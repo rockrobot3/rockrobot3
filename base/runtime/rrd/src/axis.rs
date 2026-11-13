@@ -86,25 +86,21 @@ fn rr3_text_field<'a>(
     key: &str,
 ) -> Option<&'a str> {
     let raw = v.get(key)?;
-    match raw.as_str() {
-        Some(s) => Some(s),
-        None => {
-            errs.push(format!("{path}: {key} 应为字符串"));
-            None
-        }
-    }
+    let Some(s) = raw.as_str() else {
+        errs.push(format!("{path}: {key} 应为字符串"));
+        return None;
+    };
+    Some(s)
 }
 
 /// bool 键取值（词表 kind = Bool 的键走这里）：非布尔形状当场点名置 `None`。
 fn rr3_bool_field(v: &toml::Value, errs: &mut Vec<String>, path: &str, key: &str) -> Option<bool> {
     let raw = v.get(key)?;
-    match raw.as_bool() {
-        Some(b) => Some(b),
-        None => {
-            errs.push(format!("{path}: {key} 应为布尔"));
-            None
-        }
-    }
+    let Some(b) = raw.as_bool() else {
+        errs.push(format!("{path}: {key} 应为布尔"));
+        return None;
+    };
+    Some(b)
 }
 
 /// 从档案文本装载一个轴（**机制面**：白名单 + F-6 全键必填 + 类型派发 + 外键
@@ -145,16 +141,16 @@ fn rr3_axis_finish(
     pin: Option<String>,
     path: &str,
 ) -> Result<Rr3AxisFile, Vec<String>> {
-    let profile = rr3_axis_build(nums, words).ok_or_else(|| {
-        vec![format!(
+    let Some(profile) = rr3_axis_build(nums, words) else {
+        return Err(vec![format!(
             "{path}: 逐键判据全绿但十二键不全（判据与构造面不一致，内部缺陷）"
-        )]
-    })?;
-    let pin = pin.ok_or_else(|| {
-        vec![format!(
+        )]);
+    };
+    let Some(pin) = pin else {
+        return Err(vec![format!(
             "{path}: 逐键判据全绿但 pin 缺失（判据与构造面不一致，内部缺陷）"
-        )]
-    })?;
+        )]);
+    };
     Ok(Rr3AxisFile { pin, profile })
 }
 
@@ -303,43 +299,37 @@ fn rr3_axis_words(v: &toml::Value, path: &str, errs: &mut Vec<String>) -> Rr3Axi
 /// hold 词族：只认 hold | release。
 fn rr3_axis_hold(v: &toml::Value, path: &str, errs: &mut Vec<String>) -> Option<Rr3ActHold> {
     let s = rr3_text_field(v, errs, path, "hold")?;
-    match Rr3ActHold::rr3_act_hold_parse(s) {
-        Some(h) => Some(h),
-        None => {
-            errs.push(format!(
-                "{path}: hold = \"{s}\" 不在册（只认 hold | release）"
-            ));
-            None
-        }
-    }
+    let Some(h) = Rr3ActHold::rr3_act_hold_parse(s) else {
+        errs.push(format!(
+            "{path}: hold = \"{s}\" 不在册（只认 hold | release）"
+        ));
+        return None;
+    };
+    Some(h)
 }
 
 /// hard_stop 词族：只认 unknown | yes | no。
 fn rr3_axis_stop(v: &toml::Value, path: &str, errs: &mut Vec<String>) -> Option<Rr3ActHardStop> {
     let s = rr3_text_field(v, errs, path, "hard_stop")?;
-    match Rr3ActHardStop::rr3_hard_stop_parse(s) {
-        Some(h) => Some(h),
-        None => {
-            errs.push(format!(
-                "{path}: hard_stop = \"{s}\" 不在册（只认 unknown | yes | no）"
-            ));
-            None
-        }
-    }
+    let Some(h) = Rr3ActHardStop::rr3_hard_stop_parse(s) else {
+        errs.push(format!(
+            "{path}: hard_stop = \"{s}\" 不在册（只认 unknown | yes | no）"
+        ));
+        return None;
+    };
+    Some(h)
 }
 
 /// source 词族：只认 manual | fixture | openloop-recover | stall-search。
 fn rr3_axis_src(v: &toml::Value, path: &str, errs: &mut Vec<String>) -> Option<Rr3ActSource> {
     let s = rr3_text_field(v, errs, path, "source")?;
-    match Rr3ActSource::rr3_act_source_parse(s) {
-        Some(src) => Some(src),
-        None => {
-            errs.push(format!(
-                "{path}: source = \"{s}\" 不在册（只认 manual | fixture | openloop-recover | stall-search）"
-            ));
-            None
-        }
-    }
+    let Some(src) = Rr3ActSource::rr3_act_source_parse(s) else {
+        errs.push(format!(
+            "{path}: source = \"{s}\" 不在册（只认 manual | fixture | openloop-recover | stall-search）"
+        ));
+        return None;
+    };
+    Some(src)
 }
 
 /// pin 外键对账（F-4）：档案外键与 [pins] 的 pin_id 集必须对账
@@ -429,9 +419,16 @@ pub fn rr3_act_profile_load(
 fn rr3_axis_text_read(path: &Path) -> Result<Option<String>, Vec<String>> {
     match std::fs::read_to_string(path) {
         Ok(t) => Ok(Some(t)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(vec![format!("读 {} 失败: {e}", path.display())]),
+        Err(e) => rr3_axis_read_miss(path, e),
     }
+}
+
+/// 读失败分流：`NotFound` 折"无档案"（None），其余带因点名。
+fn rr3_axis_read_miss(path: &Path, e: std::io::Error) -> Result<Option<String>, Vec<String>> {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        return Ok(None);
+    }
+    Err(vec![format!("读 {} 失败: {e}", path.display())])
 }
 
 #[cfg(test)]

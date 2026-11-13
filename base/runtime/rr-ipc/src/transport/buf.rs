@@ -151,11 +151,11 @@ fn rr3_buf_head<S: Rr3ByteStream>(s: &mut S) -> Result<(Rr3Header, Vec<u8>), Rr3
 
 /// 读满定长头区：空读 = 关闭，半头 = TornHeader。
 fn rr3_head_fill<S: Rr3ByteStream>(s: &mut S, bytes: &mut [u8]) -> Result<(), Rr3FrameError> {
-    match rr3_stream_read_fill(s, bytes)? {
-        None => Err(Rr3FrameError::Closed),
-        Some(got) if got < RR3_IPC_HDR_SIZE => Err(Rr3FrameError::TornHeader { got }),
-        _ => Ok(()),
+    let got = rr3_stream_read_fill(s, bytes)?.ok_or(Rr3FrameError::Closed)?;
+    if got < RR3_IPC_HDR_SIZE {
+        return Err(Rr3FrameError::TornHeader { got });
     }
+    Ok(())
 }
 
 /// 按头声明长度扩容并读满 payload（`want=0` 不扩容；半 payload 如实计数）。
@@ -177,11 +177,14 @@ fn rr3_payload_fill<S: Rr3ByteStream>(
     bytes: &mut [u8],
     want: usize,
 ) -> Result<(), Rr3FrameError> {
-    match rr3_stream_read_fill(s, bytes)? {
-        Some(got) if got == want => Ok(()),
-        Some(got) => Err(Rr3FrameError::TornPayload { want, got }),
-        None => Err(Rr3FrameError::TornPayload { want, got: 0 }),
+    let got = rr3_stream_read_fill(s, bytes)?;
+    if got == Some(want) {
+        return Ok(());
     }
+    Err(Rr3FrameError::TornPayload {
+        want,
+        got: got.unwrap_or(0),
+    })
 }
 
 /// 载荷 CRC32 校验（收侧单点）：声明值与实算值不符即返回 [`Rr3FrameError::CrcMismatch`]。

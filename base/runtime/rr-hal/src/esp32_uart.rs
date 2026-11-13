@@ -74,19 +74,14 @@ pub use rr_hal_api::RR3_PERIPH_AXIS_ENV as RR3_HAL_PERIPH_AXIS_ENV;
 
 /// 轴 env 取值裁决：只认 `pan` / `tilt`（trim 后）。独立纯函数：裁决可单测。
 pub fn rr3_axis_parse(s: &str) -> Option<&'static str> {
-    match s.trim() {
-        "pan" => Some("pan"),
-        "tilt" => Some("tilt"),
-        _ => None,
-    }
+    ["pan", "tilt"].iter().copied().find(|a| *a == s.trim())
 }
 
 /// 波特率 env 取值裁决（批D②）：十进制解析后过 rr-ipc 档位表
 /// （[`rr3_uart_baud_speed`]）——档位真值单点在 rr-ipc，本侧不抄第二份白名单。
 pub fn rr3_baud_parse(s: &str) -> Option<u32> {
     let baud = s.trim().parse::<u32>().ok()?;
-    rr3_uart_baud_speed(baud).ok()?;
-    Some(baud)
+    rr3_uart_baud_speed(baud).ok().map(|_| baud)
 }
 
 /// 板侧绑定载荷（纯函数，批N4 件七(b) 基-24 桥上配置腿宿主半边）：描述符板侧
@@ -127,9 +122,10 @@ fn rr3_board_pins(m: &mut Map<String, Value>, b: &Rr3HalBindings) {
         (RR3_BOARD_BINDING_I2S_WS, b.i2s_ws),
     ];
     for (key, v) in pins {
-        if let Some(v) = v {
-            m.insert(key.to_string(), json!(v.to_string()));
-        }
+        let Some(v) = v else {
+            continue;
+        };
+        m.insert(key.to_string(), json!(v.to_string()));
     }
 }
 
@@ -148,28 +144,23 @@ fn rr3_env_bindings() -> Option<Value> {
 
 /// 描述符文本解析：失败点名后跳过（fail-visible，不静默放行坏值）。
 fn rr3_bindings_of(text: &str) -> Option<Rr3HalBindings> {
-    match rr3_bindings_parse(text) {
-        Ok(b) => Some(b),
-        Err(errs) => {
+    rr3_bindings_parse(text)
+        .map_err(|errs| {
             eprintln!(
                 "rr-hal-esp32: {} 解析失败，跳过板侧绑定推送: {}",
                 RR3_HAL_BINDINGS_ENV,
                 errs.join("; ")
             );
-            None
-        }
-    }
+        })
+        .ok()
 }
 
 /// 开串口：失败当场点名（细节落日志）后折 Busy。
 fn rr3_conn_open(path: &std::path::Path, baud: u32) -> Result<Rr3UartConn, Rr3HalError> {
-    match Rr3UartConn::open_with_baud(path, baud) {
-        Ok(c) => Ok(c),
-        Err(e) => {
-            eprintln!("rr-hal-esp32: 串口 open 失败 {}: {e}", path.display());
-            Err(Rr3HalError::Busy)
-        }
-    }
+    Rr3UartConn::open_with_baud(path, baud).map_err(|e| {
+        eprintln!("rr-hal-esp32: 串口 open 失败 {}: {e}", path.display());
+        Rr3HalError::Busy
+    })
 }
 
 /// 开口后定档：净化输入队列 + 应答窗口。失败当场点名（细节落日志）后折 Busy。
@@ -227,10 +218,10 @@ impl Rr3BridgeConn {
 
     /// 开口 + 启动窗口等待 + 定档（净化输入队列 + 应答窗口），交回新连接。
     fn rr3_dial(&self) -> Result<Rr3UartConn, Rr3HalError> {
-        let c = rr3_conn_open(&self.path, self.baud)?;
-        std::thread::sleep(Duration::from_millis(RR3_OPEN_SETTLE_MS));
-        rr3_conn_ready(&c, &self.path)?;
-        Ok(c)
+        rr3_conn_open(&self.path, self.baud).and_then(|c| {
+            std::thread::sleep(Duration::from_millis(RR3_OPEN_SETTLE_MS));
+            rr3_conn_ready(&c, &self.path).map(|()| c)
+        })
     }
 
     /// 板侧绑定推送（`rr3.set_bindings`，载荷住 `params.args`——method 面信封，
@@ -256,9 +247,9 @@ impl Rr3BridgeConn {
     /// 一次 method 面 round-trip：组帧 → 发 → 阻塞收 → 四道门（dst/前缀/
     /// jsonrpc+id/error）。io 或协议失败点名后折 Busy，连接报废下次重开。
     fn rr3_method_call(&mut self, method: &str, params: &Value) -> Result<Value, Rr3HalError> {
-        self.rr3_ensure()?;
-        let id = self.rr3_send_req(method, params)?;
-        self.rr3_reply(id)
+        self.rr3_ensure()
+            .and_then(|()| self.rr3_send_req(method, params))
+            .and_then(|id| self.rr3_reply(id))
     }
 
     /// 组一帧并写出（id 在此分配）：失败点名并报废连接，下次调用重开。
@@ -298,21 +289,17 @@ impl Rr3BridgeConn {
 
     /// 拆 payload 类型前缀：非法即点名并报废连接。
     fn rr3_split_body(&mut self, payload: &[u8]) -> Result<(Rr3PayloadType, Vec<u8>), Rr3HalError> {
-        match rr3_body_split(payload) {
-            Ok(v) => Ok(v),
-            Err(e) => {
-                eprintln!("rr-hal-esp32: 应答 payload 前缀非法: {e:?}");
-                self.conn = None;
-                Err(Rr3HalError::Busy)
-            }
-        }
+        rr3_body_split(payload).map_err(|e| {
+            eprintln!("rr-hal-esp32: 应答 payload 前缀非法: {e:?}");
+            self.conn = None;
+            Rr3HalError::Busy
+        })
     }
 
     /// 应答帧还原与 dst 归属门：任一不过即点名并报废连接。
     fn rr3_reply_frame(&mut self, buf: Rr3FrameBuf) -> Result<Rr3Frame, Rr3HalError> {
-        let frame = self.rr3_frame_of(buf)?;
-        self.rr3_dst_gate(&frame)?;
-        Ok(frame)
+        self.rr3_frame_of(buf)
+            .and_then(|frame| self.rr3_dst_gate(&frame).map(|()| frame))
     }
 
     /// dst 归属门：非宿主位形即点名并报废连接。
@@ -330,14 +317,11 @@ impl Rr3BridgeConn {
 
     /// 应答帧还原：失败点名并报废连接。
     fn rr3_frame_of(&mut self, buf: Rr3FrameBuf) -> Result<Rr3Frame, Rr3HalError> {
-        match Rr3Frame::try_from(buf) {
-            Ok(f) => Ok(f),
-            Err(e) => {
-                eprintln!("rr-hal-esp32: 应答帧还原失败: {e:?}");
-                self.conn = None;
-                Err(Rr3HalError::Busy)
-            }
-        }
+        Rr3Frame::try_from(buf).map_err(|e| {
+            eprintln!("rr-hal-esp32: 应答帧还原失败: {e:?}");
+            self.conn = None;
+            Rr3HalError::Busy
+        })
     }
 
     /// 读一帧（窗口耗尽即判板侧无应答/链路断，点名后报废连接）。
@@ -355,10 +339,7 @@ impl Rr3BridgeConn {
 
     /// 取连接可变引用（未开即 Busy，防御性兜底）。
     fn rr3_conn_mut(&mut self) -> Result<&mut Rr3UartConn, Rr3HalError> {
-        match self.conn.as_mut() {
-            Some(c) => Ok(c),
-            None => Err(Rr3HalError::Busy),
-        }
+        self.conn.as_mut().ok_or(Rr3HalError::Busy)
     }
 }
 

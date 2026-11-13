@@ -74,23 +74,18 @@ pub fn read_reply_line(conn: &mut Rr3UartConn) -> Result<String, std::io::Error>
                 format!("应答 {REPLY_TIMEOUT_MS}ms 无字节"),
             ));
         }
-        match byte[0] {
-            b'\n' => {
-                while matches!(line.last(), Some(b'\r')) {
-                    line.pop();
-                }
-                return Ok(String::from_utf8_lossy(&line).into_owned());
-            }
-            b => {
-                if line.len() >= RR3_REPLY_LINE_CAP {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("应答行超 {RR3_REPLY_LINE_CAP}B 仍无换行（板面残流未停？）"),
-                    ));
-                }
-                line.push(b);
-            }
+        if byte[0] == b'\n' {
+            let end = line.iter().rposition(|&b| b != b'\r').map_or(0, |i| i + 1);
+            line.truncate(end);
+            return Ok(String::from_utf8_lossy(&line).into_owned());
         }
+        if line.len() >= RR3_REPLY_LINE_CAP {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("应答行超 {RR3_REPLY_LINE_CAP}B 仍无换行（板面残流未停？）"),
+            ));
+        }
+        line.push(byte[0]);
     }
 }
 

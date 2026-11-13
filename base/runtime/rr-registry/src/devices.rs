@@ -54,9 +54,10 @@ pub fn rr3_dev_parse(text: &str) -> Rr3DeviceTable {
         .flatten()
         .filter_map(Value::as_table)
     {
-        if let Some((model, entry)) = rr3_dev_one(d) {
-            table.devices.insert(model.to_string(), entry);
-        }
+        let Some((model, entry)) = rr3_dev_one(d) else {
+            continue;
+        };
+        table.devices.insert(model.to_string(), entry);
     }
     table
 }
@@ -100,9 +101,9 @@ fn rr3_dev_one(d: &toml::Table) -> Option<(&str, Rr3DeviceEntry)> {
 /// 器件级在位探测寄存器 `id_reg = { addr, expect }`：缺键/类型不合按缺省收。
 fn rr3_dev_id_reg(d: &toml::Table) -> Option<(i64, i64)> {
     d.get("id_reg").and_then(Value::as_table).and_then(|t| {
-        let addr = t.get("addr").and_then(Value::as_integer)?;
-        let expect = t.get("expect").and_then(Value::as_integer)?;
-        Some((addr, expect))
+        t.get("addr")
+            .and_then(Value::as_integer)
+            .zip(t.get("expect").and_then(Value::as_integer))
     })
 }
 

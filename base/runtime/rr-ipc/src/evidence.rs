@@ -120,18 +120,17 @@ fn rr3_ev_declared_chk(path: &Path, declared: &str, form: &str) -> Result<(), St
 /// value 为一行双引号文本（内部不许出现双引号）；六键齐、缺一红、未知键红。
 fn rr3_evidence_head(text: &str) -> Result<Vec<(&str, &str)>, String> {
     let mut lines = text.lines();
-    rr3_ev_open(lines.next())?;
-    let fields = rr3_ev_fields(lines)?;
+    let fields = rr3_ev_open(lines.next()).and_then(|()| rr3_ev_fields(lines))?;
     rr3_ev_required(&fields)?;
     Ok(fields)
 }
 
 /// 首行定界：必须是 `+++`。
 fn rr3_ev_open(first: Option<&str>) -> Result<(), String> {
-    match first {
-        Some(l) if l.trim() == "+++" => Ok(()),
-        _ => Err("首行必须是 +++（frontmatter 定界）".to_string()),
+    if first.is_some_and(|l| l.trim() == "+++") {
+        return Ok(());
     }
+    Err("首行必须是 +++（frontmatter 定界）".to_string())
 }
 
 /// 收界前逐行取字段（空行跳过，收界 `+++` 即返回）；缺收界即红。
@@ -205,12 +204,10 @@ fn rr3_quoted_inner<'a>(key: &str, value: &'a str) -> Result<&'a str, String> {
 
 /// 必填键核对：字段集必须覆盖 [`RR3_EVIDENCE_KEYS`] 全集
 fn rr3_ev_required(fields: &[(&str, &str)]) -> Result<(), String> {
-    for key in RR3_EVIDENCE_KEYS {
-        if !fields.iter().any(|(k, _)| *k == key) {
-            return Err(format!("缺必填键 {key:?}"));
-        }
-    }
-    Ok(())
+    RR3_EVIDENCE_KEYS
+        .iter()
+        .find(|key| !fields.iter().any(|(k, _)| k == *key))
+        .map_or(Ok(()), |key| Err(format!("缺必填键 {key:?}")))
 }
 
 #[cfg(test)]

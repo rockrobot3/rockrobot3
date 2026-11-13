@@ -36,31 +36,27 @@ pub fn serve(
             let Ok((ty, body)) = rr_bus_api::Rr3BusClient::rr3_frame_body(&frame) else {
                 continue;
             };
-            match ty {
+            if ty == Rr3PayloadType::Request {
                 // 步骤 3：RPC 面——Request 且 method == rr3.call → 剥 id /
                 // params.topic / params.args → on_rpc；Err 折 {"error": …}；
                 // `?` 即传输性失败上抛——应答写不出去不装活着。
-                Rr3PayloadType::Request => {
-                    if body.get("method").and_then(Value::as_str) != Some(RR3_METHOD_CALL) {
-                        continue;
-                    }
-                    let id = body.get("id").and_then(Value::as_u64).unwrap_or(0);
-                    let params = body.get("params").cloned().unwrap_or(Value::Null);
-                    let topic = params.get("topic").and_then(Value::as_str).unwrap_or("");
-                    let args = params.get("args").cloned().unwrap_or(Value::Null);
-                    let reply = dispatcher
-                        .on_rpc(topic, &args, &bus)
-                        .unwrap_or_else(|e| json!({ "error": e }));
-                    bus.client
-                        .rr3_reply_call(frame.header.trace_id, id, reply)?;
+                if body.get("method").and_then(Value::as_str) != Some(RR3_METHOD_CALL) {
+                    continue;
                 }
+                let id = body.get("id").and_then(Value::as_u64).unwrap_or(0);
+                let params = body.get("params").cloned().unwrap_or(Value::Null);
+                let topic = params.get("topic").and_then(Value::as_str).unwrap_or("");
+                let args = params.get("args").cloned().unwrap_or(Value::Null);
+                let reply = dispatcher
+                    .on_rpc(topic, &args, &bus)
+                    .unwrap_or_else(|e| json!({ "error": e }));
+                bus.client
+                    .rr3_reply_call(frame.header.trace_id, id, reply)?;
+            } else if ty == Rr3PayloadType::Event {
                 // 步骤 4：订阅面——Event 交 on_event（topic 本地过滤是 Dispatcher
                 // 的职责）；其余 payload（Notification/Stream 等）只排空。
-                Rr3PayloadType::Event => {
-                    let topic = body.get("topic").and_then(Value::as_str).unwrap_or("");
-                    dispatcher.on_event(topic, &body, &bus)?;
-                }
-                _ => {}
+                let topic = body.get("topic").and_then(Value::as_str).unwrap_or("");
+                dispatcher.on_event(topic, &body, &bus)?;
             }
         }
         // 步骤 5：节拍——每圈一次（帧无关节拍）。

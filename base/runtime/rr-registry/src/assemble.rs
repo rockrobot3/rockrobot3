@@ -214,18 +214,16 @@ fn rr3_item_str<'a>(
     ok: impl Fn(&str) -> bool,
     errs: &mut Vec<String>,
 ) -> Option<&'a str> {
-    match t.get(key).and_then(Value::as_str) {
-        Some(v) if ok(v) => Some(v),
-        Some(v) => {
-            // 值原样点名（空串不回声，避免 `slot "" 不得为空` 这类噪声）
-            rr3_item_str_bad(what, i, key, v, bad, errs);
-            None
-        }
-        None => {
-            errs.push(format!("{what}[{i}].{key} 应为字符串"));
-            None
-        }
+    let Some(v) = t.get(key).and_then(Value::as_str) else {
+        errs.push(format!("{what}[{i}].{key} 应为字符串"));
+        return None;
+    };
+    if ok(v) {
+        return Some(v);
     }
+    // 值原样点名（空串不回声，避免 `slot "" 不得为空` 这类噪声）
+    rr3_item_str_bad(what, i, key, v, bad, errs);
+    None
 }
 
 /// 串键值不合判据时的点名（空串不回声值，其余原样点名）。
@@ -409,53 +407,47 @@ fn rr3_demand_push(
 /// 未知键点名（五键定形：拼错键不能被静默忽略）。
 /// rail 键：非空字符串。
 fn rr3_demand_rail(d: &Value, i: usize, errs: &mut Vec<String>) -> Option<String> {
-    match d.get("rail").and_then(Value::as_str) {
-        Some(r) if !r.trim().is_empty() => Some(r.to_string()),
-        Some(_) => {
-            errs.push(format!("demands[{i}].rail 不得为空"));
-            None
-        }
-        None => {
-            errs.push(format!("demands[{i}].rail 应为字符串"));
-            None
-        }
+    let Some(r) = d.get("rail").and_then(Value::as_str) else {
+        errs.push(format!("demands[{i}].rail 应为字符串"));
+        return None;
+    };
+    if r.trim().is_empty() {
+        errs.push(format!("demands[{i}].rail 不得为空"));
+        return None;
     }
+    Some(r.to_string())
 }
 
 /// peak_ma：正整数（每实例峰值电流 mA）。
 fn rr3_demand_peak(d: &Value, i: usize, errs: &mut Vec<String>) -> Option<i64> {
-    match d.get("peak_ma").and_then(Value::as_integer) {
-        Some(v) if v > 0 => Some(v),
-        Some(v) => {
-            errs.push(format!(
-                "demands[{i}].peak_ma = {v} 须为正整数（mA，每实例峰值电流需求）"
-            ));
-            None
-        }
-        None => {
-            errs.push(format!("demands[{i}].peak_ma 应为整数"));
-            None
-        }
+    let Some(v) = d.get("peak_ma").and_then(Value::as_integer) else {
+        errs.push(format!("demands[{i}].peak_ma 应为整数"));
+        return None;
+    };
+    if v > 0 {
+        return Some(v);
     }
+    errs.push(format!(
+        "demands[{i}].peak_ma = {v} 须为正整数（mA，每实例峰值电流需求）"
+    ));
+    None
 }
 
 /// sustained_ma：正整数，须 ≤ peak_ma（ADR-0021 裁定 2 五键定形）。
 fn rr3_demand_sust(d: &Value, i: usize, errs: &mut Vec<String>) -> Option<i64> {
-    match d.get("sustained_ma").and_then(Value::as_integer) {
-        Some(v) if v > 0 => Some(v),
-        Some(v) => {
-            errs.push(format!(
-                "demands[{i}].sustained_ma = {v} 须为正整数（mA，每实例连续电流；ADR-0021 裁定 2 五键定形）"
-            ));
-            None
-        }
-        None => {
-            errs.push(format!(
-                "demands[{i}].sustained_ma 应为整数（连续分量，须 ≤ peak_ma；缺键即红——不给缺省）"
-            ));
-            None
-        }
+    let Some(v) = d.get("sustained_ma").and_then(Value::as_integer) else {
+        errs.push(format!(
+            "demands[{i}].sustained_ma 应为整数（连续分量，须 ≤ peak_ma；缺键即红——不给缺省）"
+        ));
+        return None;
+    };
+    if v > 0 {
+        return Some(v);
     }
+    errs.push(format!(
+        "demands[{i}].sustained_ma = {v} 须为正整数（mA，每实例连续电流；ADR-0021 裁定 2 五键定形）"
+    ));
+    None
 }
 
 /// peak/sustained 交叉判据：连续分量超过峰值是物理矛盾（两值都可解析时才判）。
@@ -498,30 +490,29 @@ fn rr3_demand_grp(d: &Value, i: usize, errs: &mut Vec<String>) -> Vec<String> {
     };
     let mut out = Vec::new();
     for (j, g) in gs.iter().enumerate() {
-        if let Some(s) = rr3_grp_name(g, i, j, errs) {
-            out.push(s);
-        }
+        let Some(s) = rr3_grp_name(g, i, j, errs) else {
+            continue;
+        };
+        out.push(s);
     }
     out
 }
 
 /// 单个组名：非空字符串入列，坏元素逐条点名（不静默丢弃）。
 fn rr3_grp_name(g: &Value, i: usize, j: usize, errs: &mut Vec<String>) -> Option<String> {
-    match g.as_str() {
-        Some(s) if !s.trim().is_empty() => Some(s.to_string()),
-        Some(_) => {
-            errs.push(format!(
-                "demands[{i}].concurrency_group[{j}] 不得为空（组名是互斥判据的 label）"
-            ));
-            None
-        }
-        None => {
-            errs.push(format!(
-                "demands[{i}].concurrency_group[{j}] 应为字符串（组名）"
-            ));
-            None
-        }
+    let Some(s) = g.as_str() else {
+        errs.push(format!(
+            "demands[{i}].concurrency_group[{j}] 应为字符串（组名）"
+        ));
+        return None;
+    };
+    if !s.trim().is_empty() {
+        return Some(s.to_string());
     }
+    errs.push(format!(
+        "demands[{i}].concurrency_group[{j}] 不得为空（组名是互斥判据的 label）"
+    ));
+    None
 }
 
 /// 两数组均在文本中出现且均为空（L-5 空面的前件）。
@@ -531,7 +522,9 @@ fn rr3_empty_surface(
     ops_present: bool,
     ops_empty: bool,
 ) -> bool {
-    handles_present && handles_empty && ops_present && ops_empty
+    [handles_present, handles_empty, ops_present, ops_empty]
+        .iter()
+        .all(|b| *b)
 }
 
 /// L-5 空面规则（0.0.5 批M MC-10）：两数组均在文本中出现且均为空 ⇒ 必须明写
@@ -650,15 +643,20 @@ fn rr3_asm_top_key_err(k: &str, errs: &mut Vec<String>) {
 /// schema_version 版本对账（本文件定形即 2）。
 fn rr3_asm_ver(t: &toml::Table, errs: &mut Vec<String>) {
     // v1 是"无代码读它"时代的死数据形状，直接点名不迁就
-    match t.get("schema_version") {
-        Some(Value::Integer(v)) if *v == RR3_ASSEMBLE_SCHEMA_VERSION as i64 => {}
-        Some(Value::Integer(v)) => errs.push(format!(
-            "装配清单 schema_version 必须为 {RR3_ASSEMBLE_SCHEMA_VERSION}，收到 {v}"
-        )),
-        Some(other) => errs.push(format!("装配清单 schema_version 应为整数，收到 {other:?}")),
-        None => errs.push(format!(
+    let Some(v) = t.get("schema_version") else {
+        errs.push(format!(
             "装配清单缺 schema_version（必须为 {RR3_ASSEMBLE_SCHEMA_VERSION}）"
-        )),
+        ));
+        return;
+    };
+    let Value::Integer(v) = v else {
+        errs.push(format!("装配清单 schema_version 应为整数，收到 {v:?}"));
+        return;
+    };
+    if *v != RR3_ASSEMBLE_SCHEMA_VERSION as i64 {
+        errs.push(format!(
+            "装配清单 schema_version 必须为 {RR3_ASSEMBLE_SCHEMA_VERSION}，收到 {v}"
+        ));
     }
 }
 
@@ -690,14 +688,18 @@ fn rr3_asm_key_err(k: &str, errs: &mut Vec<String>) {
 
 /// no_injection = true 是"本件不需注入面"的显式声明（L-5）：只认布尔 true。
 fn rr3_asm_noinj(asm: &toml::Table, facts: &mut Rr3AssembleFacts, errs: &mut Vec<String>) {
-    match asm.get("no_injection") {
-        Some(Value::Boolean(true)) => facts.no_injection = true,
-        Some(Value::Boolean(false)) => {
-            errs.push("no_injection 只认 true（本件不需注入面时明写；非空面不得写此键）".into())
-        }
-        Some(other) => errs.push(format!("no_injection 应为布尔 true，收到 {other:?}")),
-        None => {}
+    let Some(v) = asm.get("no_injection") else {
+        return;
+    };
+    let Value::Boolean(b) = v else {
+        errs.push(format!("no_injection 应为布尔 true，收到 {v:?}"));
+        return;
+    };
+    if !*b {
+        errs.push("no_injection 只认 true（本件不需注入面时明写；非空面不得写此键）".into());
+        return;
     }
+    facts.no_injection = true;
 }
 
 /// handles：数组，每条 = { trait, desc_key }，两键都在册表内（解析与组合件级共用
@@ -773,14 +775,20 @@ fn rr3_asm_mem(asm: &toml::Table, facts: &mut Rr3AssembleFacts, errs: &mut Vec<S
 
 /// 单个内存申报键：非负整数入档，负数/非整数各点名；缺键 = 未申报。
 fn rr3_asm_mem_one(asm: &toml::Table, key: &str, slot: &mut i64, errs: &mut Vec<String>) {
-    match asm.get(key) {
-        Some(Value::Integer(v)) if *v >= 0 => *slot = *v,
-        Some(Value::Integer(v)) => errs.push(format!(
-            "[assemble].{key} = {v} 须为非负整数（本件内存占用字节数，负数是物理矛盾）"
-        )),
-        Some(other) => errs.push(format!("[assemble].{key} 应为整数，收到 {other:?}")),
-        None => {}
+    let Some(v) = asm.get(key) else {
+        return;
+    };
+    let Value::Integer(v) = v else {
+        errs.push(format!("[assemble].{key} 应为整数，收到 {v:?}"));
+        return;
+    };
+    if *v >= 0 {
+        *slot = *v;
+        return;
     }
+    errs.push(format!(
+        "[assemble].{key} = {v} 须为非负整数（本件内存占用字节数，负数是物理矛盾）"
+    ));
 }
 
 /// 注入缺校验：ops 的每条 `src_key` 必须能在 `config_text`（模块 config.toml）上

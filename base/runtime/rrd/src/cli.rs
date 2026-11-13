@@ -61,9 +61,10 @@ const PROFILE_MANIFEST_CONFLICT: &str = "--profile 与 --manifest 不得同给�
 pub const RR3_RESTART_BASE_MS_MAX: u64 = u64::MAX / 60;
 
 fn need_value(flag: &str, args: &[String], i: usize) -> Result<String, String> {
-    args.get(i + 1)
-        .cloned()
-        .ok_or_else(|| format!("{flag} 缺参数\n{USAGE}"))
+    let Some(v) = args.get(i + 1) else {
+        return Err(format!("{flag} 缺参数\n{USAGE}"));
+    };
+    Ok(v.clone())
 }
 
 /// 路径型开关取值：以 `-` 开头的一律当"下一个开关名"拒掉，不作值。
@@ -151,10 +152,9 @@ fn rr3_surface_ok(cfg: &RrdConfig) -> Result<(), String> {
 /// 开头 / 非数字）全在此处拒，不静默回落默认值（fail-closed）。
 fn rr3_cli_arg(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
     let opt = args[i].as_str();
-    let (_, handle) = RR3_ARG_HANDLERS
-        .iter()
-        .find(|(name, _)| *name == opt)
-        .ok_or_else(|| format!("未知选项 {opt}\n{USAGE}"))?;
+    let Some((_, handle)) = RR3_ARG_HANDLERS.iter().find(|(name, _)| *name == opt) else {
+        return Err(format!("未知选项 {opt}\n{USAGE}"));
+    };
     handle(cfg, args, i)
 }
 
@@ -177,10 +177,9 @@ const RR3_ARG_HANDLERS: [(&str, Rr3ArgHandler); 11] = [
 /// 路径型参数族：值走 `need_path_value`（缺值/疑似开关一律拒，不静默回落）。
 fn rr3_cli_path(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
     let opt = args[i].as_str();
-    let (_, set) = RR3_PATH_OPTS
-        .iter()
-        .find(|(name, _)| *name == opt)
-        .ok_or_else(|| format!("未知选项 {opt}\n{USAGE}"))?;
+    let Some((_, set)) = RR3_PATH_OPTS.iter().find(|(name, _)| *name == opt) else {
+        return Err(format!("未知选项 {opt}\n{USAGE}"));
+    };
     let p = PathBuf::from(need_path_value(opt, args, i)?);
     set(cfg, p)?;
     Ok(i + 2)
@@ -233,10 +232,9 @@ fn rr3_mf_conflict(cfg: &RrdConfig) -> Result<(), String> {
 /// 数值型参数族：非负整数毫秒；watchdog 额外拒 0（忙循环不是"更快一点"）。
 fn rr3_cli_num(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
     let opt = args[i].as_str();
-    let (_, set) = RR3_NUM_OPTS
-        .iter()
-        .find(|(name, _)| *name == opt)
-        .ok_or_else(|| format!("未知选项 {opt}\n{USAGE}"))?;
+    let Some((_, set)) = RR3_NUM_OPTS.iter().find(|(name, _)| *name == opt) else {
+        return Err(format!("未知选项 {opt}\n{USAGE}"));
+    };
     set(cfg, &need_value(opt, args, i)?)?;
     Ok(i + 2)
 }

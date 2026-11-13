@@ -121,25 +121,15 @@ pub fn rr3_atom_gate(path: &Path) -> Vec<String> {
 
 /// 读 atom manifest 与其格位契约两份文本（任一读不到即点名回错）。
 fn rr3_atom_texts(path: &Path) -> Result<(String, String), Vec<String>> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(e) => {
-            return Err(vec![format!(
-                "无法读取 atom manifest {}: {e}",
-                path.display()
-            )])
-        }
-    };
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| vec![format!("无法读取 atom manifest {}: {e}", path.display())])?;
     let slots_path = rr3_atom_slots_path(path);
-    let slots_text = match std::fs::read_to_string(&slots_path) {
-        Ok(t) => t,
-        Err(e) => {
-            return Err(vec![format!(
-                "无法读取格位契约 {}（atom 查册门需要它）: {e}",
-                slots_path.display()
-            )])
-        }
-    };
+    let slots_text = std::fs::read_to_string(&slots_path).map_err(|e| {
+        vec![format!(
+            "无法读取格位契约 {}（atom 查册门需要它）: {e}",
+            slots_path.display()
+        )]
+    })?;
     Ok((text, slots_text))
 }
 
@@ -179,13 +169,11 @@ pub fn rr3_atom_chk(text: &str, slots: &crate::slots::Rr3SlotTable) -> Vec<Strin
 
 /// TOML 解析：失败入 errs 并回 None（调用方据此提前收兵）。
 fn rr3_atom_root(text: &str, errs: &mut Vec<String>) -> Option<Value> {
-    match toml::from_str(text) {
-        Ok(v) => Some(v),
-        Err(e) => {
-            errs.push(format!("atom manifest TOML 解析失败: {e}"));
-            None
-        }
+    let parsed = toml::from_str(text);
+    if let Err(e) = &parsed {
+        errs.push(format!("atom manifest TOML 解析失败: {e}"));
     }
+    parsed.ok()
 }
 
 /// 逐字段校验（字段集来自 atom.schema.toml）。
@@ -219,12 +207,17 @@ fn rr3_atom_one(
     let Some(value) = rr3_atom_req(spec, root, errs) else {
         return;
     };
-    match spec.kind.as_str() {
-        "string" => rr3_atom_str(spec, value, errs),
-        "list" => rr3_atom_list(spec, value, slots, errs),
-        "int" => rr3_atom_int(spec, value, errs),
-        other => panic!("atom schema 未知 kind {other}（契约与代码不同步）"),
+    let kind = spec.kind.as_str();
+    if kind == "string" {
+        return rr3_atom_str(spec, value, errs);
     }
+    if kind == "list" {
+        return rr3_atom_list(spec, value, slots, errs);
+    }
+    if kind == "int" {
+        return rr3_atom_int(spec, value, errs);
+    }
+    panic!("atom schema 未知 kind {kind}（契约与代码不同步）");
 }
 
 /// 字段存在性与必填：缺键且必填即点名；`None` = 无值，类型/规则不判。

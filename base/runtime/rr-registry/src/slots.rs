@@ -57,9 +57,10 @@ pub fn rr3_slot_parse(text: &str) -> Rr3SlotTable {
 
 /// 单条入册：缺 name 的条目整条不收（其余键按各自缺省收）。
 fn rr3_slot_add(table: &mut Rr3SlotTable, s: &toml::Table) {
-    if let Some(name) = s.get("name").and_then(Value::as_str) {
-        table.slots.insert(name.to_string(), rr3_slot_row(s));
-    }
+    let Some(name) = s.get("name").and_then(Value::as_str) else {
+        return;
+    };
+    table.slots.insert(name.to_string(), rr3_slot_row(s));
 }
 
 /// 单条 `[[slot]]` 的登记面：缺键按空串/空集收（逐字段次序同旧内联构造）。

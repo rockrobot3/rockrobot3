@@ -85,13 +85,19 @@ impl Rr3RpcMethod {
     /// 名字 → 变体：核心四方法直配，ctl 族按 [`RR3_CTL_METHODS`] 反查
     /// [`Self::as_str`]（解析面不另立 ctl 字面表——两张字面表并存必漂移）。
     fn parse(s: &str) -> Option<Self> {
-        match s {
-            "rr3.register" => Some(Self::Register),
-            "rr3.heartbeat" => Some(Self::Heartbeat),
-            "rr3.unregister" => Some(Self::Unregister),
-            s if s == rr_bus::RR3_METHOD_CALL => Some(Self::Call),
-            _ => RR3_CTL_METHODS.iter().copied().find(|m| m.as_str() == s),
+        // 核心三方法查表（字面名 → 变体），ctl 族按 [`RR3_CTL_METHODS`] 反查
+        const CORE: [(&str, Rr3RpcMethod); 3] = [
+            ("rr3.register", Rr3RpcMethod::Register),
+            ("rr3.heartbeat", Rr3RpcMethod::Heartbeat),
+            ("rr3.unregister", Rr3RpcMethod::Unregister),
+        ];
+        if let Some((_, m)) = CORE.iter().find(|(k, _)| *k == s) {
+            return Some(*m);
         }
+        if s == rr_bus::RR3_METHOD_CALL {
+            return Some(Self::Call);
+        }
+        RR3_CTL_METHODS.iter().copied().find(|m| m.as_str() == s)
     }
 
     /// 是否控制查询方法（ADR-0010 裁定 3 的分流判据）。成员判据与解析面共用
@@ -166,17 +172,17 @@ fn rr3_rpc_body(payload: &[u8]) -> Result<Value, (i32, String)> {
 }
 
 fn param_str(params: &Value, key: &str) -> Result<String, (i32, String)> {
-    params
+    let Some(s) = params
         .get(key)
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| {
-            (
-                Rr3StatusCode::Invalid as i32,
-                format!("缺 params.{key}（要求非空字符串）"),
-            )
-        })
+    else {
+        return Err((
+            Rr3StatusCode::Invalid as i32,
+            format!("缺 params.{key}（要求非空字符串）"),
+        ));
+    };
+    Ok(s.to_string())
 }
 
 pub fn rr3_rpc_manifest(params: &Value) -> Result<String, (i32, String)> {
@@ -205,19 +211,12 @@ pub fn rr3_rpc_call_params(params: &Value) -> Result<(String, Value), (i32, Stri
 pub fn rr3_rpc_counters(params: &Value) -> Option<BTreeMap<String, u64>> {
     let obj = params.get("counters")?.as_object()?;
     let mut out = BTreeMap::new();
-    for (k, v) in obj {
-        if k.is_empty() {
-            continue;
-        }
+    for (k, v) in obj.iter().filter(|(k, _)| !k.is_empty()) {
         if let Some(n) = v.as_u64() {
             out.insert(k.clone(), n);
         }
     }
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
+    (!out.is_empty()).then_some(out)
 }
 
 pub fn rr3_rpc_build_result(id: u64, result: &Value) -> Vec<u8> {

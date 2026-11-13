@@ -102,26 +102,23 @@ fn rr3_comp_finish(
 
 /// 取 `[assemble]` 段（缺段点名回 None，调用方按 errs 收兵）。
 fn rr3_comp_asm_tbl<'a>(t: &'a toml::Table, errs: &mut Vec<String>) -> Option<&'a toml::Table> {
-    let asm = t.get("assemble").and_then(Value::as_table);
-    if asm.is_none() {
+    let Some(asm) = t.get("assemble").and_then(Value::as_table) else {
         errs.push(
             "组合件清单缺 [assemble] 表（atoms 必填，handles / ops / no_injection 同件级规则）"
                 .into(),
         );
-    }
-    asm
+        return None;
+    };
+    Some(asm)
 }
 
 /// 顶层 TOML 解析：语法错与"顶层非表"各自成条 Err（与旧实现逐字同文案）。
 fn rr3_comp_root(text: &str) -> Result<toml::Table, Vec<String>> {
-    let root: Value = match toml::from_str(text) {
-        Ok(v) => v,
-        Err(e) => return Err(vec![format!("组合件清单 TOML 解析失败: {e}")]),
-    };
-    match root.as_table() {
-        Some(t) => Ok(t.clone()),
-        None => Err(vec![format!("组合件清单顶层必须是 TOML 表，收到 {root:?}")]),
-    }
+    let root: Value =
+        toml::from_str(text).map_err(|e| vec![format!("组合件清单 TOML 解析失败: {e}")])?;
+    root.as_table()
+        .cloned()
+        .ok_or_else(|| vec![format!("组合件清单顶层必须是 TOML 表，收到 {root:?}")])
 }
 
 /// `[assemble]` 段整体：键域 + atoms 链 + 注入面。
@@ -232,24 +229,32 @@ fn rr3_meta_key_ok(k: &str) -> bool {
 
 /// `[composite].name`：非空字符串（空串/缺键/非字符串分别点名）。
 fn rr3_comp_name(comp: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut Vec<String>) {
-    match comp.get("name").and_then(Value::as_str) {
-        Some(n) if !n.trim().is_empty() => facts.name = n.to_string(),
-        Some(_) => errs.push("[composite].name 不得为空串".into()),
-        None => errs.push("[composite].name 应为字符串".into()),
+    let Some(n) = comp.get("name").and_then(Value::as_str) else {
+        errs.push("[composite].name 应为字符串".into());
+        return;
+    };
+    if n.trim().is_empty() {
+        errs.push("[composite].name 不得为空串".into());
+        return;
     }
+    facts.name = n.to_string();
 }
 
 /// `[composite].unit`：在册词域内（扩域走契约级评审）。
 fn rr3_comp_unit(comp: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut Vec<String>) {
-    match comp.get("unit").and_then(Value::as_str) {
-        Some(u) if RR3_COMPOSITE_UNITS.contains(&u) => facts.unit = u.to_string(),
-        Some(u) => errs.push(format!(
-            "[composite].unit \"{u}\" 不在册（词域 {RR3_COMPOSITE_UNITS:?}，扩域走契约级评审）"
-        )),
-        None => errs.push(format!(
+    let Some(u) = comp.get("unit").and_then(Value::as_str) else {
+        errs.push(format!(
             "[composite].unit 应为字符串（词域 {RR3_COMPOSITE_UNITS:?}）"
-        )),
+        ));
+        return;
+    };
+    if !RR3_COMPOSITE_UNITS.contains(&u) {
+        errs.push(format!(
+            "[composite].unit \"{u}\" 不在册（词域 {RR3_COMPOSITE_UNITS:?}，扩域走契约级评审）"
+        ));
+        return;
     }
+    facts.unit = u.to_string();
 }
 
 /// atoms（⊗ 链）：非空数组、每条非空串、不重复。
@@ -267,26 +272,28 @@ fn rr3_comp_atoms(asm: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut V
 
 /// `atoms` 数组取形：缺键/非数组各自点名后回 None。
 fn rr3_comp_atom_items<'a>(asm: &'a toml::Table, errs: &mut Vec<String>) -> Option<&'a Vec<Value>> {
-    match asm.get("atoms") {
-        Some(Value::Array(items)) => Some(items),
-        Some(other) => {
-            errs.push(format!("[assemble].atoms 应为数组，收到 {other:?}"));
-            None
-        }
-        None => {
-            errs.push("[assemble] 缺 atoms 键（组合件必须申报装配了哪些原子件）".into());
-            None
-        }
-    }
+    let Some(v) = asm.get("atoms") else {
+        errs.push("[assemble] 缺 atoms 键（组合件必须申报装配了哪些原子件）".into());
+        return None;
+    };
+    let Value::Array(items) = v else {
+        errs.push(format!("[assemble].atoms 应为数组，收到 {v:?}"));
+        return None;
+    };
+    Some(items)
 }
 
 /// 单条原子件名判据：空串/非字符串/重复各点名；合格则入链。
 fn rr3_atom_item(item: &Value, i: usize, facts: &mut Rr3CompositeFacts, errs: &mut Vec<String>) {
-    match item.as_str() {
-        Some(a) if !a.trim().is_empty() => rr3_atom_push(facts, a, i, errs),
-        Some(_) => errs.push(format!("atoms[{i}] 不得为空串")),
-        None => errs.push(format!("atoms[{i}] 应为字符串，收到 {item:?}")),
+    let Some(a) = item.as_str() else {
+        errs.push(format!("atoms[{i}] 应为字符串，收到 {item:?}"));
+        return;
+    };
+    if a.trim().is_empty() {
+        errs.push(format!("atoms[{i}] 不得为空串"));
+        return;
     }
+    rr3_atom_push(facts, a, i, errs);
 }
 
 /// 原子名去重入列：重复项点名（⊗ 链一名一条）。
@@ -358,14 +365,18 @@ fn rr3_comp_ops(
 
 /// no_injection = true 是"本组合件不需注入面"的显式声明（L-5）：只认布尔 true。
 fn rr3_comp_noinj(asm: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut Vec<String>) {
-    match asm.get("no_injection") {
-        Some(Value::Boolean(true)) => facts.no_injection = true,
-        Some(Value::Boolean(false)) => {
-            errs.push("no_injection 只认 true（本组合件不需注入面时明写；非空面不得写此键）".into())
-        }
-        Some(other) => errs.push(format!("no_injection 应为布尔 true，收到 {other:?}")),
-        None => {}
+    let Some(v) = asm.get("no_injection") else {
+        return;
+    };
+    let Value::Boolean(b) = v else {
+        errs.push(format!("no_injection 应为布尔 true，收到 {v:?}"));
+        return;
+    };
+    if !*b {
+        errs.push("no_injection 只认 true（本组合件不需注入面时明写；非空面不得写此键）".into());
+        return;
     }
+    facts.no_injection = true;
 }
 
 #[cfg(test)]

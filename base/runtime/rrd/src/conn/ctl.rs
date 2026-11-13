@@ -167,25 +167,27 @@ fn rr3_ctl_health(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
 fn rr3_log_args(params: &Value) -> Result<(String, usize), (Rr3StatusCode, String)> {
     let prefix = match params.get("prefix") {
         None => String::new(),
-        Some(Value::String(s)) => s.clone(),
-        Some(other) => {
-            return Err((
-                Rr3StatusCode::Invalid,
-                format!("ctl.logs prefix 应为字符串，收到 {other}"),
-            ))
+        Some(v) => {
+            let Some(s) = v.as_str() else {
+                return Err((
+                    Rr3StatusCode::Invalid,
+                    format!("ctl.logs prefix 应为字符串，收到 {v}"),
+                ));
+            };
+            s.to_string()
         }
     };
     let tail = match params.get("tail") {
         None => 0,
-        Some(v) => match v.as_u64() {
-            Some(n) => usize::try_from(n).unwrap_or(usize::MAX),
-            None => {
+        Some(v) => {
+            let Some(n) = v.as_u64() else {
                 return Err((
                     Rr3StatusCode::Invalid,
                     format!("ctl.logs tail 应为非负整数，收到 {v}"),
-                ))
-            }
-        },
+                ));
+            };
+            usize::try_from(n).unwrap_or(usize::MAX)
+        }
     };
     Ok((prefix, tail))
 }
@@ -216,10 +218,7 @@ fn rr3_reboot_unlocked() -> Option<&'static str> {
     if !cfg!(target_os = "linux") {
         return None;
     }
-    match std::env::var("RR3_REBOOT_OK").as_deref() {
-        Ok("1") => Some("cfg(linux) + RR3_REBOOT_OK=1"),
-        _ => None,
-    }
+    (std::env::var("RR3_REBOOT_OK").as_deref() == Ok("1")).then_some("cfg(linux) + RR3_REBOOT_OK=1")
 }
 
 /// 发起重启：systemd 轨走 `systemctl reboot`，Buildroot/BusyBox 轨回退

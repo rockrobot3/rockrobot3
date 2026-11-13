@@ -22,11 +22,13 @@ pub struct Rr3UdsListener {
 impl Rr3TransportEndpoint for Rr3UdsListener {
     /// 删上一次运行残留的 socket 文件。不存在 = 已干净，`Ok(())`。
     fn rr3_cleanup(path: &Path) -> io::Result<()> {
-        match std::fs::remove_file(path) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e),
+        let Err(e) = std::fs::remove_file(path) else {
+            return Ok(());
+        };
+        if e.kind() == io::ErrorKind::NotFound {
+            return Ok(());
         }
+        Err(e)
     }
 
     /// `UnixListener::bind`。调用前先 `rr3_cleanup`：uds 不允许 bind 到已存在的路径。

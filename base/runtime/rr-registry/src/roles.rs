@@ -61,9 +61,10 @@ pub fn rr3_role_parse(text: &str) -> Rr3RoleTable {
 
 /// 单条入册：缺 name 的条目整条不收（其余键按各自缺省收）。
 fn rr3_role_row(table: &mut Rr3RoleTable, r: &toml::Table) {
-    if let Some(name) = r.get("name").and_then(Value::as_str) {
-        table.roles.insert(name.to_string(), rr3_role_entry(r));
-    }
+    let Some(name) = r.get("name").and_then(Value::as_str) else {
+        return;
+    };
+    table.roles.insert(name.to_string(), rr3_role_entry(r));
 }
 
 /// 单条 `[[role]]` 的登记面：缺键按空串/false 收（逐字段次序同旧内联构造）。

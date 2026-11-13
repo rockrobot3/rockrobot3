@@ -369,12 +369,11 @@ struct Rr3DaemonBoot {
 /// 套接字不留残迹）；--manifest 调试后门维持原路径。两路径共用 plan_boot 仲裁与
 /// supervisor spawn，不双真值。缺格不是致命项（方案 P2：缺格只降点名模块）。
 fn rr3_daemon_boot(cfg: &RrdConfig) -> Result<Rr3DaemonBoot, String> {
-    match &cfg.profile {
-        Some(p) => rr3_boot_profile(cfg, p),
+    let Some(p) = &cfg.profile else {
         // None 臂 = 仅 --manifest 调试后门（基-23）：裸起在 cli parse 处已非 0 退出。
         // 后门无装配单：hal_bindings/axis_state/hal_backend 空（spawn 不注入）、
         // 无缺格点名、无装配快照（ctl.wiring 如实回不可得）。
-        None => Ok(Rr3DaemonBoot {
+        return Ok(Rr3DaemonBoot {
             manifests: cfg.manifests.clone(),
             degraded: BTreeSet::new(),
             degrade: Vec::new(),
@@ -387,8 +386,9 @@ fn rr3_daemon_boot(cfg: &RrdConfig) -> Result<Rr3DaemonBoot, String> {
             display_backend: None,
             tier: String::new(),
             chip: String::new(),
-        }),
-    }
+        });
+    };
+    rr3_boot_profile(cfg, p)
 }
 
 /// --profile 正门：契约定位 → 装配链装载 → 日志环/快照/真值集记账定格
@@ -517,10 +517,7 @@ fn rr3_backend_summary(
 
 /// 可选后端名：None/空 → `-`（回落全局，不造假值）。
 fn rr3_dash_opt(s: Option<&str>) -> &str {
-    match s {
-        Some(v) if !v.is_empty() => v,
-        _ => "-",
-    }
+    s.filter(|v| !v.is_empty()).unwrap_or("-")
 }
 
 /// 缺角色点名（校验②：该格缺能力，修装配单 [pins] 后重启解除）。

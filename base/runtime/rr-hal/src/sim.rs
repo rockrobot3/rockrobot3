@@ -31,24 +31,28 @@ pub enum Rr3SimWave {
 }
 
 impl Rr3SimWave {
+    /// 波形词表（取值串与波形的单点真值）
+    const WORDS: [(Rr3SimWave, &'static str); 4] = [
+        (Rr3SimWave::Sine, "sine"),
+        (Rr3SimWave::Noise, "noise"),
+        (Rr3SimWave::Silence, "silence"),
+        (Rr3SimWave::Burst, "burst"),
+    ];
+
     /// 环境变量取值 → 波形（`sine` / `noise` / `silence` / `burst`，大小写不敏感）
     pub fn rr3_sim_wave_parse(s: &str) -> Option<Self> {
-        match s.to_ascii_lowercase().as_str() {
-            "sine" => Some(Self::Sine),
-            "noise" => Some(Self::Noise),
-            "silence" => Some(Self::Silence),
-            "burst" => Some(Self::Burst),
-            _ => None,
-        }
+        let lower = s.to_ascii_lowercase();
+        Self::WORDS
+            .iter()
+            .find(|(_, w)| *w == lower.as_str())
+            .map(|(w, _)| *w)
     }
 
     pub fn rr3_sim_wave_as_str(&self) -> &'static str {
-        match self {
-            Self::Sine => "sine",
-            Self::Noise => "noise",
-            Self::Silence => "silence",
-            Self::Burst => "burst",
-        }
+        Self::WORDS
+            .iter()
+            .find(|(w, _)| w == self)
+            .map_or("", |(_, s)| *s)
     }
 }
 
@@ -143,7 +147,14 @@ impl Rr3SimAudioSource {
 
 impl Rr3AudioSource for Rr3SimAudioSource {
     fn open(&mut self, cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
-        if cfg.sample_rate_hz == 0 || cfg.channels == 0 || cfg.bit_depth != 16 {
+        if ![
+            cfg.sample_rate_hz != 0,
+            cfg.channels != 0,
+            cfg.bit_depth == 16,
+        ]
+        .iter()
+        .all(|ok| *ok)
+        {
             return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
                 &format!("sim 源要求 16bit 采样且 rate/channels 非零，收到 {cfg:?}"),
             )));
@@ -222,14 +233,21 @@ fn rr3_sim_sine(t_s: f64) -> f64 {
     RR3_SIM_SINE_AMP as f64 * (2.0 * std::f64::consts::PI * RR3_SIM_SINE_HZ * t_s).sin()
 }
 
+/// 波形 → 取值函数表项（波形, 取值器）：取值器吃 (t, 帧序号, 声道数, 采样率)。
+type Rr3SimShape = (Rr3SimWave, fn(f64, u64, usize, f64) -> f64);
+
 /// 波形取值：burst 门控按绝对**帧**序号（idx/声道数）；噪声按序号确定性派生。
 fn rr3_sim_wave_at(wave: Rr3SimWave, t: f64, idx: u64, ch_n: usize, rate: f64) -> f64 {
-    match wave {
-        Rr3SimWave::Sine => rr3_sim_sine(t),
-        Rr3SimWave::Burst => rr3_sim_burst(t, idx, ch_n, rate),
-        Rr3SimWave::Noise => rr3_sim_noise(idx),
-        Rr3SimWave::Silence => 0.0,
-    }
+    let shapes: [Rr3SimShape; 4] = [
+        (Rr3SimWave::Sine, |t, _, _, _| rr3_sim_sine(t)),
+        (Rr3SimWave::Burst, rr3_sim_burst),
+        (Rr3SimWave::Noise, |_, idx, _, _| rr3_sim_noise(idx)),
+        (Rr3SimWave::Silence, |_, _, _, _| 0.0),
+    ];
+    shapes
+        .iter()
+        .find(|(w, _)| *w == wave)
+        .map_or(0.0, |(_, f)| f(t, idx, ch_n, rate))
 }
 
 /// burst 门控：偶秒有声、奇秒静音，按绝对**帧**序号（idx/声道数）判。
@@ -310,7 +328,14 @@ impl Rr3SimAudioSink {
 
 impl Rr3AudioSink for Rr3SimAudioSink {
     fn open(&mut self, cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
-        if cfg.sample_rate_hz == 0 || cfg.channels == 0 || cfg.bit_depth != 16 {
+        if ![
+            cfg.sample_rate_hz != 0,
+            cfg.channels != 0,
+            cfg.bit_depth == 16,
+        ]
+        .iter()
+        .all(|ok| *ok)
+        {
             return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
                 &format!("sim 扬声器要求 16bit 采样且 rate/channels 非零，收到 {cfg:?}"),
             )));

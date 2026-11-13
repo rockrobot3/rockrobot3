@@ -119,16 +119,17 @@ fn rr3_write_target(params: &Value) -> Result<Rr3WriteTarget, (Rr3StatusCode, St
 
 /// 非空字符串字段（name/key 同形）：缺、非串、空串一律拒，文案带字段名。
 fn rr3_write_text<'a>(params: &'a Value, field: &str) -> Result<&'a str, (Rr3StatusCode, String)> {
-    params
+    let Some(s) = params
         .get(field)
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            (
-                Rr3StatusCode::Invalid,
-                format!("缺 params.{field}（要求非空字符串）"),
-            )
-        })
+    else {
+        return Err((
+            Rr3StatusCode::Invalid,
+            format!("缺 params.{field}（要求非空字符串）"),
+        ));
+    };
+    Ok(s)
 }
 
 /// 值型白名单（conventions §6.1 三写口点名集）：域 armed 取布尔，域 severe_mv
@@ -155,16 +156,13 @@ fn rr3_write_value(
 
 /// armed 值型：缺/非布尔一律拒。
 fn rr3_write_bool(params: &Value) -> Result<Rr3WriteValue, (Rr3StatusCode, String)> {
-    params
-        .get("value")
-        .and_then(Value::as_bool)
-        .map(Rr3WriteValue::Bool)
-        .ok_or_else(|| {
-            (
-                Rr3StatusCode::Invalid,
-                "armed 的 params.value 要求布尔（true/false）".to_string(),
-            )
-        })
+    let Some(v) = params.get("value").and_then(Value::as_bool) else {
+        return Err((
+            Rr3StatusCode::Invalid,
+            "armed 的 params.value 要求布尔（true/false）".to_string(),
+        ));
+    };
+    Ok(Rr3WriteValue::Bool(v))
 }
 
 /// 正整数值型：0 与缺席/非整数分别点名。
@@ -211,17 +209,20 @@ enum Rr3PathSlot {
 /// 成员分类（纯函数）：不认识 = None（topics.toml 等非写口成员不取）。
 /// 分类单点在这里，主循环只做"放位"，成员口径变化只改这一处。
 fn rr3_path_slot(member: &str) -> Option<Rr3PathSlot> {
-    if member.starts_with("profiles/") && member.ends_with(".toml") {
-        return Some(Rr3PathSlot::Profile);
+    // 前缀/后缀成对判据（表驱动：成员口径变化只改这张表）
+    let rules = [
+        ("profiles/", ".toml", Rr3PathSlot::Profile),
+        ("hardware/", "/wiring.toml", Rr3PathSlot::Wiring),
+    ];
+    for (prefix, suffix, slot) in rules {
+        if member.starts_with(prefix) && member.ends_with(suffix) {
+            return Some(slot);
+        }
     }
-    if member.starts_with("hardware/") && member.ends_with("/wiring.toml") {
-        return Some(Rr3PathSlot::Wiring);
-    }
-    if let Some(rest) = member.strip_prefix("contracts/platform/") {
-        return rest.ends_with(".toml").then_some(Rr3PathSlot::Platform);
-    }
-    let books = &crate::profile::RR3_CONTRACT_BOOKS;
-    rr3_slot_book(member, books)
+    let Some(rest) = member.strip_prefix("contracts/platform/") else {
+        return rr3_slot_book(member, &crate::profile::RR3_CONTRACT_BOOKS);
+    };
+    rest.ends_with(".toml").then_some(Rr3PathSlot::Platform)
 }
 
 /// 契约三册（slots/roles/devices）成员 → 写口槽位。
@@ -315,7 +316,10 @@ fn rr3_slot_pick(e: &Rr3TruthSetEntry, slot: Rr3PathSlot) -> Option<PathBuf> {
 /// 缺员点名（B10 自 write_paths 抽出）：真值集记账七成员里写口必需六路，
 /// 缺哪条点哪条，不静默合并。
 fn rr3_req(v: Option<PathBuf>, what: &str) -> Result<PathBuf, String> {
-    v.ok_or_else(|| format!("真值集记账缺 {what} 成员（记账形状破），写口拒"))
+    let Some(p) = v else {
+        return Err(format!("真值集记账缺 {what} 成员（记账形状破），写口拒"));
+    };
+    Ok(p)
 }
 
 /// 证据容器根（§6.1：modules-root 同一条 `<root>/profiles/` 布局纪律推导出
@@ -323,19 +327,20 @@ fn rr3_req(v: Option<PathBuf>, what: &str) -> Result<PathBuf, String> {
 /// = 装配单路径形状破，**拒**——旧序退回相对路径 `docs/evidence`，root 侧写口
 /// 按 CWD 解析等于"证据根由启动目录决定"，这是猜路径不是推导。
 fn rr3_evidence_root(profile_path: &std::path::Path) -> Result<PathBuf, (Rr3StatusCode, String)> {
-    profile_path
+    let Some(root) = profile_path
         .parent()
         .and_then(|p| p.parent())
         .map(|p| p.join("docs/evidence"))
-        .ok_or_else(|| {
-            (
-                Rr3StatusCode::Invalid,
-                format!(
-                    "装配单路径 {} 无两级父目录，证据容器根不可推导——写口拒（不按 CWD 猜证据根）",
-                    profile_path.display()
-                ),
-            )
-        })
+    else {
+        return Err((
+            Rr3StatusCode::Invalid,
+            format!(
+                "装配单路径 {} 无两级父目录，证据容器根不可推导——写口拒（不按 CWD 猜证据根）",
+                profile_path.display()
+            ),
+        ));
+    };
+    Ok(root)
 }
 
 /// 证据引用门（B-15 ③）：必填形状 + 四道核（`rr-ipc::evidence` 唯一实现）。
@@ -359,7 +364,9 @@ fn rr3_take_evidence(
     evidence: Option<String>,
     missing: &str,
 ) -> Result<String, (Rr3StatusCode, String)> {
-    let ev = evidence.ok_or_else(|| (Rr3StatusCode::Permission, missing.to_string()))?;
+    let Some(ev) = evidence else {
+        return Err((Rr3StatusCode::Permission, missing.to_string()));
+    };
     rr3_write_evidence(profile_path, &ev)?;
     Ok(ev)
 }
@@ -469,18 +476,18 @@ fn rr3_domain_read(
 ) -> Result<(String, crate::profile::Rr3Domain), (Rr3StatusCode, String)> {
     let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
     let (text, profile) = rr3_profile_load(paths)?;
-    let dom = profile
+    let Some(dom) = profile
         .supplies
         .domains
         .iter()
         .find(|d| d.name == params.name)
         .cloned()
-        .ok_or_else(|| {
-            invalid(format!(
-                "域 {:?} 不在 [[supplies.domain]] 在册（缺域拒——新域是契约事件，不经写口注册）",
-                params.name
-            ))
-        })?;
+    else {
+        return Err(invalid(format!(
+            "域 {:?} 不在 [[supplies.domain]] 在册（缺域拒——新域是契约事件，不经写口注册）",
+            params.name
+        )));
+    };
     Ok((text, dom))
 }
 
@@ -580,11 +587,9 @@ fn rr3_domain_commit(
     let update_refs: Vec<(&str, &str)> = updates.iter().map(|(k, v)| (*k, v.as_str())).collect();
     let new_text =
         crate::profile::rr3_domain_apply(text, &params.name, &update_refs).map_err(invalid)?;
-    let stem = paths
-        .profile
-        .file_stem()
-        .and_then(std::ffi::OsStr::to_str)
-        .ok_or_else(|| invalid("装配单无文件名".to_string()))?;
+    let Some(stem) = paths.profile.file_stem().and_then(std::ffi::OsStr::to_str) else {
+        return Err(invalid("装配单无文件名".to_string()));
+    };
     let tmp = paths
         .profile
         .with_file_name(format!("{stem}.tmp-write.toml"));
@@ -724,12 +729,12 @@ fn rr3_axis_evidence(
     paths: &Rr3DomainWritePaths,
     params: &Rr3DomainWriteParams,
 ) -> Result<String, (Rr3StatusCode, String)> {
-    let ev = params.evidence.clone().ok_or_else(|| {
-        (
+    let Some(ev) = params.evidence.clone() else {
+        return Err((
             Rr3StatusCode::Permission,
             "current_ceil_ma 安全写必携证据引用 params.evidence（B-15 ③）".to_string(),
-        )
-    })?;
+        ));
+    };
     rr3_write_evidence(&paths.profile, &ev)?;
     Ok(ev)
 }
@@ -772,10 +777,9 @@ fn rr3_axis_name_gate(name: &str) -> Result<(), (Rr3StatusCode, String)> {
 
 /// 轴档目录（hardware/<形态>/axis）：由接线档的父目录推导，无父目录即拒。
 fn rr3_axis_dir(paths: &Rr3DomainWritePaths) -> Result<PathBuf, (Rr3StatusCode, String)> {
-    let parent = paths
-        .wiring
-        .parent()
-        .ok_or_else(|| (Rr3StatusCode::Invalid, "接线档路径无父目录".to_string()))?;
+    let Some(parent) = paths.wiring.parent() else {
+        return Err((Rr3StatusCode::Invalid, "接线档路径无父目录".to_string()));
+    };
     Ok(parent.join("axis"))
 }
 
@@ -817,7 +821,9 @@ fn rr3_axis_old(
             errs.join("; ")
         ))
     })?;
-    let file = existing.ok_or_else(|| invalid(format!("轴档 {} 不在场", axis_path.display())))?;
+    let Some(file) = existing else {
+        return Err(invalid(format!("轴档 {} 不在场", axis_path.display())));
+    };
     Ok(json!(file.profile.current_ceil_ma))
 }
 

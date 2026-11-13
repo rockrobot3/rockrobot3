@@ -142,12 +142,8 @@ pub fn rr3_gpio_num_parse(s: &str) -> Option<u8> {
 /// 返回 Some 归一形 `nvs:<namespace>`（前缀大小写敏感，只认小写——TOML 字面
 /// 纪律同描述符全字符串值不换形）。
 pub fn rr3_cred_store_parse(s: &str) -> Option<String> {
-    let s = s.trim();
-    let ns = s.strip_prefix("nvs:")?;
-    if ns.is_empty() {
-        return None;
-    }
-    Some(format!("nvs:{ns}"))
+    let ns = s.trim().strip_prefix("nvs:")?;
+    (!ns.is_empty()).then(|| format!("nvs:{ns}"))
 }
 
 /// GPIO 类键 → 槽位取值器（键集与槽位一处对齐：键名在 [`RR3_BOARD_BINDING_KEYS`]、
@@ -174,14 +170,21 @@ pub fn rr3_board_bind_entry(b: &mut Rr3BoardBindings, k: &str, v: &str) -> Resul
     let bad = || format!("板侧绑定键 {k} 取值不认: {v:?}");
     // cred_store 是独立的非 GPIO 取值域，先分流（不走槽位表）
     if k == RR3_BOARD_BINDING_CRED_STORE {
-        b.cred_store = Some(rr3_cred_store_parse(v).ok_or_else(bad)?);
+        let Some(store) = rr3_cred_store_parse(v) else {
+            return Err(bad());
+        };
+        b.cred_store = Some(store);
         return Ok(());
     }
-    let (_, slot) = RR3_GPIO_SLOTS
-        .iter()
-        .find(|(name, _)| *name == k)
-        .ok_or_else(|| format!("板侧绑定键 {k} 未在册（载荷键域见 bindings.rs 在册表）"))?;
-    *slot(b) = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?);
+    let Some((_, slot)) = RR3_GPIO_SLOTS.iter().find(|(name, _)| *name == k) else {
+        return Err(format!(
+            "板侧绑定键 {k} 未在册（载荷键域见 bindings.rs 在册表）"
+        ));
+    };
+    let Some(num) = rr3_gpio_num_parse(v) else {
+        return Err(bad());
+    };
+    *slot(b) = Some(num);
     Ok(())
 }
 

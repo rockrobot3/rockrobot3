@@ -178,16 +178,19 @@ pub fn rr3_backend_resolve() -> Result<&'static str, String> {
 /// 音频能力面覆盖键（[`RR3_HAL_AUDIO_BACKEND_ENV`]）共用同一条白名单与
 /// 平台门语义——两键不各写一套，防静默分叉。
 fn rr3_backend_parse(key: &str, v: &str) -> Result<&'static str, String> {
-    match v {
-        RR3_BACKEND_SIM => Ok(RR3_BACKEND_SIM),
-        RR3_BACKEND_PLACEHOLDER => Ok(RR3_BACKEND_PLACEHOLDER),
-        RR3_BACKEND_ESP32 => Ok(RR3_BACKEND_ESP32),
-        RR3_BACKEND_LINUX => Ok(rr3_backend_os(RR3_BACKEND_LINUX, cfg!(target_os = "linux"))),
-        RR3_BACKEND_MAC => Ok(rr3_backend_os(RR3_BACKEND_MAC, cfg!(target_os = "macos"))),
-        other => Err(format!(
-            "环境变量 {key} 取值不认: {other}（允许 sim/linux/esp32/mac/placeholder）"
-        )),
+    let known: [(&'static str, bool); 5] = [
+        (RR3_BACKEND_SIM, true),
+        (RR3_BACKEND_PLACEHOLDER, true),
+        (RR3_BACKEND_ESP32, true),
+        (RR3_BACKEND_LINUX, cfg!(target_os = "linux")),
+        (RR3_BACKEND_MAC, cfg!(target_os = "macos")),
+    ];
+    if let Some((backend, native)) = known.iter().find(|(b, _)| *b == v) {
+        return Ok(rr3_backend_os(backend, *native));
     }
+    Err(format!(
+        "环境变量 {key} 取值不认: {v}（允许 sim/linux/esp32/mac/placeholder）"
+    ))
 }
 
 /// 平台门：本平台才认该后端，否则落占位（使用时回 Unsupported，不静默降级）。
@@ -645,11 +648,12 @@ fn rr3_gpio_linux(role: &str) -> (Box<dyn Rr3GpioOut>, &'static str) {
 /// role 白名单到线偏移：白名单外 = 无键无绑定（fail-closed）。
 #[cfg(target_os = "linux")]
 fn rr3_gpio_line(b: &crate::descriptor::Rr3HalBindings, role: &str) -> Option<u32> {
-    match role {
-        "led" => b.gpio_led_line,
-        "relay" => b.gpio_relay_line,
-        _ => None, // 白名单外：无键无绑定，fail-closed
-    }
+    let lines: [(&str, Option<u32>); 2] = [("led", b.gpio_led_line), ("relay", b.gpio_relay_line)];
+    // 白名单外：无键无绑定，fail-closed
+    lines
+        .iter()
+        .find(|(r, _)| *r == role)
+        .and_then(|(_, line)| *line)
 }
 
 /// sim 电量键的取值裁决（0–100 十进制整数）。独立成纯函数：裁决可单测，
@@ -660,20 +664,14 @@ pub fn rr3_sim_batt_parse(s: &str) -> Option<u8> {
 
 /// sim 充电态键的取值裁决（只认 `1` / `0`）。
 pub fn rr3_sim_chg_parse(s: &str) -> Option<bool> {
-    match s.trim() {
-        "1" => Some(true),
-        "0" => Some(false),
-        _ => None,
-    }
+    let known = [("1", true), ("0", false)];
+    known.iter().find(|(k, _)| *k == s.trim()).map(|(_, v)| *v)
 }
 
 /// sim 链路在线态键的取值裁决（只认 `1` / `0`）。
 pub fn rr3_sim_up_parse(s: &str) -> Option<bool> {
-    match s.trim() {
-        "1" => Some(true),
-        "0" => Some(false),
-        _ => None,
-    }
+    let known = [("1", true), ("0", false)];
+    known.iter().find(|(k, _)| *k == s.trim()).map(|(_, v)| *v)
 }
 
 /// sim 链路信号强度键的取值裁决（-100..=-1 的十进制整数 dBm；0 与正值、
@@ -778,14 +776,16 @@ pub fn rr3_hal_power() -> (Box<dyn Rr3Power>, &'static str) {
             #[cfg(target_os = "linux")]
             return rr3_bindings_eff_log("电源读数")
                 .and_then(|b| {
-                    Some((
-                        Box::new(crate::linux_power::Rr3LinuxIna219::rr3_linux_power_new(
-                            std::path::Path::new(crate::linux_power::RR3_I2C_DEV_ROOT_DEFAULT),
-                            b.i2c_bus?,
-                            b.ina219_addr?,
-                        )) as Box<dyn Rr3Power>,
-                        RR3_BACKEND_LINUX,
-                    ))
+                    b.i2c_bus.zip(b.ina219_addr).map(|(bus, addr)| {
+                        (
+                            Box::new(crate::linux_power::Rr3LinuxIna219::rr3_linux_power_new(
+                                std::path::Path::new(crate::linux_power::RR3_I2C_DEV_ROOT_DEFAULT),
+                                bus,
+                                addr,
+                            )) as Box<dyn Rr3Power>,
+                            RR3_BACKEND_LINUX,
+                        )
+                    })
                 })
                 .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER));
             #[cfg(not(target_os = "linux"))]
@@ -840,14 +840,16 @@ pub fn rr3_hal_link(
             #[cfg(target_os = "linux")]
             return rr3_bindings_eff_log("链路读数")
                 .and_then(|b| {
-                    Some((
-                        Box::new(crate::linux_link::Rr3LinuxNmLink::rr3_linux_link_new(
-                            b.link_ifname?,
-                            "nmcli",
-                            nmcli_timeout,
-                        )) as Box<dyn crate::Rr3Link>,
-                        RR3_BACKEND_LINUX,
-                    ))
+                    b.link_ifname.map(|ifname| {
+                        (
+                            Box::new(crate::linux_link::Rr3LinuxNmLink::rr3_linux_link_new(
+                                ifname,
+                                "nmcli",
+                                nmcli_timeout,
+                            )) as Box<dyn crate::Rr3Link>,
+                            RR3_BACKEND_LINUX,
+                        )
+                    })
                 })
                 .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER));
             #[cfg(not(target_os = "linux"))]

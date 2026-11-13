@@ -96,17 +96,15 @@ fn rr3_pin_set_from(v: &Value, what: &str, errs: &mut Vec<String>) -> BTreeSet<i
 
 /// 单个脚号元素：非负整数入集，坏的逐条点名。
 fn rr3_pin_item(item: &Value, i: usize, what: &str, errs: &mut Vec<String>) -> Option<i64> {
-    match item.as_integer() {
-        Some(n) if n >= 0 => Some(n),
-        Some(n) => {
-            errs.push(format!("{what}[{i}] 脚号须非负，收到 {n}"));
-            None
-        }
-        None => {
-            errs.push(format!("{what}[{i}] 应为整数脚号，收到 {item:?}"));
-            None
-        }
+    let Some(n) = item.as_integer() else {
+        errs.push(format!("{what}[{i}] 应为整数脚号，收到 {item:?}"));
+        return None;
+    };
+    if n >= 0 {
+        return Some(n);
     }
+    errs.push(format!("{what}[{i}] 脚号须非负，收到 {n}"));
+    None
 }
 
 /// 字符串数组解析：逐元素判非空字符串，坏的逐条点名
@@ -126,17 +124,15 @@ fn rr3_str_set_from(v: &Value, what: &str, errs: &mut Vec<String>) -> BTreeSet<S
 
 /// 单个字符串元素：非空串入集，坏的逐条点名。
 fn rr3_str_item(item: &Value, i: usize, what: &str, errs: &mut Vec<String>) -> Option<String> {
-    match item.as_str() {
-        Some(s) if !s.trim().is_empty() => Some(s.to_string()),
-        Some(_) => {
-            errs.push(format!("{what}[{i}] 不得为空串"));
-            None
-        }
-        None => {
-            errs.push(format!("{what}[{i}] 应为字符串，收到 {item:?}"));
-            None
-        }
+    let Some(s) = item.as_str() else {
+        errs.push(format!("{what}[{i}] 应为字符串，收到 {item:?}"));
+        return None;
+    };
+    if !s.trim().is_empty() {
+        return Some(s.to_string());
     }
+    errs.push(format!("{what}[{i}] 不得为空串"));
+    None
 }
 
 /// 解析 + 全量形状校验一份平台表文本。fail-closed：任何一段缺、任何键坏、
@@ -219,22 +215,34 @@ fn rr3_plat_key_err(k: &str, errs: &mut Vec<String>) {
 
 /// schema_version：平台表自己的版本域（当前 1；破坏性变更才 bump）。
 fn rr3_plat_ver(t: &toml::Table, errs: &mut Vec<String>) {
-    match t.get("schema_version") {
-        Some(Value::Integer(1)) => {}
-        Some(Value::Integer(v)) => errs.push(format!("平台表 schema_version 必须为 1，收到 {v}")),
-        Some(other) => errs.push(format!("平台表 schema_version 应为整数，收到 {other:?}")),
-        None => errs.push("平台表缺 schema_version（必须为 1）".into()),
+    let Some(v) = t.get("schema_version") else {
+        errs.push("平台表缺 schema_version（必须为 1）".into());
+        return;
+    };
+    let Value::Integer(v) = v else {
+        errs.push(format!("平台表 schema_version 应为整数，收到 {v:?}"));
+        return;
+    };
+    if *v != 1 {
+        errs.push(format!("平台表 schema_version 必须为 1，收到 {v}"));
     }
 }
 
 /// platform：非空字符串（与 profiles [platform] 的平台标识同源，§4.6）。
 fn rr3_plat_name(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
-    match t.get("platform") {
-        Some(Value::String(s)) if !s.trim().is_empty() => table.platform = s.clone(),
-        Some(Value::String(_)) => errs.push("平台表 platform 不得为空串".into()),
-        Some(other) => errs.push(format!("平台表 platform 应为字符串，收到 {other:?}")),
-        None => errs.push("平台表缺 platform 键".into()),
+    let Some(v) = t.get("platform") else {
+        errs.push("平台表缺 platform 键".into());
+        return;
+    };
+    let Value::String(s) = v else {
+        errs.push(format!("平台表 platform 应为字符串，收到 {v:?}"));
+        return;
+    };
+    if s.trim().is_empty() {
+        errs.push("平台表 platform 不得为空串".into());
+        return;
     }
+    table.platform = s.clone();
 }
 
 /// `[[controller]]` 段：先逐条收集再建映射，重复名在此点名（词表一名一条）。
@@ -254,17 +262,17 @@ fn rr3_ctl_insert(
     ch: i64,
     errs: &mut Vec<String>,
 ) {
-    match table.controllers.entry(n) {
-        std::collections::btree_map::Entry::Occupied(e) => {
-            errs.push(format!("controller {} 重复（词表一名一条）", e.key()));
-        }
-        std::collections::btree_map::Entry::Vacant(v) => {
-            v.insert(Rr3ControllerEntry {
-                kind: k,
-                channels: ch,
-            });
-        }
+    if table.controllers.contains_key(&n) {
+        errs.push(format!("controller {n} 重复（词表一名一条）"));
+        return;
     }
+    table.controllers.insert(
+        n,
+        Rr3ControllerEntry {
+            kind: k,
+            channels: ch,
+        },
+    );
 }
 
 /// `[[controller]]` 数组形状与逐条解析（空表 = 词表事故，缺段/非数组分述点名）。
@@ -273,13 +281,17 @@ fn rr3_ctl_collect(
     entries: &mut Vec<(String, String, i64)>,
     errs: &mut Vec<String>,
 ) {
-    match t.get("controller") {
-        Some(Value::Array(items)) => rr3_ctl_items(items, entries, errs),
-        Some(other) => errs.push(format!(
-            "平台表 controller 应为数组（[[controller]]），收到 {other:?}"
-        )),
-        None => errs.push("平台表缺 [[controller]] 段（在册控制器词表必填）".into()),
-    }
+    let Some(v) = t.get("controller") else {
+        errs.push("平台表缺 [[controller]] 段（在册控制器词表必填）".into());
+        return;
+    };
+    let Value::Array(items) = v else {
+        errs.push(format!(
+            "平台表 controller 应为数组（[[controller]]），收到 {v:?}"
+        ));
+        return;
+    };
+    rr3_ctl_items(items, entries, errs);
 }
 
 /// `[[controller]]` 数组逐条：空表 = 词表事故（在册控制器词表为空 = ⑧-b 无键空间可判）。
@@ -345,69 +357,65 @@ fn rr3_ctl_key_ok(k: &str) -> bool {
 
 /// `[[controller]]` 单条 name：非空字符串。
 fn rr3_ctl_name(c: &toml::Table, i: usize, errs: &mut Vec<String>) -> Option<String> {
-    match c.get("name").and_then(Value::as_str) {
-        Some(n) if !n.trim().is_empty() => Some(n.to_string()),
-        Some(_) => {
-            errs.push(format!("controller[{i}].name 不得为空串"));
-            None
-        }
-        None => {
-            errs.push(format!("controller[{i}].name 应为字符串"));
-            None
-        }
+    let Some(n) = c.get("name").and_then(Value::as_str) else {
+        errs.push(format!("controller[{i}].name 应为字符串"));
+        return None;
+    };
+    if n.trim().is_empty() {
+        errs.push(format!("controller[{i}].name 不得为空串"));
+        return None;
     }
+    Some(n.to_string())
 }
 
 /// `[[controller]]` 单条 kind：封闭七值。
 fn rr3_ctl_kind(c: &toml::Table, i: usize, errs: &mut Vec<String>) -> Option<String> {
-    match c.get("kind").and_then(Value::as_str) {
-        Some(k) if RR3_PLATFORM_KINDS.contains(&k) => Some(k.to_string()),
-        Some(k) => {
-            errs.push(format!(
-                "controller[{i}].kind \"{k}\" 非法（封闭七值 {RR3_PLATFORM_KINDS:?}，扩域走契约级评审）"
-            ));
-            None
-        }
-        None => {
-            errs.push(format!("controller[{i}].kind 应为字符串"));
-            None
-        }
+    let Some(k) = c.get("kind").and_then(Value::as_str) else {
+        errs.push(format!("controller[{i}].kind 应为字符串"));
+        return None;
+    };
+    if !RR3_PLATFORM_KINDS.contains(&k) {
+        errs.push(format!(
+            "controller[{i}].kind \"{k}\" 非法（封闭七值 {RR3_PLATFORM_KINDS:?}，扩域走契约级评审）"
+        ));
+        return None;
     }
+    Some(k.to_string())
 }
 
 /// `[[controller]]` 单条 channels：非负整数（0 = 无通道维，须显式写）。
 fn rr3_ctl_chans(c: &toml::Table, i: usize, errs: &mut Vec<String>) -> Option<i64> {
-    match c.get("channels") {
-        Some(Value::Integer(n)) if *n >= 0 => Some(*n),
-        Some(Value::Integer(n)) => {
-            errs.push(format!("controller[{i}].channels 须非负，收到 {n}"));
-            None
-        }
-        Some(other) => {
-            errs.push(format!("controller[{i}].channels 应为整数，收到 {other:?}"));
-            None
-        }
-        None => {
-            errs.push(format!(
-                "controller[{i}] 缺 channels（0 = 无通道维，须显式写）"
-            ));
-            None
-        }
+    let Some(v) = c.get("channels") else {
+        errs.push(format!(
+            "controller[{i}] 缺 channels（0 = 无通道维，须显式写）"
+        ));
+        return None;
+    };
+    let Value::Integer(n) = v else {
+        errs.push(format!("controller[{i}].channels 应为整数，收到 {v:?}"));
+        return None;
+    };
+    if *n < 0 {
+        errs.push(format!("controller[{i}].channels 须非负，收到 {n}"));
+        return None;
     }
+    Some(*n)
 }
 
 /// `[capabilities]` 段：能力集四键（段缺即红；空集合法但必须显式写键）。
 fn rr3_plat_caps(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
-    match t.get("capabilities") {
-        Some(Value::Table(caps)) => {
-            rr3_caps_keys(caps, errs);
-            rr3_caps_set(caps, table, errs);
-        }
-        Some(other) => errs.push(format!(
-            "平台表 capabilities 应为表（[capabilities]），收到 {other:?}"
-        )),
-        None => errs.push("平台表缺 [capabilities] 段（⑤-a/⑤-b 判据前件，缺段即红，裁定①）".into()),
-    }
+    let Some(v) = t.get("capabilities") else {
+        errs.push("平台表缺 [capabilities] 段（⑤-a/⑤-b 判据前件，缺段即红，裁定①）".into());
+        return;
+    };
+    let Value::Table(caps) = v else {
+        errs.push(format!(
+            "平台表 capabilities 应为表（[capabilities]），收到 {v:?}"
+        ));
+        return;
+    };
+    rr3_caps_keys(caps, errs);
+    rr3_caps_set(caps, table, errs);
 }
 
 /// 能力集四键封闭：未知键逐条点名。
@@ -463,43 +471,47 @@ fn rr3_caps_pins(
     missing: &str,
     errs: &mut Vec<String>,
 ) -> BTreeSet<i64> {
-    match caps.get(key) {
-        Some(v) => rr3_pin_set_from(v, key, errs),
-        None => {
-            errs.push(missing.to_string());
-            BTreeSet::new()
-        }
-    }
+    let Some(v) = caps.get(key) else {
+        errs.push(missing.to_string());
+        return BTreeSet::new();
+    };
+    rr3_pin_set_from(v, key, errs)
 }
 
 /// output_capable_pins：在册规则写入，越域/缺键分别点名。
 fn rr3_caps_output(caps: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
-    match caps.get("output_capable_pins").and_then(Value::as_str) {
-        Some(r) if RR3_PLATFORM_OUTPUT_RULES.contains(&r) => {
-            table.capabilities.output_rule = r.to_string();
-        }
-        Some(r) => errs.push(format!(
-            "[capabilities].output_capable_pins \"{r}\" 不在册（在册规则 {RR3_PLATFORM_OUTPUT_RULES:?}，扩规则走契约级评审）"
-        )),
-        None => errs.push(
+    let Some(r) = caps.get("output_capable_pins").and_then(Value::as_str) else {
+        errs.push(
             "[capabilities] 缺 output_capable_pins（取值规则集，§4.6：写规则不写枚举）".into(),
-        ),
+        );
+        return;
+    };
+    if !RR3_PLATFORM_OUTPUT_RULES.contains(&r) {
+        errs.push(format!(
+            "[capabilities].output_capable_pins \"{r}\" 不在册（在册规则 {RR3_PLATFORM_OUTPUT_RULES:?}，扩规则走契约级评审）"
+        ));
+        return;
     }
+    table.capabilities.output_rule = r.to_string();
 }
 
 /// `conflict` 段：组名唯一、成员至少一侧、why 必填；controllers 成员须本表在册。
 fn rr3_plat_conf(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
     let mut groups_seen = BTreeSet::<String>::new();
-    match t.get("conflict") {
-        Some(Value::Array(items)) => rr3_conf_items(items, table, &mut groups_seen, errs),
-        Some(other) => errs.push(format!(
-            "平台表 conflict 应为数组（[[conflict]] / []），收到 {other:?}"
-        )),
-        None => errs.push(
+    let Some(v) = t.get("conflict") else {
+        errs.push(
             "平台表缺 conflict 键（无冲突也必须显式写 conflict = [] 并带'评审确认无冲突矩阵'注记，裁定②）"
                 .into(),
-        ),
-    }
+        );
+        return;
+    };
+    let Value::Array(items) = v else {
+        errs.push(format!(
+            "平台表 conflict 应为数组（[[conflict]] / []），收到 {v:?}"
+        ));
+        return;
+    };
+    rr3_conf_items(items, table, &mut groups_seen, errs);
 }
 
 /// `[[conflict]]` 数组逐条：组名唯一状态随遍历累积。
@@ -567,32 +579,28 @@ fn rr3_conf_key_err(k: &str, i: usize, errs: &mut Vec<String>) {
 
 /// 组名：非空字符串（空串/非串各自点名，返回 None 即不登记）。
 fn rr3_conf_group(c: &toml::Table, i: usize, errs: &mut Vec<String>) -> Option<String> {
-    match c.get("group").and_then(Value::as_str) {
-        Some(g) if !g.trim().is_empty() => Some(g.to_string()),
-        Some(_) => {
-            errs.push(format!("conflict[{i}].group 不得为空串"));
-            None
-        }
-        None => {
-            errs.push(format!("conflict[{i}].group 应为字符串"));
-            None
-        }
+    let Some(g) = c.get("group").and_then(Value::as_str) else {
+        errs.push(format!("conflict[{i}].group 应为字符串"));
+        return None;
+    };
+    if g.trim().is_empty() {
+        errs.push(format!("conflict[{i}].group 不得为空串"));
+        return None;
     }
+    Some(g.to_string())
 }
 
 /// 理由：进册必须带非空可读理由（缺失/空串点名，登记值取空串保持旧形状）。
 fn rr3_conf_why<'a>(c: &'a toml::Table, i: usize, errs: &mut Vec<String>) -> &'a str {
-    match c.get("why").and_then(Value::as_str) {
-        Some(w) if !w.trim().is_empty() => w,
-        Some(_) => {
-            errs.push(format!("conflict[{i}].why 不得为空串"));
-            ""
-        }
-        None => {
-            errs.push(format!("conflict[{i}] 缺 why（进册的冲突必须带可读理由）"));
-            ""
-        }
+    let Some(w) = c.get("why").and_then(Value::as_str) else {
+        errs.push(format!("conflict[{i}] 缺 why（进册的冲突必须带可读理由）"));
+        return "";
+    };
+    if w.trim().is_empty() {
+        errs.push(format!("conflict[{i}].why 不得为空串"));
+        return "";
     }
+    w
 }
 
 /// conflict 单册解析产物（rr3_conf_item 五步的汇合点，入册前成型）。
@@ -672,11 +680,13 @@ fn rr3_conf_sets(
 ) -> (BTreeSet<i64>, BTreeSet<String>) {
     let mut pins = BTreeSet::new();
     let mut controllers = BTreeSet::new();
+    let pins_txt = format!("conflict[{i}].pins");
+    let ctls_txt = format!("conflict[{i}].controllers");
     if let Some(v) = c.get("pins") {
-        pins = rr3_pin_set_from(v, &format!("conflict[{i}].pins"), errs);
+        pins = rr3_pin_set_from(v, &pins_txt, errs);
     }
     if let Some(v) = c.get("controllers") {
-        controllers = rr3_str_set_from(v, &format!("conflict[{i}].controllers"), errs);
+        controllers = rr3_str_set_from(v, &ctls_txt, errs);
     }
     rr3_conf_blank_err(i, group, &pins, &controllers, errs);
     (pins, controllers)
@@ -715,21 +725,17 @@ fn rr3_plat_cons(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<S
 
 /// `[construction]` 段形状：段缺/类型错各自点名回 None。
 fn rr3_cons_tbl<'a>(t: &'a toml::Table, errs: &mut Vec<String>) -> Option<&'a toml::Table> {
-    match t.get("construction") {
-        Some(Value::Table(cons)) => Some(cons),
-        Some(other) => {
-            errs.push(format!(
-                "平台表 construction 应为表（[construction]），收到 {other:?}"
-            ));
-            None
-        }
-        None => {
-            errs.push(
-                "平台表缺 [construction] 段（⑧ 对账前件；无绑定形态显式写空表，裁定①）".into(),
-            );
-            None
-        }
-    }
+    let Some(v) = t.get("construction") else {
+        errs.push("平台表缺 [construction] 段（⑧ 对账前件；无绑定形态显式写空表，裁定①）".into());
+        return None;
+    };
+    let Value::Table(cons) = v else {
+        errs.push(format!(
+            "平台表 construction 应为表（[construction]），收到 {v:?}"
+        ));
+        return None;
+    };
+    Some(cons)
 }
 
 /// 单条 construction：三元键（controller/role 非空、controller 在册）+ 非空路径。
@@ -742,15 +748,17 @@ fn rr3_cons_item(k: &str, v: &Value, table: &mut Rr3PlatformTable, errs: &mut Ve
 
 /// 构造路径值：非空字符串入表，空串/非串各自点名（文案逐字保留）。
 fn rr3_cons_val(k: &str, v: &Value, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
-    match v.as_str() {
-        Some(p) if !p.trim().is_empty() => {
-            table.construction.insert(k.to_string(), p.to_string());
-        }
-        Some(_) => errs.push(format!("construction[\"{k}\"] 构造路径不得为空串")),
-        None => errs.push(format!(
+    let Some(p) = v.as_str() else {
+        errs.push(format!(
             "construction[\"{k}\"] 应为字符串（平台侧构造路径，§4.5），收到 {v:?}"
-        )),
+        ));
+        return;
+    };
+    if p.trim().is_empty() {
+        errs.push(format!("construction[\"{k}\"] 构造路径不得为空串"));
+        return;
     }
+    table.construction.insert(k.to_string(), p.to_string());
 }
 
 /// 三元键形状与在册性：`controller:role:instance`，前两段非空且 controller 在册。
@@ -808,22 +816,20 @@ fn rr3_plat_wf(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<Str
 
 /// `[controller_wordform]` 段形状：段缺/类型错各自点名回 None。
 fn rr3_wf_tbl<'a>(t: &'a toml::Table, errs: &mut Vec<String>) -> Option<&'a toml::Table> {
-    match t.get("controller_wordform") {
-        Some(Value::Table(wf)) => Some(wf),
-        Some(other) => {
-            errs.push(format!(
-                "平台表 controller_wordform 应为表（[controller_wordform]），收到 {other:?}"
-            ));
-            None
-        }
-        None => {
-            errs.push(
-                "平台表缺 [controller_wordform] 段（host 词形派生表，实-6 (a)；无词形派生面须显式写空表并带注记，裁定①）"
-                    .into(),
-            );
-            None
-        }
-    }
+    let Some(v) = t.get("controller_wordform") else {
+        errs.push(
+            "平台表缺 [controller_wordform] 段（host 词形派生表，实-6 (a)；无词形派生面须显式写空表并带注记，裁定①）"
+                .into(),
+        );
+        return None;
+    };
+    let Value::Table(wf) = v else {
+        errs.push(format!(
+            "平台表 controller_wordform 应为表（[controller_wordform]），收到 {v:?}"
+        ));
+        return None;
+    };
+    Some(wf)
 }
 
 /// 单条词形：键在册四键内、值为非空前缀。
@@ -839,19 +845,21 @@ fn rr3_wf_item(k: &str, v: &Value, table: &mut Rr3PlatformTable, errs: &mut Vec<
 
 /// 词形值：非空前缀入表（空串/非串各自点名，文案逐字保留）。
 fn rr3_wf_val(k: &str, v: &Value, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
-    match v.as_str() {
-        Some(p) if !p.trim().is_empty() => {
-            table
-                .controller_wordform
-                .insert(k.to_string(), p.to_string());
-        }
-        Some(_) => errs.push(format!(
-            "[controller_wordform].{k} 词形前缀不得为空串（无词形须删键走空表显式）"
-        )),
-        None => errs.push(format!(
+    let Some(p) = v.as_str() else {
+        errs.push(format!(
             "[controller_wordform].{k} 应为字符串前缀，收到 {v:?}"
-        )),
+        ));
+        return;
+    };
+    if p.trim().is_empty() {
+        errs.push(format!(
+            "[controller_wordform].{k} 词形前缀不得为空串（无词形须删键走空表显式）"
+        ));
+        return;
     }
+    table
+        .controller_wordform
+        .insert(k.to_string(), p.to_string());
 }
 
 impl Rr3PlatformTable {
