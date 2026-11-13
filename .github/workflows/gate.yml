@@ -13,7 +13,7 @@ concurrency:
   group: gate-${{ github.ref }}
   cancel-in-progress: true
 env:
-  CARGO_TERM_COLOR: always
+  CARGO_TERM_COLOR: never   # 纯文本输出：注解/日志可读，不再被 ANSI 转义吃掉
   CARGO_INCREMENTAL: "0"
 
 jobs:
