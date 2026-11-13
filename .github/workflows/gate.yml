@@ -42,7 +42,7 @@ jobs:
           set -o pipefail
           if ! bash tools/ci/check.sh 2>&1 | tee /tmp/gate.log; then
             fails=$(grep -E "^(FAIL|ERROR)" /tmp/gate.log | tail -4 | tr '\n' ' ')
-            errs=$(grep -E "^error(\[|:)" /tmp/gate.log | head -3 | tr '\n' ' ')
+            errs=$(grep -E "error(\[|:)" /tmp/gate.log | head -3 | tr '\n' ' ')
             echo "::error title=check.sh::${fails:0:500} @@ ${errs:0:700}"
             grep -E "^(FAIL|ERROR)" /tmp/gate.log | tail -20
             exit 1
@@ -68,7 +68,12 @@ jobs:
                      -not -path "*/target/*" -not -path "base/runtime/*" -print0 | sort -z)
       - name: clippy -D warnings（base/runtime + 全部独立工程）
         run: |
-          cargo clippy -q --all-targets --manifest-path base/runtime/Cargo.toml --workspace -- -D warnings
+          set -o pipefail
+          if ! cargo clippy --all-targets --manifest-path base/runtime/Cargo.toml --workspace -- -D warnings 2>&1 | tee /tmp/clippy.log; then
+            errs=$(grep -E "error(\[|:)|warning: unused" /tmp/clippy.log | head -4 | tr '\n' ' ')
+            echo "::error title=clippy::${errs:0:900}"
+            exit 1
+          fi
           while IFS= read -r -d '' m; do
             cargo clippy -q --all-targets --manifest-path "$m" -- -D warnings
           done < <(find modules tools base/ota -name Cargo.toml \
