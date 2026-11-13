@@ -43,7 +43,7 @@ use crate::manifest::{rr3_manifest_abs, rr3_manifest_parse, Rr3ManifestFacts};
 use crate::registry::{rr3_phase_for_exit, Rr3Beat, Rr3Death, Rr3Phase, RrdRegistry, RR3_FAN_CAP};
 use crate::rpc::{
     rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_call_params, rr3_rpc_counters,
-    rr3_rpc_deny_status, rr3_rpc_manifest, rr3_rpc_parse, rr3_rpc_reg_status, rr3_rpc_topic_param,
+    rr3_rpc_deny_status, rr3_rpc_manifest, rr3_rpc_parse, rr3_rpc_reg_status, rr3_rpc_topic_ref,
     Rr3RpcMethod, Rr3RpcRequest,
 };
 use crate::supervisor::Rr3Supervisor;
