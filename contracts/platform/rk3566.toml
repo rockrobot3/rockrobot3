@@ -1,56 +1,68 @@
-# contracts/platform/rk3566.toml —— RK3566 芯片事实登记表（**演练实例**）。
-# RK3566 = default.toml 参考机（RK3566 桌面具身形态）的平台。施工图 Task 3 Step 2：
-# 树莓派与 RK3566 只能先给演练实例，取值全部标"演练"并进 status.md 敞口——
-# host 侧的引脚/控制器事实散在 runbook/R22 定案档，未经真机逐一核过，本表只立
-# 形状与"与现役 profile 可对账的最小集"，**不充当已核事实**。
+# contracts/platform/rk3566.toml —— RK3566 芯片事实登记表。
+# RK3566 = default.toml 参考机（RK3566 桌面具身形态）的平台。
+#
+# 取值来源（批B63 逐键对账）：profiles/default.toml [[pin]]（现参考机五绑定——
+# R22 定案档 pwm0=GPIO12、R8 预算表 GPIO4/17 软件路、接线 3 i2c1、BOM #5
+# INA219@0x40、批N3 件六接线 4 spidev0）与 contracts/roles.toml 的派生规则。
+# **仓内无芯片级实录的键（每控制器通道数、input-only / 开漏约束、片上 ADC
+# 通道集）显式标「待器件」**，不以数据手册记忆冒充已核事实。
 schema_version = 1
 platform = "rk3566"
 
-# 评审确认无冲突矩阵（演练实例，待器件核对）——§4.6 裁定②：空数组必须显式写。
+# 无冲突矩阵：现役五绑定落在 pwmchip0/ch0、gpiochip0 线 4 与 17、i2c1、spidev0
+# 片选 0——按 profiles/default.toml [[pin]] 逐条比对无交叠，故空集。
+# §4.6 裁定②：空数组必须显式写。
 # （顶层键须落在任何 [段头] 之前，否则被 TOML 归入前一段表内。）
 conflict = []
 
 [[controller]]
-# 演练实例：Rockchip 每 PWM 硬件通道一枚 chip（pwmchip0 仅 ch0），通道上界待芯片
-# 手册核对后回填。现参考机只用 ch0（default.toml [pins] R22 定案档 pwm0=GPIO12）。
+# 参考机只用 ch0（profiles/default.toml [[pin]] controller="pwm0" channel=0
+# → physical GPIO12）。**每控制器通道上界待芯片手册核对后回填**：表值 1 是
+# "本表在册的最小可用通道数"，不是已核数据手册上界。
 name = "pwm0"
 kind = "pwm"
 channels = 1
 
 [[controller]]
-# 演练实例：Linux gpiochip0（无通道维，资源是线本身）。
+# Linux gpiochip0（无通道维，资源是线本身）。来源：profiles/default.toml
+# [[pin]] 两处 controller="gpiochip0"（线 4/17）+ 词形 gpiochip 派生规则。
+# **仓内无 gpiochip 节点实机实录，待器件核对。**
 name = "gpiochip0"
 kind = "gpio"
 channels = 0
 
 [[controller]]
-# 演练实例：I2C1（default.toml [pins] 接线 3：BOM #5 INA219@0x40 挂 i2c1）。
+# I2C1（profiles/default.toml 接线 3：BOM #5 INA219@0x40 挂 i2c1；同址
+# (i2c1, 0x40) 共址为校验③-c 正例形状）。
 name = "i2c1"
 kind = "i2c"
 channels = 0
 
 [[controller]]
-# 演练实例：SPI0（批N3 件六：ui.face.spi 显示面走 SPI0 CE0，profiles 两份 [[pin]]
-# controller="spidev0"/channel=0 的词表校验⑧-b 读者——链④真件档 MAX7219）。
+# SPI0：profiles/default.toml [[pin]] ui.face.spi 填 controller="spidev0"、
+# channel=0（片选 0），装载期派生 spi_device="/dev/spidev0.0"（批N3 件六接线 4，
+# 校验⑧-b 的词表读者）；链④真件档 MAX7219。channels=1 指本表在册片选数。
 name = "spidev0"
 kind = "spi"
 channels = 1
 
 [capabilities]
-# 演练实例：RK3566 片上 SARADC 通道集待器件核对后回填——现 host 档模拟测点走
-# 外挂 INA219（i2c1），无片上 ADC 消费者，故按"当前可消费集为空"显式写空。
+# 片上 ADC 通道集：**未登记（待器件核对）**——现参考机无片上 ADC 消费者
+# （模拟测点走外挂 INA219@i2c1），本表不写未核的通道映射；空 = 未声明，
+# 不等于"芯片无 ADC"。回填前模拟测点绑定只能走外挂器件。
 adc_pins = []
-# 演练实例：input-only 脚集待器件核对（现役绑定无此约束消费者），显式空。
+# input-only 脚集：仓内无“某脚只能输入”的实机证据，按空集登记——空 =
+# 未声明该约束；**待器件核对**。
 input_only_pins = []
-# 演练实例：同上，显式空。
+# no_open_drain：同上，待器件核对（驱动能力/开漏约束未逐脚核过），显式空。
 no_open_drain = []
 # 取值规则集不写枚举（§4.6）；platform.rs 只认在册规则名。
 output_capable_pins = "complement(input_only_pins)"
 
 [construction]
-# 具名构造表（演练实例）：值 = rr-hal 后端构造函数名（base/runtime/rr-hal/src/
-# backend.rs 在案符号，host 侧"平台侧构造路径"的真值点）。取值 = default.toml
-# [pins] 现役五绑定的真值（R22 定案档 / 接线 3 / BOM #5 / 批N3 件六接线 4），
+# 具名构造表：值 = rr-hal 后端构造函数名（base/runtime/rr-hal/src/backend.rs
+# 在案符号，host 侧"平台侧构造路径"的真值点）。取自 profiles/default.toml
+# [pins] 现役五绑定（R22 定案档 / 接线 3 / BOM #5 / 批N3 件六接线 4），
 # 非凭记忆编造。
 "pwm0:act.axis.pwm:pan" = "rr3_hal_servo"
 "gpiochip0:act.led.gpio:" = "rr3_hal_gpio_out"

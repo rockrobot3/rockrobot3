@@ -1,31 +1,47 @@
 # contracts/platform/raspberry-pi-4.toml —— 树莓派 4 芯片事实登记表。
 # 树莓派 = 0.0.6 真板批的独立形态（architecture §12.7 三形态两两零关系）；
 # W4/P0-C（批N43）起由 profiles/pi4b-board.toml 作板端点装配单，W2/T1 由
-# profiles/pi4b-host-esp32-classic.toml 作 Pi 宿主档。芯片侧取值仍按演练实例
-# 纪律登记（施工图 Task 3 Step 2，进 status.md 敞口），真机对账归后续板批。
+# profiles/pi4b-host-esp32-classic.toml 作 Pi 宿主档。
+#
+# 取值来源（批B63 逐键对账）：仓内板级实录 docs/evidence/实测/0008.md（Pi 4B
+# 上 `npwm=2`、`i2cdetect -y 1` 总线在位）、0010.md（`/dev/spidev0.0` 在位，
+# MAX7219 实接）、status.md N44 行（Pi 实机三模块 running 回执）与
+# profiles/pi4b-board.toml 的接线表。**无实录可指的键显式标「待器件」**，
+# 不以数据手册记忆冒充已核事实。
 schema_version = 1
 platform = "raspberry-pi-4"
 
-# 评审确认无冲突矩阵（演练实例，待器件核对）——§4.6 裁定②：空数组必须显式写。
+# 无冲突矩阵：现役两路 PWM 走 GPIO12/13（pwm0 的 channel 0/1），显示走 SPI0
+# CE0（GPIO8；board 实录见 base/os/distro/boards/raspberry-pi-64.md 的
+# VCC/GND/DIN(GPIO10)/CS(GPIO8)/CLK(GPIO11) 行），I2C1 走 GPIO2/3——按
+# profiles/pi4b-board.toml [[pin]] 与 hardware 接线表逐脚比对无交叠，故空集。
+# §4.6 裁定②：空数组必须显式写。
 # （顶层键须落在任何 [段头] 之前，否则被 TOML 归入前一段表内。）
 conflict = []
 
 [[controller]]
 # BCM2711 硬件 PWM 两通道（PWM0/PWM1）：dtoverlay=pwm-2chan 落成
-# /sys/class/pwm/pwmchip0 下的 pwm0/pwm1 两个通道目录。W4 起 pan = channel 0
-# （GPIO12）、tilt = channel 1（GPIO13），见 profiles/pi4b-board.toml [[pin]]。
+# /sys/class/pwm/pwmchip0 下的 pwm0/pwm1 两个通道目录。
+# 来源：实测 0008.md —— `/sys/class/pwm/pwmchip0` 在位且 `npwm = 2`；通道
+# 0/1 的用途见 profiles/pi4b-board.toml [[pin]]（pan=channel 0 → GPIO12，
+# tilt=channel 1 → GPIO13）。
 name = "pwm0"
 kind = "pwm"
 channels = 2
 
 [[controller]]
-# 演练实例：Linux gpiochip0（无通道维）。
+# Linux gpiochip0（无通道维，资源是线本身）。
+# 来源：Linux 对 BCM2711 单 GPIO 控制器的通用命名；**仓内无 gpiochip 节点的
+# 实机实录，待器件核对**（数字输出面真值以装配单 [pins] 为准，本表只登记
+# 控制器在册名）。
 name = "gpiochip0"
 kind = "gpio"
 channels = 0
 
 [[controller]]
-# 演练实例：I2C1（树莓派 40-pin 排针惯用总线）。
+# I2C1（树莓派 40-pin 排针惯用总线，GPIO2/3）。
+# 来源：实测 0008.md —— `i2cdetect -y 1` 对总线 1 完整扫面（0x03–0x77 全空 =
+# 总线在、从机未接），证明 i2c1 控制器在位；BOM #5 INA219@0x40 挂本总线。
 name = "i2c1"
 kind = "i2c"
 channels = 0
@@ -35,6 +51,8 @@ channels = 0
 # MAX7219 双位级联点阵已于 2026-10-15 链④真件档实测）。名须与 [controller_wordform]
 # 的 spi_device 前缀 "spidev" 对得上——装配单 [[pin]] 的 controller 只能填本表在册名
 # （校验⑧-b），故此处按 Linux 设备名而非芯片手册的 "SPI0" 命名。
+# 来源：实测 0010.md（`/dev/spidev0.0` 在位）+ status.md N44 行（显示面 linux
+# 后端实开出帧回执）。
 name = "spidev0"
 kind = "spi"
 channels = 1
@@ -50,22 +68,22 @@ channels = 1
 "pwm0:act.axis.pwm:tilt" = "sysfs-pwm"
 
 [capabilities]
-# 评审确认：本芯片无片上 ADC，模拟测点须外挂（施工图 Task 3 Step 2 原文口径，
-# §4.6 裁定②"空集须显式"）。
+# 本芯片无片上 ADC，模拟测点须外挂（实测 0008.md：模拟测点候选 ADS1115@0x48
+# 在 i2c1 上无应答，属缺件；§4.6 裁定②"空集须显式"）。
 adc_pins = []
-# 演练实例：input-only 脚集待器件核对（BCM2711 无 input-only 硬约束的出脚），
-# 显式空。
+# input-only 脚集：仓内无“某脚只能输入”的实机证据，按空集登记——空 =
+# 未声明该约束，不等于已核过；**待器件核对**（进 status.md 敞口第 17 行）。
 input_only_pins = []
-# 演练实例：同上，显式空。
+# no_open_drain：同上，待器件核对（驱动能力/开漏约束未逐脚核过），显式空。
 no_open_drain = []
 # 取值规则集不写枚举（§4.6）；platform.rs 只认在册规则名。
 output_capable_pins = "complement(input_only_pins)"
 
 [controller_wordform]
-# host 词形派生表（实-6 (a)，批N4 件七——演练实例，与 rk3566 同为 Linux sysfs
-# 命名习惯故同形同值；树莓派形态真机对账后回填，进 status.md 敞口）。键 = 词形
-# 派生物理键（封闭四值），值 = 控制器名前缀——与上方 [[controller]] 在册名
-# （pwm0/gpiochip0/i2c1）逐一对拍。
+# host 词形派生表（实-6 (a)，批N4 件七）：键 = 词形派生物理键（封闭四值），
+# 值 = 控制器名前缀——与上方 [[controller]] 在册名（pwm0/gpiochip0/i2c1/
+# spidev0）逐一对拍。来源：Linux sysfs 命名习惯 + 实测 0008/0010 的节点名
+# （pwmchip0 / i2c-1 / spidev0.0）。
 pwm_chip = "pwm"
 gpio_chip = "gpiochip"
 i2c_bus = "i2c"
