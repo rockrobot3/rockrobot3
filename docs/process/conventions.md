@@ -3236,6 +3236,14 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/gat
 `tests/<目标名>/`，必须 `#[path = "..."]` 显式指路；②跨模块可达的夹具按最小面
 放开到 `pub(super)`，不放宽到 `pub`。
 
+**2026-11-14 第二批（基线 55→35）**：19 件测试体抽取（rr-hal esp32_uart、rr-ipc
+protocol/header、rr-mech control、rr-registry atom/depends、rrd assembly/cli/manifest/
+topics_load/wiring、rr3-act intent、rr3-interact boot、rr3-power dispatch、rr3-sense boot、
+pi-periph-base ports、rrctl commands、sim main、rr3-brain boot 夹具/用例）+ 生产面三件
+（sim drill 定位段、rr3-brain boot 夹具、rrd domain 写口四分 1412→82）。第三条纪律：
+③测试体搬目录后 `include_str!`/`include_bytes!` 的相对基准跟着文件走——仓内夹具一律
+`concat!(env!("CARGO_MANIFEST_DIR"), ...)` 定位，不再写 `../` 层级。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
