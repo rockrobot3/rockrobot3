@@ -106,10 +106,9 @@ fn rr3_env_num(s: &str) -> Result<u64, String> {
 
 /// 进制前缀：`0x`/`0X` 为十六进制，其余十进制。
 fn rr3_num_parts(s: &str) -> (&str, u32) {
-    match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        Some(rest) => (rest, 16),
-        None => (s, 10),
-    }
+    s.strip_prefix("0x")
+        .or_else(|| s.strip_prefix("0X"))
+        .map_or((s, 10), |rest| (rest, 16))
 }
 
 /// 键值合法性：键非空且不含 `=`/`\0`，值不含 `\0`。
@@ -130,7 +129,7 @@ fn rr3_env_val_ok(key: &str, value: &str) -> Result<(), String> {
 
 /// 键形制：非空且不含 `=`/`\0`。
 fn rr3_env_key_ok(key: &str) -> bool {
-    !key.is_empty() && !key.contains('=') && !key.contains('\0')
+    !key.is_empty() && !key.contains(&['=', '\0'][..])
 }
 
 /// env 体（键值有序表；顺序即渲染顺序，U-Boot 不要求排序）。
@@ -213,10 +212,11 @@ impl Rr3BootEnv {
     /// 写一个键（存在即覆盖，不存在即追加）。键/值的非法字符当场拒。
     pub fn rr3_env_set(&mut self, key: &str, value: &str) -> Result<(), String> {
         rr3_env_kv_chk(key, value)?;
-        match self.vars.iter_mut().find(|(k, _)| k == key) {
-            Some(slot) => slot.1 = value.to_string(),
-            None => self.vars.push((key.to_string(), value.to_string())),
+        if let Some(slot) = self.vars.iter_mut().find(|(k, _)| k == key) {
+            slot.1 = value.to_string();
+            return Ok(());
         }
+        self.vars.push((key.to_string(), value.to_string()));
         Ok(())
     }
 
@@ -297,18 +297,21 @@ pub fn rr3_env_read(dev: &Rr3EnvDev) -> Result<Rr3BootEnv, String> {
 #[cfg(unix)]
 fn rr3_env_open_r(dev: &Rr3EnvDev) -> Result<std::fs::File, String> {
     use std::io::{Seek, SeekFrom};
-    let mut f = std::fs::OpenOptions::new()
+    std::fs::OpenOptions::new()
         .read(true)
         .open(dev.rr3_dev_path())
-        .map_err(|e| format!("打开 {} 失败：{e}", dev.rr3_dev_path()))?;
-    f.seek(SeekFrom::Start(dev.rr3_dev_offset())).map_err(|e| {
-        format!(
-            "定位 {} 到 {} 失败：{e}",
-            dev.rr3_dev_path(),
-            dev.rr3_dev_offset()
-        )
-    })?;
-    Ok(f)
+        .map_err(|e| format!("打开 {} 失败：{e}", dev.rr3_dev_path()))
+        .and_then(|mut f| {
+            f.seek(SeekFrom::Start(dev.rr3_dev_offset()))
+                .map(|_| f)
+                .map_err(|e| {
+                    format!(
+                        "定位 {} 到 {} 失败：{e}",
+                        dev.rr3_dev_path(),
+                        dev.rr3_dev_offset()
+                    )
+                })
+        })
 }
 
 /// 把 env 整区写回 config 指明的设备位置（仅 linux）。
@@ -341,18 +344,21 @@ fn rr3_env_put(dev: &Rr3EnvDev, image: &[u8]) -> Result<(), String> {
 #[cfg(unix)]
 fn rr3_env_open_w(dev: &Rr3EnvDev) -> Result<std::fs::File, String> {
     use std::io::{Seek, SeekFrom};
-    let mut f = std::fs::OpenOptions::new()
+    std::fs::OpenOptions::new()
         .write(true)
         .open(dev.rr3_dev_path())
-        .map_err(|e| format!("以写打开 {} 失败：{e}", dev.rr3_dev_path()))?;
-    f.seek(SeekFrom::Start(dev.rr3_dev_offset())).map_err(|e| {
-        format!(
-            "定位 {} 到 {} 失败：{e}",
-            dev.rr3_dev_path(),
-            dev.rr3_dev_offset()
-        )
-    })?;
-    Ok(f)
+        .map_err(|e| format!("以写打开 {} 失败：{e}", dev.rr3_dev_path()))
+        .and_then(|mut f| {
+            f.seek(SeekFrom::Start(dev.rr3_dev_offset()))
+                .map(|_| f)
+                .map_err(|e| {
+                    format!(
+                        "定位 {} 到 {} 失败：{e}",
+                        dev.rr3_dev_path(),
+                        dev.rr3_dev_offset()
+                    )
+                })
+        })
 }
 
 #[cfg(test)]

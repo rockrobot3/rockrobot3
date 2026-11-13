@@ -244,18 +244,16 @@ fn rr3_serve_request(
     me: &Rr3Peer,
     body: &[u8],
 ) -> Result<Rr3Flow, String> {
-    let req = match rr3_rpc_parse(body) {
-        Ok(r) => r,
-        Err((_, msg)) => {
-            rr3_reply_err(
-                out,
-                me,
-                rr3_best_effort_id(body),
-                Rr3StatusCode::Invalid,
-                &msg,
-            );
-            return Ok(Rr3Flow::Keep);
-        }
+    let Ok(req) = rr3_rpc_parse(body).map_err(|(_, msg)| {
+        rr3_reply_err(
+            out,
+            me,
+            rr3_best_effort_id(body),
+            Rr3StatusCode::Invalid,
+            &msg,
+        )
+    }) else {
+        return Ok(Rr3Flow::Keep);
     };
     match req.method {
         Rr3RpcMethod::Register => {

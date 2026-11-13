@@ -139,17 +139,14 @@ impl FrameAssembler {
         if self.buf.len() < RR3_IPC_HDR_SIZE {
             return Ok(None);
         }
-        let header = self.rr3_head_of()?;
-        self.rr3_plen_guard(&header)?;
-        Ok(Some(header))
+        self.rr3_head_of()
+            .and_then(|header| self.rr3_plen_guard(&header).map(|()| Some(header)))
     }
 
     /// 头层解码：坏头弃 4B magic 回错（真帧起点可能就在其后不远处）。
     fn rr3_head_of(&mut self) -> Result<Rr3Header, (u64, String)> {
-        match Rr3Header::from_bytes(&self.buf[..RR3_IPC_HDR_SIZE]) {
-            Ok(h) => Ok(h),
-            Err(e) => Err(self.drop_magic(4, alloc::format!("头层拒收: {e:?}"))),
-        }
+        let parsed = Rr3Header::from_bytes(&self.buf[..RR3_IPC_HDR_SIZE]);
+        parsed.map_err(|e| self.drop_magic(4, alloc::format!("头层拒收: {e:?}")))
     }
 
     /// plen 护栏：超拆帧上限即弃 4B magic（幻影头）。

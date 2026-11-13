@@ -39,31 +39,41 @@ pub const RR3_OTA_SLOT_NAMES: [&str; 2] = ["rr_a", "rr_b"];
 pub const RR3_OTA_STAGING_PARTITION: &str = "rr_staging";
 
 impl Rr3Slot {
+    /// 槽位词表（标签与槽位的单点真值）
+    const WORDS: [(Rr3Slot, &'static str); 3] = [
+        (Rr3Slot::SlotA, "rr_a"),
+        (Rr3Slot::SlotB, "rr_b"),
+        (Rr3Slot::Factory, "rr_factory"),
+    ];
+
+    /// 对合表（A↔B，Factory 自映射）
+    const PEERS: [(Rr3Slot, Rr3Slot); 3] = [
+        (Rr3Slot::SlotA, Rr3Slot::SlotB),
+        (Rr3Slot::SlotB, Rr3Slot::SlotA),
+        (Rr3Slot::Factory, Rr3Slot::Factory),
+    ];
+
     /// 对侧槽位（切换用）
     pub fn rr3_slot_peer(self) -> Self {
-        match self {
-            Self::SlotA => Self::SlotB,
-            Self::SlotB => Self::SlotA,
-            Self::Factory => Self::Factory,
-        }
+        Self::PEERS
+            .iter()
+            .find(|(s, _)| *s == self)
+            .map_or(self, |(_, p)| *p)
     }
 
     pub fn rr3_slot_label(self) -> &'static str {
-        match self {
-            Self::SlotA => "rr_a",
-            Self::SlotB => "rr_b",
-            Self::Factory => "rr_factory",
-        }
+        Self::WORDS
+            .iter()
+            .find(|(s, _)| *s == self)
+            .map_or("", |(_, w)| *w)
     }
 
     /// 分区标签反查槽位（bootconf/cmdline 解析入口；不在册标签返回 None）
     pub fn rr3_slot_from_label(label: &str) -> Option<Self> {
-        match label {
-            "rr_a" => Some(Self::SlotA),
-            "rr_b" => Some(Self::SlotB),
-            "rr_factory" => Some(Self::Factory),
-            _ => None,
-        }
+        Self::WORDS
+            .iter()
+            .find(|(_, w)| *w == label)
+            .map(|(s, _)| *s)
     }
 }
 

@@ -37,14 +37,12 @@ fn rr3_tail_digits(rest: &str) -> bool {
 /// 词形前缀查询 + fail-closed 守卫（实-6 (a)）：派生键查平台表词形前缀，查不到
 /// 红——不许回退硬编码（回退 = 策略重新住回机制侧，下移作废）。
 fn rr3_wordform_prefix(platform: &Rr3PlatformTable, key: &str) -> Result<String, String> {
-    platform
-        .rr3_wordform(key)
-        .map(str::to_string)
-        .ok_or_else(|| {
-            format!(
-                "平台事实表 controller_wordform 无 {key} 词形（host 档派生前件缺失，fail-closed）"
-            )
-        })
+    let Some(w) = platform.rr3_wordform(key) else {
+        return Err(format!(
+            "平台事实表 controller_wordform 无 {key} 词形（host 档派生前件缺失，fail-closed）"
+        ));
+    };
+    Ok(w.to_string())
 }
 
 /// 单条 pin 的派生取值（机制侧，八物理键封闭）：role.derives（策略，contracts/
@@ -86,8 +84,10 @@ fn rr3_derive_word(
     platform: &Rr3PlatformTable,
 ) -> Result<String, String> {
     let prefix = rr3_wordform_prefix(platform, key)?;
-    rr3_wordform_tail(&pin.controller, &prefix)
-        .ok_or_else(|| format!("controller 词形 {} 不合 {prefix}<N>", pin.controller))
+    rr3_wordform_tail(&pin.controller, &prefix).ok_or(format!(
+        "controller 词形 {} 不合 {prefix}<N>",
+        pin.controller
+    ))
 }
 
 /// spi_device 派生（B9 自 pin_derive_value 抽出）：`/dev/spidev<bus>.<cs>`，
@@ -98,26 +98,30 @@ fn rr3_derive_spi(
     platform: &Rr3PlatformTable,
 ) -> Result<String, String> {
     let prefix = rr3_wordform_prefix(platform, key)?;
-    let bus = rr3_wordform_tail(&pin.controller, &prefix)
-        .ok_or_else(|| format!("controller 词形 {} 不合 {prefix}<N>", pin.controller))?;
-    let cs = pin
-        .channel
-        .map(|c| c.to_string())
-        .ok_or_else(|| "channel 留空（SPI 片选号）".to_string())?;
+    let Some(bus) = rr3_wordform_tail(&pin.controller, &prefix) else {
+        return Err(format!(
+            "controller 词形 {} 不合 {prefix}<N>",
+            pin.controller
+        ));
+    };
+    let Some(cs) = pin.channel else {
+        return Err("channel 留空（SPI 片选号）".to_string());
+    };
     Ok(format!("/dev/spidev{bus}.{cs}"))
 }
 
 fn rr3_derive_channel(pin: &Rr3PinEntry) -> Result<String, String> {
-    pin.channel
-        .map(|c| c.to_string())
-        .ok_or_else(|| "channel 留空".to_string())
+    let Some(ch) = pin.channel else {
+        return Err("channel 留空".to_string());
+    };
+    Ok(ch.to_string())
 }
 
 fn rr3_derive_line(pin: &Rr3PinEntry) -> Result<String, String> {
-    pin.physical
-        .first()
-        .map(|n| n.to_string())
-        .ok_or_else(|| "physical 留空".to_string())
+    let Some(n) = pin.physical.first() else {
+        return Err("physical 留空".to_string());
+    };
+    Ok(n.to_string())
 }
 
 fn rr3_derive_addr(pin: &Rr3PinEntry) -> Result<String, String> {
@@ -524,17 +528,25 @@ fn rr3_derive_one(
     derived: &mut BTreeMap<String, String>,
     errs: &mut Vec<String>,
 ) {
-    match rr3_pin_derive_value(pin, d, platform) {
-        Ok(v) => match derived.get(d) {
-            None => {
-                derived.insert(d.to_string(), v);
+    let v = match rr3_pin_derive_value(pin, d, platform) {
+        Ok(v) => v,
+        Err(e) => {
+            errs.push(format!("{label} 派生 {d} 失败: {e}"));
+            return;
+        }
+    };
+    match derived.entry(d.to_string()) {
+        std::collections::btree_map::Entry::Vacant(slot) => {
+            slot.insert(v);
+        }
+        std::collections::btree_map::Entry::Occupied(slot) => {
+            if slot.get() != &v {
+                errs.push(format!(
+                    "{label} 派生键 {d} 与他条取值不同（{} vs {v}）——多实例共键须同值（同一资源维）",
+                    slot.get()
+                ));
             }
-            Some(prev) if prev != &v => errs.push(format!(
-                "{label} 派生键 {d} 与他条取值不同（{prev} vs {v}）——多实例共键须同值（同一资源维）"
-            )),
-            _ => {}
-        },
-        Err(e) => errs.push(format!("{label} 派生 {d} 失败: {e}")),
+        }
     }
 }
 

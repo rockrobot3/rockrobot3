@@ -154,14 +154,14 @@ impl Rr3PayloadType {
     /// 由类型枚举值解析。payload 体的前缀宽度已在 M2 冻结为 2 字节（`protocol::body`，
     /// `RR3_BODY_TYPE_PREFIX_LEN`），本函数就是它把线上字节还原成枚举的唯一入口。
     pub fn from_u16(v: u16) -> Option<Self> {
-        match v {
-            0x0001 => Some(Self::Request),
-            0x0002 => Some(Self::Response),
-            0x0003 => Some(Self::Event),
-            0x0004 => Some(Self::Stream),
-            0x0005 => Some(Self::Notification),
-            _ => None,
-        }
+        let known: [(u16, Self); 5] = [
+            (0x0001, Self::Request),
+            (0x0002, Self::Response),
+            (0x0003, Self::Event),
+            (0x0004, Self::Stream),
+            (0x0005, Self::Notification),
+        ];
+        known.iter().find(|(k, _)| *k == v).map(|(_, t)| *t)
     }
 }
 

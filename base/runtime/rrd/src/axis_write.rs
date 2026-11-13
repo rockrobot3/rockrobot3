@@ -46,9 +46,9 @@ const USAGE: &str = "用法: axis_write --profile <装配单.toml> --candidate <
 /// 路径型开关取值：缺参数与疑似开关的值都拒（与 rrd cli 的
 /// `need_path_value` 同一条口径——fail-open 的形状两处都不许有）。
 fn need_path_value(flag: &str, args: &[String], i: usize) -> Result<PathBuf, String> {
-    let raw = args
-        .get(i + 1)
-        .ok_or_else(|| format!("{flag} 缺参数\n{USAGE}"))?;
+    let Some(raw) = args.get(i + 1) else {
+        return Err(format!("{flag} 缺参数\n{USAGE}"));
+    };
     if raw.starts_with('-') {
         return Err(format!(
             "{flag} 缺参数：收到疑似开关的 {raw}（路径值不得以 - 开头）\n{USAGE}"
@@ -65,8 +65,12 @@ pub fn rr3_axis_write_parse(args: &[String]) -> Result<Rr3AxisWriteArgs, String>
     while i < args.len() {
         i = rr3_aw_arg(args, i, &mut profile, &mut candidate)?;
     }
-    let profile = profile.ok_or_else(|| format!("--profile 缺失\n{USAGE}"))?;
-    let candidate = candidate.ok_or_else(|| format!("--candidate 缺失\n{USAGE}"))?;
+    let Some(profile) = profile else {
+        return Err(format!("--profile 缺失\n{USAGE}"));
+    };
+    let Some(candidate) = candidate else {
+        return Err(format!("--candidate 缺失\n{USAGE}"));
+    };
     Ok(Rr3AxisWriteArgs { profile, candidate })
 }
 
@@ -77,18 +81,19 @@ fn rr3_aw_arg(
     profile: &mut Option<PathBuf>,
     candidate: &mut Option<PathBuf>,
 ) -> Result<usize, String> {
-    match args[i].as_str() {
-        "--profile" => {
-            *profile = Some(need_path_value("--profile", args, i)?);
-            Ok(i + 2)
-        }
-        "--candidate" => {
-            *candidate = Some(need_path_value("--candidate", args, i)?);
-            Ok(i + 2)
-        }
-        "-h" | "--help" => Err(USAGE.to_string()),
-        other => Err(format!("未知选项 {other}\n{USAGE}")),
+    let flag = args[i].as_str();
+    if flag == "--profile" {
+        *profile = Some(need_path_value("--profile", args, i)?);
+        return Ok(i + 2);
     }
+    if flag == "--candidate" {
+        *candidate = Some(need_path_value("--candidate", args, i)?);
+        return Ok(i + 2);
+    }
+    if ["-h", "--help"].contains(&flag) {
+        return Err(USAGE.to_string());
+    }
+    Err(format!("未知选项 {flag}\n{USAGE}"))
 }
 
 /// 写入编排（策略全在本函数，逐条显式）：装配单装载 → 候选全判据 → 拒绝面
@@ -149,17 +154,17 @@ fn rr3_aw_candidate(
         pin_ids,
     )
     .map_err(|errs| errs.join("; "))?;
-    let instance = file
+    let Some(instance) = file
         .pin
         .rsplit('.')
         .next()
         .filter(|seg| !seg.is_empty() && *seg != file.pin)
-        .ok_or_else(|| {
-            format!(
-                "候选 pin = {:?} 不是 role.instance 两段式（act.axis.pwm.pan 形），拒绝猜测落位",
-                file.pin
-            )
-        })?;
+    else {
+        return Err(format!(
+            "候选 pin = {:?} 不是 role.instance 两段式（act.axis.pwm.pan 形），拒绝猜测落位",
+            file.pin
+        ));
+    };
     let target = axis_dir.join(format!("{instance}.toml"));
     Ok((file, target))
 }
@@ -175,19 +180,18 @@ fn rr3_aw_existing(
     pin_ids: &BTreeSet<String>,
 ) -> Result<(), String> {
     match rr3_act_profile_load(target, pin_ids) {
-        Ok(None) => Ok(()),
-        Err(errs) => Err(format!(
-            "目标 {} 已存在且装载红（{}）——坏档案不许覆盖，先修或手工移除后再写",
-            target.display(),
-            errs.join("; ")
-        )),
         Ok(Some(existing)) if existing.pin != file.pin => Err(format!(
             "目标 {} 已存在且 pin = {:?}（候选 {:?}）——instance 落位与档案身份冲突，拒绝覆盖",
             target.display(),
             existing.pin,
             file.pin
         )),
-        Ok(Some(_)) => Ok(()),
+        Ok(_) => Ok(()),
+        Err(errs) => Err(format!(
+            "目标 {} 已存在且装载红（{}）——坏档案不许覆盖，先修或手工移除后再写",
+            target.display(),
+            errs.join("; ")
+        )),
     }
 }
 
@@ -254,13 +258,9 @@ fn rr3_aw_scan(
     pin_ids: &BTreeSet<String>,
 ) -> Option<String> {
     let entries = std::fs::read_dir(axis_dir).ok()?;
-    for e in entries.flatten() {
-        let p = e.path();
-        if let Some(msg) = rr3_aw_same_pin(&p, target, file, pin_ids) {
-            return Some(msg);
-        }
-    }
-    None
+    entries
+        .flatten()
+        .find_map(|e| rr3_aw_same_pin(&e.path(), target, file, pin_ids))
 }
 
 /// 原子落盘（tmp→fsync→rename 唯一写路径）并回显写入路径与档案要点

@@ -96,17 +96,15 @@ fn req_str(root: &Value, path: &str, errs: &mut Vec<String>) -> String {
 
 /// 必填字符串值型：空串与类型错两类点名（均回空串）。
 fn rr3_str_take(v: &Value, path: &str, errs: &mut Vec<String>) -> String {
-    match v.as_str() {
-        Some(s) if !s.is_empty() => s.to_string(),
-        Some(_) => {
-            errs.push(format!("{path} 不得为空字符串"));
-            String::new()
-        }
-        None => {
-            errs.push(format!("{path} 应为字符串"));
-            String::new()
-        }
+    let Some(s) = v.as_str() else {
+        errs.push(format!("{path} 应为字符串"));
+        return String::new();
+    };
+    if s.is_empty() {
+        errs.push(format!("{path} 不得为空字符串"));
+        return String::new();
     }
+    s.to_string()
 }
 
 fn req_int(root: &Value, path: &str, errs: &mut Vec<String>) -> u64 {
@@ -118,17 +116,15 @@ fn req_int(root: &Value, path: &str, errs: &mut Vec<String>) -> u64 {
 
 /// 必填整数值型：非正与类型错两类点名（均回 0）。
 fn rr3_int_take(v: &Value, path: &str, errs: &mut Vec<String>) -> u64 {
-    match v.as_integer() {
-        Some(n) if n > 0 => n as u64,
-        Some(n) => {
-            errs.push(format!("{path} 应为正整数，实际 {n}"));
-            0
-        }
-        None => {
-            errs.push(format!("{path} 应为整数"));
-            0
-        }
+    let Some(n) = v.as_integer() else {
+        errs.push(format!("{path} 应为整数"));
+        return 0;
+    };
+    if n <= 0 {
+        errs.push(format!("{path} 应为正整数，实际 {n}"));
+        return 0;
     }
+    n as u64
 }
 
 /// 必填项取在场值：缺项当场点名并返回 `None`。

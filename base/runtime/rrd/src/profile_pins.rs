@@ -57,14 +57,28 @@ fn rr3_pin_caps(
         ));
     }
     // ⑤-a output 落 input-only 集（角色 input_only_ok 的另一侧输入取 roles 表）
-    if pin.direction == "out" && roles.rr3_role_input_only(&pin.role) == Some(false) {
-        for p in &pin.physical {
-            if platform.rr3_input_only_pins().contains(p) {
-                errs.push(format!(
-                    "{label} physical 元素 {p} 落在平台 {plat} 的 input-only 脚集（校验⑤-a：direction = out 且角色 {} input_only_ok = false，input-only 脚无输出驱动能力）",
-                    pin.role
-                ));
-            }
+    rr3_pin_out_only(pin, roles, platform, plat, &label, errs);
+}
+
+/// ⑤-a 单脚判据：direction = out 且角色不允 input-only 时，physical 不得落 input-only 脚。
+fn rr3_pin_out_only(
+    pin: &Rr3PinEntry,
+    roles: &Rr3RoleTable,
+    platform: &Rr3PlatformTable,
+    plat: &str,
+    label: &str,
+    errs: &mut Vec<String>,
+) {
+    let driven_out = pin.direction == "out" && roles.rr3_role_input_only(&pin.role) == Some(false);
+    if !driven_out {
+        return;
+    }
+    for p in &pin.physical {
+        if platform.rr3_input_only_pins().contains(p) {
+            errs.push(format!(
+                "{label} physical 元素 {p} 落在平台 {plat} 的 input-only 脚集（校验⑤-a：direction = out 且角色 {} input_only_ok = false，input-only 脚无输出驱动能力）",
+                pin.role
+            ));
         }
     }
 }
@@ -189,15 +203,12 @@ fn rr3_pin_phys_take(
     errs: &mut Vec<String>,
 ) {
     for p in &pin.physical {
-        match owner.get(p) {
-            Some(first) if *first != idx => errs.push(format!(
+        let first = owner.entry(*p).or_insert(idx);
+        if *first != idx {
+            errs.push(format!(
                 "{label} physical 元素 {p} 与 pins[{}] 双占（校验③-a：同一 physical 元素在启用集里 ≤ 1 次）",
                 profile.pins[*first].rr3_pin_id()
-            )),
-            None => {
-                owner.insert(*p, idx);
-            }
-            _ => {}
+            ));
         }
     }
 }
@@ -263,11 +274,9 @@ fn rr3_pin_addr_take(
         return;
     }
     let key = (pin.controller.clone(), pin.addr.clone());
-    match owner.get(&key) {
-        Some(first) => rr3_addr_conflict(label, pin, &profile.pins[*first], errs),
-        None => {
-            owner.insert(key, idx);
-        }
+    let first = *owner.entry(key).or_insert(idx);
+    if first != idx {
+        rr3_addr_conflict(label, pin, &profile.pins[first], errs);
     }
 }
 

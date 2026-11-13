@@ -51,6 +51,19 @@ fn rr3_text_trim(s: &str, mut len: usize) -> usize {
     len
 }
 
+/// 按容量抄字节并退到 char 边界（定长文本构造函数共用）。
+fn rr3_copy_trim(s: &str, bytes: &mut [u8]) -> usize {
+    let mut len = 0usize;
+    for (i, b) in s.as_bytes().iter().enumerate() {
+        if i >= bytes.len() {
+            break;
+        }
+        bytes[i] = *b;
+        len = i + 1;
+    }
+    rr3_text_trim(s, len)
+}
+
 /// 定长错误文案（[`Rr3HalError::InvalidParam`] 载荷）。no_std 面没有 `String`，
 /// 但实现层（Linux 后端）的错误文案是动态的（io error、路径、数值插值）——
 /// 实现层 `format!` 后经 [`Rr3ErrText::rr3_err_text_new`] 截断入缓冲，按 char
@@ -71,18 +84,11 @@ impl Rr3ErrText {
     /// 截断的尾巴不带语义——判据面靠变体与静态前缀，不靠尾巴）
     pub fn rr3_err_text_new(s: &str) -> Self {
         let mut bytes = [0u8; 128];
-        let mut len = 0usize;
-        for (i, b) in s.as_bytes().iter().enumerate() {
-            if i >= bytes.len() {
-                break;
-            }
-            bytes[i] = *b;
-            len = i + 1;
-        }
+        let len = rr3_copy_trim(s, &mut bytes);
         // 退到 char 边界（UTF-8 多字节序列不劈半）
         Self {
             bytes,
-            len: rr3_text_trim(s, len) as u8,
+            len: len as u8,
         }
     }
 
@@ -110,17 +116,10 @@ impl Rr3SsidText {
     /// 超长截断进摘要；真 SSID 本就不该超限）
     pub fn rr3_ssid_text_new(s: &str) -> Self {
         let mut bytes = [0u8; 32];
-        let mut len = 0usize;
-        for (i, b) in s.as_bytes().iter().enumerate() {
-            if i >= bytes.len() {
-                break;
-            }
-            bytes[i] = *b;
-            len = i + 1;
-        }
+        let len = rr3_copy_trim(s, &mut bytes);
         Self {
             bytes,
-            len: rr3_text_trim(s, len) as u8,
+            len: len as u8,
         }
     }
 
@@ -164,15 +163,21 @@ pub enum Rr3RailTier {
 }
 
 impl Rr3RailTier {
+    /// 档位词表（档名与档位的单点真值）
+    const NAMES: [(Rr3RailTier, &'static str); 4] = [
+        (Rr3RailTier::Ok, "ok"),
+        (Rr3RailTier::Mild, "mild"),
+        (Rr3RailTier::Severe, "severe"),
+        (Rr3RailTier::Unknown, "unknown"),
+    ];
+
     /// 档名（守护输出行 `INFO rail_tier=` 同串；板侧 `RailTier::name` 投影到此，
     /// 第四态补 `"unknown"`——两条线的文案自此同源一个词表）。
     pub fn rr3_rail_tier_name(self) -> &'static str {
-        match self {
-            Rr3RailTier::Ok => "ok",
-            Rr3RailTier::Mild => "mild",
-            Rr3RailTier::Severe => "severe",
-            Rr3RailTier::Unknown => "unknown",
-        }
+        Self::NAMES
+            .iter()
+            .find(|(t, _)| *t == self)
+            .map_or("", |(_, n)| *n)
     }
 }
 
@@ -207,11 +212,10 @@ pub struct Rr3RailState {
 /// 那一侧处置（闸门保持置位 / 不许解禁），在展示面原样显示——本函数只折档，
 /// 不判处置策略，执法归校验⑥-c2 消费侧（板侧守护 / 件五 RailMonitor 归属搬家）。
 pub fn rr3_rail_tier_fold(tier: Rr3RailTier, age_ms: Option<u32>, max_age_ms: u32) -> Rr3RailTier {
-    match age_ms {
-        None => Rr3RailTier::Unknown,
-        Some(age) if age > max_age_ms => Rr3RailTier::Unknown,
-        Some(_) => tier,
+    if age_ms.is_none_or(|age| age > max_age_ms) {
+        return Rr3RailTier::Unknown;
     }
+    tier
 }
 
 /// HAL 错误
@@ -330,24 +334,25 @@ pub enum Rr3ActHardStop {
 }
 
 impl Rr3ActHardStop {
+    /// 挡块事实词表（档名与取值的单点真值）
+    const NAMES: [(Rr3ActHardStop, &'static str); 3] = [
+        (Rr3ActHardStop::Unknown, "unknown"),
+        (Rr3ActHardStop::Yes, "yes"),
+        (Rr3ActHardStop::No, "no"),
+    ];
+
     /// 档名（档案取值串同源：`unknown` / `yes` / `no`）
     pub fn rr3_hard_stop_name(self) -> &'static str {
-        match self {
-            Rr3ActHardStop::Unknown => "unknown",
-            Rr3ActHardStop::Yes => "yes",
-            Rr3ActHardStop::No => "no",
-        }
+        Self::NAMES
+            .iter()
+            .find(|(h, _)| *h == self)
+            .map_or("", |(_, w)| *w)
     }
 
     /// 从档案词解析（词表外回 `None`，装载侧点名红，不猜——与 name 同源成对，
     /// 词形改动只许落这一处）
     pub fn rr3_hard_stop_parse(s: &str) -> Option<Self> {
-        match s {
-            "unknown" => Some(Rr3ActHardStop::Unknown),
-            "yes" => Some(Rr3ActHardStop::Yes),
-            "no" => Some(Rr3ActHardStop::No),
-            _ => None,
-        }
+        Self::NAMES.iter().find(|(_, w)| *w == s).map(|(h, _)| *h)
     }
 }
 
@@ -368,26 +373,26 @@ pub enum Rr3ActMotion {
 }
 
 impl Rr3ActMotion {
+    /// 动作形态词表（词名与取值的单点真值）
+    const NAMES: [(Rr3ActMotion, &'static str); 4] = [
+        (Rr3ActMotion::Jog, "jog"),
+        (Rr3ActMotion::Auto, "auto"),
+        (Rr3ActMotion::CalibOpenLoop, "calib-openloop"),
+        (Rr3ActMotion::CalibStallSearch, "calib-stall-search"),
+    ];
+
     /// 词名（命令面取值串同源：`jog` / `auto` / `calib-openloop` / `calib-stall-search`）
     pub fn rr3_act_motion_name(self) -> &'static str {
-        match self {
-            Rr3ActMotion::Jog => "jog",
-            Rr3ActMotion::Auto => "auto",
-            Rr3ActMotion::CalibOpenLoop => "calib-openloop",
-            Rr3ActMotion::CalibStallSearch => "calib-stall-search",
-        }
+        Self::NAMES
+            .iter()
+            .find(|(m, _)| *m == self)
+            .map_or("", |(_, w)| *w)
     }
 
     /// 从词解析（词表外回 `None`，调用侧点名红，不猜——与 name 同源成对，
     /// 词形改动只许落这一处）
     pub fn rr3_act_motion_parse(s: &str) -> Option<Self> {
-        match s {
-            "jog" => Some(Rr3ActMotion::Jog),
-            "auto" => Some(Rr3ActMotion::Auto),
-            "calib-openloop" => Some(Rr3ActMotion::CalibOpenLoop),
-            "calib-stall-search" => Some(Rr3ActMotion::CalibStallSearch),
-            _ => None,
-        }
+        Self::NAMES.iter().find(|(_, w)| *w == s).map(|(m, _)| *m)
     }
 }
 
@@ -405,17 +410,27 @@ impl Rr3ActMotion {
 /// 单真值点：产出侧（rr3-act 组合件执行面）与判据用例共用本函数，不许各自
 /// 手抄 `if` 链。拒收回 [`Rr3HalError::InvalidParam`]（文案带动作形态与判据名，
 /// 与板侧 `axis_check` 越域回错同形——越界显式回错不静默 clamp）。
+/// 动作 → 判据表项（形态, 判据）：判据只看硬挡块与标定态，返回拒因或放行。
+type Rr3MotionRule = (
+    Rr3ActMotion,
+    fn(Rr3ActHardStop, bool) -> Result<(), Rr3HalError>,
+);
+
 pub fn rr3_motion_allowed(
     hard_stop: Rr3ActHardStop,
     calibrated: bool,
     motion: Rr3ActMotion,
 ) -> Result<(), Rr3HalError> {
-    match motion {
-        Rr3ActMotion::Jog => Ok(()),
-        Rr3ActMotion::Auto => rr3_motion_auto(calibrated),
-        Rr3ActMotion::CalibOpenLoop => rr3_motion_calib(hard_stop),
-        Rr3ActMotion::CalibStallSearch => rr3_motion_stall(hard_stop),
-    }
+    let rules: [Rr3MotionRule; 4] = [
+        (Rr3ActMotion::Jog, |_, _| Ok(())),
+        (Rr3ActMotion::Auto, |_, cal| rr3_motion_auto(cal)),
+        (Rr3ActMotion::CalibOpenLoop, |hs, _| rr3_motion_calib(hs)),
+        (Rr3ActMotion::CalibStallSearch, |hs, _| rr3_motion_stall(hs)),
+    ];
+    rules
+        .iter()
+        .find(|(m, _)| *m == motion)
+        .map_or(Ok(()), |(_, f)| f(hard_stop, calibrated))
 }
 
 /// 拒收回错（文案带动作形态与判据名，与板侧 `axis_check` 越域回错同形）。
@@ -599,21 +614,21 @@ pub enum Rr3ActHold {
 }
 
 impl Rr3ActHold {
+    /// 保持策略词表（档名与取值的单点真值）
+    const NAMES: [(Rr3ActHold, &'static str); 2] =
+        [(Rr3ActHold::Hold, "hold"), (Rr3ActHold::Release, "release")];
+
     /// 档名（档案取值串同源：`hold` / `release`）
     pub fn rr3_act_hold_name(self) -> &'static str {
-        match self {
-            Rr3ActHold::Hold => "hold",
-            Rr3ActHold::Release => "release",
-        }
+        Self::NAMES
+            .iter()
+            .find(|(h, _)| *h == self)
+            .map_or("", |(_, w)| *w)
     }
 
     /// 从档案词解析（词表外回 `None`，装载侧点名红，不猜——与 name 同源成对）
     pub fn rr3_act_hold_parse(s: &str) -> Option<Self> {
-        match s {
-            "hold" => Some(Rr3ActHold::Hold),
-            "release" => Some(Rr3ActHold::Release),
-            _ => None,
-        }
+        Self::NAMES.iter().find(|(_, w)| *w == s).map(|(h, _)| *h)
     }
 }
 
@@ -633,25 +648,25 @@ pub enum Rr3ActSource {
 }
 
 impl Rr3ActSource {
+    /// 标定来源词表（档名与取值的单点真值）
+    const NAMES: [(Rr3ActSource, &'static str); 4] = [
+        (Rr3ActSource::Manual, "manual"),
+        (Rr3ActSource::Fixture, "fixture"),
+        (Rr3ActSource::OpenLoopRecover, "openloop-recover"),
+        (Rr3ActSource::StallSearch, "stall-search"),
+    ];
+
     /// 档名（档案取值串同源：`manual` / `fixture` / `openloop-recover` / `stall-search`）
     pub fn rr3_act_source_name(self) -> &'static str {
-        match self {
-            Rr3ActSource::Manual => "manual",
-            Rr3ActSource::Fixture => "fixture",
-            Rr3ActSource::OpenLoopRecover => "openloop-recover",
-            Rr3ActSource::StallSearch => "stall-search",
-        }
+        Self::NAMES
+            .iter()
+            .find(|(s, _)| *s == self)
+            .map_or("", |(_, w)| *w)
     }
 
     /// 从档案词解析（词表外回 `None`，装载侧点名红，不猜——与 name 同源成对）
     pub fn rr3_act_source_parse(s: &str) -> Option<Self> {
-        match s {
-            "manual" => Some(Rr3ActSource::Manual),
-            "fixture" => Some(Rr3ActSource::Fixture),
-            "openloop-recover" => Some(Rr3ActSource::OpenLoopRecover),
-            "stall-search" => Some(Rr3ActSource::StallSearch),
-            _ => None,
-        }
+        Self::NAMES.iter().find(|(_, w)| *w == s).map(|(s, _)| *s)
     }
 }
 

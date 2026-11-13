@@ -153,14 +153,15 @@ impl Rr3LinuxPwmServo {
             return Ok(false);
         }
         let export_path = self.chip_dir().join("export");
-        std::fs::write(&export_path, format!("{}\n", self.channel)).map_err(|e| {
-            Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
-                "pwm 导出通道 {} 写 {:?} 失败: {e}（芯片不在位——dtoverlay=pwm-2chan 未开，或权限不足）",
-                self.channel,
-                export_path.display()
-            )))
-        })?;
-        rr3_pwm_await(&dir)?;
+        std::fs::write(&export_path, format!("{}\n", self.channel))
+            .map_err(|e| {
+                Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+                    "pwm 导出通道 {} 写 {:?} 失败: {e}（芯片不在位——dtoverlay=pwm-2chan 未开，或权限不足）",
+                    self.channel,
+                    export_path.display()
+                )))
+            })
+            .and_then(|()| rr3_pwm_await(&dir))?;
         Ok(true)
     }
 

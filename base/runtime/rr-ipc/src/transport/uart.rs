@@ -299,19 +299,22 @@ extern "C" {
 /// docs/status.md），换线/换板后须重测。不在档位上报错
 /// ——静默降到最近的档位等于把线路参数交给运气。
 pub fn rr3_uart_baud_speed(baud: u32) -> std::io::Result<SpeedT> {
-    match baud {
-        115200 => Ok(B115200),
-        9600 => Ok(B9600),
-        921600 => Ok(B921600),
-        1_500_000 => Ok(B1500000),
-        2_000_000 => Ok(B2000000),
-        other => Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!(
-                "不支持的波特率 {other}：只支持 115200（默认）、9600（降速档）、921600/1500000/2000000（高速档）"
-            ),
-        )),
+    let known: [(u32, SpeedT); 5] = [
+        (115200, B115200),
+        (9600, B9600),
+        (921600, B921600),
+        (1_500_000, B1500000),
+        (2_000_000, B2000000),
+    ];
+    if let Some((_, speed)) = known.iter().find(|(b, _)| *b == baud) {
+        return Ok(*speed);
     }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        format!(
+            "不支持的波特率 {baud}：只支持 115200（默认）、9600（降速档）、921600/1500000/2000000（高速档）"
+        ),
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -393,13 +396,14 @@ fn rr3_excl_busy_err(e: std::io::Error) -> std::io::Error {
 /// 退账：refs 减到零关 guard fd（flock 随最后一次 close 释放），并移除账目。
 fn excl_exit(path: &str) {
     let mut m = excl_map().lock().unwrap_or_else(|p| p.into_inner());
-    if let Some(g) = m.get_mut(path) {
-        g.refs -= 1;
-        if g.refs == 0 {
-            // SAFETY：guard fd 是 excl_enter 开出的合法描述符，账退尽即归还。
-            unsafe { c_close(g.fd) };
-            m.remove(path);
-        }
+    let Some(g) = m.get_mut(path) else {
+        return;
+    };
+    g.refs -= 1;
+    if g.refs == 0 {
+        // SAFETY：guard fd 是 excl_enter 开出的合法描述符，账退尽即归还。
+        unsafe { c_close(g.fd) };
+        m.remove(path);
     }
 }
 
@@ -460,30 +464,18 @@ impl Rr3UartConn {
             excl_exit(&key);
             return Err(e);
         }
-        match configure(fd, speed) {
-            Ok(()) => {
-                // 撤 O_NONBLOCK：Read/Write 是阻塞语义（VMIN=1 等 ≥1 字节），
-                // 非阻塞 fd 上 VMIN/VTIME 失效、read 缺数据返 EAGAIN，会把这些
-                // EAGAIN 当真错误抛出——开口序列收尾必须换回阻塞。
-                if let Err(e) = rr3_uart_clear_nb(fd) {
-                    // SAFETY：fd 是本函数 open 成功的合法描述符，收尾失败则归还。
-                    unsafe { c_close(fd) };
-                    excl_exit(&key);
-                    return Err(e);
-                }
-                Ok(Self {
-                    fd,
-                    excl_path: Some(key),
-                    last_tx: None,
-                })
-            }
-            Err(e) => {
-                // SAFETY：fd 是刚 open 成功的合法描述符，配置失败则归还。
-                unsafe { c_close(fd) };
-                excl_exit(&key);
-                Err(e)
-            }
+        // 撤 O_NONBLOCK：Read/Write 是阻塞语义（VMIN=1 等 ≥1 字节），收尾失败则归还 fd。
+        if let Err(e) = configure(fd, speed).and_then(|()| rr3_uart_clear_nb(fd)) {
+            // SAFETY：fd 是刚 open 成功的合法描述符，配置失败则归还。
+            unsafe { c_close(fd) };
+            excl_exit(&key);
+            return Err(e);
         }
+        Ok(Self {
+            fd,
+            excl_path: Some(key),
+            last_tx: None,
+        })
     }
 
     /// 从已打开的 fd 建连接并配 raw 模式（单测经 pty 注入用；**取得 fd 所有权**）。

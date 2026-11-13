@@ -65,24 +65,22 @@ pub struct Rr3Wiring {
 /// rr3_profile_abs`] 口径——装机现场读不到装配单，接线路径无从谈起）。
 pub fn rr3_wiring_path(profile: &std::path::Path) -> Result<PathBuf, String> {
     let abs = crate::profile::rr3_profile_abs(profile)?;
-    let stem = abs
-        .file_stem()
-        .and_then(std::ffi::OsStr::to_str)
-        .ok_or_else(|| format!("装配单 {} 无文件名", abs.display()))?;
+    let Some(stem) = abs.file_stem().and_then(std::ffi::OsStr::to_str) else {
+        return Err(format!("装配单 {} 无文件名", abs.display()));
+    };
     let root = rr3_hardware_root(&abs)?;
     Ok(root.join("hardware").join(stem).join("wiring.toml"))
 }
 
 /// 装配单的两级父目录（`<root>/profiles/` 的 root），推不出即点名。
 fn rr3_hardware_root(abs: &std::path::Path) -> Result<&std::path::Path, String> {
-    abs.parent()
-        .and_then(std::path::Path::parent)
-        .ok_or_else(|| {
-            format!(
-                "装配单 {} 无法定位 hardware-root（须在 <root>/profiles/ 下）",
-                abs.display()
-            )
-        })
+    let Some(root) = abs.parent().and_then(std::path::Path::parent) else {
+        return Err(format!(
+            "装配单 {} 无法定位 hardware-root（须在 <root>/profiles/ 下）",
+            abs.display()
+        ));
+    };
+    Ok(root)
 }
 
 /// [[wire]] 九字段词表（§4.3 定形）：全键必填，未知键点名

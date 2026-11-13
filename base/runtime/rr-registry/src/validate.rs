@@ -70,7 +70,7 @@ fn rr3_topic_tail_ok(segs: &[&str]) -> bool {
 
 /// 点分数字版本
 fn rr3_semver_ok(s: &str) -> bool {
-    s.contains('.') && !s.starts_with('.') && !s.ends_with('.') && s.split('.').all(rr3_semver_part)
+    s.split('.').count() >= 2 && s.split('.').all(rr3_semver_part)
 }
 
 /// 版本段：非空且全十进制数字
@@ -81,11 +81,16 @@ fn rr3_semver_part(p: &str) -> bool {
 /// 单条规则检查（上下文无关规则）。`own_topic` 需 manifest.name，由
 /// `rr3_manifest_gate` 特判，不进这里。
 pub fn rr3_registry_check(rule: &str, value: &str) -> Vec<String> {
-    match rr3_rule_pass(rule, value) {
-        Some(true) => Vec::new(),
-        Some(false) => vec![rr3_rule_err(rule, value)],
-        None => vec![format!("未知规则名（schema 与代码不同步）: {rule}")],
-    }
+    rr3_rule_pass(rule, value).map_or_else(
+        || vec![format!("未知规则名（schema 与代码不同步）: {rule}")],
+        |ok| {
+            if ok {
+                Vec::new()
+            } else {
+                vec![rr3_rule_err(rule, value)]
+            }
+        },
+    )
 }
 
 /// 规则裁决总入口：词形类（[`rr3_rule_shape`]）先查，未命中再查枚举词表；
@@ -97,51 +102,71 @@ fn rr3_rule_pass(rule: &str, value: &str) -> Option<bool> {
     rr3_rule_enum(rule, value)
 }
 
+/// module_name 词形：去 `rr3-` 前缀后小写字母
+fn rr3_module_name_ok(value: &str) -> bool {
+    rr3_lower_alpha(value.strip_prefix(RR3_TOPIC_HEAD).unwrap_or(""))
+}
+
+/// 词形类规则表项（规则名, 值判据）。
+type Rr3ShapeRule = (&'static str, fn(&str) -> bool);
+
 /// 词形类规则（值自身判据，与词表无关）。
 fn rr3_rule_shape(rule: &str, value: &str) -> Option<bool> {
-    match rule {
-        "module_name" => Some(rr3_lower_alpha(
-            value.strip_prefix(RR3_TOPIC_HEAD).unwrap_or(""),
-        )),
-        "semver" => Some(rr3_semver_ok(value)),
-        "capability" => Some(rr3_capability_shape(value)),
-        // 原子件名（atom.schema.toml，0.0.5 批B①）：^[a-z][a-z_]*$，复用 capability 段规则
-        "atom_name" => Some(rr3_lower_us(value)),
-        "topic" => Some(rr3_topic_shape_ok(value)),
-        _ => None,
-    }
+    // 原子件名（atom.schema.toml，0.0.5 批B①）：^[a-z][a-z_]*$，复用 capability 段规则
+    let shapes: [Rr3ShapeRule; 5] = [
+        ("module_name", rr3_module_name_ok),
+        ("semver", rr3_semver_ok),
+        ("capability", rr3_capability_shape),
+        ("atom_name", rr3_lower_us),
+        ("topic", rr3_topic_shape_ok),
+    ];
+    shapes
+        .iter()
+        .find(|(r, _)| *r == rule)
+        .map(|(_, f)| (*f)(value))
 }
 
 /// 枚举类规则（`[rules]` 词表成员检查）；`none` 恒放行。
 fn rr3_rule_enum(rule: &str, value: &str) -> Option<bool> {
-    match rule {
-        "none" => Some(true),
-        "type" | "lang" | "restart_policy" => Some(
-            rr3_rule_list(rule)
-                .unwrap_or_default()
-                .iter()
-                .any(|a| a == value),
-        ),
-        _ => None,
+    if rule == "none" {
+        return Some(true);
     }
+    if !["type", "lang", "restart_policy"].contains(&rule) {
+        return None;
+    }
+    Some(
+        rr3_rule_list(rule)
+            .unwrap_or_default()
+            .iter()
+            .any(|a| a == value),
+    )
 }
+
+/// 词形类规则的失配文案表（label + 追加提示，与判据同表单点）。
+const RR3_SHAPE_ERRS: [(&str, &str, &str); 5] = [
+    ("module_name", "manifest.name 非法", "要求 ^rr3-[a-z]+$"),
+    ("semver", "semver 非法", "要求点分数字"),
+    (
+        "capability",
+        "capability 非法",
+        r"要求 ^[a-z]+(\.[a-z_]+)+$",
+    ),
+    ("atom_name", "atom.name 非法", "要求 ^[a-z][a-z_]*$"),
+    ("topic", "topic 非法", "要求 rr3-<模块>/<域>/<事件>"),
+];
 
 /// 规则失配文案（一句一规则，与判据同表单点；新增规则两处同批）。
 fn rr3_rule_err(rule: &str, value: &str) -> String {
-    match rule {
-        "module_name" => format!("manifest.name 非法: {value}（要求 ^rr3-[a-z]+$）"),
-        "semver" => format!("semver 非法: {value}（要求点分数字）"),
-        "type" | "lang" | "restart_policy" => {
-            format!(
-                "{rule} 越界: {value}（允许 {:?}）",
-                rr3_rule_list(rule).unwrap_or_default()
-            )
-        }
-        "capability" => format!("capability 非法: {value}（要求 ^[a-z]+(\\.[a-z_]+)+$）"),
-        "atom_name" => format!("atom.name 非法: {value}（要求 ^[a-z][a-z_]*$）"),
-        "topic" => format!("topic 非法: {value}（要求 rr3-<模块>/<域>/<事件>）"),
-        other => format!("未知规则名（schema 与代码不同步）: {other}"),
+    if let Some((_, label, hint)) = RR3_SHAPE_ERRS.iter().find(|(r, _, _)| *r == rule) {
+        return format!("{label}: {value}（{hint}）");
     }
+    if ["type", "lang", "restart_policy"].contains(&rule) {
+        return format!(
+            "{rule} 越界: {value}（允许 {:?}）",
+            rr3_rule_list(rule).unwrap_or_default()
+        );
+    }
+    format!("未知规则名（schema 与代码不同步）: {rule}")
 }
 
 fn rr3_type_err(path: &str, kind: &str, v: &Value) -> String {
@@ -301,28 +326,24 @@ pub fn rr3_manifest_gate(path: &Path) -> Rr3ValidationReport {
 
 /// 读 manifest 文本；读不到即点名（路径原样上报）。
 fn rr3_manifest_text(path: &Path, errs: &mut Vec<String>) -> Option<String> {
-    match std::fs::read_to_string(path) {
-        Ok(t) => Some(t),
-        Err(e) => {
-            errs.push(format!("无法读取 manifest {}: {e}", path.display()));
-            None
-        }
+    let read = std::fs::read_to_string(path);
+    if let Err(e) = &read {
+        errs.push(format!("无法读取 manifest {}: {e}", path.display()));
     }
+    read.ok()
 }
 
 /// 读主题契约文本（相对 manifest 定位）；读不到即点名。
 fn rr3_contract_read(path: &Path, errs: &mut Vec<String>) -> Option<(PathBuf, String)> {
     let contract_path = rr3_contract_path(path);
-    match std::fs::read_to_string(&contract_path) {
-        Ok(t) => Some((contract_path, t)),
-        Err(e) => {
-            errs.push(format!(
-                "无法读取主题契约 {}（manifest 交叉校验需要它）: {e}",
-                contract_path.display()
-            ));
-            None
-        }
+    let read = std::fs::read_to_string(&contract_path);
+    if let Err(e) = &read {
+        errs.push(format!(
+            "无法读取主题契约 {}（manifest 交叉校验需要它）: {e}",
+            contract_path.display()
+        ));
     }
+    read.ok().map(|t| (contract_path, t))
 }
 
 /// 直接校验一段 manifest 文本 + 调用方给定的主题集。
@@ -377,25 +398,24 @@ fn rr3_validate_inner(text: &str, topics: &crate::topics::Rr3TopicSet) -> Vec<St
 
 /// manifest 文本的 TOML 根：解析失败即点名并入 `errs`（返回 `None`）。
 fn rr3_toml_root(text: &str, errs: &mut Vec<String>) -> Option<Value> {
-    match toml::from_str(text) {
-        Ok(v) => Some(v),
-        Err(e) => {
-            errs.push(format!("manifest TOML 解析失败: {e}"));
-            None
-        }
+    let parsed = toml::from_str(text);
+    if let Err(e) = &parsed {
+        errs.push(format!("manifest TOML 解析失败: {e}"));
     }
+    parsed.ok()
 }
 
 /// 跨字段：heartbeat_ms 必须小于 watchdog_timeout_ms（两键都在才判）。
 fn rr3_hb_lt_wd(root: &Value, errs: &mut Vec<String>) {
     let hb = rr3_get_by_path(root, "health.heartbeat_ms").and_then(Value::as_integer);
     let wd = rr3_get_by_path(root, "health.watchdog_timeout_ms").and_then(Value::as_integer);
-    if let (Some(hb), Some(wd)) = (hb, wd) {
-        if hb >= wd {
-            errs.push(format!(
-                "heartbeat_ms({hb}) 必须小于 watchdog_timeout_ms({wd})"
-            ));
-        }
+    let (Some(hb), Some(wd)) = (hb, wd) else {
+        return;
+    };
+    if hb >= wd {
+        errs.push(format!(
+            "heartbeat_ms({hb}) 必须小于 watchdog_timeout_ms({wd})"
+        ));
     }
 }
 
@@ -429,13 +449,20 @@ fn rr3_kind_ok(
     topics: &crate::topics::Rr3TopicSet,
     errs: &mut Vec<String>,
 ) -> bool {
-    match spec.kind.as_str() {
-        "string" => rr3_kind_str(spec, value, errs),
-        "bool" => value.as_bool().is_some(),
-        "int" => value.as_integer().is_some(),
-        "list" => rr3_chk_list(spec, value, self_name, topics, errs),
-        other => panic!("schema 未知 kind {other}（契约与代码不同步）"),
+    let kind = spec.kind.as_str();
+    if kind == "string" {
+        return rr3_kind_str(spec, value, errs);
     }
+    if kind == "bool" {
+        return value.as_bool().is_some();
+    }
+    if kind == "int" {
+        return value.as_integer().is_some();
+    }
+    if kind == "list" {
+        return rr3_chk_list(spec, value, self_name, topics, errs);
+    }
+    panic!("schema 未知 kind {kind}（契约与代码不同步）");
 }
 
 /// 字符串字段：规则在场则下沉到 `rr3_registry_check`，非串一律不合法。

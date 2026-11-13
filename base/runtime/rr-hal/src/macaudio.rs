@@ -165,12 +165,19 @@ const AQ_PROP_STREAM_FORMAT: u32 = 0x6171_6674;
 
 /// open 参数门禁：与 ALSA/sim 后端同一套要求（16bit 采样且 rate/channels 非零）。
 fn rr3_mac_cfg_check(cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
-    if cfg.sample_rate_hz == 0 || cfg.channels == 0 || cfg.bit_depth != 16 {
-        return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
-            &format!("mac 后端要求 16bit 采样且 rate/channels 非零，收到 {cfg:?}"),
-        )));
+    if [
+        cfg.sample_rate_hz != 0,
+        cfg.channels != 0,
+        cfg.bit_depth == 16,
+    ]
+    .iter()
+    .all(|ok| *ok)
+    {
+        return Ok(());
     }
-    Ok(())
+    Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+        &format!("mac 后端要求 16bit 采样且 rate/channels 非零，收到 {cfg:?}"),
+    )))
 }
 
 /// 按采样规格组装 ASBD（s16le 交错线性 PCM；帧长 = 声道数 × 2 字节）。

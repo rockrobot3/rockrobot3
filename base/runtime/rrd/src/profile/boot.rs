@@ -244,10 +244,9 @@ pub fn rr3_truth_locations(
     chip: &str,
 ) -> Result<Vec<Rr3TruthSetLocation>, String> {
     let abs = rr3_profile_abs(profile_path)?;
-    let stem = abs
-        .file_stem()
-        .and_then(std::ffi::OsStr::to_str)
-        .ok_or_else(|| format!("装配单 {} 无文件名", abs.display()))?;
+    let Some(stem) = abs.file_stem().and_then(std::ffi::OsStr::to_str) else {
+        return Err(format!("装配单 {} 无文件名", abs.display()));
+    };
     let names = rr3_truth_names(stem, chip);
     // 与 names 同序逐条映射（成员名生成与定位映射一一对应，错位即成员集判等红）
     let paths = rr3_truth_paths(&abs, contracts_dir, wiring_path, chip);
@@ -346,63 +345,17 @@ pub fn rr3_boot_with_probe(
     // ④⑤⑧ 静默不判，§18 F-6 同病），读不到/形状坏都逐条点名拒 boot，不降级。
     let platform = rr3_load_platform(platform_dir, &profile.platform_chip)?;
 
-    let mut errs: Vec<String> = Vec::new();
-    errs.extend(rr3_check_slot_refs(&profile, &table));
-    errs.extend(rr3_check_tier(&profile, &table));
-    errs.extend(rr3_check_claims(&profile));
-    // 装载期校验①（增补轮六 §5，后果 = 拒）：[[pin]] 逐条校验 + host 档词形派生
-    let (pin_errs, derived) = rr3_check_pins(&profile, &roles, &table, &platform);
-    errs.extend(pin_errs);
-    // 门 n（§8 注入路径唯一）：[hardware] 不得出现引脚侧派生键
-    errs.extend(rr3_check_hw_keys(&profile, &derived));
-    // 装载期校验⑤-a/⑤-b/⑧-b（增补轮六 §5，后果 = 拒；Task 4）：方向/能力/词表
-    // 三面接平台表——判据真值只有 contracts/platform/<chip>.toml 一册，不推断、
-    // 不运行期回退；表在上方已 fail-closed 装载，此处只判。
-    errs.extend(rr3_pin_capabilities(&profile, &roles, &platform));
-    // 装载期校验③-a/③-b/③-c + ④-b（增补轮六 §5，后果 = 拒；Task 5）：三个资源
-    // 空间各自不双占 + 平台 conflicts 反推互斥（组名取自平台表，漏声明即红）。
-    errs.extend(rr3_pin_occupancy(&profile, &platform, &devices));
-    // 装载期校验⑥（增补轮六 §5，后果 = 拒）：有轨、轨在册、绑定归一。
-    // ⑥-a pins.rail ∈ supplies.domain.names；⑥-b kind=power 角色必有在册轨
-    // （"none" 只对 signal 侧控制线合法）；⑥-c armed=true 必有测点且龄期上界 > 0
-    // （无龄期快照不得充当拒动依据，§19 Y-4）；⑥-d 域的三个绑定引用位写 pin_id
-    // 且能在 [pins] 取到（F-2：第二套语法一条校验都打不到）。
-    let domain_names: BTreeSet<String> = profile
-        .supplies
-        .domains
-        .iter()
-        .map(|d| d.name.clone())
-        .collect();
-    errs.extend(rr3_check_rails(&profile, &roles, &domain_names));
-    errs.extend(rr3_check_domains(&profile));
-    // 装载期校验⑦（增补轮六 §5，后果 = 拒）：接线闭合与额定加总。⑦-a wire.signal
-    // ⊆ pin_id ∪ {vcc,gnd}；⑦-b wire.net ⊆ domains；⑦-d wire.mate ∈ devices.toml
-    // 的 mate 集；闭合面（feeds 位号集）在接线档装载时已判。额定加总两位（§22
-    // 实-4 拆分）装载期均不预支：⑦-c1（器件侧，判据对象 = devices.toml peak_ma）
-    // 的自检时点判已随 assembly.rs 额定加总族先行（批N5 件五）；⑦-c2（件侧）的
-    // 判据对象是件 demands 申报（n1-7 才立数据面），批N2 同链补。
     let pin_ids: BTreeSet<String> = profile.pins.iter().map(|p| p.rr3_pin_id()).collect();
-    let mate_set = devices.rr3_dev_mates();
-    errs.extend(wiring.rr3_wiring_check(&pin_ids, &domain_names, &mate_set));
-
-    // 门 c 装载执法（批N2 本体 ⑨-c）：装配扫描一次两用——形状/注入缺错误进
-    // assemble_broken（G4 该格 Degraded，不 fatal），校验⑨⑩ 的预算判据进 errs
-    // （boot 拒）。如实注记：assemble.toml 坏形的件无法供 demands facts（坏形已进
-    // assemble_broken 点名），预算加总不含它——洞的可见面 = Degraded 点名。
     let root = abs.parent().and_then(Path::parent).ok_or_else(|| {
         format!(
             "装配单 {} 无法定位 modules-root（须在 <root>/profiles/ 下）",
             abs.display()
         )
     })?;
-    let (scanned, assemble_broken) = rr3_scan_modules(root, &profile);
-    errs.extend(rr3_check_budgets(&profile, &roles, &scanned));
-    // 装载期校验⑥-e 文件半边（批N21 件二）：armed=true 域的证据引用四道核
-    // （存在/frontmatter/form 一致；形制与成对形状半边已在 parse 层与 ⑥ 校验段拒）。
-    // 证据容器根复用 modules-root 同一条 <root>/profiles/ 布局纪律 → <root>/docs/evidence；
-    // 装配单不在仓布局时容器缺＋有武装申报即红（不静默放行），无武装申报（evidence
-    // 恒 "none"）零波及。
-    errs.extend(rr3_evidence_check(&root.join("docs/evidence"), &profile));
+    // 装载期校验族整段交 [`rr3_boot_checks`]（追加序即判据序，与逐条写在本处等价）。
+    let (errs, derived, assemble_broken) = rr3_boot_checks(
+        &profile, &table, &roles, &devices, &platform, &wiring, root, &pin_ids,
+    );
     if !errs.is_empty() {
         return Err(errs.join("; "));
     }
@@ -456,6 +409,74 @@ pub fn rr3_boot_with_probe(
         platform_tier: profile.platform_tier.clone(),
         snapshot: Some(snapshot),
     })
+}
+
+/// 装载期校验族（①③④⑤⑥⑦⑧⑨⑩ 与 ⑥-e 文件半边）：逐条点名，追加序即判据序。
+/// 返回 (错误清单, 引脚派生, 装配段坏件点名)——坏件点名不是 fatal（G4 该格 Degraded）。
+type Rr3BootChecks = (Vec<String>, BTreeMap<String, String>, Vec<(String, String)>);
+
+#[allow(clippy::too_many_arguments)]
+fn rr3_boot_checks(
+    profile: &Rr3Profile,
+    table: &Rr3SlotTable,
+    roles: &Rr3RoleTable,
+    devices: &Rr3DeviceTable,
+    platform: &Rr3PlatformTable,
+    wiring: &crate::wiring::Rr3Wiring,
+    root: &Path,
+    pin_ids: &BTreeSet<String>,
+) -> Rr3BootChecks {
+    let mut errs: Vec<String> = Vec::new();
+    errs.extend(rr3_check_slot_refs(profile, table));
+    errs.extend(rr3_check_tier(profile, table));
+    errs.extend(rr3_check_claims(profile));
+    // 装载期校验①（增补轮六 §5，后果 = 拒）：[[pin]] 逐条校验 + host 档词形派生
+    let (pin_errs, derived) = rr3_check_pins(profile, roles, table, platform);
+    errs.extend(pin_errs);
+    // 门 n（§8 注入路径唯一）：[hardware] 不得出现引脚侧派生键
+    errs.extend(rr3_check_hw_keys(profile, &derived));
+    // 装载期校验⑤-a/⑤-b/⑧-b（增补轮六 §5，后果 = 拒；Task 4）：方向/能力/词表
+    // 三面接平台表——判据真值只有 contracts/platform/<chip>.toml 一册，不推断、
+    // 不运行期回退；表在调用方已 fail-closed 装载，此处只判。
+    errs.extend(rr3_pin_capabilities(profile, roles, platform));
+    // 装载期校验③-a/③-b/③-c + ④-b（增补轮六 §5，后果 = 拒；Task 5）：三个资源
+    // 空间各自不双占 + 平台 conflicts 反推互斥（组名取自平台表，漏声明即红）。
+    errs.extend(rr3_pin_occupancy(profile, platform, devices));
+    // 装载期校验⑥（增补轮六 §5，后果 = 拒）：有轨、轨在册、绑定归一。
+    // ⑥-a pins.rail ∈ supplies.domain.names；⑥-b kind=power 角色必有在册轨
+    // （"none" 只对 signal 侧控制线合法）；⑥-c armed=true 必有测点且龄期上界 > 0
+    // （无龄期快照不得充当拒动依据，§19 Y-4）；⑥-d 域的三个绑定引用位写 pin_id
+    // 且能在 [pins] 取到（F-2：第二套语法一条校验都打不到）。
+    let domain_names: BTreeSet<String> = profile
+        .supplies
+        .domains
+        .iter()
+        .map(|d| d.name.clone())
+        .collect();
+    errs.extend(rr3_check_rails(profile, roles, &domain_names));
+    errs.extend(rr3_check_domains(profile));
+    // 装载期校验⑦（增补轮六 §5，后果 = 拒）：接线闭合与额定加总。⑦-a wire.signal
+    // ⊆ pin_id ∪ {vcc,gnd}；⑦-b wire.net ⊆ domains；⑦-d wire.mate ∈ devices.toml
+    // 的 mate 集；闭合面（feeds 位号集）在接线档装载时已判。额定加总两位（§22
+    // 实-4 拆分）装载期均不预支：⑦-c1（器件侧，判据对象 = devices.toml peak_ma）
+    // 的自检时点判已随 assembly.rs 额定加总族先行（批N5 件五）；⑦-c2（件侧）的
+    // 判据对象是件 demands 申报（n1-7 才立数据面），批N2 同链补。
+    let mate_set = devices.rr3_dev_mates();
+    errs.extend(wiring.rr3_wiring_check(pin_ids, &domain_names, &mate_set));
+
+    // 门 c 装载执法（批N2 本体 ⑨-c）：装配扫描一次两用——形状/注入缺错误进
+    // assemble_broken（G4 该格 Degraded，不 fatal），校验⑨⑩ 的预算判据进 errs
+    // （boot 拒）。如实注记：assemble.toml 坏形的件无法供 demands facts（坏形已进
+    // assemble_broken 点名），预算加总不含它——洞的可见面 = Degraded 点名。
+    let (scanned, assemble_broken) = rr3_scan_modules(root, profile);
+    errs.extend(rr3_check_budgets(profile, roles, &scanned));
+    // 装载期校验⑥-e 文件半边（批N21 件二）：armed=true 域的证据引用四道核
+    // （存在/frontmatter/form 一致；形制与成对形状半边已在 parse 层与 ⑥ 校验段拒）。
+    // 证据容器根复用 modules-root 同一条 <root>/profiles/ 布局纪律 → <root>/docs/evidence；
+    // 装配单不在仓布局时容器缺＋有武装申报即红（不静默放行），无武装申报（evidence
+    // 恒 "none"）零波及。
+    errs.extend(rr3_evidence_check(&root.join("docs/evidence"), profile));
+    (errs, derived, assemble_broken)
 }
 
 /// 装配单装载：绝对化 → 读文本 → 解析（形状不合逐条点名，一条不静默放行）
@@ -679,26 +700,26 @@ fn rr3_atom_scan(
     out: &mut Vec<String>,
 ) -> Option<(String, Rr3AssembleFacts)> {
     let path = atoms_dir.join(atom).join("assemble.toml");
-    let text = match std::fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(_) => {
-            out.push(format!("件 {atom} 缺 assemble.toml（五件套④，装配段点名）"));
-            return None;
-        }
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        out.push(format!("件 {atom} 缺 assemble.toml（五件套④，装配段点名）"));
+        return None;
     };
-    let facts = match rr_registry::rr3_assemble_parse(&text) {
-        Ok(f) => f,
-        Err(errs) => {
-            for e in errs {
-                out.push(format!("件 {atom} 装配清单坏形: {e}"));
-            }
-            return None;
-        }
+    let Ok(facts) =
+        rr_registry::rr3_assemble_parse(&text).map_err(|errs| rr3_atom_bad(atom, errs, out))
+    else {
+        return None;
     };
     if !facts.ops.is_empty() {
         rr3_atom_inject(module_dir, atom, &facts, out);
     }
     Some((atom.to_string(), facts))
+}
+
+/// 装配清单坏形逐条点名（Err 仅作信号，故返回 ()）。
+fn rr3_atom_bad(atom: &str, errs: Vec<String>, out: &mut Vec<String>) {
+    for e in errs {
+        out.push(format!("件 {atom} 装配清单坏形: {e}"));
+    }
 }
 
 /// ops 注入缺点路径游走：声明的参数槽必须能从模块 config.toml 按点路径取到。
@@ -788,16 +809,17 @@ fn rr3_rail_sum<'a>(
     let mut worst = 0i64;
     let mut owners: BTreeSet<&str> = BTreeSet::new();
     let mut groups: BTreeMap<&str, i64> = BTreeMap::new();
-    for (owner, demands) in declared {
-        for d in demands.iter().filter(|d| d.critical && d.rail == dname) {
-            owners.insert(owner.as_str());
-            match d.concurrency_group.as_slice() {
-                [g] => {
-                    let slot = groups.entry(g.as_str()).or_insert(0);
-                    *slot = (*slot).max(d.peak_ma);
-                }
-                _ => worst += d.peak_ma,
-            }
+    let hits = declared
+        .iter()
+        .flat_map(|(owner, demands)| demands.iter().map(move |d| (owner.as_str(), d)))
+        .filter(|(_, d)| d.critical && d.rail == dname);
+    for (owner, d) in hits {
+        owners.insert(owner);
+        if let [g] = d.concurrency_group.as_slice() {
+            let slot = groups.entry(g.as_str()).or_insert(0);
+            *slot = (*slot).max(d.peak_ma);
+        } else {
+            worst += d.peak_ma;
         }
     }
     for peak in groups.values() {
@@ -828,20 +850,7 @@ pub(crate) fn rr3_demand_expand(
                 .iter()
                 .map(|h| h.trait_name.as_str())
                 .collect();
-            let mut instances: i64 = 0;
-            for pin in &profile.pins {
-                let served = roles
-                    .rr3_role_iface(&pin.role)
-                    .is_some_and(|i| traits.contains(i.as_str()));
-                let bound = roles
-                    .rr3_role_slot(&pin.role)
-                    .and_then(|s| profile.bindings.get(&s))
-                    .is_some_and(|m| m == module);
-                if served && bound {
-                    instances += 1;
-                }
-            }
-            let n = instances.max(1);
+            let n = rr3_atom_instances(profile, roles, &traits, module).max(1);
             let expanded: Vec<Rr3AssembleDemand> = facts
                 .demands
                 .iter()
@@ -856,6 +865,29 @@ pub(crate) fn rr3_demand_expand(
         }
     }
     out
+}
+
+/// 件的角色实例数：pin 的角色 iface ∈ traits 且该角色 slot 绑到本模块即计一。
+fn rr3_atom_instances(
+    profile: &Rr3Profile,
+    roles: &Rr3RoleTable,
+    traits: &BTreeSet<&str>,
+    module: &str,
+) -> i64 {
+    profile
+        .pins
+        .iter()
+        .filter(|pin| {
+            let served = roles
+                .rr3_role_iface(&pin.role)
+                .is_some_and(|i| traits.contains(i.as_str()));
+            let bound = roles
+                .rr3_role_slot(&pin.role)
+                .and_then(|s| profile.bindings.get(&s))
+                .is_some_and(|m| m == module);
+            served && bound
+        })
+        .count() as i64
 }
 
 /// power 角色的有效挂轨；非 power 或轨缺失/`none` 返回 None（⑥-b 已点名，不双报）。

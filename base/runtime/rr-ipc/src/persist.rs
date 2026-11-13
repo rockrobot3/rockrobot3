@@ -100,11 +100,13 @@ fn rr3_store_full(tmp: &Path, body: &[u8], mode: u32) -> Result<(), String> {
 
 /// 父目录 fsync（尽力而为，失败静默）。
 fn rr3_dir_sync(path: &Path) {
-    if let Some(parent) = path.parent() {
-        if let Ok(d) = File::open(parent) {
-            let _ = d.sync_all();
-        }
-    }
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    let Ok(d) = File::open(parent) else {
+        return;
+    };
+    let _ = d.sync_all();
 }
 
 #[cfg(test)]

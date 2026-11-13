@@ -389,46 +389,41 @@ fn rr3_plat_unknown(t: &toml::Table, errs: &mut Vec<String>) {
 
 /// [platform].tier：封闭三档（host/rtos/bare）；缺键或出域逐条点名。
 fn rr3_plat_tier(t: &toml::Table, errs: &mut Vec<String>) -> String {
-    match t.get("tier") {
-        None => {
-            errs.push("[platform] 缺 tier（host/rtos/bare）".to_string());
-            String::new()
-        }
-        Some(v) => match v.as_str() {
-            Some(s) if RR3_PLATFORM_TIERS.contains(&s) => s.to_string(),
-            other => {
-                errs.push(format!(
-                    "platform.tier 必须是 host/rtos/bare 之一，收到 {other:?}"
-                ));
-                String::new()
-            }
-        },
+    let Some(v) = t.get("tier") else {
+        errs.push("[platform] 缺 tier（host/rtos/bare）".to_string());
+        return String::new();
+    };
+    let other = v.as_str();
+    if let Some(s) = other.filter(|s| RR3_PLATFORM_TIERS.contains(s)) {
+        return s.to_string();
     }
+    errs.push(format!(
+        "platform.tier 必须是 host/rtos/bare 之一，收到 {other:?}"
+    ));
+    String::new()
 }
 
 /// [platform].chip：平台事实表外键，非空必填（留空 = ③④⑤⑧ 判不了，fail-closed）。
 fn rr3_plat_chip(t: &toml::Table, errs: &mut Vec<String>) -> String {
-    match t.get("chip") {
-        Some(toml::Value::String(s)) if !s.trim().is_empty() => s.clone(),
-        Some(toml::Value::String(_)) => {
-            errs.push(
-                "[platform].chip 不得为空串（平台事实表外键，contracts/platform/<chip>.toml 选册）"
-                    .to_string(),
-            );
-            String::new()
-        }
-        Some(other) => {
-            errs.push(format!("[platform].chip 应为字符串，收到 {other:?}"));
-            String::new()
-        }
-        None => {
-            errs.push(
-                "[platform] 缺 chip（平台事实表外键——校验③④⑤⑧按它选 contracts/platform/<chip>.toml，留空即红）"
-                    .to_string(),
-            );
-            String::new()
-        }
+    let Some(v) = t.get("chip") else {
+        errs.push(
+            "[platform] 缺 chip（平台事实表外键——校验③④⑤⑧按它选 contracts/platform/<chip>.toml，留空即红）"
+                .to_string(),
+        );
+        return String::new();
+    };
+    let Some(s) = v.as_str() else {
+        errs.push(format!("[platform].chip 应为字符串，收到 {v:?}"));
+        return String::new();
+    };
+    if s.trim().is_empty() {
+        errs.push(
+            "[platform].chip 不得为空串（平台事实表外键，contracts/platform/<chip>.toml 选册）"
+                .to_string(),
+        );
+        return String::new();
     }
+    s.to_string()
 }
 
 /// [runtime] 段解析产物（五键）
@@ -457,49 +452,46 @@ fn rr3_backend_opt(t: &toml::Table, key: &str, errs: &mut Vec<String>) -> Option
 /// `[runtime].log_ring_cap`：正整数且有上界（环按行常驻内存，超界随日志量吃光
 /// 板载内存）；缺/非整数/非正/超界逐条点名，坏值一律留 0（装载红在前，值不外泄）。
 fn rr3_rt_cap(t: &toml::Table, errs: &mut Vec<String>) -> usize {
-    match t.get("log_ring_cap").and_then(toml::Value::as_integer) {
-        Some(v) if v > 0 && v <= RR3_LOG_CAP_MAX => v as usize,
-        Some(v) if v > 0 => {
-            errs.push(format!(
-                "runtime.log_ring_cap = {v} 超上界 {RR3_LOG_CAP_MAX}（日志环按行常驻内存，超界会随日志量吃光板载内存）"
-            ));
-            0
-        }
-        Some(v) => {
-            errs.push(format!(
-                "runtime.log_ring_cap = {v} 须为正整数（日志环容量，0 = 运维留痕无环）"
-            ));
-            0
-        }
-        None => {
-            errs.push(
-                "runtime.log_ring_cap 缺失或不是整数（日志环容量，行数；批N5 件二）".to_string(),
-            );
-            0
-        }
+    let Some(v) = t.get("log_ring_cap").and_then(toml::Value::as_integer) else {
+        errs.push("runtime.log_ring_cap 缺失或不是整数（日志环容量，行数；批N5 件二）".to_string());
+        return 0;
+    };
+    if (1..=RR3_LOG_CAP_MAX).contains(&v) {
+        return v as usize;
+    }
+    errs.push(rr3_cap_bad(v));
+    0
+}
+
+/// 环容量坏值点名（超上界 / 非正各一句，调用方已排除 0 与负数之外的分支）。
+fn rr3_cap_bad(v: i64) -> String {
+    if v > 0 {
+        format!(
+            "runtime.log_ring_cap = {v} 超上界 {RR3_LOG_CAP_MAX}（日志环按行常驻内存，超界会随日志量吃光板载内存）"
+        )
+    } else {
+        format!("runtime.log_ring_cap = {v} 须为正整数（日志环容量，0 = 运维留痕无环）")
     }
 }
 
 /// `[runtime].hal_backend`：P0-3 根因门——必填且须在白名单内。后端选择是部署
 /// 事实，必须进装配单显式数据，不靠隐式缺省（漏 env 静默落 sim = 生产假验证）。
 fn rr3_rt_hal(t: &toml::Table, errs: &mut Vec<String>) -> String {
-    match t.get("hal_backend").and_then(toml::Value::as_str) {
-        Some(v) if RR3_HAL_BACKEND_LEGAL.contains(&v) => v.to_string(),
-        Some(v) => {
-            errs.push(format!(
-                "runtime.hal_backend 取值不认: {v}（允许 {}）",
-                RR3_HAL_BACKEND_LEGAL.join("/")
-            ));
-            String::new()
-        }
-        None => {
-            errs.push(
-                "runtime.hal_backend 缺失（P0-3：后端选择必须进装配单显式数据，不靠隐式缺省）"
-                    .to_string(),
-            );
-            String::new()
-        }
+    let Some(v) = t.get("hal_backend").and_then(toml::Value::as_str) else {
+        errs.push(
+            "runtime.hal_backend 缺失（P0-3：后端选择必须进装配单显式数据，不靠隐式缺省）"
+                .to_string(),
+        );
+        return String::new();
+    };
+    if RR3_HAL_BACKEND_LEGAL.contains(&v) {
+        return v.to_string();
     }
+    errs.push(format!(
+        "runtime.hal_backend 取值不认: {v}（允许 {}）",
+        RR3_HAL_BACKEND_LEGAL.join("/")
+    ));
+    String::new()
 }
 
 /// `[runtime]` 未知键点名（只认 [`RR3_RUNTIME_KEYS`]，拼错键不静默当缺省）。
@@ -594,13 +586,19 @@ fn rr3_sup_key_ok(k: &str) -> bool {
 
 /// 看门狗有无与非空喂者两键（B9 自 supplies_core 抽出）：缺/型错各自点名。
 fn rr3_supplies_flags(t: &toml::Table, supplies: &mut Rr3Supplies, errs: &mut Vec<String>) {
-    match t.get("watchdog_present").and_then(toml::Value::as_bool) {
-        Some(b) => supplies.watchdog_present = b,
-        None => errs.push("supplies.watchdog_present 缺失或不是布尔".to_string()),
+    if let Some(b) = t.get("watchdog_present").and_then(toml::Value::as_bool) {
+        supplies.watchdog_present = b;
+    } else {
+        errs.push("supplies.watchdog_present 缺失或不是布尔".to_string());
     }
-    match t.get("watchdog_feeder").and_then(toml::Value::as_str) {
-        Some(s) if !s.is_empty() => supplies.watchdog_feeder = s.to_string(),
-        _ => errs.push("supplies.watchdog_feeder 缺失或不是非空字符串".to_string()),
+    if let Some(s) = t
+        .get("watchdog_feeder")
+        .and_then(toml::Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
+        supplies.watchdog_feeder = s.to_string();
+    } else {
+        errs.push("supplies.watchdog_feeder 缺失或不是非空字符串".to_string());
     }
 }
 
@@ -704,12 +702,15 @@ fn rr3_domain_str(
 /// 字符串值按键落位。
 fn rr3_domain_set(d: &mut Rr3Domain, key: &str, s: &str) {
     let v = s.to_string();
-    match key {
-        "name" => d.name = v,
-        "sense" => d.sense = v,
-        "current_sense" => d.current_sense = v,
-        "evidence" => d.evidence = v,
-        _ => d.switch = v,
+    let mut fields = [
+        ("name", &mut d.name),
+        ("sense", &mut d.sense),
+        ("current_sense", &mut d.current_sense),
+        ("evidence", &mut d.evidence),
+    ];
+    match fields.iter_mut().find(|(k, _)| *k == key) {
+        Some((_, slot)) => **slot = v,
+        None => d.switch = v,
     }
 }
 
@@ -736,15 +737,18 @@ fn rr3_domain_int(
     path: &str,
     errs: &mut Vec<String>,
 ) {
-    match supplies_int(v, path) {
-        Ok(n) => match key {
-            "nominal_mv" => d.nominal_mv = n,
-            "mild_mv" => d.mild_mv = n,
-            "severe_mv" => d.severe_mv = n,
-            "current_cap_ma" => d.current_cap_ma = n,
-            _ => d.max_age_ms = n,
-        },
-        Err(e) => errs.push(e),
+    let Ok(n) = supplies_int(v, path).map_err(|e| errs.push(e)) else {
+        return;
+    };
+    let mut fields = [
+        ("nominal_mv", &mut d.nominal_mv),
+        ("mild_mv", &mut d.mild_mv),
+        ("severe_mv", &mut d.severe_mv),
+        ("current_cap_ma", &mut d.current_cap_ma),
+    ];
+    match fields.iter_mut().find(|(k, _)| *k == key) {
+        Some((_, slot)) => **slot = n,
+        None => d.max_age_ms = n,
     }
 }
 
@@ -991,5 +995,5 @@ fn rr3_absent_item(
 /// [supplies] 的整数键读取：缺失或类型不合同一条错误点名（运维一次改对）
 fn supplies_int(v: Option<&toml::Value>, key: &str) -> Result<i64, String> {
     v.and_then(toml::Value::as_integer)
-        .ok_or_else(|| format!("supplies.{key} 缺失或不是整数"))
+        .ok_or(format!("supplies.{key} 缺失或不是整数"))
 }

@@ -237,20 +237,21 @@ fn rr3_entry_path(manifest_path: &Path, facts: &Rr3ManifestFacts) -> PathBuf {
 
 /// E-3：entry 存在、是文件且可执行。
 fn rr3_entry_runnable(entry: &Path) -> bool {
-    match std::fs::metadata(entry) {
-        Ok(md) => md.is_file() && md.permissions().mode() & 0o111 != 0,
-        Err(_) => false,
-    }
+    let Ok(md) = std::fs::metadata(entry) else {
+        return false;
+    };
+    md.is_file() && md.permissions().mode() & 0o111 != 0
 }
 
 /// 到期表（E-4）：`(起它的时刻, 计划)`。`Instant::now() + Duration::from_millis(delay_ms)` 在
 /// `delay_ms == u64::MAX`（`rr3_charge` 的饱和值，语义"永不重启"）时会溢出 → 必须 `checked_add`，
 /// 取不到就打 E-4 那句并丢弃——**不许**在这里改回 `sleep`，也不许 `unwrap`。
 fn rr3_schedule_due(due: &mut Vec<(Instant, Rr3RestartPlan)>, plan: Rr3RestartPlan) {
-    match Instant::now().checked_add(Duration::from_millis(plan.delay_ms)) {
-        Some(at) => due.push((at, plan)),
-        None => rr3_log(&format!("退避不可表示，视为永久停止 {}", plan.name)),
-    }
+    let Some(at) = Instant::now().checked_add(Duration::from_millis(plan.delay_ms)) else {
+        rr3_log(&format!("退避不可表示，视为永久停止 {}", plan.name));
+        return;
+    };
+    due.push((at, plan));
 }
 
 /// 低电拒绝时重建的到期计划：名字/第几次/入口原样，延迟换成固定重试间隔。
@@ -313,17 +314,16 @@ fn rr3_absorb_exit(
             None
         }
     };
-    match plan {
-        Some(p) => rr3_schedule_due(due, p),
+    if let Some(p) = plan {
+        rr3_schedule_due(due, p);
+    } else {
         // 硬规矩：`rr3_reg_hit_cap` 先 `let` 绑，**绝不写进 match 守卫**（守卫里的 `MutexGuard`
         // 会延寿到整个 match 语句结束，而调用方随后还要再取同一把锁）。
-        None => {
-            let capped = rr3_lock(shared).rr3_reg_hit_cap(name);
-            if capped {
-                rr3_log(&format!(
-                    "停止重启 {name}：连续崩溃达上限，运行时降级（spec §5.3）"
-                ));
-            }
+        let capped = rr3_lock(shared).rr3_reg_hit_cap(name);
+        if capped {
+            rr3_log(&format!(
+                "停止重启 {name}：连续崩溃达上限，运行时降级（spec §5.3）"
+            ));
         }
     }
 }
@@ -683,20 +683,20 @@ fn rr3_fire_due(
         // E-1：**只有本守护起的进程才 spawn 回来**。`jobs` 是"我能起谁"的全集，
         // 判据就是这一条查询（外来模块的计划在这里被跳过，连它的 entry 都不碰）。
         // 这里不"统一"成"照 plan.entry 硬起"：那要求 rrd 知道该给外来进程注入什么身份（E-2）。
-        let job = jobs.get(&plan.name).cloned();
-        match job {
-            Some(job) => rr3_boot_spawn(
-                shared,
-                t0,
-                children,
-                due,
-                &job,
-                plan.attempt,
-                bus_path,
-                boot_role,
-            ),
-            None => rr3_log(&format!("跳过重启 {}：不是本守护起的进程", plan.name)),
-        }
+        let Some(job) = jobs.get(&plan.name).cloned() else {
+            rr3_log(&format!("跳过重启 {}：不是本守护起的进程", plan.name));
+            continue;
+        };
+        rr3_boot_spawn(
+            shared,
+            t0,
+            children,
+            due,
+            &job,
+            plan.attempt,
+            bus_path,
+            boot_role,
+        );
     }
 }
 
@@ -739,10 +739,10 @@ pub fn rr3_spawn_supervisor(
 /// **到期时刻**队列，到点了就得有人看表；"没东西到期时这一拍仍等于
 /// `--watchdog-tick-ms`"这句话没被改动（E-5 的接线照旧）。
 fn rr3_sweep_wait(due: &[(Instant, Rr3RestartPlan)], sweep: Duration) -> Duration {
-    match due.iter().map(|(at, _)| *at).min() {
-        Some(at) => sweep.min(at.saturating_duration_since(Instant::now())),
-        None => sweep,
-    }
+    let Some(at) = due.iter().map(|(at, _)| *at).min() else {
+        return sweep;
+    };
+    sweep.min(at.saturating_duration_since(Instant::now()))
 }
 
 /// supervisor 一拍：收件 → 扫尸 → 到期执行。返回 false = 投递方已断，收摊退出。

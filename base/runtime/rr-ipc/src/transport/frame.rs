@@ -22,12 +22,15 @@ pub use crate::protocol::wire::{rr3_frame_to_bytes, Rr3Frame, Rr3FrameError};
 pub(crate) fn read_fill(r: &mut impl Read, buf: &mut [u8]) -> Result<Option<usize>, Rr3FrameError> {
     let mut done = 0usize;
     while done < buf.len() {
-        match r.read(&mut buf[done..]) {
-            Ok(0) => return Ok(if done == 0 { None } else { Some(done) }),
-            Ok(n) => done += n,
+        let n = match r.read(&mut buf[done..]) {
+            Ok(n) => n,
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(e) => return Err(Rr3FrameError::Io(e.to_string())),
+        };
+        if n == 0 {
+            return Ok(Some(done).filter(|d| *d > 0));
         }
+        done += n;
     }
     Ok(Some(done))
 }
@@ -58,11 +61,11 @@ pub fn rr3_frame_read_cap(mut r: impl Read, cap: usize) -> Result<Rr3Frame, Rr3F
 /// 读满 128B 定长头（空读 = 对端关闭；半头 = TornHeader）。
 fn rr3_head_read(r: &mut impl Read) -> Result<Rr3Header, Rr3FrameError> {
     let mut head = [0u8; RR3_IPC_HDR_SIZE];
-    match read_fill(r, &mut head)? {
-        None => Err(Rr3FrameError::Closed),
-        Some(got) if got < head.len() => Err(Rr3FrameError::TornHeader { got }),
-        _ => Rr3Header::from_bytes(&head).map_err(Rr3FrameError::Header),
+    let got = read_fill(r, &mut head)?.ok_or(Rr3FrameError::Closed)?;
+    if got < head.len() {
+        return Err(Rr3FrameError::TornHeader { got });
     }
+    Rr3Header::from_bytes(&head).map_err(Rr3FrameError::Header)
 }
 
 /// 读满 payload（`want=0` 不分配；半 payload 报 TornPayload，已读计数如实）。
@@ -71,11 +74,11 @@ fn rr3_payload_read(r: &mut impl Read, want: usize) -> Result<Vec<u8>, Rr3FrameE
         return Ok(Vec::new());
     }
     let mut payload = vec![0u8; want];
-    match read_fill(r, &mut payload)? {
-        Some(got) if got == want => Ok(payload),
-        Some(got) => Err(Rr3FrameError::TornPayload { want, got }),
-        None => Err(Rr3FrameError::TornPayload { want, got: 0 }),
+    let got = read_fill(r, &mut payload)?.ok_or(Rr3FrameError::TornPayload { want, got: 0 })?;
+    if got != want {
+        return Err(Rr3FrameError::TornPayload { want, got });
     }
+    Ok(payload)
 }
 
 /// 写一帧

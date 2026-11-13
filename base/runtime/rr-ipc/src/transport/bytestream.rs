@@ -41,7 +41,7 @@ pub(crate) fn rr3_stream_read_fill<S: Rr3ByteStream>(
     while done < buf.len() {
         let n = s.rr3_read_into(&mut buf[done..]);
         if n == 0 {
-            return Ok(if done == 0 { None } else { Some(done) });
+            return Ok(Some(done).filter(|d| *d > 0));
         }
         done += n;
     }

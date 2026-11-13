@@ -41,13 +41,10 @@ fn entries<'a>(root: &'a Value, key: &str) -> impl Iterator<Item = &'a toml::Tab
 
 /// `[[owner]]` 名收集（顺序保持，去重排序由调用方做）
 fn rr3_topic_owners(root: &Value) -> Vec<String> {
-    let mut owners = Vec::new();
-    for o in entries(root, "owner") {
-        if let Some(n) = o.get("name").and_then(Value::as_str) {
-            owners.push(n.to_string());
-        }
-    }
-    owners
+    entries(root, "owner")
+        .filter_map(|o| o.get("name").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
 }
 
 /// 解析一份主题文本（`contracts/topics.toml` 与叠加层同构，共用同一解析器，不写第二套）
@@ -81,10 +78,11 @@ fn rr3_topic_add(set: &mut Rr3TopicSet, t: &toml::Table) {
 
 /// status 登记：非空才入册（缺键/空串即无此状态）。
 fn rr3_topic_status(set: &mut Rr3TopicSet, t: &toml::Table, name: &str) {
-    if let Some(st) = t.get("status").and_then(Value::as_str) {
-        if !st.is_empty() {
-            set.statuses.insert(name.to_string(), st.to_string());
-        }
+    let Some(st) = t.get("status").and_then(Value::as_str) else {
+        return;
+    };
+    if !st.is_empty() {
+        set.statuses.insert(name.to_string(), st.to_string());
     }
 }
 

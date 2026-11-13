@@ -44,14 +44,9 @@ pub(crate) fn rr3_nm_unescape(s: &str) -> String {
     out
 }
 
-/// 反斜杠后的一个字符：`\:`/`\\` 还原，其余原样透传，无后继则不产出。
+/// 反斜杠后的一个字符：`\:`/`\\` 与其余字符都原样落账，无后继则不产出。
 fn rr3_nm_esc(next: Option<char>, out: &mut String) {
-    match next {
-        Some(':') => out.push(':'),
-        Some('\\') => out.push('\\'),
-        Some(other) => out.push(other),
-        None => {}
-    }
+    out.extend(next);
 }
 
 /// terse 输出里取一个字段值：逐行找 `key:` 前缀，冒号后整段返回
@@ -100,14 +95,13 @@ fn rr3_nm_stop(out: &[u8], deadline: Instant) -> bool {
 
 /// 一次读错误后的处置：WouldBlock 睡一轮重试、Interrupted 立刻重试、其余终止。
 fn rr3_nm_retry(kind: std::io::ErrorKind) -> bool {
-    match kind {
-        std::io::ErrorKind::WouldBlock => {
-            std::thread::sleep(RR3_NM_POLL);
-            true
-        }
-        std::io::ErrorKind::Interrupted => true,
-        _ => false,
+    if kind == std::io::ErrorKind::WouldBlock {
+        std::thread::sleep(RR3_NM_POLL);
     }
+    matches!(
+        kind,
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+    )
 }
 
 /// 两平台共用的读循环主体：EOF/到点/超帽/错误四出口。超帽截断返回，调用方按
@@ -135,7 +129,7 @@ fn rr3_nm_step(s: &mut impl Read, buf: &mut [u8], out: &mut Vec<u8>) -> bool {
 
 /// 凭据键判定：`psk` / `password` / `*.psk`（裸键与等号式键同一判据）。
 fn rr3_nm_secret(key: &str) -> bool {
-    key == "psk" || key == "password" || key.ends_with(".psk")
+    ["psk", "password"].contains(&key) || key.ends_with(".psk")
 }
 
 /// 等号形式单个参数：凭据键值打码，其余原样。
@@ -270,9 +264,10 @@ fn rr3_nm_wait(
     deadline: Instant,
 ) -> Result<(Option<std::process::ExitStatus>, bool), Rr3HalError> {
     loop {
-        if let Some(done) = rr3_nm_poll(child, deadline)? {
-            return Ok(done);
-        }
+        let Some(done) = rr3_nm_poll(child, deadline)? else {
+            continue;
+        };
+        return Ok(done);
     }
 }
 

@@ -304,8 +304,7 @@ fn rr3_evt_body(payload: &[u8]) -> Result<Value, String> {
 /// 四道门之三/四：topic 门 + 字段门（format/rate/seq/ms/pcm_b64），返回
 /// (采样率, b64 载荷)。字段检查次序即报错次序（首缺即点名）。
 fn rr3_evt_fields(v: &Value) -> Result<(u32, &str), String> {
-    rr3_evt_topic(v)?;
-    rr3_evt_format(v)?;
+    rr3_evt_topic(v).and_then(|()| rr3_evt_format(v))?;
     let rate = v.get("rate").and_then(Value::as_u64).ok_or("缺 rate")? as u32;
     rr3_evt_time(v)?;
     let b64 = v
@@ -350,8 +349,7 @@ fn rr3_evt_topic(v: &Value) -> Result<(), String> {
 /// fail-closed 口径；与 tools/rr3-audio-rec `parse_audio_event` 同值锚定）：
 /// dst=宿主门 → payload Event 类型门 → topic 门 → 字段/b64 门。
 fn rr3_esp32_evt_parse(hdr: &Rr3Header, payload: &[u8]) -> Result<Rr3Esp32AudioChunk, String> {
-    rr3_evt_dst(hdr)?;
-    let v = rr3_evt_body(payload)?;
+    let v = rr3_evt_dst(hdr).and_then(|()| rr3_evt_body(payload))?;
     let (rate, b64) = rr3_evt_fields(&v)?;
     let samples = rr3_base64_decode(b64).map_err(|e| format!("pcm_b64 解码失败: {e:?}"))?;
     Ok(Rr3Esp32AudioChunk { rate, samples })
@@ -361,15 +359,19 @@ fn rr3_esp32_evt_parse(hdr: &Rr3Header, payload: &[u8]) -> Result<Rr3Esp32AudioC
 /// 不匹配回 `InvalidParam` 并指路 config-esp32.toml——单声道缺省配置误吃
 /// esp32 档时在探活期就点名，不静默出交织垃圾。
 fn rr3_esp32_cfg_check(cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
-    if cfg.sample_rate_hz != RR3_ESP32_AUDIO_RATE
-        || cfg.channels != RR3_ESP32_AUDIO_CHANNELS
-        || cfg.bit_depth != 16
+    if [
+        cfg.sample_rate_hz == RR3_ESP32_AUDIO_RATE,
+        cfg.channels == RR3_ESP32_AUDIO_CHANNELS,
+        cfg.bit_depth == 16,
+    ]
+    .iter()
+    .all(|ok| *ok)
     {
-        return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
-            "esp32 板面流钉 16k/双声道/s16le，配置须同款（见 modules/rr3-sense/config-esp32.toml）",
-        )));
+        return Ok(());
     }
-    Ok(())
+    Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+        "esp32 板面流钉 16k/双声道/s16le，配置须同款（见 modules/rr3-sense/config-esp32.toml）",
+    )))
 }
 
 /// 开口 + 握手（首连/重连同款路径）：open 自带 flock 排他（跨进程第二 opener

@@ -33,10 +33,10 @@ pub struct Rr3DependsFacts {
 }
 
 fn string_list(root: &Value, path: &str, errs: &mut Vec<String>) -> Vec<String> {
-    match rr3_get_by_path(root, path).and_then(Value::as_array) {
-        None => vec![],
-        Some(arr) => rr3_str_items(arr, path, errs),
-    }
+    let Some(arr) = rr3_get_by_path(root, path).and_then(Value::as_array) else {
+        return vec![];
+    };
+    rr3_str_items(arr, path, errs)
 }
 
 /// 数组项逐条收为字符串：非字符串项必须报告，不许被 filter_map 静默吞掉（fail-open）。
@@ -56,13 +56,14 @@ fn rr3_str_item(
     out: &mut Vec<String>,
     errs: &mut Vec<String>,
 ) {
-    match item.as_str() {
-        Some(s) => out.push(s.to_string()),
-        None => errs.push(format!(
+    let Some(s) = item.as_str() else {
+        errs.push(format!(
             "{path} 第 {} 项应为字符串，实际为 {item:?}",
             idx + 1
-        )),
-    }
+        ));
+        return;
+    };
+    out.push(s.to_string());
 }
 
 /// 不可满足错误行（唯一拼装点）：`resolve` 生成、`plan_boot` 按前缀归还给点名模块。
@@ -100,17 +101,15 @@ pub fn rr3_depends_parse(text: &str) -> Result<Rr3DependsFacts, Vec<String>> {
 
 /// `manifest.name`：空串与缺键分别点名，均回空串（调用方按 errs 非空拒绝）。
 fn rr3_dep_name(root: &Value, errs: &mut Vec<String>) -> String {
-    match rr3_get_by_path(root, "manifest.name").and_then(Value::as_str) {
-        Some(s) if !s.is_empty() => s.to_string(),
-        Some(_) => {
-            errs.push("manifest.name 不得为空字符串（依赖仲裁按名字建边）".to_string());
-            String::new()
-        }
-        None => {
-            errs.push("缺少 manifest.name（依赖仲裁按名字建边）".to_string());
-            String::new()
-        }
+    let Some(s) = rr3_get_by_path(root, "manifest.name").and_then(Value::as_str) else {
+        errs.push("缺少 manifest.name（依赖仲裁按名字建边）".to_string());
+        return String::new();
+    };
+    if s.is_empty() {
+        errs.push("manifest.name 不得为空字符串（依赖仲裁按名字建边）".to_string());
+        return String::new();
     }
+    s.to_string()
 }
 
 /// 依赖仲裁本体（ADR-0009 裁定 1/2）：返回 boot 启动序（模块名），或逐条错误。

@@ -44,7 +44,10 @@ pub fn rr3_field_specs() -> Vec<Rr3FieldSpec> {
 /// schema 的 `[rules]` 表（字符串列表类规则）
 pub fn rr3_rule_list(name: &str) -> Option<Vec<String>> {
     let root: Value = toml::from_str(RR3_MODULE_SCHEMA_TOML).ok()?;
-    let arr = root.get("rules")?.get(name)?.as_array()?;
+    let arr = root
+        .get("rules")
+        .and_then(|r| r.get(name))
+        .and_then(Value::as_array)?;
     Some(
         arr.iter()
             .filter_map(Value::as_str)
@@ -55,11 +58,7 @@ pub fn rr3_rule_list(name: &str) -> Option<Vec<String>> {
 
 /// 按点分路径取 manifest 值（`"events.publishes"` → 两级 table 遍历）
 pub fn rr3_get_by_path<'a>(root: &'a Value, dotted: &str) -> Option<&'a Value> {
-    let mut cur = root;
-    for seg in dotted.split('.') {
-        cur = cur.get(seg)?;
-    }
-    Some(cur)
+    dotted.split('.').try_fold(root, |cur, seg| cur.get(seg))
 }
 
 #[cfg(test)]
