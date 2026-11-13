@@ -47,7 +47,7 @@ fn rr3_panel_warn_addr(addr: &str) {
 
 /// 监听是否只绑回环：可解析 IP 才判 loopback；主机名/非法形状按非回环处理
 /// （保守告警，不猜解析结果）。
-fn rr3_panel_loopback(addr: &str) -> bool {
+pub(super) fn rr3_panel_loopback(addr: &str) -> bool {
     addr.parse::<std::net::SocketAddr>()
         .map(|a| a.ip().is_loopback())
         .unwrap_or(false)
@@ -120,7 +120,7 @@ fn rr3_panel_guard(shared: Arc<Rr3PanelShared>) {
 /// 静默 clamp 成功，不可作注入）注入 spawn 失败，钉"起不来一个连接后面板
 /// 仍可访问"（工单回归判据）。生产路径工厂返回普通 builder，行为与旧 serve
 /// 零漂移。
-fn rr3_accept_loop(
+pub(super) fn rr3_accept_loop(
     listener: TcpListener,
     shared: Arc<Rr3PanelShared>,
     live: Arc<AtomicUsize>,
@@ -190,7 +190,7 @@ pub fn rr3_panel_addr() -> String {
 
 /// 单连接处理：读请求 → 路由 → 执行 → 应答。任何错误都折 JSON 应答——
 /// 面板连接没有"协议违规掉线"语义，坏请求回 400 就是它的全部惩罚。
-fn rr3_panel_handle(stream: &mut TcpStream, shared: &Rr3PanelShared) {
+pub(super) fn rr3_panel_handle(stream: &mut TcpStream, shared: &Rr3PanelShared) {
     let req = match rr3_http_read_req(stream, &shared.limits) {
         Ok(r) => r,
         Err(e) => {
