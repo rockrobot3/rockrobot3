@@ -37,10 +37,12 @@ jobs:
             triple: aarch64-unknown-linux-musl
             arch: "ARM aarch64"
             platform: linux/arm64
+            mode: build
           - chip: 进迭时空（SpacemiT K1/K3）
             triple: riscv64gc-unknown-linux-musl
             arch: "RISC-V"
             platform: linux/riscv64
+            mode: check
     name: cross / ${{ matrix.chip }}
     steps:
       - uses: actions/checkout@v4
@@ -54,14 +56,24 @@ jobs:
       # 不再 apt 装 qemu-user-static——runner 的 apt 源不稳定时整条腿会因装包红，
       # 而那与"芯片平台能不能跑"无关。
       - uses: docker/setup-qemu-action@v3
-      - name: 交叉构建 + ELF 断言（失败把日志尾部打成注解，便于远端归因）
+      # mode=build：能链接的目标 → 构建七件静态产物 + ELF 断言；
+      # mode=check：缺 musl 交叉工具链的目标（riscv64）→ 只验证编译面，
+      # 不冒充"可执行"（详见 tools/ci/host-check-target.sh 文件头）。
+      - name: 目标平台构建/编译面（失败把日志压成单行注解，便于远端归因）
         run: |
           set -o pipefail
-          if ! bash tools/ci/cross-artifacts.sh "${{ matrix.triple }}" "${{ matrix.arch }}" 2>&1 | tee /tmp/cross.log; then
-            tail -c 3000 /tmp/cross.log | sed 's/^/::error title=cross-artifacts::/'
+          if [ "${{ matrix.mode }}" = "build" ]; then
+            cmd=(bash tools/ci/cross-artifacts.sh "${{ matrix.triple }}" "${{ matrix.arch }}")
+          else
+            cmd=(bash tools/ci/host-check-target.sh "${{ matrix.triple }}")
+          fi
+          if ! "${cmd[@]}" 2>&1 | tee /tmp/cross.log; then
+            errs=$(grep -iE "error(\[|:)|failed" /tmp/cross.log | tail -4 | tr '\n' ' ')
+            echo "::error title=platform-build::${errs:0:900}"
             exit 1
           fi
       - name: 目标 ISA 执行冒烟（binfmt + docker，产物真能跑起来）
+        if: matrix.mode == 'build'
         run: |
           rel="/tmp/rr3-build/${{ matrix.triple }}/release"
           for b in rrd rr3-ctl; do
@@ -75,10 +87,19 @@ jobs:
             echo "PASS  $b 可在 ${{ matrix.platform }} 执行（rc=$rc）"
           done
       - name: 上传静态产物
+        if: matrix.mode == 'build'
         uses: actions/upload-artifact@v4
         with:
           name: artifacts-${{ matrix.triple }}
-          path: /tmp/rr3-build/${{ matrix.triple }}/release/{rrd,rr3-ctl,rr3-act,rr3-connect,rr3-interact,rr3-sense,rr3-power}
+          # upload-artifact v4 不做 brace 展开，必须逐行列（首跑即红实证）。
+          path: |
+            /tmp/rr3-build/${{ matrix.triple }}/release/rrd
+            /tmp/rr3-build/${{ matrix.triple }}/release/rr3-ctl
+            /tmp/rr3-build/${{ matrix.triple }}/release/rr3-act
+            /tmp/rr3-build/${{ matrix.triple }}/release/rr3-connect
+            /tmp/rr3-build/${{ matrix.triple }}/release/rr3-interact
+            /tmp/rr3-build/${{ matrix.triple }}/release/rr3-sense
+            /tmp/rr3-build/${{ matrix.triple }}/release/rr3-power
           if-no-files-found: error
           retention-days: 7
 
@@ -134,7 +155,8 @@ jobs:
           . "$HOME/export-esp.sh"
           set -o pipefail
           if ! bash tools/ci/esp32-periph-base-check.sh 2>&1 | tee /tmp/g.log; then
-            tail -c 4000 /tmp/g.log | sed 's/^/::error title=esp32-periph-base::/'
+            errs=$(grep -iE "error(\[|:)|failed|错误" /tmp/g.log | tail -4 | tr '\n' ' ')
+            echo "::error title=esp32-periph-base::${errs:0:900}"
             exit 1
           fi
       - name: ESP32-S3 外设基座门（debug + release + 单测编译面）
@@ -143,7 +165,8 @@ jobs:
           . "$HOME/export-esp.sh"
           set -o pipefail
           if ! bash tools/ci/esp32s3-periph-base-check.sh 2>&1 | tee /tmp/g.log; then
-            tail -c 4000 /tmp/g.log | sed 's/^/::error title=esp32s3-periph-base::/'
+            errs=$(grep -iE "error(\[|:)|failed|错误" /tmp/g.log | tail -4 | tr '\n' ' ')
+            echo "::error title=esp32s3-periph-base::${errs:0:900}"
             exit 1
           fi
       - name: classic ESP32 UART echo 固件门（release）
@@ -152,7 +175,8 @@ jobs:
           . "$HOME/export-esp.sh"
           set -o pipefail
           if ! bash tools/ci/esp-uart-echo-check.sh 2>&1 | tee /tmp/g.log; then
-            tail -c 4000 /tmp/g.log | sed 's/^/::error title=esp-uart-echo::/'
+            errs=$(grep -iE "error(\[|:)|failed|错误" /tmp/g.log | tail -4 | tr '\n' ' ')
+            echo "::error title=esp-uart-echo::${errs:0:900}"
             exit 1
           fi
       - name: ESP-IDF std 构建链冒烟门（xtensa-esp32-espidf）
@@ -161,7 +185,8 @@ jobs:
           . "$HOME/export-esp.sh"
           set -o pipefail
           if ! bash tools/ci/espidf-std-check.sh 2>&1 | tee /tmp/g.log; then
-            tail -c 4000 /tmp/g.log | sed 's/^/::error title=espidf-std::/'
+            errs=$(grep -iE "error(\[|:)|failed|错误" /tmp/g.log | tail -4 | tr '\n' ' ')
+            echo "::error title=espidf-std::${errs:0:900}"
             exit 1
           fi
       - name: ESP-IDF 哨兵构建门（双证之①编译面）
@@ -170,7 +195,8 @@ jobs:
           . "$HOME/export-esp.sh"
           set -o pipefail
           if ! bash tools/ci/espidf-sentinel-check.sh 2>&1 | tee /tmp/g.log; then
-            tail -c 4000 /tmp/g.log | sed 's/^/::error title=espidf-sentinel::/'
+            errs=$(grep -iE "error(\[|:)|failed|错误" /tmp/g.log | tail -4 | tr '\n' ' ')
+            echo "::error title=espidf-sentinel::${errs:0:900}"
             exit 1
           fi
       - name: rr3-act / rr3-sense espidf 档编译面门（esp32 + esp32s3）
@@ -179,7 +205,8 @@ jobs:
           . "$HOME/export-esp.sh"
           set -o pipefail
           if ! bash tools/ci/rr3-act-sense-espidf-check.sh 2>&1 | tee /tmp/g.log; then
-            tail -c 4000 /tmp/g.log | sed 's/^/::error title=act-sense-espidf::/'
+            errs=$(grep -iE "error(\[|:)|failed|错误" /tmp/g.log | tail -4 | tr '\n' ' ')
+            echo "::error title=act-sense-espidf::${errs:0:900}"
             exit 1
           fi
 
