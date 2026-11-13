@@ -1,7 +1,11 @@
-# CI 单一事实源（R30 裁定，2026-10-11）：atomgit 无流水线功能（用户裁定），CI
-# 流水线改走 GitHub Actions——R27 时代的 .gitcode/workflows/ 单真源路径作废，
-# .gitcode/ 已删除，真源回归本文件。改 CI 只改本文件。GitHub 仓库待建+SSH key
-# 待配，推送后触发八 job 首跑（回执核对见 docs/status.md 敞口表第 1 条）。
+# CI 单一事实源（R30 裁定，2026-10-11；2026-11-13 覆盖面重构）：atomgit 无流水线
+# 功能，CI 走 GitHub Actions，改 CI 只改本文件。
+#
+# 分工：`conventions` 跑 `tools/ci/check.sh` 全步（与本地同一入口，判据不抄第二份）；
+# 其余 job 承担 check.sh 装不下的环境面——macOS 宿主等价、脚本语法、跨架构对拍、
+# 容器真装、装配冒烟、aarch64 静态产物、装配/全链演练、点验矩阵、esp 重工具链。
+# 重工具链档（esp32-gates）不随每次 dev 推送跑：手动、合入 main 的 PR、周程各一次。
+# 纪律：源码区不做任何编译/构建（target-dir=/tmp），本地只写代码，验证看远端回执。
 name: ci
 on:
   push:
@@ -9,13 +13,41 @@ on:
   pull_request:
   # 重工具链 ESP 档按需触发（冷跑含 ESP-IDF 工具链安装，不随每次 dev 推送跑账）
   workflow_dispatch:
+  # 每周一次全量：把按需档（esp32-gates）与整套门禁固定跑一遍，
+  # 防止"只在 push 时绿、重工具链档长期没人碰"的漂移。
+  schedule:
+    # UTC 周日 18:00 = 北京周一 02:00；cron 只认 UTC，不用 timezone 键（避免非标键）。
+    - cron: "0 18 * * 0"
+
+# 最小权限：CI 只读仓库，不写回、不发布。
+permissions:
+  contents: read
+
+# 同一 ref 的新推送取消旧运行：省掉排队里已过时的验证。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # 与 Swatinem/rust-cache 的增量缓存口径一致：CI 不做增量编译，缓存只存依赖。
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   # 规约门禁（十步）：本地与 CI 同一入口（docs/process/conventions.md §2）。
   conventions:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      # 工具链按仓根 rust-toolchain.toml 钉版（rustup 目录覆盖优先于 default）；
+      # components 显式声明，不依赖 runner 镜像预装的 clippy/rustfmt。
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
       # ⑨-y 跨平台可编面的前件（批N8 件六）：门内不设 SKIP，target 缺位即红
       - name: 安装 Windows target（⑨-y 门前置）
         run: rustup target add x86_64-pc-windows-msvc
@@ -24,8 +56,52 @@ jobs:
 
   # 门禁之外的 lint 拆步：fmt 与 clippy 各自独立失败，一步红即整 job 红，
   # 失败归因不用翻混合日志。绿色基线 = 提交 fd0942c（rustfmt 全仓归一 + clippy 清零）。
+  # 宿主等价面（macOS）：本地开发环境与 CI 的编译器/链接器/系统库不同，
+  # "本地绿、CI 红"的另一半来自宿主差异。本 job 在 macOS 上把 workspace 全量测试
+  # 与全部独立工程的测试按门禁 ④/⑥ 同口径跑一遍——它不替代 ubuntu 上的门禁，
+  # 只回答"换宿主后行为是否一致"。esp 条件工程（xtensa/espidf）按门禁同口径排除。
+  host-macos:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      - name: workspace 全量测试（macOS 宿主）
+        working-directory: base/runtime
+        run: cargo test --workspace
+      - name: 独立工程测试（门禁 ④/⑥ 同口径；esp 条件工程除外）
+        run: |
+          set -o pipefail
+          for m in $(find modules tools base/ota -name Cargo.toml \
+                     -not -path "*/target/*" -not -path "base/runtime/*" \
+                     -not -path "tools/esp32-uart-echo/*" -not -path "tools/espidf-std-hello/*" \
+                     -not -path "tools/espidf-sentinel/*" -not -path "tools/esp32-periph-base/*" \
+                     | sort); do
+            echo "=== $m ==="
+            cargo test -q --manifest-path "$m"
+          done
+
+  # 脚本语法门：CI 的全部判据最终都落在 tools/ci/*.sh 上——脚本自身写坏时，
+  # 门禁会"看起来跑过了"。bash -n 不执行、零副作用，覆盖全部追踪脚本。
+  scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash 语法检查（全部追踪 .sh）
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            bash -n "$f" || { echo "SYNTAX FAIL $f"; fail=1; }
+          done < <(git -c core.quotepath=false ls-files '*.sh')
+          [ "$fail" -eq 0 ] && echo "全部脚本语法通过"
+
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -65,6 +141,7 @@ jobs:
   # QEMU 仿真下容器内 cargo 构建较慢属预期；rust-cache 与 conventions/lint 共享加速。
   ipct003:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -95,8 +172,9 @@ jobs:
   # 合入 main 的 PR 才跑（发布门前置）。两门各自 SKIP 纪律不变：前置缺位 = SKIP 明说，
   # 在位但编译失败/产物不在树 = 红。
   esp32-gates:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main')
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main')
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -154,6 +232,7 @@ jobs:
   # deb（方案 P1），真装只认这个 job 的远端回执。
   distro-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       # 与其余 job 同源：runner 预装 rustc 版本不受控，① 现在编 brain（ureq/rustls
@@ -170,6 +249,7 @@ jobs:
   # 目标根（TARGET_DIR），不需要 Docker 或 Buildroot 全量构建。
   buildroot-assembly:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: 保底轨装配冒烟（post-build.sh）
@@ -180,6 +260,7 @@ jobs:
   # 工具链，归板上原生构建，不在本门（同 pack-arm64 ③ 分工）。
   arm64-artifacts:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -195,6 +276,7 @@ jobs:
   # brain 也是 Rust），判据六模块全 running + denied_publish = 0。
   sim-assemble:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -206,6 +288,7 @@ jobs:
   # 进程 mock 闭环 + 总线观察者取证。
   sim-chain:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -221,6 +304,7 @@ jobs:
   # 时间），默认口径如实记"未跑"不冒领 PASS、退 0；矩阵出现 FAIL 列时退 1（job 红）。
   matrix:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
