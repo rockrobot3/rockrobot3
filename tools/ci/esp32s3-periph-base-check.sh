@@ -102,15 +102,21 @@ else
 fi
 
 # ⑧ 纯逻辑单测编译面（同 classic 门 ⑦；xtensa 目标本机不可跑，--no-run 只验编译）
-if cargo +esp test --no-run \
+# panic=abort 下测试 harness 必须显式 `-Zpanic_abort_tests`；RUSTFLAGS 会覆盖
+# config 的 target rustflags，故整条重写（与 [target.xtensa-esp32s3-espidf] 同值）。
+s3_test_log=/tmp/rr3-esp32s3-periph-test.log
+s3_test_rf="--cfg espidf_time64 -Zunstable-options -Cpanic=immediate-abort -Zpanic_abort_tests"
+if RUSTFLAGS="$s3_test_rf" cargo +esp test --no-run \
      --target xtensa-esp32s3-espidf \
      --no-default-features --features esp32s3 \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
-     >/dev/null 2>&1; then
+     >"$s3_test_log" 2>&1; then
   echo "PASS  甲面单测编译（--no-run）：S3 目标纯逻辑层单测在编"
 else
-  echo "FAIL  esp32-periph-base S3 单测编译失败（cargo +esp test --no-run）" >&2
+  errs=$(grep -E "error(\[|:)|panicked at" "$s3_test_log" | head -4 | tr '\n' ' ')
+  echo "FAIL  esp32-periph-base S3 单测编译失败（cargo +esp test --no-run）: ${errs:0:900}" >&2
+  tail -3 "$s3_test_log" >&2
   fail=1
 fi
 
