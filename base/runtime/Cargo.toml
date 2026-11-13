@@ -11,7 +11,6 @@ publish = false
 
 [workspace.dependencies]
 toml = "0.8"
-async-trait = "0.1"
 serde_json = "1"
 
 # 空壳阶段只看能否编译与测试，产物体积/速度优先
