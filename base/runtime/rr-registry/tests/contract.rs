@@ -63,44 +63,6 @@ fn staged(tag: &str, text: String) -> PathBuf {
     m
 }
 
-/// 从 topics.toml 文本解析出的 (name, owner, kind) 三元组
-fn registry_triples(text: &str) -> Vec<(String, String, String)> {
-    fn topic_str(v: &toml::Value, k: &str) -> String {
-        v.get(k)
-            .and_then(toml::Value::as_str)
-            .unwrap_or_default()
-            .to_string()
-    }
-
-    let root: toml::Value = text.parse().expect("contracts/topics.toml 必须是合法 TOML");
-    let arr = root
-        .get("topic")
-        .and_then(toml::Value::as_array)
-        .expect("contracts/topics.toml 缺 [[topic]] 数组");
-    arr.iter()
-        .map(|e| {
-            (
-                topic_str(e, "name"),
-                topic_str(e, "owner"),
-                topic_str(e, "kind"),
-            )
-        })
-        .collect()
-}
-
-/// C2：把 `contracts/topics.toml` 的**形状**钉死——owner 数、topic 数、kind 分布，
-/// 以及全部 39 条 `(name, owner, kind)` 三元组逐条在册（且不多不少）。
-///
-/// 计数做成硬 pin 是**故意**的，不是"禁止 append"：契约只增不改，新增主题合法，
-/// 但必须是一次**有意识的编辑**——同一次改动里既要改 `contracts/topics.toml`，
-/// 也要更新这里的 `RR3_PINNED_TOPICS` / 四个计数期望，以及把这些形状当事实来写的
-/// 文档（`docs/architecture/architecture.md` §6.3、`docs/architecture/naming.md` §3、`contracts/README.md`）。
-/// 少改任何一处，本用例即红。
-///（注：本数组在批N4 件六二/九二/九三只改了计数 pin、漏了随批补条——批N5 件二笔3
-/// 补齐七条后重新与 topics.toml 等长，"不多不少"的等价自此恢复。）
-///
-/// 反过来说，删一条主题、改一条 kind、改一个 owner 数同样会红——评审证明这正是
-/// 此前门禁的空洞（只有 owner 数与 fixture 引用的四条主题被钉住）。
 /// 仲裁只吃 name / provides / depends.required / start_priority 四样事实，
 /// 夹具因此只写这四样——其余字段的语法归单件校验，不在本节重复
 fn depends_manifest(name: &str, provides: &[&str], requires: &[&str], prio: i64) -> String {
