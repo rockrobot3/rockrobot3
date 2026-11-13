@@ -12,4 +12,6 @@
 #   + tests/contract/ 十一段（最大 326 行）→ 超标数 57→56。
 # 2026-11-13 三拆：rr3-interact panel/server.rs 2079 行拆成 server.rs（路由 550）
 #   + server/{ctl,selftest,serve}.rs + server/tests/ 四段（最大 424 行）→ 56→55。
-55
+# 2026-11-14 四拆（测试体抽取）：rrctl commands.rs 638→374 + commands/tests.rs 262；
+#   sim main.rs 735→497 + src/tests.rs 236 → 55→53。
+53
