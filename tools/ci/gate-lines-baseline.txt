@@ -8,6 +8,8 @@
 #   rrd/src/registry/tests.rs 1917）。
 # 2026-11-13 首拆：rrd registry 测试 1917 行拆成 tests/{mod,fanout,register,beat,
 #   publish,restart,death,degrade}.rs（最大 421 行）→ 超标数 58→57。
-# 2026-11-13 二拆：rr-registry 契约对拍 2632 行拆成 tests/contract.rs（夹具 461）
+# 2026-11-13 二拆：rr-registry 契约对拍 2632 行拆成 tests/contract.rs（夹具 435）
 #   + tests/contract/ 十一段（最大 326 行）→ 超标数 57→56。
-56
+# 2026-11-13 三拆：rr3-interact panel/server.rs 2079 行拆成 server.rs（路由 550）
+#   + server/{ctl,selftest,serve}.rs + server/tests/ 四段（最大 424 行）→ 56→55。
+55
