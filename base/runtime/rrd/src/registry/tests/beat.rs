@@ -1,6 +1,7 @@
 // 心跳与到期：提升、显式单调毫秒、到期回报内容。
 use super::*;
 
+/// 注册即 registered；收到心跳才 running；未在册 task 的心跳被拒
 #[test]
 fn heartbeat_promotes_registered_to_running() {
     let mut r = RrdRegistry::new(1000);
@@ -139,10 +140,3 @@ fn publish_rejects_foreign_prefix() {
         }
     );
 }
-
-/// 归属判定的**最后一道**看的是主题集里登记的 owner，而不是主题串的首段：
-/// 首段相等只可能来自"表没被 `rr3_topic_check` 复验过"（check 强制首段 == owner，
-/// `rr-registry/src/topics.rs` 的 `rr3_topic_check`），而那条前置只在
-/// `rr3_topics_load` 的装载路径上成立。`rr3_topic_parse` 是 public，
-/// 任何绕开 check 造出来的表都可能带着"首段是 rr3-sima、owner 登记的是 rr3-simb"的条目。
-/// 故本用例**刻意不用** `topic_set()`（它 assert 过 check，结构上造不出这张表）。

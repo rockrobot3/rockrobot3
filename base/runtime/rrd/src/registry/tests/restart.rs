@@ -1,6 +1,7 @@
 // 重启记账：重启策略、退避表、计数前缀合并与键上限。
 use super::*;
 
+/// 运维计数聚合（0.0.4 批B）：模块前缀归并、同键累加、空拍不算变化
 #[test]
 fn counters_merge_prefixes_and_accumulates() {
     use std::collections::BTreeMap;
@@ -226,5 +227,3 @@ fn facts_roundtrip_for_known_and_unknown_names() {
     );
     assert_eq!(r.rr3_reg_facts("rr3-nobody"), None, "不在册的名字必须 None");
 }
-
-/// fanout：跳过发起者；对端已 drop 只是少计，不 panic

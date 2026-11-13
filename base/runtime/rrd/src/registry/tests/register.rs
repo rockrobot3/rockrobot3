@@ -1,6 +1,7 @@
 // 注册面：重名/保留名/容量/看门狗断言/panic 留条目。
 use super::*;
 
+/// 同名在册必须拒，且不留影子条目
 #[test]
 fn duplicate_name_is_rejected() {
     let mut r = RrdRegistry::new(1000);
@@ -258,5 +259,3 @@ fn caught_panic_leaves_the_failed_entry_registered() {
         "task→name 映射同样不许被摘掉"
     );
 }
-
-/// 注册即 registered；收到心跳才 running；未在册 task 的心跳被拒

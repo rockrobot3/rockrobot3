@@ -1,6 +1,8 @@
 // 降级与恢复：能力提供者全灭/回归、依赖饱和、事实回读。
 use super::*;
 
+/// 唯一提供者死了（conn EOF 路）→ 依赖它的 Running 模块置 Degraded；
+/// 心跳只续命不升级（Kept），降级不被一颗心跳抹平
 #[test]
 fn provider_death_degrades_running_dependent() {
     let mut r = RrdRegistry::new(20);
