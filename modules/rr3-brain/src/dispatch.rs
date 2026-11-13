@@ -207,11 +207,12 @@ pub(crate) fn rr3_wake_decide(
     if let Some(action) = rr3_wake_hit(&norm, cfg) {
         return action;
     }
-    match last_wake_ms {
-        Some(last) if cfg.followup_ms > 0 && now_ms.saturating_sub(last) <= cfg.followup_ms => {
-            Rr3WakeAction::FollowUp
-        }
-        _ => Rr3WakeAction::Ignore,
+    let in_followup = last_wake_ms
+        .is_some_and(|last| cfg.followup_ms > 0 && now_ms.saturating_sub(last) <= cfg.followup_ms);
+    if in_followup {
+        Rr3WakeAction::FollowUp
+    } else {
+        Rr3WakeAction::Ignore
     }
 }
 
@@ -466,31 +467,29 @@ impl Rr3BrainDispatcher {
         body: &Value,
         bus: &B,
     ) -> Result<(), String> {
-        match topic {
-            RR3_TOPIC_PCM => {
-                // Python: body.get("pcm_b64") 直取（sense 事件体保证在册）＋
-                // ms 缺席折 0（攒窗按 0ms 帧计，不虚占预滚窗）
-                let pcm_b64 = body
-                    .get("pcm_b64")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                let ms = body
-                    .get("ms")
-                    .and_then(Value::as_f64)
-                    .map(|f| f as i64)
-                    .unwrap_or(0);
-                self.dialog.rr3_feed_pcm(pcm_b64, ms)
+        if topic == RR3_TOPIC_PCM {
+            // Python: body.get("pcm_b64") 直取（sense 事件体保证在册）＋
+            // ms 缺席折 0（攒窗按 0ms 帧计，不虚占预滚窗）
+            let pcm_b64 = body
+                .get("pcm_b64")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let ms = body
+                .get("ms")
+                .and_then(Value::as_f64)
+                .map(|f| f as i64)
+                .unwrap_or(0);
+            self.dialog.rr3_feed_pcm(pcm_b64, ms)
+        } else if topic == RR3_TOPIC_VAD {
+            // Python: edge = body.get("edge", "")——不认的边沿由状态机静默忽略
+            let edge = body.get("edge").and_then(Value::as_str).unwrap_or("");
+            if self.dialog.rr3_feed_vad(edge, self.tb.rr3_now_ms()) {
+                self.rr3_finish_turn(bus)?;
             }
-            RR3_TOPIC_VAD => {
-                // Python: edge = body.get("edge", "")——不认的边沿由状态机静默忽略
-                let edge = body.get("edge").and_then(Value::as_str).unwrap_or("");
-                if self.dialog.rr3_feed_vad(edge, self.tb.rr3_now_ms()) {
-                    self.rr3_finish_turn(bus)?;
-                }
-                Ok(())
-            }
+            Ok(())
+        } else {
             // 订阅面外事件：本地过滤静默（module.toml 申报面之外的来件不消费）
-            _ => Ok(()),
+            Ok(())
         }
     }
 
@@ -726,16 +725,16 @@ impl Rr3BrainDispatcher {
             let llm_started = Instant::now();
             let completed = self.clients.llm.rr3_complete(&input);
             llm_cost_ms = llm_started.elapsed().as_millis().to_string();
-            reply_text = match completed {
-                Ok(t) => t,
-                Err(e) => {
+            let t = completed
+                .map_err(|e| {
                     bus.counter_bump("llm_fail", 1);
                     eprintln!(
                         "轮次 {trace}: LLM 失败，弃轮（user='{user_text}'，llm_ms={llm_cost_ms}，{e}）"
                     );
-                    return None;
-                }
-            };
+                    e
+                })
+                .ok()?;
+            reply_text = t;
         }
         Some(Rr3TurnReply {
             text: reply_text,
@@ -758,23 +757,21 @@ impl Rr3BrainDispatcher {
         } else {
             None
         };
-        let reply_pcm = match cached_ack {
-            Some(pcm) => pcm,
-            None => match self
-                .clients
+        let reply_pcm = if let Some(pcm) = cached_ack {
+            pcm
+        } else {
+            self.clients
                 .tts
                 .rr3_synthesize(reply_text, RR3_TTS_SAMPLE_RATE)
-            {
-                Ok(p) => p,
-                Err(e) => {
+                .map_err(|e| {
                     bus.counter_bump("tts_fail", 1);
                     eprintln!(
                         "轮次 {trace}: TTS 失败，弃轮（tts_cost_ms={}，{e}）",
                         tts_started.elapsed().as_millis()
                     );
-                    return None;
-                }
-            },
+                    e
+                })
+                .ok()?
         };
         let tts_cost_ms = tts_started.elapsed().as_millis();
         if is_wake_ack && self.wake_ack_pcm.is_none() && !reply_pcm.is_empty() {
@@ -807,8 +804,7 @@ impl Rr3BrainDispatcher {
                 // (int, float) 且非 bool 同形状（Null/串不进账）。
                 let played_ms = reply.get("played_ms").cloned().unwrap_or(Value::Null);
                 played = format!(" played_ms={}", rr3_py_str(&played_ms));
-                if matches!(played_ms, Value::Number(_)) && played_ms.as_f64().unwrap_or(0.0) > 0.0
-                {
+                if played_ms.as_f64().is_some_and(|ms| ms > 0.0) {
                     bus.counter_bump("rounds_audible", 1);
                 }
             }
@@ -895,16 +891,14 @@ pub(crate) fn rr3_rpc_arm(
             rr3_model_test_arm(cfg, args)
         }),
     ];
-    match arms.iter().find(|(t, _)| *t == topic) {
-        Some((_, arm)) => arm(cfg, clients, dialog, args),
-        None => {
-            let list: Vec<String> = RR3_RPC_EXPOSES.iter().map(|t| format!("'{t}'")).collect();
-            Err(format!(
-                "rr3-brain 只 exposes [{}]，收到 {topic}",
-                list.join(", ")
-            ))
-        }
-    }
+    let Some((_, arm)) = arms.iter().find(|(t, _)| *t == topic) else {
+        let list: Vec<String> = RR3_RPC_EXPOSES.iter().map(|t| format!("'{t}'")).collect();
+        return Err(format!(
+            "rr3-brain 只 exposes [{}]，收到 {topic}",
+            list.join(", ")
+        ));
+    };
+    arm(cfg, clients, dialog, args)
 }
 
 /// 把一轮 TTS 的 PCM 分帧为 `rr3-brain/audio/tts_pcm` 的载荷体列表（纯函数，自

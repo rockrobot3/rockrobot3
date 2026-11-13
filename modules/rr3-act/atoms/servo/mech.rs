@@ -108,15 +108,19 @@ pub fn rr3_servo_timeout(
     move_ms: Option<u64>,
     cfg: &Rr3ServoCfg,
 ) -> Result<u64, Rr3ServoTimeoutError> {
-    match move_ms {
-        None => Ok(cfg.move_timeout_ms),
-        Some(0) => Err(Rr3ServoTimeoutError::ZeroMs),
-        Some(ms) if ms > cfg.move_timeout_ms => Err(Rr3ServoTimeoutError::BeyondLimit {
+    let Some(ms) = move_ms else {
+        return Ok(cfg.move_timeout_ms);
+    };
+    if ms == 0 {
+        return Err(Rr3ServoTimeoutError::ZeroMs);
+    }
+    if ms > cfg.move_timeout_ms {
+        return Err(Rr3ServoTimeoutError::BeyondLimit {
             ms,
             limit: cfg.move_timeout_ms,
-        }),
-        Some(ms) => Ok(ms),
+        });
     }
+    Ok(ms)
 }
 
 #[cfg(test)]

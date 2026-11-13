@@ -42,12 +42,11 @@ pub(crate) fn rr3_block_render(rows: &[Value]) -> Result<String, String> {
             .ok_or_else(|| format!("模型行 #{i} 须为表（TOML 行表同构）"))?;
         let mut out = String::from("[[rr3-brain.model]]\n");
         for key in RR3_MODEL_ROW_KEYS {
-            if let Some(v) = obj.get(key) {
-                let s = v
-                    .as_str()
-                    .ok_or_else(|| format!("模型行 #{i}.{key} 须字符串"))?;
-                out.push_str(&format!("{key} = {}\n", rr3_toml_encode_str(s)));
-            }
+            let Some(v) = obj.get(key) else { continue };
+            let s = v
+                .as_str()
+                .ok_or_else(|| format!("模型行 #{i}.{key} 须字符串"))?;
+            out.push_str(&format!("{key} = {}\n", rr3_toml_encode_str(s)));
         }
         let active = obj.get("active").and_then(Value::as_bool).unwrap_or(false);
         out.push_str(&format!("active = {active}\n"));
@@ -109,10 +108,10 @@ pub(crate) fn rr3_block_rewrite(full_text: &str, rows: &[Value]) -> Result<Strin
     let block = rr3_block_render(rows)?;
     let Some((start, end)) = rr3_block_bounds(full_text) else {
         let mut out = full_text.to_string();
-        if !out.is_empty() && !out.ends_with('\n') {
-            out.push('\n');
-        }
         if !out.is_empty() && !out.ends_with("\n\n") {
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
             out.push('\n');
         }
         out.push_str(&block);

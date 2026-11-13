@@ -162,10 +162,12 @@ fn rr3_axis_slot(raw: &mut Rr3AxisRaw, k: &str, v: &str) -> Result<(), String> {
 
 /// calibrated/hard_stop 两键（显式布尔 / 档案词表）。
 fn rr3_axis_flag(raw: &mut Rr3AxisRaw, k: &str, v: &str) -> Result<(), String> {
-    match k {
-        "calibrated" => raw.calibrated = Some(rr3_axis_bool(v)?),
-        "hard_stop" => raw.hard_stop = Some(rr3_axis_stop(v)?),
-        _ => return Err(format!("执行轴状态未知键 {k:?}")),
+    if k == "calibrated" {
+        raw.calibrated = Some(rr3_axis_bool(v)?);
+    } else if k == "hard_stop" {
+        raw.hard_stop = Some(rr3_axis_stop(v)?);
+    } else {
+        return Err(format!("执行轴状态未知键 {k:?}"));
     }
     Ok(())
 }
@@ -173,23 +175,29 @@ fn rr3_axis_flag(raw: &mut Rr3AxisRaw, k: &str, v: &str) -> Result<(), String> {
 /// 键是否已出现（重复键判据的单点；未知键在此点名，与旧 [`rr3_axis_once`]
 /// 同一文案域）。
 fn rr3_axis_seen(raw: &Rr3AxisRaw, k: &str) -> Result<bool, String> {
-    match k {
-        "calibrated" => Ok(raw.calibrated.is_some()),
-        "hard_stop" => Ok(raw.hard_stop.is_some()),
-        "lo" => Ok(raw.lo.is_some()),
-        "hi" => Ok(raw.hi.is_some()),
-        "center" => Ok(raw.center.is_some()),
-        other => Err(format!("执行轴状态未知键 {other:?}")),
-    }
+    type Rr3AxisProbe = fn(&Rr3AxisRaw) -> bool;
+    let probes: [(&str, Rr3AxisProbe); 5] = [
+        ("calibrated", |r| r.calibrated.is_some()),
+        ("hard_stop", |r| r.hard_stop.is_some()),
+        ("lo", |r| r.lo.is_some()),
+        ("hi", |r| r.hi.is_some()),
+        ("center", |r| r.center.is_some()),
+    ];
+    let Some((_, probe)) = probes.iter().find(|(key, _)| *key == k) else {
+        return Err(format!("执行轴状态未知键 {k:?}"));
+    };
+    Ok(probe(raw))
 }
 
 /// lo/hi/center 三数值键（同形 u16 域，文案按键取域说明）
 fn rr3_axis_pose(raw: &mut Rr3AxisRaw, k: &str, v: &str) -> Result<(), String> {
     let n = rr3_axis_num(v, k, rr3_axis_what(k))?;
-    match k {
-        "lo" => raw.lo = Some(n),
-        "hi" => raw.hi = Some(n),
-        _ => raw.center = Some(n),
+    if k == "lo" {
+        raw.lo = Some(n);
+    } else if k == "hi" {
+        raw.hi = Some(n);
+    } else {
+        raw.center = Some(n);
     }
     Ok(())
 }
@@ -205,10 +213,12 @@ fn rr3_axis_what(k: &str) -> &'static str {
 
 /// 显式布尔（只认 `true`/`false`：注入链错值必须点名，不猜同义写法）。
 fn rr3_axis_bool(v: &str) -> Result<bool, String> {
-    match v {
-        "true" => Ok(true),
-        "false" => Ok(false),
-        _ => Err(format!("执行轴状态 calibrated={v:?} 非显式布尔")),
+    if v == "true" {
+        Ok(true)
+    } else if v == "false" {
+        Ok(false)
+    } else {
+        Err(format!("执行轴状态 calibrated={v:?} 非显式布尔"))
     }
 }
 
@@ -365,11 +375,13 @@ fn rr3_servo_pick(bus: &BusHandle) -> Result<(Box<dyn Rr3PwmServo>, &'static str
 /// 本进程舵机面探活（Busy + esp32 降级远端，其余读失败 fail-closed 上抛）。
 fn rr3_servo_open(bus: &BusHandle) -> Result<(Box<dyn Rr3PwmServo>, &'static str), String> {
     let (dev, backend) = rr3_hal_servo();
-    match dev.angle() {
-        Ok(_) => Ok((dev, backend)),
-        Err(Rr3HalError::Busy) if backend == RR3_BACKEND_ESP32 => rr3_remote_bridge(bus, backend),
-        Err(e) => Err(format!("舵机面探活失败({backend}): {e}")),
+    let Err(e) = dev.angle() else {
+        return Ok((dev, backend));
+    };
+    if matches!(&e, Rr3HalError::Busy) && backend == RR3_BACKEND_ESP32 {
+        return rr3_remote_bridge(bus, backend);
     }
+    Err(format!("舵机面探活失败({backend}): {e}"))
 }
 
 /// 可缺面探活：占位后端（`Unsupported`）是装配单"该格未启用"的诚实投影——点名
@@ -550,7 +562,7 @@ fn rr3_act_loop_raw(sect: &toml::Value) -> Result<u64, String> {
         .and_then(toml::Value::as_integer)
         .filter(|n| *n >= 0)
         .map(|n| n as u64)
-        .ok_or_else(|| "config [rr3-act.reflex] 缺 loop_hz（非负整数）".to_string())?
+        .ok_or("config [rr3-act.reflex] 缺 loop_hz（非负整数）")?
         .max(1))
 }
 
@@ -560,17 +572,16 @@ fn rr3_act_cfg_effects(sect: &toml::Value) -> Result<Vec<Rr3LedEffect>, String> 
     let arr = sect
         .get("effects")
         .and_then(toml::Value::as_array)
-        .ok_or_else(|| "config [rr3-act.led] 缺 effects（灯效白名单数组）".to_string())?;
+        .ok_or("config [rr3-act.led] 缺 effects（灯效白名单数组）")?;
     rr3_effects_of(arr)
 }
 
 /// 灯效数组逐项落位（顺序与下标文案随项）。
 fn rr3_effects_of(arr: &[toml::Value]) -> Result<Vec<Rr3LedEffect>, String> {
-    let mut effects = Vec::with_capacity(arr.len());
-    for (i, e) in arr.iter().enumerate() {
-        effects.push(rr3_act_effect_at(i, e)?);
-    }
-    Ok(effects)
+    arr.iter()
+        .enumerate()
+        .map(|(i, e)| rr3_act_effect_at(i, e))
+        .collect()
 }
 
 /// 单项灯效：必为在册契约值的字符串（越界值点名在册值）。
@@ -596,17 +607,16 @@ fn rr3_act_cfg_topics(sect: &toml::Value) -> Result<Vec<String>, String> {
     let arr = sect
         .get("open_topics")
         .and_then(toml::Value::as_array)
-        .ok_or_else(|| "config [rr3-act.intent] 缺 open_topics（意图开放主题数组）".to_string())?;
+        .ok_or("config [rr3-act.intent] 缺 open_topics（意图开放主题数组）")?;
     rr3_topics_of(arr)
 }
 
 /// 主题数组逐项落位（顺序与下标文案随项）。
 fn rr3_topics_of(arr: &[toml::Value]) -> Result<Vec<String>, String> {
-    let mut topics = Vec::with_capacity(arr.len());
-    for (i, t) in arr.iter().enumerate() {
-        topics.push(rr3_act_topic_at(i, t)?);
-    }
-    Ok(topics)
+    arr.iter()
+        .enumerate()
+        .map(|(i, t)| rr3_act_topic_at(i, t))
+        .collect()
 }
 
 /// 单项主题：字符串且在本模块执行臂内（只认 relay/set 与 servo/command）。
