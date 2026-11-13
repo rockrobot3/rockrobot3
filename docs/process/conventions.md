@@ -3205,7 +3205,7 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/gat
 |---|---|---|---|
 | ESP32 / ESP32-S3（乐鑫，xtensa） | `esp32` / `esp32s3`（espup v0.17.1 钉版 + ESP-IDF v5.2.2） | `esp32-gates` | 外设基座 debug+release、UART echo、espidf std、哨兵、act/sense espidf 五门全编译 |
 | 瑞芯微 RK3566 / RK3588（aarch64） | `aarch64-unknown-linux-musl`（+ `-gnu` 字节对拍归 `ipct003`） | `cross-artifacts` 矩阵一腿 | 七件全静态 aarch64 产物 + ELF 断言 + qemu-aarch64 执行冒烟 |
-| 进迭时空 SpacemiT K1/K3（RISC-V） | `riscv64gc-unknown-linux-musl` | `cross-artifacts` 矩阵另一腿 | 七件全静态 riscv64 产物 + ELF 断言 + qemu-riscv64 执行冒烟 |
+| 进迭时空 SpacemiT K1/K3（RISC-V） | `riscv64gc-unknown-linux-musl` | `cross-artifacts` 矩阵另一腿（mode=check） | **编译面**：workspace + 五模块 + rr3-ctl 的 `cargo check`（runner 无 riscv64 musl 链接器，链接/执行面如实不做） |
 | 英特尔 / AMD（x86_64） | 原生 `x86_64-unknown-linux-gnu` | `conventions`（全量门）+ `distro-smoke`（deb 真装） | 编译 + 757 测试 + 门禁 ①–⑭ + 容器内真装起机 |
 
 口径说明：以上是**构建/执行环境**验证（能在目标 ISA 上编译并跑起来）；真板上的
