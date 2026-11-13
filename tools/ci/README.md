@@ -35,7 +35,7 @@
    在输出里同时出现行首的 `running N tests`（N≥1）与 `test result: ok. N passed`（N≥1）
    才判 PASS，封死"过滤器笔误/测试集改名"造成的静默放行。
 
-CI 单一事实源在 [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
+CI 单一事实源在 [`.github/workflows/`](../../.github/workflows)（gate / platforms / integration / publish 四条）
 （R30 裁定，2026-10-11：atomgit 无流水线功能，CI 改走 GitHub Actions；R27 时代
 `.gitcode/workflows/` 路径作废，`.gitcode/` 已删除），本脚本才是实际门禁。
 **合入前必须本地跑绿**，退出码非 0 即不合入。
@@ -50,7 +50,7 @@ CI 单一事实源在 [`.github/workflows/ci.yml`](../../.github/workflows/ci.ym
 采样窗口与样本数/原始数据，缺一判证据不足；手测行不覆盖自动 FAIL 格）。
 判据唯一真源仍是本目录各 `*.sh` 脚本，矩阵只是出数入口。
 
-**CI 接线（0.0.5 批M MC-10 L-1）**：本脚本此前**无任何调用方**（不在 `check.sh`、不在 `ci.yml`），
-0.0.5 批M 起由 `.github/workflows/ci.yml` 的第九 job `matrix`（ubuntu-latest）调用——**非 `--strict`**
+**CI 接线（0.0.5 批M MC-10 L-1）**：本脚本此前**无任何调用方**（不在 `check.sh`、不在任何工作流里），
+0.0.5 批M 起由 `.github/workflows/integration.yml` 的 `matrix` job（ubuntu-latest）调用——**非 `--strict`**
 （⑦ 时序达标无固定载体，默认口径如实记"未跑"、退 0；出现 FAIL 列才退 1），产出**人工搬进**
 `docs/status.md` 矩阵行。出数 ≠ 判据：判据真源仍 `check.sh` 全步 + 本目录各专用门。
