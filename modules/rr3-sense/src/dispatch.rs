@@ -116,6 +116,8 @@ pub(crate) struct Rr3SenseDispatcher {
     doa_cfg: capture::Rr3DoaCfg,
     /// 判向窗 ring（B批 b3b）：双麦链路才分配（单声道恒无方向可判，不分配零开销）
     doa_ring: Option<Rr3DoaRing>,
+    /// 采集帧缓冲池：稳态复用同一块 Vec（mono 链路每拍零分配，见 [`Rr3FrameBuf`]）
+    read_pool: Rr3FrameBuf,
 }
 
 impl Rr3SenseDispatcher {
@@ -162,6 +164,7 @@ impl Rr3SenseDispatcher {
             pending_nod: None,
             doa_cfg,
             doa_ring,
+            read_pool: Rr3FrameBuf::default(),
         }
     }
 
@@ -273,6 +276,10 @@ impl Dispatcher for Rr3SenseDispatcher {
         let (raw, done) = self.rr3_read_frame()?;
         let pcm = self.rr3_tick_pub(raw, done, bus)?;
         self.rr3_tick_tail(&pcm, now, bus)?;
+        // 拍尾归还缓冲：mono 链路下一拍原样复用（稳态零分配）；下行混成 mono
+        // 的双麦链路容量不够即弃（不为此多留一份整拍内存）
+        let need = self.frames_per_tick * self.cfg.audio.channels as usize;
+        self.read_pool.rr3_put(pcm.samples, need);
         Ok(())
     }
 }
@@ -309,9 +316,11 @@ impl Rr3SenseDispatcher {
         Ok(())
     }
 
-    /// 读一拍（按帧×声道分配、欠载按实填数截断），回原始流与实填采样点数。
+    /// 读一拍：从缓冲池取"帧×声道"采样点（池里有足够容量就不分配），欠载按
+    /// 实填数截断；缓冲随 [`Rr3PcmStream`] 走完本拍后在 `on_tick` 尾归还。
     fn rr3_read_frame(&mut self) -> Result<(Rr3PcmStream, usize), String> {
-        let mut buf = vec![0i16; self.frames_per_tick * self.cfg.audio.channels as usize];
+        let need = self.frames_per_tick * self.cfg.audio.channels as usize;
+        let mut buf = self.read_pool.rr3_take(need);
         let done = self
             .source
             .read(&mut buf)
@@ -618,6 +627,34 @@ fn rr3_reflex_nod_plan(
         lift_at: now + Duration::from_millis(delay_ms + hold_ms),
         dip_sent: false,
     })
+}
+
+/// 采集帧缓冲池：把"每拍新分配一块 Vec"改成"稳态复用同一块"。
+///
+/// `take` 出的缓冲随本拍 `Rr3PcmStream` 走完读帧→发布→VAD，拍尾 `put` 归还；
+/// 容量够下一拍就继续用（mono 链路稳态零分配），不够就丢弃由下次 `take`
+/// 重新分配。语义与逐拍 `vec![0; need]` 等价：每拍拿到的都是全零、长度
+/// `need` 的可写缓冲。
+#[derive(Default)]
+struct Rr3FrameBuf {
+    spare: Vec<i16>,
+}
+
+impl Rr3FrameBuf {
+    /// 取一块长度恰为 `need` 的全零缓冲（池里有富余容量的块就不分配）。
+    fn rr3_take(&mut self, need: usize) -> Vec<i16> {
+        let mut buf = std::mem::take(&mut self.spare);
+        buf.clear();
+        buf.resize(need, 0);
+        buf
+    }
+
+    /// 归还本拍缓冲：容量够下一拍才留下（不足不占坑，由下次 take 重分配）。
+    fn rr3_put(&mut self, samples: Vec<i16>, need: usize) {
+        if samples.capacity() >= need {
+            self.spare = samples;
+        }
+    }
 }
 
 /// 判向窗环形缓冲（帧交错存储，与采集 samples 同形；主循环单线程读写）
@@ -927,5 +964,31 @@ mod tests {
                 .bin,
             Rr3DoaBin::Left
         );
+    }
+
+    /// 采集缓冲池：每拍拿到的都是"长度 need、全零"的可写缓冲；容量够就复用
+    /// （稳态零分配），不够则丢弃重分配——与逐拍 `vec![0; need]` 语义等价。
+    #[test]
+    fn frame_pool_reuses_capacity_and_hands_zeroed_buffer() {
+        let mut pool = Rr3FrameBuf::default();
+        let mut buf = pool.rr3_take(8);
+        assert_eq!(buf.len(), 8, "长度 = 帧×声道");
+        assert!(buf.iter().all(|&s| s == 0), "交出去的必须是全零缓冲");
+        let cap = buf.capacity();
+        buf[0] = 7;
+        buf.truncate(5);
+        pool.rr3_put(buf, 8);
+        let buf = pool.rr3_take(8);
+        assert_eq!(buf.capacity(), cap, "容量够必须复用同一块（零分配）");
+        assert!(buf.iter().all(|&s| s == 0), "复用前必须清掉上一拍残值");
+
+        // 容量不够（双麦下行混成 mono 的拍）就丢弃，下次按需重分配
+        let mut pool = Rr3FrameBuf::default();
+        let mut small = Vec::with_capacity(4);
+        small.extend_from_slice(&[1, 2, 3, 4]);
+        pool.rr3_put(small, 8);
+        let buf = pool.rr3_take(8);
+        assert_eq!(buf.len(), 8);
+        assert!(buf.iter().all(|&s| s == 0));
     }
 }
