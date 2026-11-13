@@ -12,7 +12,9 @@
 //! `rr3_sense_probe` 同款）；契约类型（Rr3AudioSink/Rr3Display）与采样规格
 //! 常量走 rr_hal_api 直依（⑨-w 模块单元契约面纪律）。
 
-use rr_hal::backend::{rr3_hal_audio_sink, rr3_hal_display};
+use rr_hal::backend::{
+    rr3_backend_resolve, rr3_hal_audio_sink, rr3_hal_display, RR3_BACKEND_PLACEHOLDER,
+};
 use rr_hal_api::{Rr3AudioSink, Rr3Display, RR3_AUDIO_CFG_16K_MONO16};
 
 use crate::face::{rr3_face_expr_lookup, RR3_FACE_EXPRESSIONS_JOINED};
@@ -42,6 +44,11 @@ pub(crate) fn rr3_interact_probe() -> Result<Rr3PlayDispDevs, String> {
         .frame()
         .map_err(|e| format!("显示面探活失败({display_backend}): {e}"))?;
     eprintln!("显示面就绪: backend={display_backend} 8x8");
+    // 面选择摘要（可定位一行）：全局 hal 档 + 播放/显示两面后端 + 承载形状
+    eprintln!(
+        "面选择: hal={} sink={backend} display={display_backend} shape=16000Hz/1ch/8x8",
+        rr3_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER)
+    );
     Ok((sink, display))
 }
 

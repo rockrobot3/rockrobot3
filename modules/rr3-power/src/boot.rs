@@ -6,7 +6,7 @@
 //! 本层零业务 match——策略量经 config 数据化注入（阈值/周期），rail 阈值倒挂
 //! 执法是解析面策略合法性，不是业务分支。
 
-use rr_hal::backend::{rr3_hal_power, rr3_hal_rail};
+use rr_hal::backend::{rr3_backend_resolve, rr3_hal_power, rr3_hal_rail, RR3_BACKEND_PLACEHOLDER};
 use rr_hal_api::{Rr3BatteryState, Rr3Power, Rr3Rail};
 
 use crate::battery::Rr3BatteryCfg;
@@ -53,6 +53,12 @@ pub(crate) fn rr3_power_ready(
 ) -> Result<crate::dispatch::Rr3PowerDispatcher, String> {
     let (dev, backend, first) = rr3_power_probe()?;
     let (rail_dev, rail_backend) = rr3_rail_probe(&cfg.rail)?;
+    // 面选择摘要（可定位一行）：全局 hal 档 + 电源/轨压两面后端 + 轨压面是否启用
+    eprintln!(
+        "面选择: hal={} battery={backend} rail={rail_backend} rail_up={}",
+        rr3_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER),
+        cfg.rail.up
+    );
     Ok(crate::dispatch::Rr3PowerDispatcher::new(
         dev,
         backend,

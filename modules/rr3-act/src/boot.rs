@@ -12,7 +12,8 @@
 
 use rr3mod::BusHandle;
 use rr_hal::backend::{
-    rr3_hal_gpio_out, rr3_hal_servo, rr3_servo_backend, RR3_BACKEND_ESP32, RR3_BACKEND_PLACEHOLDER,
+    rr3_audio_backend, rr3_backend_resolve, rr3_hal_gpio_out, rr3_hal_servo, rr3_servo_backend,
+    RR3_BACKEND_ESP32, RR3_BACKEND_PLACEHOLDER,
 };
 use rr_hal_api::{Rr3GpioOut, Rr3HalError, Rr3PwmServo};
 
@@ -345,6 +346,13 @@ pub(crate) fn rr3_act_probe(bus: &BusHandle) -> Result<Rr3ActDevs, String> {
         (relay_backend, relay_gpio.as_ref()),
     )?;
     eprintln!("执行面就绪: servo={servo_backend} led={led_backend} relay={relay_backend}");
+    // 面选择摘要（可定位一行）：全局 hal 档 + 执行三面后端 + 音频面（桥归属判据）
+    let audio = rr3_audio_backend().unwrap_or(RR3_BACKEND_PLACEHOLDER);
+    eprintln!(
+        "面选择: hal={} servo={servo_backend} led={led_backend} relay={relay_backend} audio={audio} bridge={}",
+        rr3_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER),
+        if rr3_bridge_shared(servo_backend) { "remote" } else { "local" }
+    );
     Ok((servo_dev, led_gpio, relay_gpio))
 }
 
