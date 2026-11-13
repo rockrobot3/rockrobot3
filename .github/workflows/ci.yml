@@ -127,6 +127,26 @@ jobs:
           # shellcheck disable=SC1091
           . "$HOME/export-esp.sh"
           bash tools/ci/esp32s3-periph-base-check.sh
+      - name: classic ESP32 UART echo 固件门（release）
+        run: |
+          # shellcheck disable=SC1091
+          . "$HOME/export-esp.sh"
+          bash tools/ci/esp-uart-echo-check.sh
+      - name: ESP-IDF std 构建链冒烟门（xtensa-esp32-espidf）
+        run: |
+          # shellcheck disable=SC1091
+          . "$HOME/export-esp.sh"
+          bash tools/ci/espidf-std-check.sh
+      - name: ESP-IDF 哨兵构建门（双证之①编译面）
+        run: |
+          # shellcheck disable=SC1091
+          . "$HOME/export-esp.sh"
+          bash tools/ci/espidf-sentinel-check.sh
+      - name: rr3-act / rr3-sense espidf 档编译面门（esp32 + esp32s3）
+        run: |
+          # shellcheck disable=SC1091
+          . "$HOME/export-esp.sh"
+          bash tools/ci/rr3-act-sense-espidf-check.sh
 
   # 发行版快路轨冒烟（0.0.2 T5 / D8，ADR-0013 裁定 5 首证）：单步容器
   # （rust:bookworm，glibc 自洽，本机产物装本机 deb）内构建 → rr3-pack 出 deb →
