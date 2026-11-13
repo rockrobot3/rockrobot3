@@ -63,7 +63,10 @@ jobs:
         run: |
           cargo fmt --manifest-path base/runtime/Cargo.toml --all -- --check
           while IFS= read -r -d '' m; do
-            cargo fmt --manifest-path "$m" -- --check
+            if ! cargo fmt --manifest-path "$m" -- --check; then
+              echo "::error title=fmt($m)::rustfmt --check 有差异（本地跑 cargo fmt --manifest-path $m）"
+              exit 1
+            fi
           done < <(find modules tools base/ota -name Cargo.toml \
                      -not -path "*/target/*" -not -path "base/runtime/*" -print0 | sort -z)
       - name: clippy -D warnings（base/runtime + 全部独立工程）
@@ -75,7 +78,13 @@ jobs:
             exit 1
           fi
           while IFS= read -r -d '' m; do
-            cargo clippy -q --all-targets --manifest-path "$m" -- -D warnings
+            # 独立工程逐个编译：失败按同一口径压成单行注解（cargo 失败退出码是 101，
+            # 不带本注解时 GitHub 只报"exit code 101"，根因不可见）。
+            if ! cargo clippy -q --all-targets --manifest-path "$m" -- -D warnings 2>&1 | tee /tmp/clippy_one.log; then
+              errs=$(grep -E "error(\[|:)|warning: unused" /tmp/clippy_one.log | head -4 | tr '\n' ' ')
+              echo "::error title=clippy($m)::${errs:0:900}"
+              exit 1
+            fi
           done < <(find modules tools base/ota -name Cargo.toml \
                      -not -path "*/target/*" -not -path "base/runtime/*" \
                      -not -path "tools/esp32-uart-echo/*" -not -path "tools/espidf-std-hello/*" \
