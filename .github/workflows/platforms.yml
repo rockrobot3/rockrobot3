@@ -260,7 +260,13 @@ jobs:
           workspaces: base/runtime
       - name: workspace 全量测试（macOS 宿主）
         working-directory: base/runtime
-        run: cargo test --workspace
+        run: |
+          set -o pipefail
+          if ! cargo test --workspace 2>&1 | tee /tmp/mac.log; then
+            fails=$(grep -E "^test .* FAILED|^error(\[|:)" /tmp/mac.log | head -4 | tr '\n' ' ')
+            echo "::error title=host-macos::${fails:0:900}"
+            exit 1
+          fi
       - name: 独立工程测试（门禁 ④/⑥ 同口径；esp 条件工程除外）
         run: |
           set -o pipefail

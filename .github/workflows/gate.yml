@@ -41,8 +41,9 @@ jobs:
           # 多行尾部会丢掉真正的 FAIL 行（首版实测踩过）。
           set -o pipefail
           if ! bash tools/ci/check.sh 2>&1 | tee /tmp/gate.log; then
-            fails=$(grep -E "^(FAIL|ERROR)" /tmp/gate.log | tail -6 | tr '\n' ' ')
-            echo "::error title=check.sh::${fails:0:900}"
+            fails=$(grep -E "^(FAIL|ERROR)" /tmp/gate.log | tail -4 | tr '\n' ' ')
+            errs=$(grep -E "^error(\[|:)" /tmp/gate.log | head -3 | tr '\n' ' ')
+            echo "::error title=check.sh::${fails:0:500} @@ ${errs:0:700}"
             grep -E "^(FAIL|ERROR)" /tmp/gate.log | tail -20
             exit 1
           fi
