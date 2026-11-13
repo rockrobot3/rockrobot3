@@ -1,0 +1,14 @@
+# 工具链唯一真值（T2，2026-11-12）：本地与 CI 同一编译器，杜绝"本地绿、CI 红"。
+#
+# 背景实证：clippy 1.100 新增 needless_bool，本地 1.99 扫全绿、远端 lint 连续
+# 三笔红（0611a5f 修复）。根因不是那行代码，而是工具链漂移——版本不钉，每季
+# stable 推进都会以"远端突然红"的形式暴露。
+#
+# 纪律：升级 = 改本文件的一笔显式提交（可评审、可回滚、可 bisect），不做隐式跟随。
+# CI 的 dtolnay/rust-toolchain 只负责装 rustfmt/clippy；rustup 对仓库目录的
+# rust-toolchain.toml 覆盖优先于 `rustup default`，所以 CI 实际编译/检查用的就是
+# 本文件钉的版本。esp 档走 `cargo +esp` 显式工具链，不受本文件影响。
+[toolchain]
+channel = "1.100.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

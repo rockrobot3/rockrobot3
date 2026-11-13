@@ -13,9 +13,9 @@
 ### 1.1 仓库追踪策略（默认忽略所有＋白名单）
 
 - `.gitignore` 以 `*` 默认忽略一切，只白名单放行 `.gitignore`/`README*`/`LICENSE`/
-  `.dockerignore`/`.cargo/`/`.github/`/`docs/`/`base/`/`modules/`/`contracts/`/
-  `profiles/`/`hardware/`/`tools/`——**新增顶层路径必须先来 `.gitignore` 挂白名单**，
-  否则文件根本不会出现在 `git status`，静默丢件
+  `.dockerignore`/`.cargo/`/`.github/`/`rust-toolchain.toml`/`docs/`/`base/`/`modules/`/
+  `contracts/`/`profiles/`/`hardware/`/`tools/`——**新增顶层路径必须先来 `.gitignore`
+  挂白名单**，否则文件根本不会出现在 `git status`，静默丢件
 - **产物面一律不追踪**（白名单目录内的再排除）：`target/`/`build/`/`__pycache__/`/
   `*.wav`/`*.log`/`*.tmp`/`*.bak`/`*.swp`/`.DS_Store`/`.trae/`——源码区严禁任何
   编译/集成/构建产物（铁律），构建统一走源码区外（P0-5：`target-dir=/tmp/rr3-build`）
