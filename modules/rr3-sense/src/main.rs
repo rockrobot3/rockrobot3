@@ -1,19 +1,22 @@
 //! rr3-sense 入口（0.0.8 W-A 批3 拆分，ADR-0017 五层表装配层，≤80 行）。
 //! 装配只做启动编排：SURFACE 自述 → manifest 路径 → [`rr3mod::bootstrap`]（收敛
 //! 序列前四段）→ config 就绪行 → 音频源探活（[`boot`]）→ Dispatcher 构造 →
-//! [`rr3mod::serve`] 主循环。机制在 [`dispatch`]（采集拍＋门控/反射环/判向窗三
-//! 切片＋三臂点名分发），协议面在 [`rpc`]（载荷组装＋dump/ops 快照体），原子件
-//! 在 `atoms/` 原位不动（capture/env/imu/vad 四件）；三份清单功能守恒零改动。
+//! [`rr3mod::serve`] 主循环。机制在 [`dispatch`]（采集拍编排＋反射环＋三臂点名
+//! 分发），门控与判向窗两个纯机制切片各自成件（[`tts_gate`]/[`doa_ring`]），
+//! 协议面在 [`rpc`]（载荷组装＋dump/ops 快照体），原子件在 `atoms/` 原位不动
+//! （capture/env/imu/vad 四件）；三份清单功能守恒零改动。
 
 mod boot;
 #[path = "../atoms/capture/capture.rs"]
 mod capture;
 mod dispatch;
+mod doa_ring;
 #[path = "../atoms/env/env.rs"]
 mod env;
 #[path = "../atoms/imu/imu.rs"]
 mod imu;
 mod rpc;
+mod tts_gate;
 #[path = "../atoms/vad/vad.rs"]
 mod vad;
 
