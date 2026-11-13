@@ -1,0 +1,9 @@
+# ⑭ 源文件行数门低水位基线（2026-11-13 立规：每个 .rs <600 行）。
+# 语义：git ls-files 追踪的 .rs 中，行数 ≥600 的文件数不得超过本值——
+#   count > 本值即 FAIL（新增长文件）；count 下降须同批下调本值（只降不升）；
+#   文件缺/无整数计数即 FAIL（fail-closed）。
+# 处置纪律：不是"把长文件塞进白名单"，而是按职责结构化拆分后同批减一。
+# 初值 58 = 立规时的存量盘点（2026-11-13，含测试文件；最大三件：
+#   rr-registry/tests/contract.rs 2632、rr3-interact/src/panel/server.rs 2079、
+#   rrd/src/registry/tests.rs 1917）。
+58

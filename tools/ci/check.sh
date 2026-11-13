@@ -1632,6 +1632,39 @@ if [ "$gs_fail" -ne 0 ]; then
   fail=1
 fi
 
+# ⑭ 源文件行数门（2026-11-13 立规）：每个 .rs 源文件必须 <600 行。
+# 存量超标文件先立低水位基线 tools/ci/gate-lines-baseline.txt（只降不升）：
+# 新增超标文件即红；拆完一个就同批下调基线。判据面 = git ls-files（追踪面即
+# 执法面），测试文件同样计入——"测试代码不是代码"是自欺。
+step "⑭ 源文件行数门（.rs ≥600 行违规，基线只降不升）"
+lines_base_file="tools/ci/gate-lines-baseline.txt"
+if [ ! -f "$lines_base_file" ]; then
+  printf 'FAIL  ⑭ 缺基线文件 %s（fail-closed）\n' "$lines_base_file"
+  fail=1
+else
+  base_n="$(grep -E '^[0-9]+$' "$lines_base_file" | head -1)"
+  if [ -z "$base_n" ]; then
+    printf 'FAIL  ⑭ 基线文件无整数计数（fail-closed）\n'
+    fail=1
+  else
+    over="$(git -c core.quotepath=false ls-files '*.rs' | while IFS= read -r f; do
+      n="$(wc -l < "$f")"
+      [ "$n" -ge 600 ] && printf '%s\t%s\n' "$n" "$f"
+    done | sort -rn)"
+    cnt="$(printf '%s\n' "$over" | grep -c . || true)"
+    printf '⑭ 超标文件 %s 个（上限 %s，阈值 600 行）\n' "$cnt" "$base_n"
+    if [ "$cnt" -gt "$base_n" ]; then
+      printf '%s\n' "$over" | head -10 | sed 's/^/  超标  /'
+      printf 'FAIL  ⑭ 超标文件数回涨（%s > %s）：先拆再评审，不许直接上调基线\n' "$cnt" "$base_n"
+      fail=1
+    elif [ "$cnt" -lt "$base_n" ]; then
+      printf 'PASS  ⑭ 超标 %s < 上限 %s（拆完同批下调 %s）\n' "$cnt" "$base_n" "$lines_base_file"
+    else
+      printf 'PASS  ⑭ 超标 %s = 上限 %s（只降不升）\n' "$cnt" "$base_n"
+    fi
+  fi
+fi
+
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then
   echo "所有规约检查通过"
