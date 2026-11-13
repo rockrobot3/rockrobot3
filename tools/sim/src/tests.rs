@@ -1,5 +1,7 @@
 //! 仿真入口单测：drill 报告与链/装配判据在主板面的形状。
 
+use super::drill::*;
+
 fn v(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| s.to_string()).collect()
 }
