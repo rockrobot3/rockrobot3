@@ -138,7 +138,7 @@ fn config_parse_doa_section_defaults_full_and_rejects() {
 /// config.toml」前提已消灭，登记不改）。
 #[test]
 fn config_toml_matches_registered_values() {
-    let text = include_str!("../config.toml");
+    let text = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/config.toml"));
     let cfg = rr3_sense_cfg_parse(text).unwrap();
     assert_eq!(cfg.audio.sample_rate, 16000);
     assert_eq!(cfg.audio.channels, 1);

@@ -3,8 +3,14 @@
 use super::*;
 use crate::slots::{rr3_slot_parse, Rr3SlotTable};
 
-// include_str! 以本文件所在目录（src/）为基准：src → rr-registry → runtime → base → 仓库根
-const CONTRACT: &str = include_str!("../../../../contracts/slots.toml");
+// 仓内文件一律以 CARGO_MANIFEST_DIR 定位（模块目录搬家不再改相对层级）。
+macro_rules! repo_file {
+    ($p:literal) => {
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../", $p))
+    };
+}
+
+const CONTRACT: &str = repo_file!("contracts/slots.toml");
 
 fn slots() -> Rr3SlotTable {
     rr3_slot_parse(CONTRACT)
@@ -131,11 +137,11 @@ slots = ["audio.vad"]
 }
 
 /// 批B③ 打样件钉死：rr3-power 的两份 atom.toml 必须过契约 + 查册门 + 板无关断言
-/// （打样件漂移当场红；include_str! 相对 src/：src → rr-registry → runtime → base → 仓根）
+/// （打样件漂移当场红；路径经 CARGO_MANIFEST_DIR 钉到仓根，与模块层级无关）
 #[test]
 fn power_pilot_atoms_stay_compliant() {
-    let battery = include_str!("../../../../modules/rr3-power/atoms/battery/atom.toml");
-    let charger = include_str!("../../../../modules/rr3-power/atoms/charger/atom.toml");
+    let battery = repo_file!("modules/rr3-power/atoms/battery/atom.toml");
+    let charger = repo_file!("modules/rr3-power/atoms/charger/atom.toml");
     let errs = rr3_atom_chk(battery, &slots());
     assert!(errs.is_empty(), "battery 打样件漂移: {errs:?}");
     let errs = rr3_atom_chk(charger, &slots());
@@ -146,10 +152,10 @@ fn power_pilot_atoms_stay_compliant() {
 /// （重铺件漂移当场红；每格一件由校验器跨字段规则把守）
 #[test]
 fn sense_relaid_atoms_stay_compliant() {
-    let capture = include_str!("../../../../modules/rr3-sense/atoms/capture/atom.toml");
-    let vad = include_str!("../../../../modules/rr3-sense/atoms/vad/atom.toml");
-    let env = include_str!("../../../../modules/rr3-sense/atoms/env/atom.toml");
-    let imu = include_str!("../../../../modules/rr3-sense/atoms/imu/atom.toml");
+    let capture = repo_file!("modules/rr3-sense/atoms/capture/atom.toml");
+    let vad = repo_file!("modules/rr3-sense/atoms/vad/atom.toml");
+    let env = repo_file!("modules/rr3-sense/atoms/env/atom.toml");
+    let imu = repo_file!("modules/rr3-sense/atoms/imu/atom.toml");
     for (name, text) in [
         ("capture", capture),
         ("vad", vad),
@@ -165,9 +171,9 @@ fn sense_relaid_atoms_stay_compliant() {
 /// （重铺件漂移当场红；每格一件由校验器跨字段规则把守）
 #[test]
 fn act_relaid_atoms_stay_compliant() {
-    let servo = include_str!("../../../../modules/rr3-act/atoms/servo/atom.toml");
-    let led = include_str!("../../../../modules/rr3-act/atoms/led/atom.toml");
-    let relay = include_str!("../../../../modules/rr3-act/atoms/relay/atom.toml");
+    let servo = repo_file!("modules/rr3-act/atoms/servo/atom.toml");
+    let led = repo_file!("modules/rr3-act/atoms/led/atom.toml");
+    let relay = repo_file!("modules/rr3-act/atoms/relay/atom.toml");
     for (name, text) in [("servo", servo), ("led", led), ("relay", relay)] {
         let errs = rr3_atom_chk(text, &slots());
         assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
@@ -178,8 +184,8 @@ fn act_relaid_atoms_stay_compliant() {
 /// （重铺件漂移当场红；每格一件由校验器跨字段规则把守）
 #[test]
 fn interact_relaid_atoms_stay_compliant() {
-    let face = include_str!("../../../../modules/rr3-interact/atoms/face/atom.toml");
-    let player = include_str!("../../../../modules/rr3-interact/atoms/player/atom.toml");
+    let face = repo_file!("modules/rr3-interact/atoms/face/atom.toml");
+    let player = repo_file!("modules/rr3-interact/atoms/player/atom.toml");
     for (name, text) in [("face", face), ("player", player)] {
         let errs = rr3_atom_chk(text, &slots());
         assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
@@ -190,8 +196,8 @@ fn interact_relaid_atoms_stay_compliant() {
 /// （重铺件漂移当场红；每格一件由校验器跨字段规则把守）
 #[test]
 fn connect_relaid_atoms_stay_compliant() {
-    let wifi = include_str!("../../../../modules/rr3-connect/atoms/wifi/atom.toml");
-    let bt = include_str!("../../../../modules/rr3-connect/atoms/bt/atom.toml");
+    let wifi = repo_file!("modules/rr3-connect/atoms/wifi/atom.toml");
+    let bt = repo_file!("modules/rr3-connect/atoms/bt/atom.toml");
     for (name, text) in [("wifi", wifi), ("bt", bt)] {
         let errs = rr3_atom_chk(text, &slots());
         assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
@@ -203,10 +209,10 @@ fn connect_relaid_atoms_stay_compliant() {
 /// 拆分随 ADR-0016 迁移收敛；重铺件漂移当场红）
 #[test]
 fn brain_relaid_atoms_stay_compliant() {
-    let dialog = include_str!("../../../../modules/rr3-brain/atoms/dialog/atom.toml");
-    let asr = include_str!("../../../../modules/rr3-brain/atoms/asr/atom.toml");
-    let llm = include_str!("../../../../modules/rr3-brain/atoms/llm/atom.toml");
-    let tts = include_str!("../../../../modules/rr3-brain/atoms/tts/atom.toml");
+    let dialog = repo_file!("modules/rr3-brain/atoms/dialog/atom.toml");
+    let asr = repo_file!("modules/rr3-brain/atoms/asr/atom.toml");
+    let llm = repo_file!("modules/rr3-brain/atoms/llm/atom.toml");
+    let tts = repo_file!("modules/rr3-brain/atoms/tts/atom.toml");
     for (name, text) in [("dialog", dialog), ("asr", asr), ("llm", llm), ("tts", tts)] {
         let errs = rr3_atom_chk(text, &slots());
         assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
