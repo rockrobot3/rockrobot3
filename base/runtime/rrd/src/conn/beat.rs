@@ -90,10 +90,7 @@ fn rr3_ctr_flush(
 
 /// 是否满足落盘前提：确有变化且有落盘路径。
 fn rr3_ctr_ready(changed: bool, ctx: &Rr3ConnCtx) -> bool {
-    if !changed || ctx.counters_path.is_none() {
-        return false;
-    }
-    true
+    changed && ctx.counters_path.is_some()
 }
 
 /// `registered → running` 的唯一升级时刻：广播 running + 依赖恢复传播。
