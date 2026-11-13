@@ -34,7 +34,14 @@ jobs:
       - name: 安装 Windows target（⑨-y 门前置）
         run: rustup target add x86_64-pc-windows-msvc
       - name: 规约门禁检查（check.sh 全步，含 ⑫ 质量度量）
-        run: bash tools/ci/check.sh
+        run: |
+          # 失败把日志尾部写成注解：匿名日志接口 403 时，check-run annotations
+          # 是唯一公开可读的归因通道（与 esp 五门同款）。
+          set -o pipefail
+          if ! bash tools/ci/check.sh 2>&1 | tee /tmp/gate.log; then
+            tail -c 6000 /tmp/gate.log | sed 's/^/::error title=check.sh::/'
+            exit 1
+          fi
 
   lint:
     runs-on: ubuntu-latest
