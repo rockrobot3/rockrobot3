@@ -570,7 +570,9 @@ stdout 接成了 `Stdio::null()`，实测 45 处留痕按设计不可达；**202
 （⑥/⑦ 两步随 0.0.5 批E 接入、⑧ 三门随 0.0.5 批K 接入，`check.sh` 由七步经九步扩十步；
 步序与 PASS 条数的逐批台账见本文件下方登记条目）：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
-①b 把 workspace 的 237 条（Windows，推算）/294 条（Unix）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
+①b 把 workspace 全部测试跑一遍（2026-11-12 实测 757 条 passed；旧记的 294 条是扩批前
+的存量，数字只在本行维护，不抄第二处；Windows 面未实测、不作推算），②/③ 只是其中被
+点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
 `tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
 没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
