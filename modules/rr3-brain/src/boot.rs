@@ -188,7 +188,7 @@ fn rr3_wake_phrases(v: &Value) -> Result<Vec<String>, String> {
         .ok_or("config [rr3-brain.wake] phrases 须字符串数组")?;
     let out: Vec<String> = arr
         .iter()
-        .filter_map(|item| rr3_wake_phrase(item).transpose())
+        .filter_map(|item| rr3_wake_item(item).transpose())
         .collect::<Result<Vec<String>, String>>()?;
     if out.is_empty() {
         return Err("config [rr3-brain.wake] phrases 须至少一个非空短语".to_string());
@@ -197,7 +197,7 @@ fn rr3_wake_phrases(v: &Value) -> Result<Vec<String>, String> {
 }
 
 /// 单项：必为字符串，trim 后空返回 None（空项跳过）。
-fn rr3_wake_phrase(item: &Value) -> Result<Option<String>, String> {
+fn rr3_wake_item(item: &Value) -> Result<Option<String>, String> {
     let s = item
         .as_str()
         .ok_or("config [rr3-brain.wake] phrases 项须字符串")?
