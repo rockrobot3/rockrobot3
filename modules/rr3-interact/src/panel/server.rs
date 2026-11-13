@@ -546,5 +546,5 @@ pub use selftest::{
     RR3_SELFTEST_WIRING_EXPECTS,
 };
 #[cfg(test)]
-use serve::{rr3_accept_loop, rr3_panel_handle, rr3_panel_loopback};
-pub use serve::{rr3_panel_addr, rr3_panel_serve, spawn_host, Rr3PanelShared};
+use serve::{rr3_accept_loop, rr3_fake_ctl_rrd, rr3_panel_handle, rr3_panel_loopback};
+pub use serve::{spawn_host, Rr3PanelShared};

@@ -217,7 +217,7 @@ fn rr3_reply_send(stream: &mut TcpStream, reply: &Rr3PanelReply) {
 /// 假 rrd 的 ctl 应答器（单测夹具）：accept 一条连接，读一帧，按预置的**完整
 /// JSON-RPC 应答**（result 或 error 信封，测试自组——与 rrd 真实两态同形）回一帧。
 #[cfg(test)]
-fn rr3_fake_ctl_rrd(
+pub(super) fn rr3_fake_ctl_rrd(
     listener: std::os::unix::net::UnixListener,
     rpc: Value,
 ) -> std::thread::JoinHandle<()> {
