@@ -155,7 +155,7 @@ jobs:
           . "$HOME/export-esp.sh"
           set -o pipefail
           if ! bash tools/ci/esp32-periph-base-check.sh 2>&1 | tee /tmp/g.log; then
-            errs=$(grep -iE "error(\[|:)|failed|错误" /tmp/g.log | tail -4 | tr '\n' ' ')
+            errs=$(grep -iE "error(\[|:)|failed|错误|FAIL" /tmp/g.log | tail -4 | tr '\n' ' ')
             echo "::error title=esp32-periph-base::${errs:0:900}"
             exit 1
           fi
@@ -165,7 +165,7 @@ jobs:
           . "$HOME/export-esp.sh"
           set -o pipefail
           if ! bash tools/ci/esp32s3-periph-base-check.sh 2>&1 | tee /tmp/g.log; then
-            errs=$(grep -iE "error(\[|:)|failed|错误" /tmp/g.log | tail -4 | tr '\n' ' ')
+            errs=$(grep -iE "error(\[|:)|failed|错误|FAIL" /tmp/g.log | tail -4 | tr '\n' ' ')
             echo "::error title=esp32s3-periph-base::${errs:0:900}"
             exit 1
           fi
@@ -175,7 +175,7 @@ jobs:
           . "$HOME/export-esp.sh"
           set -o pipefail
           if ! bash tools/ci/esp-uart-echo-check.sh 2>&1 | tee /tmp/g.log; then
-            errs=$(grep -iE "error(\[|:)|failed|错误" /tmp/g.log | tail -4 | tr '\n' ' ')
+            errs=$(grep -iE "error(\[|:)|failed|错误|FAIL" /tmp/g.log | tail -4 | tr '\n' ' ')
             echo "::error title=esp-uart-echo::${errs:0:900}"
             exit 1
           fi
@@ -185,7 +185,7 @@ jobs:
           . "$HOME/export-esp.sh"
           set -o pipefail
           if ! bash tools/ci/espidf-std-check.sh 2>&1 | tee /tmp/g.log; then
-            errs=$(grep -iE "error(\[|:)|failed|错误" /tmp/g.log | tail -4 | tr '\n' ' ')
+            errs=$(grep -iE "error(\[|:)|failed|错误|FAIL" /tmp/g.log | tail -4 | tr '\n' ' ')
             echo "::error title=espidf-std::${errs:0:900}"
             exit 1
           fi
@@ -195,7 +195,7 @@ jobs:
           . "$HOME/export-esp.sh"
           set -o pipefail
           if ! bash tools/ci/espidf-sentinel-check.sh 2>&1 | tee /tmp/g.log; then
-            errs=$(grep -iE "error(\[|:)|failed|错误" /tmp/g.log | tail -4 | tr '\n' ' ')
+            errs=$(grep -iE "error(\[|:)|failed|错误|FAIL" /tmp/g.log | tail -4 | tr '\n' ' ')
             echo "::error title=espidf-sentinel::${errs:0:900}"
             exit 1
           fi
@@ -205,7 +205,7 @@ jobs:
           . "$HOME/export-esp.sh"
           set -o pipefail
           if ! bash tools/ci/rr3-act-sense-espidf-check.sh 2>&1 | tee /tmp/g.log; then
-            errs=$(grep -iE "error(\[|:)|failed|错误" /tmp/g.log | tail -4 | tr '\n' ' ')
+            errs=$(grep -iE "error(\[|:)|failed|错误|FAIL" /tmp/g.log | tail -4 | tr '\n' ' ')
             echo "::error title=act-sense-espidf::${errs:0:900}"
             exit 1
           fi

@@ -1,6 +1,7 @@
 // 死亡/收尸/崩溃预算：与到期互斥收费、重注册后的预算延续。
 use super::*;
 
+/// fanout：跳过发起者；对端已 drop 只是少计，不 panic
 #[test]
 fn fanout_skips_sender_and_survives_dropped_peer() {
     let mut r = RrdRegistry::new(1000);
@@ -416,6 +417,3 @@ fn providers_of(pairs: &[(&str, &[&str])]) -> BTreeMap<String, BTreeSet<String>>
     }
     m
 }
-
-/// 唯一提供者死了（conn EOF 路）→ 依赖它的 Running 模块置 Degraded；
-/// 心跳只续命不升级（Kept），降级不被一颗心跳抹平

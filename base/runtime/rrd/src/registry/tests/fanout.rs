@@ -331,5 +331,3 @@ fn publish_deny_display_distinguishes_the_three_layers() {
         "未注册主题 rr3-sima/x/state，拒绝发布"
     );
 }
-
-/// 同名在册必须拒，且不留影子条目

@@ -1,6 +1,12 @@
 // 发布归属：越权前缀、运行期冒充、保留命名空间、拒发布计数。
 use super::*;
 
+/// 归属判定的**最后一道**看的是主题集里登记的 owner，而不是主题串的首段：
+/// 首段相等只可能来自"表没被 `rr3_topic_check` 复验过"（check 强制首段 == owner，
+/// `rr-registry/src/topics.rs` 的 `rr3_topic_check`），而那条前置只在
+/// `rr3_topics_load` 的装载路径上成立。`rr3_topic_parse` 是 public，
+/// 任何绕开 check 造出来的表都可能带着"首段是 rr3-sima、owner 登记的是 rr3-simb"的条目。
+/// 故本用例**刻意不用** `topic_set()`（它 assert 过 check，结构上造不出这张表）。
 #[test]
 fn publish_check_uses_the_registered_owner_not_just_the_first_segment() {
     let set = rr_registry::rr3_topic_parse(
@@ -190,5 +196,3 @@ fn never_policy_never_restarts() {
     assert_eq!(r.rr3_reg_death("rr3-simb", false, 600).rr3_plan(), None);
     assert_eq!(r.rr3_reg_snapshot()[0].2, Rr3Phase::Failed);
 }
-
-/// 运维计数聚合（0.0.4 批B）：模块前缀归并、同键累加、空拍不算变化
