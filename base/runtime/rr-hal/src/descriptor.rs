@@ -67,6 +67,10 @@ pub struct Rr3HalBindings {
     pub i2c_bus: Option<u32>,
     /// INA219 从地址（7-bit，`0x` 前缀十六进制；BOM #5 参考机 = 0x40）
     pub ina219_addr: Option<u8>,
+    /// INA219 分流电阻（毫欧，装配事实；缺 = 不校准、电流面不可信）
+    pub ina219_shunt_mohm: Option<u32>,
+    /// INA219 电流 LSB（微安/位，量程策略；与分流电阻两键齐备才校准）
+    pub ina219_ilsb_ua: Option<u32>,
     /// NetworkManager 链路读数的接口名（参考机 runbook 件 4 = wlan0）
     pub link_ifname: Option<String>,
     /// spidev 设备路径（显示面 MAX7219；链④真件档，参考机 = /dev/spidev0.0）
@@ -116,8 +120,9 @@ fn rr3_non_empty(s: &str) -> Option<String> {
 /// 描述符键 → 落位函数（键位真值单点；`false` = 取值不认）。
 type Rr3BindSet = fn(&mut Rr3HalBindings, &str) -> bool;
 
-/// 在册键表：非空串域 4 + 索引数域 6 + GPIO 号域 10 + 两种特殊值域。
-const RR3_BIND_SETS: [(&str, Rr3BindSet); 22] = [
+/// 在册键表：非空串域 4 + 索引数域 6 + GPIO 号域 10 + 两种特殊值域
+/// + INA219 分流两键（正整数域）。
+const RR3_BIND_SETS: [(&str, Rr3BindSet); 24] = [
     ("alsa_device", |b, s| {
         rr3_non_empty(s).map(|v| b.alsa_device = Some(v)).is_some()
     }),
@@ -213,6 +218,18 @@ const RR3_BIND_SETS: [(&str, Rr3BindSet); 22] = [
         let ok = v.is_some();
         b.ina219_addr = v;
         ok
+    }),
+    ("ina219_shunt_mohm", |b, s| {
+        rr3_pwm_index_parse(s)
+            .filter(|v| *v > 0)
+            .map(|v| b.ina219_shunt_mohm = Some(v))
+            .is_some()
+    }),
+    ("ina219_ilsb_ua", |b, s| {
+        rr3_pwm_index_parse(s)
+            .filter(|v| *v > 0)
+            .map(|v| b.ina219_ilsb_ua = Some(v))
+            .is_some()
     }),
 ];
 
@@ -339,6 +356,16 @@ pub fn rr3_env_override_map() -> BTreeMap<String, String> {
         &mut m,
         "ina219_addr",
         crate::backend::RR3_HAL_INA219_ADDR_ENV,
+    );
+    put(
+        &mut m,
+        "ina219_shunt_mohm",
+        crate::backend::RR3_HAL_INA219_SHUNT_ENV,
+    );
+    put(
+        &mut m,
+        "ina219_ilsb_ua",
+        crate::backend::RR3_HAL_INA219_ILSB_ENV,
     );
     put(
         &mut m,

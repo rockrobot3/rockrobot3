@@ -180,7 +180,7 @@ impl Rr3Probe for Rr3LinuxProbe {
     /// L-14 器件级探测：I2C 格位 + (bus, addr) 在册 → 在位 = 总线节点在（前置
     /// 条件，收窄到该具体总线）**且** sysfs 器件节点在（`devices/<bus>-<addr4>`）。
     /// 器件节点不存在 = 内核没为该地址注册从机 = 总线在、器件不在 → 缺。
-    /// 寄存器 ID 读回比对（INA219 0x00 = 0x2268）需 i2c-dev 事务、会碰器件，
+    /// 寄存器 ID 读回比对（INA219 0x00 = 0x399F）需 i2c-dev 事务、会碰器件，
     /// 归器件与真板批（status 敞口在案）——本判据不冒充它是读回。
     fn rr3_probe_slot_bound(&self, slot: &str, bus: Option<u32>, addr: Option<&str>) -> bool {
         match (rr3_slot_probe_face(slot), bus, addr) {

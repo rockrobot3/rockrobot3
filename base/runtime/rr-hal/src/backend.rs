@@ -93,6 +93,15 @@ pub const RR3_HAL_I2C_BUS_ENV: &str = "RR3_HAL_I2C_BUS";
 /// BOM #5 定案档 0x40 在 profiles）。
 pub const RR3_HAL_INA219_ADDR_ENV: &str = "RR3_HAL_INA219_ADDR";
 
+/// linux I2C 电池读数的 INA219 分流电阻（毫欧正整数）。应急覆盖：描述符键
+/// `ina219_shunt_mohm` 同域。与 LSB 键两件齐备才写校准（0x05）；缺一即电流面
+/// 不可信（charging 恒 false，见 [`crate::linux_power`]）。
+pub const RR3_HAL_INA219_SHUNT_ENV: &str = "RR3_HAL_INA219_SHUNT_MOHM";
+
+/// linux I2C 电池读数的 INA219 电流 LSB（微安/位正整数）。应急覆盖：描述符键
+/// `ina219_ilsb_ua` 同域（量程策略：LSB = 最大预期电流 / 32768）。
+pub const RR3_HAL_INA219_ILSB_ENV: &str = "RR3_HAL_INA219_ILSB_UA";
+
 /// linux（NetworkManager）链路读数的接口名键（任意非空串）。应急覆盖：描述符键
 /// `link_ifname` 同域；都没给 → 链路面占位显式回错（fail-closed，runbook 件 4
 /// 参考机 wlan0 在 profiles）。
@@ -765,6 +774,22 @@ fn rr3_display_esp32() -> (Box<dyn crate::Rr3Display>, &'static str) {
     }
 }
 
+/// 电源面分流校准参数：两键齐备才给 `Some`；只给一半时点名（电流面保持
+/// 不可信——不拿半个配置去校准，"没校过"与"没在充"不许混）。
+#[cfg(target_os = "linux")]
+fn rr3_ina_cal(b: &crate::descriptor::Rr3HalBindings) -> Option<crate::linux_power::Rr3InaCal> {
+    match (b.ina219_shunt_mohm, b.ina219_ilsb_ua) {
+        (Some(r_mohm), Some(i_lsb_ua)) => Some(crate::linux_power::Rr3InaCal { r_mohm, i_lsb_ua }),
+        (None, None) => None,
+        (shunt, ilsb) => {
+            eprintln!(
+                "rr-hal: INA219 分流校准参数只给了一半（shunt_mohm={shunt:?}, ilsb_ua={ilsb:?}）——电流面不校准，charging 恒 false"
+            );
+            None
+        }
+    }
+}
+
 /// 按环境选电源读数面（与 [`rr3_audio_source`] 同一套规则）。linux 走
 /// INA219 I2C 后端（[`crate::linux_power`]，R18），总线/地址来自生效绑定
 /// （描述符 `i2c_bus`/`ina219_addr`，`RR3_HAL_*` env 应急覆盖）；键缺失或合成
@@ -776,12 +801,14 @@ pub fn rr3_hal_power() -> (Box<dyn Rr3Power>, &'static str) {
             #[cfg(target_os = "linux")]
             return rr3_bindings_eff_log("电源读数")
                 .and_then(|b| {
+                    let cal = rr3_ina_cal(&b);
                     b.i2c_bus.zip(b.ina219_addr).map(|(bus, addr)| {
                         (
                             Box::new(crate::linux_power::Rr3LinuxIna219::rr3_linux_power_new(
                                 std::path::Path::new(crate::linux_power::RR3_I2C_DEV_ROOT_DEFAULT),
                                 bus,
                                 addr,
+                                cal,
                             )) as Box<dyn Rr3Power>,
                             RR3_BACKEND_LINUX,
                         )
