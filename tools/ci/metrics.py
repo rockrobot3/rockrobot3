@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# 质量度量门（B11，规约门第 ⑫ 步）：重复率 / 圈复杂度 / 生产函数名长度。
+# 质量度量门（B11，规约门第 ⑫ 步）：重复率 / 圈复杂度 / 生产 panic 落点 / 函数名长度。
 #
 # 判据与口径（真值单点在本文件，check.sh 只调它，不重复实现）：
 # - 重复率：**硬门槛 3%**。相邻 W=10 条"有效行"滑窗取哈希，出现 ≥2 次的窗口
@@ -11,6 +11,9 @@
 # - 圈复杂度：均值与单函数最大值按 `tools/ci/metrics-baseline.json` **钉基线、
 #   只降不升**（与仓内红账基线门同款纪律）。目标均值 2.5 尚未达到，红账在账；
 #   基线只能随重构下调，上调须在评审里说明理由。
+# - 生产 panic 落点：生产面 `.unwrap()` / `.expect(` 计数（测试面按上面的同一口径
+#   截除），基线 71、**只钉不回涨**。它不是"越少越好"的绝对值判据——启动期
+#   fail-fast 与外键自证式 expect 是合理形态；这条钉的是"新增 panic 必须被看见"。
 # - 生产函数名：>20 字节计红；FFI 外部符号（AudioQueue*，名字由平台 ABI 决定）
 #   豁免。基线 = 存量 14 个 rr3_reg_* 域 API（21–25B），只降不升——新代码必须
 #   ≤20B。
@@ -254,6 +257,7 @@ def measure(root):
     total_lines = 0
     ccs = []
     long_names = []
+    unwrap_sites = 0
     for rel in rust_files(root):
         if "/tests/" in rel or rel.startswith("tests/") or os.path.basename(rel) == "tests.rs":
             continue
@@ -267,6 +271,9 @@ def measure(root):
         if "@generated" in head or "自动生成" in raw[:400]:
             continue
         src = production_part(strip_code(raw))
+        # 生产面 panic 落点（unwrap/expect）：测试面已被 production_part 截掉。
+        # 此项不判"越少越好"的绝对值，只钉"不回涨"——新增落点必须同批给理由。
+        unwrap_sites += len(re.findall(r"\.unwrap\(\)|\.expect\(", src))
         for name, body in functions(src):
             ccs.append(cyclomatic(body))
             if len(name.encode()) > NAME_MAX and not name.startswith(FFI_PREFIXES):
@@ -282,7 +289,7 @@ def measure(root):
             for rel, i in occ:
                 for k in range(WINDOW):
                     dup.add((rel, i + k))
-    return total_lines, len(dup), ccs, long_names
+    return total_lines, len(dup), ccs, long_names, unwrap_sites
 
 
 def load_baseline(root):
@@ -294,7 +301,7 @@ def load_baseline(root):
 def main():
     root = repo_root()
     base = load_baseline(root)
-    total, dup_lines, ccs, long_names = measure(root)
+    total, dup_lines, ccs, long_names, unwrap_sites = measure(root)
     if total == 0 or not ccs:
         print("FAIL  ⑫ 度量面为空（git ls-files 无生产 Rust 行）", file=sys.stderr)
         return 1
@@ -319,6 +326,14 @@ def main():
         print(f"FAIL  ⑫ 圈复杂度回归：均值 {mean_cc}（基线 {base['cc_mean_max']:.2f}）、"
               f"最大 {max_cc}（基线 {base['cc_max_fn']}）——拆函数或下调基线须评审",
               file=sys.stderr)
+        ok = False
+
+    if unwrap_sites <= base["unwrap_max"]:
+        print(f"PASS  ⑫ 生产面 panic 落点 {unwrap_sites} ≤ 基线 {base['unwrap_max']}"
+              f"（unwrap/expect；测试面已截除，只钉不回涨）")
+    else:
+        print(f"FAIL  ⑫ 生产面 panic 落点回涨：{unwrap_sites} > 基线 {base['unwrap_max']}"
+              f"——新增落点须同批给理由或改成 Result", file=sys.stderr)
         ok = False
 
     if len(long_names) <= base["long_names_max"]:

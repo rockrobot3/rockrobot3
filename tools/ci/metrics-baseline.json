@@ -2,5 +2,6 @@
   "dup_max_pct": 3.0,
   "cc_mean_max": 2.5,
   "cc_max_fn": 13,
-  "long_names_max": 0
+  "long_names_max": 0,
+  "unwrap_max": 71
 }
