@@ -112,8 +112,8 @@ loop_hz = 1000
 saturate_notice_ms = 500
 "#;
 
-/// 装机布局夹具用 support 的共享 [`support::E2eRoot`]（e2e_power/e2e_connect 同款）；
-/// 轴档案的 stage 在用例体内紧跟 `rr3_write_profile` 落盘。
+// 装机布局夹具用 support 的共享 [`support::E2eRoot`]（e2e_power/e2e_connect 同款）；
+// 轴档案的 stage 在用例体内紧跟 `rr3_write_profile` 落盘。
 
 #[test]
 fn act_module_full_face_end_to_end() {

@@ -103,7 +103,6 @@ watchdog_timeout_ms = 500
 mod beat;
 mod death;
 mod degrade;
-/// 影子统计：按 subscribes 只记账"本应过滤"的连接，不改变全量投递
 
 /// 小测试辅助：主题集
 fn topic_set(entries: &[(&str, &str)]) -> Rr3TopicSet {
