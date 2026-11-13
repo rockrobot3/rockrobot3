@@ -37,9 +37,13 @@ jobs:
         run: |
           # 失败把日志尾部写成注解：匿名日志接口 403 时，check-run annotations
           # 是唯一公开可读的归因通道（与 esp 五门同款）。
+          # 注解必须压成一行：GitHub 把多行 message 拆成逐行注解且每次只留 10 条，
+          # 多行尾部会丢掉真正的 FAIL 行（首版实测踩过）。
           set -o pipefail
           if ! bash tools/ci/check.sh 2>&1 | tee /tmp/gate.log; then
-            tail -c 6000 /tmp/gate.log | sed 's/^/::error title=check.sh::/'
+            fails=$(grep -E "^(FAIL|ERROR)" /tmp/gate.log | tail -6 | tr '\n' ' ')
+            echo "::error title=check.sh::${fails:0:900}"
+            grep -E "^(FAIL|ERROR)" /tmp/gate.log | tail -20
             exit 1
           fi
 
