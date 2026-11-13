@@ -7,11 +7,12 @@
 //! tts_pcm 流帧；其余订阅帧与本件无关径直忽略）；`on_rpc`＝dump/ops/list/兜底
 //! 三臂点名应答（兜底 Err 点名，serve 折 `{"error": …}` wire 等价）。
 //!
-//! 门控/反射环/判向窗三个纯机制切片随本层（自原 composite.rs 逐字迁）：门控吃
-//! tts_pcm 帧流外推静音窗（裁定②：订阅既有主题零新契约），反射环吃 onset 判向
-//! 换算 pan 目标（裁定①：快环落 sense，唯一持音频 conn 者），判向窗 ring 是双麦
-//! 链路的 TDOA 积累器（b3b：onset 时整窗回看交 capture::rr3_doa_fix）。策略量
-//! 全在 config（Rr3ReflexConfig 等），此处只有判定与算术。
+//! 门控/判向窗两个纯机制切片已各自成件（[`crate::tts_gate`]/[`crate::doa_ring`]，
+//! 批D1 迁出），本层只留反射环与编排：反射环吃 onset 判向换算 pan 目标（裁定①：
+//! 快环落 sense，唯一持音频 conn 者）；门控吃 tts_pcm 帧流外推静音窗（裁定②：
+//! 订阅既有主题零新契约）；判向窗 ring 是双麦链路的 TDOA 积累器（b3b：onset 时
+//! 整窗回看交 capture::rr3_doa_fix）。策略量全在 config（Rr3ReflexConfig 等），
+//! 此处只有判定与算术。
 //!
 //! 发布/读帧失败 Err 上抛致命：模块不装"活着"，死交给 supervisor 按
 //! restart_policy=always 重启（rrd 的进程语义）。
@@ -30,7 +31,9 @@ use serde_json::{json, Value};
 use crate::boot::Rr3SenseConfig;
 use crate::capture;
 use crate::capture::Rr3DoaFix;
+use crate::doa_ring::{rr3_ring_feed, Rr3DoaRing};
 use crate::rpc;
+use crate::tts_gate::Rr3TtsGate;
 use crate::vad::{self, Rr3VadEdge, Rr3VadState};
 
 /// 本模块 exposes 的唯一事务面主题（module.toml [rpc].exposes 同源）
@@ -499,13 +502,6 @@ fn rr3_sense_unknown(topic: &str) -> String {
     format!("rr3-sense 只 exposes {RR3_DUMP_TOPIC}/{RR3_OPS_LIST_TOPIC}{servo}，收到 {topic}")
 }
 
-/// 判向窗积累（未分配 ring = 单声道链路，跳过）。
-fn rr3_ring_feed(ring: Option<&mut Rr3DoaRing>, samples: &[i16]) {
-    if let Some(ring) = ring {
-        ring.rr3_ring_feed(samples);
-    }
-}
-
 /// 流级单声道化（R14 + 2026-10-31 实机订正）：`cfg.channels` 归 1、rate/bit_depth
 /// 不动、samples 收缩为**能量最高通道**（不平均——双麦平均下混实测梳状滤波，
 /// ASR 质量显著劣于单通道）；`channels <= 1` 时原样返回（零改动）。自 capture/
@@ -522,53 +518,6 @@ fn rr3_pcm_downmix(pcm: Rr3PcmStream) -> Rr3PcmStream {
             ..pcm.cfg
         },
         samples: capture::rr3_pcm_best_channel(&pcm.samples, pcm.cfg.channels),
-    }
-}
-
-/// TTS 回放的门控状态机：帧流（与上一帧间隔 > gap 判新一轮）累计 `ms`，
-/// 外推线 = 本轮首帧时刻 + 累计时长 + 尾窗。状态只进不外泄，
-/// [`Rr3TtsGate::rr3_tts_gate_open`] 是唯一读口。
-#[derive(Debug, Default)]
-struct Rr3TtsGate {
-    /// 本轮首帧时刻（外推线的锚点）
-    round_start: Option<Instant>,
-    /// 上一帧到达时刻（轮分隔判据）
-    last_frame_at: Option<Instant>,
-    /// 本轮累计时长（帧体 ms 直加——brain 侧 ms 由样点数导出，含尾块实算）
-    cum_ms: u64,
-    /// 门外推线：now ≤ 外推线即门开
-    deadline: Option<Instant>,
-}
-
-impl Rr3TtsGate {
-    /// 喂一帧 tts_pcm：轮分隔（与上一帧间隔 > `gap_ms` 重置累计）→ 累计 → 外推。
-    fn rr3_tts_gate_feed(&mut self, now: Instant, ms: u64, gap_ms: u64, tail_ms: u64) {
-        if Self::rr3_round_break(self.last_frame_at, now, gap_ms) {
-            self.round_start = Some(now);
-            self.cum_ms = 0;
-        }
-        self.last_frame_at = Some(now);
-        self.cum_ms = self.cum_ms.saturating_add(ms);
-        if let Some(start) = self.round_start {
-            // checked_add：Instant 端点溢出按"门长开"处理，不 panic（裸板口径）
-            self.deadline = start.checked_add(Duration::from_millis(self.cum_ms + tail_ms));
-        }
-    }
-
-    /// 轮分隔判据：从未收帧，或与上一帧间隔超 `gap_ms`，即新一轮。
-    fn rr3_round_break(last: Option<Instant>, now: Instant, gap_ms: u64) -> bool {
-        match last {
-            None => true,
-            Some(t) => now.duration_since(t) > Duration::from_millis(gap_ms),
-        }
-    }
-
-    /// 门开着吗（now ≤ 外推线）。从未收到帧 = 关。
-    fn rr3_tts_gate_open(&self, now: Instant) -> bool {
-        match self.deadline {
-            Some(d) => now <= d,
-            None => false,
-        }
     }
 }
 
@@ -657,53 +606,6 @@ impl Rr3FrameBuf {
     }
 }
 
-/// 判向窗环形缓冲（帧交错存储，与采集 samples 同形；主循环单线程读写）
-struct Rr3DoaRing {
-    buf: Vec<i16>,
-    ch: usize,
-    cap_frames: usize,
-    /// 下一写入帧位（模 cap_frames）
-    pos: usize,
-    /// 已积累帧数（≤ cap_frames）
-    have: usize,
-}
-
-impl Rr3DoaRing {
-    fn rr3_ring_new(cap_frames: usize, ch: usize) -> Self {
-        let ch = ch.max(1);
-        let cap_frames = cap_frames.max(1);
-        Self {
-            buf: vec![0i16; cap_frames * ch],
-            ch,
-            cap_frames,
-            pos: 0,
-            have: 0,
-        }
-    }
-
-    /// 推入一拍原始采样（帧交错）；不足一帧的余数丢弃（采集整帧纪律）
-    fn rr3_ring_feed(&mut self, samples: &[i16]) {
-        for frame in samples.chunks_exact(self.ch) {
-            let off = self.pos * self.ch;
-            self.buf[off..off + self.ch].copy_from_slice(frame);
-            self.pos = (self.pos + 1) % self.cap_frames;
-            self.have = (self.have + 1).min(self.cap_frames);
-        }
-    }
-
-    /// 线性化快照：最旧帧在前、最新帧在后（onset 时交判向机制）
-    fn rr3_ring_snapshot(&self) -> Vec<i16> {
-        if self.have < self.cap_frames {
-            return self.buf[..self.have * self.ch].to_vec();
-        }
-        let off = self.pos * self.ch;
-        let mut snap = Vec::with_capacity(self.buf.len());
-        snap.extend_from_slice(&self.buf[off..]);
-        snap.extend_from_slice(&self.buf[..off]);
-        snap
-    }
-}
-
 /// 舵机命令面（A9，桥单所有者）：args `{"pan":0..=180}` / `{"tilt":0..=180}`，
 /// 至少一键；逐轴推入持桥音频源的命令旁路（板侧执行前回执）。`cmd_tx` 缺位 =
 /// 本进程不是桥所有者（音频后端非 esp32）——fail-closed 点名拒，不另开 UART。
@@ -775,7 +677,6 @@ fn rr3_deg_cap(key: &str, n: u64) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capture::Rr3DoaBin;
 
     /// A9 舵机命令面：单轴门 + 非桥主 fail-closed（无 cmd_tx 不许另开 UART）。
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -821,42 +722,7 @@ mod tests {
         assert_eq!(rr3_pcm_downmix(one.clone()), one);
     }
 
-    // ---------- B批 b2：播放期门控与反射环用例 ----------
-
-    /// 门控三拍：帧到开门 → 尾窗外推到期关门 → 帧间隔超 gap 判新一轮重置累计。
-    #[test]
-    fn tts_gate_opens_expires_and_re_rounds_on_gap() {
-        let t0 = Instant::now();
-        let mut g = Rr3TtsGate::default();
-        assert!(!g.rr3_tts_gate_open(t0), "从未收到帧 = 门关");
-        g.rr3_tts_gate_feed(t0, 200, 500, 1000);
-        // deadline = t0 + 200 + 1000
-        assert!(g.rr3_tts_gate_open(t0));
-        assert!(g.rr3_tts_gate_open(t0 + Duration::from_millis(1200)));
-        assert!(!g.rr3_tts_gate_open(t0 + Duration::from_millis(1201)));
-        // 间隔 600ms > gap 500ms：新一轮，累计重置——新 deadline = t0.6 + 100 + 1000。
-        // t0+1.6s 在旧线（t0+1.2s）外本已关门，新线把它重新覆盖，即轮分隔生效的证据
-        g.rr3_tts_gate_feed(t0 + Duration::from_millis(600), 100, 500, 1000);
-        assert!(
-            g.rr3_tts_gate_open(t0 + Duration::from_millis(1600)),
-            "新轮外推线生效（旧线早已到期）"
-        );
-        assert!(g.rr3_tts_gate_open(t0 + Duration::from_millis(1700)));
-        assert!(!g.rr3_tts_gate_open(t0 + Duration::from_millis(1701)));
-    }
-
-    /// 同轮多帧：ms 逐帧直加（brain 侧尾块按实算），deadline 随累计外推。
-    #[test]
-    fn tts_gate_accumulates_ms_within_round() {
-        let t0 = Instant::now();
-        let mut g = Rr3TtsGate::default();
-        // 同轮三帧各 200ms、间隔 20ms（< gap 500）：deadline = t0 + 600 + 1000
-        g.rr3_tts_gate_feed(t0, 200, 500, 1000);
-        g.rr3_tts_gate_feed(t0 + Duration::from_millis(20), 200, 500, 1000);
-        g.rr3_tts_gate_feed(t0 + Duration::from_millis(40), 200, 500, 1000);
-        assert!(g.rr3_tts_gate_open(t0 + Duration::from_millis(1600)));
-        assert!(!g.rr3_tts_gate_open(t0 + Duration::from_millis(1601)));
-    }
+    // ---------- B批 b2：反射环用例 ----------
 
     /// 反射环全量判据：未启用 / 门开 / 死区内三路不转头；过判据的换算
     /// = 中位 90 + clamp(deg, ±30)，左右号直通、双端限幅。
@@ -894,75 +760,6 @@ mod tests {
         assert_eq!(
             rr3_reflex_nod_plan(90, -8, 500, 200, now).unwrap().lift_deg,
             82
-        );
-    }
-
-    // ---------- B批 b3b：判向窗 ring 用例 ----------
-
-    /// 判向窗 ring：未满窗快照只有已积累帧（原序）；满窗回绕后快照 = 最旧在前
-    /// 最新在后的线性化；不足一帧的余数丢弃（帧交错纪律）。
-    #[test]
-    fn doa_ring_accumulates_and_linearizes_snapshot() {
-        let mut ring = Rr3DoaRing::rr3_ring_new(4, 2);
-        ring.rr3_ring_feed(&[1, 2, 3, 4, 5, 6]);
-        assert_eq!(
-            ring.rr3_ring_snapshot(),
-            vec![1, 2, 3, 4, 5, 6],
-            "未满窗只回已积累帧"
-        );
-        // 再喂 2 帧共 5 帧：第 1 帧被挤掉，快照 = 帧2..帧5 原序（回绕线性化）
-        ring.rr3_ring_feed(&[7, 8, 9, 10]);
-        assert_eq!(
-            ring.rr3_ring_snapshot(),
-            vec![3, 4, 5, 6, 7, 8, 9, 10],
-            "回绕线性化"
-        );
-        let mut ring = Rr3DoaRing::rr3_ring_new(4, 2);
-        ring.rr3_ring_feed(&[1, 2, 3, 4, 9]);
-        assert_eq!(ring.rr3_ring_snapshot(), vec![1, 2, 3, 4], "余数丢弃");
-    }
-
-    /// ring → snapshot → 判向机制的组合件侧集成形状：τ=+4 声源在右、τ=−4 在左
-    /// （确定性宽带源与 mech 侧 golden 同构；此处只证管线通，算法逐位由 mech 钉）。
-    #[test]
-    fn doa_ring_snapshot_feeds_tdoa_pipeline() {
-        fn xs_next(x: &mut u32) -> i16 {
-            *x ^= *x << 13;
-            *x ^= *x >> 17;
-            *x ^= *x << 5;
-            ((*x as i32) >> 16) as i16
-        }
-        let cfg = capture::Rr3DoaCfg {
-            sample_rate_hz: 16000,
-            frame_ms: 20,
-            mic_baseline_mm: 150,
-            window_rms_min: 800,
-            bin_threshold_deg: 30,
-        };
-        let n = 3400usize;
-        let mut x = 0x1234_5678u32;
-        let u: Vec<i16> = (0..n + 4).map(|_| xs_next(&mut x)).collect();
-        // τ=+4：frame[0]=物理右麦领先（u[t+4] 相对 u[t] 左移 4 = 提前）→ 声源在右
-        let right: Vec<i16> = (0..n).flat_map(|t| [u[t + 4], u[t]]).collect();
-        let mut ring = Rr3DoaRing::rr3_ring_new(3200, 2);
-        ring.rr3_ring_feed(&right);
-        let snap = ring.rr3_ring_snapshot();
-        assert_eq!(snap.len(), 3200 * 2, "满窗快照 = 容量帧数×声道");
-        assert_eq!(
-            capture::rr3_doa_fix(&snap, 2, &cfg).unwrap().bin,
-            Rr3DoaBin::Right
-        );
-        // τ=−4：frame[1]=物理左麦领先 → 声源在左
-        let mut x = 0x1234_5678u32;
-        let u: Vec<i16> = (0..n + 4).map(|_| xs_next(&mut x)).collect();
-        let left: Vec<i16> = (0..n).flat_map(|t| [u[t], u[t + 4]]).collect();
-        let mut ring = Rr3DoaRing::rr3_ring_new(3200, 2);
-        ring.rr3_ring_feed(&left);
-        assert_eq!(
-            capture::rr3_doa_fix(&ring.rr3_ring_snapshot(), 2, &cfg)
-                .unwrap()
-                .bin,
-            Rr3DoaBin::Left
         );
     }
 
