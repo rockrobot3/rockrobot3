@@ -3218,6 +3218,16 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/gat
 防止"只在 push 绿、esp 档长期没人碰"的漂移。Windows L1 面仍无 runner 载体，敞口
 第 5 条维持（不在本表冒领）。
 
+
+**2026-11-13 源文件行数上限（⑭，新立）**：每个 `.rs` 源文件必须 **<600 行**
+（含测试文件）——超过即按职责结构化拆分，不是加白名单。`check.sh` 新增
+`step "⑭ 源文件行数门"`：`git ls-files '*.rs'` 逐文件计行，≥600 的文件数
+与低水位基线 `tools/ci/gate-lines-baseline.txt` 比对（**只降不升**：新增超标
+即红；拆完同批下调，不许直接上调）；基线文件缺/无整数即红（fail-closed）。
+立规时存量 **58** 个（最大三件：`rr-registry/tests/contract.rs` 2632、
+`rr3-interact/src/panel/server.rs` 2079、`rrd/src/registry/tests.rs` 1917），
+按模块分批拆分并逐批下调基线。可数 step 17→**18** 行。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
