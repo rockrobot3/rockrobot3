@@ -1,0 +1,129 @@
+# 发布流水线：把编译好的运行面推到 ghcr.io。
+#
+# 发布物 = 运行镜像（rrd + 六模块 + rr3-ctl + 契约/装配单/硬件描述），镜像根来自
+# tools/deploy/stage-image.sh 的 rr3-pack stage 树——与 deb 装机布局同一份真值，
+# 不另写一套文件摆放。amd64 / arm64 各在**原生 runner** 上构建（Intel/AMD 与
+# 瑞芯微都是该架构的原生面），不引入交叉工具链，避免"编得过、跑不了"。
+#
+# 触发：打 v* 标签（发版）、main 分支（edge）、手动（自定义 tag）。
+# PR 不触发：发布面不能被未合入的代码覆盖。
+name: publish
+on:
+  push:
+    tags: ["v*"]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "镜像标签（如 0.0.8 或 edge）"
+        required: true
+        default: edge
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+
+      - name: 计算发布标签
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          elif [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag=edge
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: 原生构建运行面（rrd / 六模块 / rr3-ctl / rr3-pack）
+        env:
+          CARGO_TARGET_DIR: /tmp/rr3-build
+        run: |
+          cargo build -q --locked --release --manifest-path base/runtime/Cargo.toml -p rrd
+          for m in act brain connect interact sense power; do
+            cargo build -q --locked --release --manifest-path "modules/rr3-$m/Cargo.toml"
+          done
+          cargo build -q --locked --release --manifest-path tools/rrctl/Cargo.toml
+          cargo build -q --locked --release --manifest-path tools/rr3-pack/Cargo.toml
+
+      - name: 铺镜像根（rr3-pack stage 树）
+        env:
+          CARGO_TARGET_DIR: /tmp/rr3-build
+        run: |
+          bash tools/deploy/stage-image.sh /tmp/rr3-image \
+            "${{ matrix.arch }}" "${{ steps.meta.outputs.version }}"
+          test -x /tmp/rr3-image/usr/bin/rrd
+
+      - name: 登录 ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 构建并推送单架构镜像
+        run: |
+          tag="${{ steps.meta.outputs.tag }}"
+          docker build --platform "${{ matrix.platform }}" \
+            -f tools/deploy/Containerfile \
+            -t "${IMAGE}:${tag}-${{ matrix.arch }}" /tmp/rr3-image
+          docker push "${IMAGE}:${tag}-${{ matrix.arch }}"
+
+  merge:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 登录 ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - name: 合并多架构清单
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          elif [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag=edge
+          fi
+          docker buildx imagetools create -t "${IMAGE}:${tag}" \
+            "${IMAGE}:${tag}-amd64" "${IMAGE}:${tag}-arm64"
+          # 发版标签同时更新 latest（edge 不更新，避免把开发面当稳定版）
+          case "$tag" in
+            v*|[0-9]*) docker buildx imagetools create -t "${IMAGE}:latest" \
+                         "${IMAGE}:${tag}-amd64" "${IMAGE}:${tag}-arm64" ;;
+          esac
+          docker buildx imagetools inspect "${IMAGE}:${tag}"

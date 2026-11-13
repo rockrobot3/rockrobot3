@@ -3185,8 +3185,8 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/gat
 （`rr-registry/tests/contract.rs` `esp32_mini_profile_binds_bridged_minimal_shape` 红）。
 
 **2026-11-13 CI 覆盖面重构（"本地只写代码，构建与测试在远端"）**：本地资源有限且
-环境不标准（macOS + 非标工具链），编译/测试/集成一律以远端回执为准。原 `ci.yml` 单文件（八 job）先扩为 12 job、再按职责拆成 **三条流水线**
-（`gate.yml` / `platforms.yml` / `integration.yml`），门禁唯一入口固定在 CI：
+环境不标准（macOS + 非标工具链），编译/测试/集成一律以远端回执为准。原 `ci.yml` 单文件（八 job）先扩为 12 job、再按职责拆成 **四条流水线**
+（`gate.yml` / `platforms.yml` / `integration.yml` / `publish.yml`），门禁唯一入口固定在 CI：
 
 | job | 作用 | 触发 |
 |---|---|---|
@@ -3197,6 +3197,7 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/gat
 | `ipct003` / `distro-smoke` / `buildroot-assembly` / `sim-assemble` / `sim-chain` / `matrix` | 跨架构对拍、真装、装配冒烟、装配演练、全链、点验矩阵 | push / PR / 周程 |
 | `cross-artifacts`（矩阵） | 非 x86 芯片平台静态产物：构建七件 + ELF 断言 + **qemu 目标 ISA 执行冒烟** + 产物上传 | push / PR / 周程 |
 | `esp32-gates` | xtensa/espidf 五门（ESP32 / S3 双档），工具链与 IDF 走缓存 | push / PR / 手动 / 周程 |
+| `publish`（`publish.yml`） | 运行镜像发布到 `ghcr.io/rockrobot3/rockrobot3`：amd64/arm64 原生构建 → 单架构镜像 → 多架构清单合并；镜像根 = rr3-pack stage 树 | 打 `v*` 标签 / main（edge）/ 手动 |
 
 **芯片平台 × 流水线环境验证（主要芯片全覆盖）**：
 

@@ -1,0 +1,28 @@
+# 运行镜像（ghcr.io 发布面）：构建上下文 = tools/deploy/stage-image.sh 产出的
+# rr3-pack stage 树（与 deb 装机布局同一份真值）。
+#
+# 基础镜像选 debian:bookworm-slim：产物按目标平台原生编译（glibc 自洽），
+# 不用 scratch —— brain 走 TLS 需要 ca-certificates，运行期也要有 /bin/sh
+# 供排障与健康检查使用。
+FROM debian:bookworm-slim
+
+# CA 根证书（brain 的 HTTPS 云面）；不装编译工具链，运行镜像不带构建面。
+RUN apt-get update -qq \
+    && apt-get install -y -qq --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# 非 root 运行（rrd 的数据面在 /var/lib/rockrobot3，总线 socket 在 /run/rrd）。
+RUN groupadd --system rr3 && useradd --system --gid rr3 --no-create-home rr3 \
+    && mkdir -p /var/lib/rockrobot3 /run/rrd \
+    && chown -R rr3:rr3 /var/lib/rockrobot3 /run/rrd
+
+COPY . /
+
+USER rr3:rr3
+VOLUME ["/var/lib/rockrobot3"]
+EXPOSE 8080 18080
+
+ENTRYPOINT ["/usr/bin/rrd"]
+CMD ["--socket", "/run/rrd/rrd.sock", \
+     "--contracts", "/usr/lib/rockrobot3/contracts", \
+     "--profile", "/usr/lib/rockrobot3/profiles/distro.toml"]
