@@ -10,7 +10,9 @@
 
 use std::time::Duration;
 
-use rr_hal::backend::{rr3_hal_link, rr3_hal_wifi_store};
+use rr_hal::backend::{
+    rr3_backend_resolve, rr3_hal_link, rr3_hal_wifi_store, RR3_BACKEND_PLACEHOLDER,
+};
 use rr_hal::provision_store::Rr3WifiStore;
 use rr_hal_api::{Rr3Link, Rr3SsidText};
 
@@ -51,16 +53,26 @@ pub(crate) fn rr3_connect_probe(
 /// HAL 配网凭据存储选择 + 在册查询编排（MC-6：凭据由后端承载持久化——linux =
 /// NetworkManager 连接配置）：构造不触设备，首次调用才起 nmcli。开机查在册——
 /// 在册则经 `rr3_prov_restored` 直接起 station（重启仍在册），失败即致命
-/// （fail-closed，不静默当"没配过网"）。「配网面就绪」回显归本编排。返回二元
-/// ——凭据存储（on_rpc connect/forget 运行期需要）与配网状态机初值。
+/// （fail-closed，不静默当"没配过网"）。「配网面就绪」回显归本编排，随后按
+/// `link_backend` 与配网相位打一行面选择摘要。返回二元——凭据存储（on_rpc
+/// connect/forget 运行期需要）与配网状态机初值。
 pub(crate) fn rr3_wifi_provision(
     timeout_ms: u64,
+    link_backend: &str,
 ) -> Result<(Box<dyn Rr3WifiStore>, Rr3Provision), String> {
     let (store, store_backend) = rr3_hal_wifi_store(Duration::from_millis(timeout_ms));
     let ssid = store
         .rr3_wifi_ssid()
         .map_err(|e| format!("配网凭据在册查询失败（{store_backend}）: {e}"))?;
-    Ok((store, rr3_prov_of(store_backend, ssid)))
+    let restored = ssid.is_some();
+    let prov = rr3_prov_of(store_backend, ssid);
+    // 面选择摘要（可定位一行）：全局 hal 档 + 链路/配网两面后端 + 配网相位
+    eprintln!(
+        "面选择: hal={} link={link_backend} store={store_backend} provision={}",
+        rr3_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER),
+        if restored { "station" } else { "ap" }
+    );
+    Ok((store, prov))
 }
 
 /// 在册则直起 station（重启仍在册），否则出厂 ap。

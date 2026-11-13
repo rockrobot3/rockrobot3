@@ -11,6 +11,7 @@
 
 use rr_hal::backend::rr3_audio_source_cmd;
 use rr_hal::backend::Rr3AudioCmdProducer;
+use rr_hal::backend::{rr3_backend_resolve, RR3_BACKEND_PLACEHOLDER};
 use rr_hal_api::Rr3AudioCfg;
 use rr_hal_api::Rr3AudioSource;
 
@@ -59,6 +60,16 @@ pub(crate) fn rr3_sense_probe(cfg: &Rr3SenseConfig) -> Result<Rr3SenseProbe, Str
     eprintln!(
         "音频源就绪: backend={backend} rate={} ch={} frame_ms={}",
         cfg.audio.sample_rate, cfg.audio.channels, cfg.audio.frame_ms
+    );
+    // 面选择摘要（可定位一行）：全局 hal 档 + 采集面后端 + 关键形状 + 反射环开关
+    eprintln!(
+        "面选择: hal={} audio={backend} rate={} ch={} frame_ms={} doa_window_ms={} reflex={}",
+        rr3_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER),
+        cfg.audio.sample_rate,
+        cfg.audio.channels,
+        cfg.audio.frame_ms,
+        cfg.doa.window_ms,
+        if cfg.reflex.enable { "on" } else { "off" }
     );
     Ok((source, cmd_tx, backend, open_cfg))
 }
