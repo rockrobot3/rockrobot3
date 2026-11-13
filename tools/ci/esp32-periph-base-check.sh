@@ -97,7 +97,12 @@ fi
 #    零回显契约单测；批N23 件一起 atoms/<名>/mech.rs 机制核单测——xtensa 目标
 #    本机不可跑，--no-run 只验测试码编译；xtensa 测试 harness 执行面归真板批）
 esp_test_log=/tmp/rr3-esp32-periph-test.log
-if cargo +esp test --no-run \
+# RUSTFLAGS 一旦设置会**整体覆盖** .cargo/config.toml 的 target rustflags，故整条
+# 重写（与 [target.xtensa-esp32-espidf] 同值，两处必须同批改）。补
+# `-Zpanic_abort_tests`：panic=abort 下测试 harness 的唯一合法形状，缺失时 rustc
+# 直接拒编（"building tests with panic=abort is not supported"）。
+esp_test_rf="--cfg espidf_time64 -Zunstable-options -Cpanic=immediate-abort -Zpanic_abort_tests"
+if RUSTFLAGS="$esp_test_rf" cargo +esp test --no-run \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
      >"$esp_test_log" 2>&1; then

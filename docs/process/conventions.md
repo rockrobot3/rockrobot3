@@ -3228,6 +3228,14 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/gat
 `rr3-interact/src/panel/server.rs` 2079、`rrd/src/registry/tests.rs` 1917），
 按模块分批拆分并逐批下调基线。可数 step 17→**18** 行。
 
+**2026-11-13 首批三拆（基线 58→55）**：rrd registry 测试 1917→`tests/` 八件
+（最大 421）；rr-registry 契约对拍 2632→`tests/contract.rs` 夹具根 435 +
+`tests/contract/` 十一段（最大 326）；rr3-interact 面板服务端 2079→`server.rs` 550 +
+`server/{ctl,selftest,serve}.rs` + `server/tests/` 四段（最大 424）。两条拆分纪律：
+①集成测试目标（`tests/*.rs`）自身是 crate root，子模块按 `tests/` 解析而非
+`tests/<目标名>/`，必须 `#[path = "..."]` 显式指路；②跨模块可达的夹具按最小面
+放开到 `pub(super)`，不放宽到 `pub`。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
