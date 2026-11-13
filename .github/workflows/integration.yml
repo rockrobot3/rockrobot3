@@ -90,5 +90,11 @@ jobs:
       # "对拍破裂"致 job 红。ipct003 job 有同一步，此处与之同源。
       - uses: docker/setup-qemu-action@v3
       - name: 点验矩阵出数（bash tools/ci/matrix.sh）
-        run: bash tools/ci/matrix.sh
+        run: |
+          set -o pipefail
+          if ! bash tools/ci/matrix.sh 2>&1 | tee /tmp/matrix.log; then
+            fails=$(grep -E "(^| )FAIL" /tmp/matrix.log | tail -4 | tr '\n' ' ')
+            echo "::error title=matrix::${fails:0:900}"
+            exit 1
+          fi
 
