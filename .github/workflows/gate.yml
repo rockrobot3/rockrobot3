@@ -1,0 +1,88 @@
+# 门禁流水线：与本地 tools/ci/check.sh 同一入口（全步门禁 + lint + 脚本语法）。
+# 拆分自 ci.yml（2026-11-13）：按职责分开，job 正文原样搬运；
+# 判据仍以 tools/ci/check.sh 与 tools/ci/*.sh 为唯一真源。
+name: gate
+on:
+  push:
+    branches: [main, "dev/**"]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  conventions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      # 工具链按仓根 rust-toolchain.toml 钉版（rustup 目录覆盖优先于 default）；
+      # components 显式声明，不依赖 runner 镜像预装的 clippy/rustfmt。
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      # ⑨-y 跨平台可编面的前件（批N8 件六）：门内不设 SKIP，target 缺位即红
+      - name: 安装 Windows target（⑨-y 门前置）
+        run: rustup target add x86_64-pc-windows-msvc
+      - name: 规约门禁检查（check.sh 全步，含 ⑫ 质量度量）
+        run: bash tools/ci/check.sh
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      - name: rustfmt --check（base/runtime + 全部独立工程）
+        run: |
+          cargo fmt --manifest-path base/runtime/Cargo.toml --all -- --check
+          while IFS= read -r -d '' m; do
+            cargo fmt --manifest-path "$m" -- --check
+          done < <(find modules tools base/ota -name Cargo.toml \
+                     -not -path "*/target/*" -not -path "base/runtime/*" -print0 | sort -z)
+      - name: clippy -D warnings（base/runtime + 全部独立工程）
+        run: |
+          cargo clippy -q --all-targets --manifest-path base/runtime/Cargo.toml --workspace -- -D warnings
+          while IFS= read -r -d '' m; do
+            cargo clippy -q --all-targets --manifest-path "$m" -- -D warnings
+          done < <(find modules tools base/ota -name Cargo.toml \
+                     -not -path "*/target/*" -not -path "base/runtime/*" \
+                     -not -path "tools/esp32-uart-echo/*" -not -path "tools/espidf-std-hello/*" \
+                     -not -path "tools/espidf-sentinel/*" -not -path "tools/esp32-periph-base/*" \
+                     -print0 | sort -z)
+        # esp 工程的排除与门禁 ④ 同口径：xtensa/espidf 专用工具链工程，宿主 stable
+        # clippy 必红，编译执法在专用门（esp-uart-echo-check.sh / espidf-std-check.sh /
+        # espidf-sentinel-check.sh / esp32-periph-base-check.sh / rr3-act-sense-espidf-check.sh，
+        # SKIP 纪律）；fmt 步不编译，对它们照跑。modules/rr3-act、rr3-sense 是双档
+        # 工程（批N8 件三）：宿主 linux 档照常进本 lint 步与门禁 ④/⑥（不整目录排除），
+        # espidf 档归专用门。
+
+  # 脚本语法门：CI 的全部判据最终都落在 tools/ci/*.sh 上——脚本自身写坏时，
+  # 门禁会"看起来跑过了"。bash -n 不执行、零副作用，覆盖全部追踪脚本。
+  scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash 语法检查（全部追踪 .sh）
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            bash -n "$f" || { echo "SYNTAX FAIL $f"; fail=1; }
+          done < <(git -c core.quotepath=false ls-files '*.sh')
+          [ "$fail" -eq 0 ] && echo "全部脚本语法通过"
+
