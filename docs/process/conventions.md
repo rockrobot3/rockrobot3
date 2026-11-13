@@ -3194,8 +3194,21 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/gat
 | `host-macos` | macOS 宿主等价面：workspace 全量测试 + 独立工程测试（门禁 ④/⑥ 同口径，esp 工程除外） | push / PR / 周程 |
 | `scripts` | 全部追踪 `.sh` 的 `bash -n` 语法门（判据自身不许写坏） | push / PR / 周程 |
 | `lint` | fmt + clippy（workspace + 独立工程） | push / PR / 周程 |
-| `ipct003` / `distro-smoke` / `buildroot-assembly` / `arm64-artifacts` / `sim-assemble` / `sim-chain` / `matrix` | 跨架构对拍、真装、装配冒烟、静态产物、装配演练、全链、点验矩阵 | push / PR / 周程 |
-| `esp32-gates` | xtensa/espidf 重工具链五门 | 手动 / 合入 main 的 PR / **周程** |
+| `ipct003` / `distro-smoke` / `buildroot-assembly` / `sim-assemble` / `sim-chain` / `matrix` | 跨架构对拍、真装、装配冒烟、装配演练、全链、点验矩阵 | push / PR / 周程 |
+| `cross-artifacts`（矩阵） | 非 x86 芯片平台静态产物：构建七件 + ELF 断言 + **qemu 目标 ISA 执行冒烟** + 产物上传 | push / PR / 周程 |
+| `esp32-gates` | xtensa/espidf 五门（ESP32 / S3 双档），工具链与 IDF 走缓存 | push / PR / 手动 / 周程 |
+
+**芯片平台 × 流水线环境验证（主要芯片全覆盖）**：
+
+| 芯片平台 | 目标/工具链 | CI 载体 | 环境判据 |
+|---|---|---|---|
+| ESP32 / ESP32-S3（乐鑫，xtensa） | `esp32` / `esp32s3`（espup v0.17.1 钉版 + ESP-IDF v5.2.2） | `esp32-gates` | 外设基座 debug+release、UART echo、espidf std、哨兵、act/sense espidf 五门全编译 |
+| 瑞芯微 RK3566 / RK3588（aarch64） | `aarch64-unknown-linux-musl`（+ `-gnu` 字节对拍归 `ipct003`） | `cross-artifacts` 矩阵一腿 | 七件全静态 aarch64 产物 + ELF 断言 + qemu-aarch64 执行冒烟 |
+| 进迭时空 SpacemiT K1/K3（RISC-V） | `riscv64gc-unknown-linux-musl` | `cross-artifacts` 矩阵另一腿 | 七件全静态 riscv64 产物 + ELF 断言 + qemu-riscv64 执行冒烟 |
+| 英特尔 / AMD（x86_64） | 原生 `x86_64-unknown-linux-gnu` | `conventions`（全量门）+ `distro-smoke`（deb 真装） | 编译 + 757 测试 + 门禁 ①–⑭ + 容器内真装起机 |
+
+口径说明：以上是**构建/执行环境**验证（能在目标 ISA 上编译并跑起来）；真板上的
+器件读数、时序与断电证据仍属板上收口，不在本表冒领。
 
 纪律：① **不在源码区做任何编译/集成/构建**（`.cargo/config.toml` 已把 target-dir
 指到 `/tmp`，CI 侧只跑远端）；② 新增需要"跑起来"的验证，先加进 `check.sh` 或本表

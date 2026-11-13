@@ -171,29 +171,47 @@ jobs:
   # 乐鑫 esp-clang + ldproxy——冷跑 20 分钟量级，不与每次 dev 推送抢跑账：手动触发或
   # 合入 main 的 PR 才跑（发布门前置）。两门各自 SKIP 纪律不变：前置缺位 = SKIP 明说，
   # 在位但编译失败/产物不在树 = 红。
+  # ESP32 芯片平台环境（esp32 / esp32s3 双档，xtensa + espidf 五门）。
+  # 每次 push 都跑：这是唯一能证明 ESP32 环境可构建的载体；冷跑约 20 分钟，
+  # 靠下面三处 cache（espup/工具链/IDF）把常跑压到分钟级。
   esp32-gates:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main')
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # 缓存面：espup 可执行、esp 工具链、ESP-IDF 与工具目录。键钉版本，
+      # 升 espup/IDF 必须改键（与下方安装命令同批改），否则会吃旧工具链。
+      - name: 缓存 esp 工具链与 ESP-IDF
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/bin/espup
+            ~/.rustup/toolchains/esp
+            ~/.espressif
+            ~/.cargo/bin/ldproxy
+          key: esp-${{ runner.os }}-v0.17.1-idf5.2.2
       - name: 安装 esp 工具链（espup 钉版，esp32 + esp32s3 双档）
         run: |
           mkdir -p "$HOME/.local/bin"
-          curl -fsSL https://github.com/esp-rs/espup/releases/download/v0.17.1/espup-x86_64-unknown-linux-gnu \
-            -o "$HOME/.local/bin/espup"
-          chmod +x "$HOME/.local/bin/espup"
+          if [ ! -x "$HOME/.local/bin/espup" ]; then
+            curl -fsSL https://github.com/esp-rs/espup/releases/download/v0.17.1/espup-x86_64-unknown-linux-gnu \
+              -o "$HOME/.local/bin/espup"
+            chmod +x "$HOME/.local/bin/espup"
+          fi
           "$HOME/.local/bin/espup" install --targets esp32,esp32s3
       - name: 安装 ldproxy
-        run: cargo install ldproxy --locked
+        run: command -v ldproxy >/dev/null || cargo install ldproxy --locked
       - name: 克隆 ESP-IDF v5.2.2（版本钉与 tools/espidf-std-hello/README.md 登记表同源）
         run: |
-          mkdir -p "$HOME/.espressif/frameworks"
-          git clone --depth 1 -b v5.2.2 --recursive \
-            https://github.com/espressif/esp-idf.git \
-            "$HOME/.espressif/frameworks/esp-idf-v5.2.2"
-          "$HOME/.espressif/frameworks/esp-idf-v5.2.2/install.sh" esp32 esp32s3
+          idf="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
+          if [ ! -d "$idf/.git" ]; then
+            mkdir -p "$HOME/.espressif/frameworks"
+            git clone --depth 1 -b v5.2.2 --recursive \
+              https://github.com/espressif/esp-idf.git "$idf"
+          fi
+          "$idf/install.sh" esp32 esp32s3
       - name: classic ESP32 外设基座门（debug + release）
         run: |
           # espup 生成的环境导出（LIBCLANG_PATH 等）供 +esp 工具链取用
@@ -255,22 +273,65 @@ jobs:
       - name: 保底轨装配冒烟（post-build.sh）
         run: bash tools/ci/buildroot-assembly-smoke.sh
 
-  # 树莓派 / 瑞芯微部署面：aarch64-musl 静态产物构建门（与 pack-arm64 ① 同源，
-  # rust-lld 零外部工具链；不需要真板/打包器）。brain 的 ureq+ring 需 aarch64 C
-  # 工具链，归板上原生构建，不在本门（同 pack-arm64 ③ 分工）。
-  arm64-artifacts:
+  # 芯片平台环境矩阵（除 esp32 外的三条非 x86 面）：
+  #   瑞芯微 RK3566/RK3588 → aarch64-musl；进迭时空 SpacemiT K1/K3 → riscv64-musl；
+  #   x86_64（英特尔 / AMD）→ 原生 `conventions` 全量门，无需交叉。
+  # 每个平台做三件事：① 交叉构建七件静态产物；② `file` 断言目标 ISA + 全静态；
+  # ③ qemu-user 把产物在目标 ISA 上真跑一次（证明"环境能执行"，不只是能编译）。
+  # brain 的 ureq+ring 需目标 C 工具链，归板上原生构建（同 pack-bundle ③ 分工）。
+  cross-artifacts:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - chip: 瑞芯微（RK3566/RK3588）
+            triple: aarch64-unknown-linux-musl
+            arch: "ARM aarch64"
+            qemu: qemu-aarch64-static
+          - chip: 进迭时空（SpacemiT K1/K3）
+            triple: riscv64gc-unknown-linux-musl
+            arch: "RISC-V"
+            qemu: qemu-riscv64-static
+    name: cross / ${{ matrix.chip }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-unknown-linux-musl
+          targets: ${{ matrix.triple }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: base/runtime
-      - name: aarch64-musl 静态产物七件
-        run: bash tools/ci/arm64-cross-check.sh
+      # qemu-user-static 提供 binfmt 与静态 qemu-*；不依赖 Docker/QEMU action。
+      - name: 安装 qemu-user-static
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user-static
+      - name: 交叉构建 + ELF 断言（失败把日志尾部打成注解，便于远端归因）
+        run: |
+          set -o pipefail
+          if ! bash tools/ci/cross-artifacts.sh "${{ matrix.triple }}" "${{ matrix.arch }}" 2>&1 | tee /tmp/cross.log; then
+            tail -c 3000 /tmp/cross.log | sed 's/^/::error title=cross-artifacts::/'
+            exit 1
+          fi
+      - name: qemu 目标 ISA 执行冒烟（产物真能跑起来）
+        run: |
+          rel="/tmp/rr3-build/${{ matrix.triple }}/release"
+          for b in rrd rr3-ctl; do
+            out=$("${{ matrix.qemu }}" "$rel/$b" --help 2>&1) && rc=0 || rc=$?
+            echo "$out" | head -3
+            if echo "$out" | grep -qiE "exec format error|Exec format error|could not open"; then
+              echo "FAIL  $b 在 ${{ matrix.triple }} 上无法执行" >&2
+              exit 1
+            fi
+            echo "PASS  $b 可在 ${{ matrix.triple }} 执行（rc=$rc）"
+          done
+      - name: 上传静态产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.triple }}
+          path: /tmp/rr3-build/${{ matrix.triple }}/release/{rrd,rr3-ctl,rr3-act,rr3-connect,rr3-interact,rr3-sense,rr3-power}
+          if-no-files-found: error
+          retention-days: 7
 
   # D9 装配演练（0.0.2 T6）：装配单驱动 boot + 六 Rust 模块真进程（批N32 件四起
   # brain 也是 Rust），判据六模块全 running + denied_publish = 0。
