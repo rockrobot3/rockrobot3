@@ -75,6 +75,10 @@ struct Rr3SimOpen {
     cfg: Rr3AudioCfg,
     /// 已读出的**采样点**数（不是帧数）：正弦相位与噪声序号都按它推进
     cursor: u64,
+    /// 波形取值器（open 时解析一次；read 热路径不做波形查表）
+    wave: fn(f64, u64, usize, f64) -> f64,
+    /// 每通道 (增益, 相位偏移)，长度 = channels（方位参数 open 时一次算好）
+    chans: Vec<(f64, f64)>,
 }
 
 /// sim 音频源（虚拟麦克风）。多通道 + [`Rr3SimDoa`] 时按双麦方位模型出各路增益与
@@ -159,7 +163,12 @@ impl Rr3AudioSource for Rr3SimAudioSource {
                 &format!("sim 源要求 16bit 采样且 rate/channels 非零，收到 {cfg:?}"),
             )));
         }
-        *self.open.lock().unwrap_or_else(|p| p.into_inner()) = Some(Rr3SimOpen { cfg, cursor: 0 });
+        *self.open.lock().unwrap_or_else(|p| p.into_inner()) = Some(Rr3SimOpen {
+            cfg,
+            cursor: 0,
+            wave: rr3_sim_wave_fn(self.wave),
+            chans: rr3_sim_chans(cfg.channels as usize, self.doa),
+        });
         Ok(())
     }
 
@@ -170,19 +179,21 @@ impl Rr3AudioSource for Rr3SimAudioSource {
                 "sim 源 read 前必须 open",
             )));
         };
-        let ch_n = open.cfg.channels as usize;
         let n = buf.len();
         // 每采样点的值一律由绝对序号（cursor + i）确定性派生：
         // 同一波形任何机器任何时刻逐点相等，golden 向量与 e2e 都钉在这一点上
         let rate = open.cfg.sample_rate_hz.max(1) as f64;
-        // 方位模型参数（无注入或单声道时全 None——mono 链路没有方向语义，
-        // 逐采样路径与旧实现逐点等价，golden 向量不因 DoA 注入而动）
-        let (k, itd) = rr3_sim_doa_args(self.doa, ch_n);
         let cursor = open.cursor;
-        rr3_sim_fill(self.wave, buf, cursor, ch_n, rate, k, itd);
+        rr3_sim_fill(open.wave, &open.chans, buf, cursor, rate);
         open.cursor += n as u64;
         Ok(n)
     }
+}
+
+/// 逐通道 (增益, 相位偏移)：方位参数在此一次解好，read 热路径不再按采样点算。
+fn rr3_sim_chans(ch_n: usize, doa: Option<Rr3SimDoa>) -> Vec<(f64, f64)> {
+    let (k, itd) = rr3_sim_doa_args(doa, ch_n);
+    (0..ch_n).map(|ch| rr3_sim_gain(ch, k, itd)).collect()
 }
 
 /// 方位模型参数（无注入或单声道时全 None——mono 链路没有方向语义）。
@@ -194,38 +205,27 @@ fn rr3_sim_doa_args(doa: Option<Rr3SimDoa>, ch_n: usize) -> (Option<f64>, Option
 }
 
 /// 按绝对序号（cursor + i）逐点确定性填充输出缓冲。
+///
+/// 波形器与逐通道 (增益, 相位) 都由 `open` 预解传入——采集是持续热路径，逐采样
+/// 点不做波形查表/参数分派；取值路径与旧实现逐点等价（golden 向量守护）。
 fn rr3_sim_fill(
-    wave: Rr3SimWave,
+    wave: fn(f64, u64, usize, f64) -> f64,
+    chans: &[(f64, f64)],
     buf: &mut [i16],
     cursor: u64,
-    ch_n: usize,
     rate: f64,
-    k: Option<f64>,
-    itd: Option<f64>,
 ) {
+    let ch_n = chans.len();
     for (i, out) in buf.iter_mut().enumerate() {
         let idx = cursor + i as u64;
-        *out = rr3_sim_sample(wave, idx, i % ch_n, ch_n, rate, k, itd) as i16;
+        // 波形时间轴按**帧序**（idx/ch_n）：每通道按自己的采样时刻取值——B批
+        // b3b 修复：旧写法 t = idx/rate 是交错样点轴，双通道下每通道波形时间被
+        // 拉伸 2 倍（16k 轴上 440Hz 实际出 880Hz），ITD 注入的互相关出"伪峰与
+        // 物理峰并列"双峰。mono 路径 idx/1 = idx 逐点等价，golden 向量不动。
+        let t = (idx / ch_n as u64) as f64 / rate;
+        let (gain, shift) = chans[i % ch_n];
+        *out = (wave(t + shift, idx, ch_n, rate) * gain) as i16;
     }
-}
-
-/// 单采样点：波形（正弦/间歇/噪声/静音）× 通道方位增益与 ITD 相位。
-/// 波形时间轴按**帧序**（idx/ch_n）：每通道按自己的采样时刻取值——B批 b3b
-/// 修复：旧写法 t = idx/rate 是交错样点轴，双通道下每通道波形时间被拉伸 2 倍
-/// （16k 轴上 440Hz 实际出 880Hz），ITD 注入的互相关出"伪峰与物理峰并列"
-/// 双峰。mono 路径 idx/1 = idx 逐点等价，golden 向量不动。
-fn rr3_sim_sample(
-    wave: Rr3SimWave,
-    idx: u64,
-    ch: usize,
-    ch_n: usize,
-    rate: f64,
-    k: Option<f64>,
-    itd: Option<f64>,
-) -> f64 {
-    let t = (idx / ch_n as u64) as f64 / rate;
-    let (gain, t_shift) = rr3_sim_gain(ch, k, itd);
-    rr3_sim_wave_at(wave, t + t_shift, idx, ch_n, rate) * gain
 }
 
 /// 正弦样本（单点振幅/频率参数，形波与 burst 共用）。
@@ -233,21 +233,14 @@ fn rr3_sim_sine(t_s: f64) -> f64 {
     RR3_SIM_SINE_AMP as f64 * (2.0 * std::f64::consts::PI * RR3_SIM_SINE_HZ * t_s).sin()
 }
 
-/// 波形 → 取值函数表项（波形, 取值器）：取值器吃 (t, 帧序号, 声道数, 采样率)。
-type Rr3SimShape = (Rr3SimWave, fn(f64, u64, usize, f64) -> f64);
-
-/// 波形取值：burst 门控按绝对**帧**序号（idx/声道数）；噪声按序号确定性派生。
-fn rr3_sim_wave_at(wave: Rr3SimWave, t: f64, idx: u64, ch_n: usize, rate: f64) -> f64 {
-    let shapes: [Rr3SimShape; 4] = [
-        (Rr3SimWave::Sine, |t, _, _, _| rr3_sim_sine(t)),
-        (Rr3SimWave::Burst, rr3_sim_burst),
-        (Rr3SimWave::Noise, |_, idx, _, _| rr3_sim_noise(idx)),
-        (Rr3SimWave::Silence, |_, _, _, _| 0.0),
-    ];
-    shapes
-        .iter()
-        .find(|(w, _)| *w == wave)
-        .map_or(0.0, |(_, f)| f(t, idx, ch_n, rate))
+/// 波形 → 取值函数（open 时解析一次；热路径只调函数指针，不查表）。
+fn rr3_sim_wave_fn(wave: Rr3SimWave) -> fn(f64, u64, usize, f64) -> f64 {
+    match wave {
+        Rr3SimWave::Sine => |t, _, _, _| rr3_sim_sine(t),
+        Rr3SimWave::Burst => rr3_sim_burst,
+        Rr3SimWave::Noise => |_, idx, _, _| rr3_sim_noise(idx),
+        Rr3SimWave::Silence => |_, _, _, _| 0.0,
+    }
 }
 
 /// burst 门控：偶秒有声、奇秒静音，按绝对**帧**序号（idx/声道数）判。
