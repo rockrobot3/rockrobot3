@@ -211,37 +211,3 @@ fn low_power_flag_rises_once_lowers_and_rises_again() {
     assert!(r.rr3_reg_lp_raise(), "解除后可再升起（episodes 语义）");
     assert!(r.rr3_reg_lp_is_set());
 }
-
-/// 小测试辅助：主题集
-fn topic_set(entries: &[(&str, &str)]) -> Rr3TopicSet {
-    use std::collections::BTreeSet;
-    let mut owners: BTreeSet<&str> = BTreeSet::new();
-    for (_, o) in entries {
-        owners.insert(o);
-    }
-    let mut text = String::from("schema_version = 1\n");
-    for o in &owners {
-        text.push_str(&format!("\n[[owner]]\nname = \"{o}\"\n"));
-    }
-    for (t, o) in entries {
-        text.push_str(&format!(
-            "\n[[topic]]\nname = \"{t}\"\nkind = \"event\"\nowner = \"{o}\"\n"
-        ));
-    }
-    let set = rr_registry::rr3_topic_parse(&text);
-    assert!(
-        set.rr3_topic_check().is_empty(),
-        "测试主题集自身必须合法: {:?}",
-        set.rr3_topic_check()
-    );
-    set
-}
-
-fn frame_to(dst: u64) -> Rr3Frame {
-    let mut h = rr_ipc::Rr3Header::rr3_hdr_broadcast(rr_ipc::opcode::SEND, 0);
-    h.dst_task = dst;
-    Rr3Frame {
-        header: h,
-        payload: vec![],
-    }
-}
