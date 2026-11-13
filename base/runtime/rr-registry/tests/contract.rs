@@ -16,16 +16,28 @@ fn topics_toml() -> String {
         .expect("contracts/topics.toml 必须存在（Task 4 产物）")
 }
 
+// 集成测试目标是 crate root，子模块按 tests/ 解析（而非 contract/），故显式给路径。
+#[path = "contract/assemble.rs"]
 mod assemble;
+#[path = "contract/depends.rs"]
 mod depends;
+#[path = "contract/failopen.rs"]
 mod failopen;
+#[path = "contract/manifest.rs"]
 mod manifest;
+#[path = "contract/profile_board.rs"]
 mod profile_board;
+#[path = "contract/profile_default.rs"]
 mod profile_default;
+#[path = "contract/profile_esp32.rs"]
 mod profile_esp32;
+#[path = "contract/profile_pi4b.rs"]
 mod profile_pi4b;
+#[path = "contract/shape.rs"]
 mod shape;
+#[path = "contract/slots.rs"]
 mod slots;
+#[path = "contract/topics.rs"]
 mod topics;
 
 fn fixture_text() -> String {
