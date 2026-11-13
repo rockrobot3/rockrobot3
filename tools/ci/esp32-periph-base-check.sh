@@ -96,13 +96,18 @@ fi
 # ⑦ 纯逻辑单测编译面（批N13 件一：httpd 路由/漂移/JSON 形状单测；批N14 cred
 #    零回显契约单测；批N23 件一起 atoms/<名>/mech.rs 机制核单测——xtensa 目标
 #    本机不可跑，--no-run 只验测试码编译；xtensa 测试 harness 执行面归真板批）
+esp_test_log=/tmp/rr3-esp32-periph-test.log
 if cargo +esp test --no-run \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
-     >/dev/null 2>&1; then
+     >"$esp_test_log" 2>&1; then
   echo "PASS  甲面单测编译（--no-run）：板侧纯逻辑层单测在编（httpd/cred + atoms 机制核）"
 else
-  echo "FAIL  esp32-periph-base 单测编译失败（cargo +esp test --no-run）" >&2
+  # 归因：本门在 CI 里只把末 4 条含 error 的行写进 check-run 注解，输出被吞掉
+  # 就等于"红而无因"。压成单行（GitHub 会把多行注解拆散并截断）。
+  errs=$(grep -E "error(\[|:)|panicked at" "$esp_test_log" | head -4 | tr '\n' ' ')
+  echo "FAIL  esp32-periph-base 单测编译失败（cargo +esp test --no-run）: ${errs:0:900}" >&2
+  tail -3 "$esp_test_log" >&2
   fail=1
 fi
 
