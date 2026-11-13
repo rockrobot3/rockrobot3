@@ -217,32 +217,56 @@ jobs:
           # espup 生成的环境导出（LIBCLANG_PATH 等）供 +esp 工具链取用
           # shellcheck disable=SC1091
           . "$HOME/export-esp.sh"
-          bash tools/ci/esp32-periph-base-check.sh
+          set -o pipefail
+          if ! bash tools/ci/esp32-periph-base-check.sh 2>&1 | tee /tmp/g.log; then
+            tail -c 4000 /tmp/g.log | sed 's/^/::error title=esp32-periph-base::/'
+            exit 1
+          fi
       - name: ESP32-S3 外设基座门（debug + release + 单测编译面）
         run: |
           # shellcheck disable=SC1091
           . "$HOME/export-esp.sh"
-          bash tools/ci/esp32s3-periph-base-check.sh
+          set -o pipefail
+          if ! bash tools/ci/esp32s3-periph-base-check.sh 2>&1 | tee /tmp/g.log; then
+            tail -c 4000 /tmp/g.log | sed 's/^/::error title=esp32s3-periph-base::/'
+            exit 1
+          fi
       - name: classic ESP32 UART echo 固件门（release）
         run: |
           # shellcheck disable=SC1091
           . "$HOME/export-esp.sh"
-          bash tools/ci/esp-uart-echo-check.sh
+          set -o pipefail
+          if ! bash tools/ci/esp-uart-echo-check.sh 2>&1 | tee /tmp/g.log; then
+            tail -c 4000 /tmp/g.log | sed 's/^/::error title=esp-uart-echo::/'
+            exit 1
+          fi
       - name: ESP-IDF std 构建链冒烟门（xtensa-esp32-espidf）
         run: |
           # shellcheck disable=SC1091
           . "$HOME/export-esp.sh"
-          bash tools/ci/espidf-std-check.sh
+          set -o pipefail
+          if ! bash tools/ci/espidf-std-check.sh 2>&1 | tee /tmp/g.log; then
+            tail -c 4000 /tmp/g.log | sed 's/^/::error title=espidf-std::/'
+            exit 1
+          fi
       - name: ESP-IDF 哨兵构建门（双证之①编译面）
         run: |
           # shellcheck disable=SC1091
           . "$HOME/export-esp.sh"
-          bash tools/ci/espidf-sentinel-check.sh
+          set -o pipefail
+          if ! bash tools/ci/espidf-sentinel-check.sh 2>&1 | tee /tmp/g.log; then
+            tail -c 4000 /tmp/g.log | sed 's/^/::error title=espidf-sentinel::/'
+            exit 1
+          fi
       - name: rr3-act / rr3-sense espidf 档编译面门（esp32 + esp32s3）
         run: |
           # shellcheck disable=SC1091
           . "$HOME/export-esp.sh"
-          bash tools/ci/rr3-act-sense-espidf-check.sh
+          set -o pipefail
+          if ! bash tools/ci/rr3-act-sense-espidf-check.sh 2>&1 | tee /tmp/g.log; then
+            tail -c 4000 /tmp/g.log | sed 's/^/::error title=act-sense-espidf::/'
+            exit 1
+          fi
 
   # 发行版快路轨冒烟（0.0.2 T5 / D8，ADR-0013 裁定 5 首证）：单步容器
   # （rust:bookworm，glibc 自洽，本机产物装本机 deb）内构建 → rr3-pack 出 deb →
@@ -303,7 +327,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: base/runtime
-      # qemu-user-static 提供 binfmt 与静态 qemu-*；不依赖 Docker/QEMU action。
+      # Ubuntu 只有 qemu-user-static 一个包（内含 qemu-aarch64-static /
+      # qemu-riscv64-static 等全部架构）；没有 per-arch 独立包，装错名 apt 退 100。
       - name: 安装 qemu-user-static
         run: sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user-static
       - name: 交叉构建 + ELF 断言（失败把日志尾部打成注解，便于远端归因）
