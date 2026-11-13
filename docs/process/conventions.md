@@ -3184,6 +3184,26 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/gat
 "导航漏链"红）；②件二漏把 contract 形状 pin `heap_reserved_bytes` 16384→98816 同批
 （`rr-registry/tests/contract.rs` `esp32_mini_profile_binds_bridged_minimal_shape` 红）。
 
+**2026-11-13 CI 覆盖面重构（"本地只写代码，构建与测试在远端"）**：本地资源有限且
+环境不标准（macOS + 非标工具链），编译/测试/集成一律以远端回执为准。`ci.yml` 由
+"八 job"扩为 **12 job**，并把门禁唯一入口固定在 CI：
+
+| job | 作用 | 触发 |
+|---|---|---|
+| `conventions` | `bash tools/ci/check.sh` 全步（①–⑭，与本地同一入口）；显式装 clippy/rustfmt | push / PR / 周程 |
+| `host-macos` | macOS 宿主等价面：workspace 全量测试 + 独立工程测试（门禁 ④/⑥ 同口径，esp 工程除外） | push / PR / 周程 |
+| `scripts` | 全部追踪 `.sh` 的 `bash -n` 语法门（判据自身不许写坏） | push / PR / 周程 |
+| `lint` | fmt + clippy（workspace + 独立工程） | push / PR / 周程 |
+| `ipct003` / `distro-smoke` / `buildroot-assembly` / `arm64-artifacts` / `sim-assemble` / `sim-chain` / `matrix` | 跨架构对拍、真装、装配冒烟、静态产物、装配演练、全链、点验矩阵 | push / PR / 周程 |
+| `esp32-gates` | xtensa/espidf 重工具链五门 | 手动 / 合入 main 的 PR / **周程** |
+
+纪律：① **不在源码区做任何编译/集成/构建**（`.cargo/config.toml` 已把 target-dir
+指到 `/tmp`，CI 侧只跑远端）；② 新增需要"跑起来"的验证，先加进 `check.sh` 或本表
+的 job，再谈"本地没跑过"；③ 同一 ref 的旧运行由 `concurrency` 自动取消，避免排队
+里跑过时代码；④ 周程（UTC 周日 18:00 = 北京周一 02:00）把重工具链档固定跑一遍，
+防止"只在 push 绿、esp 档长期没人碰"的漂移。Windows L1 面仍无 runner 载体，敞口
+第 5 条维持（不在本表冒领）。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
