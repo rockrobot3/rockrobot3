@@ -12,11 +12,17 @@ use crate::rail_judge::RailTier;
 /// 协议级 0–180 之外的角先拒；轴行程 `[lo, hi]` 之外**点名拒收**，不静默钳位
 /// （静默钳到边界会让调用方误以为按给值生效）。`center` 只进文案。
 pub fn rr3_axis_check(name: &str, lo: u32, hi: u32, center: u32, deg: u32) -> Result<u32, String> {
+    rr3_deg_range(deg)?;
+    rr3_axis_limit(name, lo, hi, center, deg)?;
+    Ok(deg)
+}
+
+/// 协议级角域门：0–180 之外先拒。
+fn rr3_deg_range(deg: u32) -> Result<(), String> {
     if deg > 180 {
         return Err(format!("角度超范围 0-180: {deg}"));
     }
-    rr3_axis_limit(name, lo, hi, center, deg)?;
-    Ok(deg)
+    Ok(())
 }
 
 /// 轴行程门：落在 `[lo, hi]` 之外点名拒收（`center` 只进文案）。
@@ -110,17 +116,27 @@ impl Rr3ServoCore {
 
     /// 本通道的记账角。
     pub fn deg(&self, channel: Rr3PwmChannel) -> u32 {
-        match channel {
-            Rr3PwmChannel::Pan => self.pan_deg,
-            Rr3PwmChannel::Tilt => self.tilt_deg,
-        }
+        *self.slot(channel)
     }
 
     /// 一次移动成功后提交记账角（失败路径不得调用——读角永不复述没到达的角）。
     pub fn commit(&mut self, channel: Rr3PwmChannel, deg: u32) {
+        *self.slot_mut(channel) = deg;
+    }
+
+    /// 通道 → 记账位（读）。
+    fn slot(&self, channel: Rr3PwmChannel) -> &u32 {
         match channel {
-            Rr3PwmChannel::Pan => self.pan_deg = deg,
-            Rr3PwmChannel::Tilt => self.tilt_deg = deg,
+            Rr3PwmChannel::Pan => &self.pan_deg,
+            Rr3PwmChannel::Tilt => &self.tilt_deg,
+        }
+    }
+
+    /// 通道 → 记账位（写）。
+    fn slot_mut(&mut self, channel: Rr3PwmChannel) -> &mut u32 {
+        match channel {
+            Rr3PwmChannel::Pan => &mut self.pan_deg,
+            Rr3PwmChannel::Tilt => &mut self.tilt_deg,
         }
     }
 }

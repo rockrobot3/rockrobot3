@@ -92,9 +92,23 @@ fn rr3_asm_profile_read(
     workdir: &Path,
     profile_src: &Path,
 ) -> Result<(PathBuf, Rr3Profile), String> {
-    let profile_text = std::fs::read_to_string(profile_src)
-        .map_err(|e| format!("读不到装配单 {}: {e}", profile_src.display()))?;
-    let sim_text = rr3_asm_sim_text(&profile_text)?;
+    let profile_text = rr3_asm_profile_text(profile_src)?;
+    rr3_asm_layout(workdir, profile_src, &profile_text)
+}
+
+/// 源装配单读入（读不到点名源路径）。
+fn rr3_asm_profile_text(profile_src: &Path) -> Result<String, String> {
+    std::fs::read_to_string(profile_src)
+        .map_err(|e| format!("读不到装配单 {}: {e}", profile_src.display()))
+}
+
+/// sim 变换 → 复核解析 → 落位。
+fn rr3_asm_layout(
+    workdir: &Path,
+    profile_src: &Path,
+    profile_text: &str,
+) -> Result<(PathBuf, Rr3Profile), String> {
+    let sim_text = rr3_asm_sim_text(profile_text)?;
     let profile = rr3_asm_parse(&sim_text, profile_src)?;
     let profile_dst = rr3_layout_profile(workdir, profile_src, &sim_text)?;
     Ok((profile_dst, profile))
@@ -343,6 +357,11 @@ fn rr3_layout_atoms(src_dir: &Path, dst_dir: &Path) -> Result<(), String> {
 fn rr3_copy_tree(src: &Path, dst: &Path) -> Result<(), String> {
     std::fs::create_dir_all(dst).map_err(|e| format!("建 {dst:?} 失败: {e}"))?;
     let rd = std::fs::read_dir(src).map_err(|e| format!("读目录 {src:?} 失败: {e}"))?;
+    rr3_copy_entries(rd, src, dst)
+}
+
+/// 逐条目拷贝（遍历失败的文案带源目录）。
+fn rr3_copy_entries(rd: std::fs::ReadDir, src: &Path, dst: &Path) -> Result<(), String> {
     for ent in rd {
         let ent = ent.map_err(|e| format!("遍历 {src:?} 失败: {e}"))?;
         rr3_copy_node(&ent, dst)?;
@@ -639,6 +658,11 @@ fn rr3_asm_wait_ctl(ctx: &Rr3AsmCtx, report: &mut String) -> Result<(), String> 
     report.push_str(&status_out);
     rr3_asm_denied(&status_out)?;
     rr3_asm_rows_ok(ctx)?;
+    rr3_asm_tail_ctl(ctx, report)
+}
+
+/// 巡检后三段（health / logs / ota）留痕。
+fn rr3_asm_tail_ctl(ctx: &Rr3AsmCtx, report: &mut String) -> Result<(), String> {
     report.push_str(rr3_section("rr3-ctl health").as_str());
     report.push_str(&rr3_ctl_out(ctx.rrctl, ctx.socket, "health")?);
     report.push_str(rr3_section("rr3-ctl logs（rrd 日志环尾部）").as_str());

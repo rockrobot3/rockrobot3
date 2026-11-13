@@ -118,17 +118,21 @@ fn rr3_uart_pair(cfg: &BridgeConfig, shutdown: &AtomicBool) -> Option<(Rr3UartCo
         }
         match open_uart_pair(cfg) {
             Ok(pair) => return Some(pair),
-            Err(e) => {
-                log(&format!(
-                    "uart open 失败（{e}）；{}s 后重开",
-                    backoff.peek().as_secs()
-                ));
-                if !sleep_sliced(backoff.next(), shutdown) {
-                    return None;
-                }
-            }
+            Err(e) => rr3_uart_retry(e, &mut backoff, shutdown)?,
         }
     }
+}
+
+/// 开口失败的一拍：留痕后退避等待；None = 等待期收到关停。
+fn rr3_uart_retry(e: std::io::Error, backoff: &mut Backoff, shutdown: &AtomicBool) -> Option<()> {
+    log(&format!(
+        "uart open 失败（{e}）；{}s 后重开",
+        backoff.peek().as_secs()
+    ));
+    if !sleep_sliced(backoff.next(), shutdown) {
+        return None;
+    }
+    Some(())
 }
 
 /// 开一对 rx/tx 句柄（同一设备节点 open 两次，读/写分体——模块注记的理由）。
@@ -254,11 +258,18 @@ fn rr3_link_serve(
         let Some(conn) = uds_attach(cfg, shutdown, sink, src, dropped) else {
             return LinkOutcome::Shutdown;
         };
-        match uds_wait(exit_rx, shutdown, conn, &mut dwell) {
-            WaitOutcome::Reconnect => continue,
-            WaitOutcome::UartDead => return LinkOutcome::UartDead,
-            WaitOutcome::Shutdown => return LinkOutcome::Shutdown,
+        if let Some(outcome) = rr3_serve_outcome(uds_wait(exit_rx, shutdown, conn, &mut dwell)) {
+            return outcome;
         }
+    }
+}
+
+/// 看守结局分流：None = 重连（继续接力循环）。
+fn rr3_serve_outcome(w: WaitOutcome) -> Option<LinkOutcome> {
+    match w {
+        WaitOutcome::Reconnect => None,
+        WaitOutcome::UartDead => Some(LinkOutcome::UartDead),
+        WaitOutcome::Shutdown => Some(LinkOutcome::Shutdown),
     }
 }
 
@@ -330,15 +341,15 @@ fn rr3_uds_halves(stream: &UnixStream) -> Option<(UnixStream, UnixStream)> {
 
 /// 连接日志（等待过退避时带丢弃累计——运维据它判断"看起来在跑"是否真在跑）。
 fn log_connected(socket: &Path, waited: bool, dropped: &AtomicU64) {
-    if waited {
-        log(&format!(
-            "uds connected {}（等待期上行丢弃 {} 字节，未缓冲）",
-            socket.display(),
+    let tail = if waited {
+        format!(
+            "（等待期上行丢弃 {} 字节，未缓冲）",
             dropped.load(Ordering::Relaxed)
-        ));
+        )
     } else {
-        log(&format!("uds connected {}", socket.display()));
-    }
+        String::new()
+    };
+    log(&format!("uds connected {}{tail}", socket.display()));
 }
 
 /// 克隆一个半边；失败点名后按"重试"处理（None）。
@@ -366,24 +377,37 @@ fn uds_wait(
             return WaitOutcome::Shutdown;
         }
         match exit_rx.recv_timeout(WAIT_SLICE) {
-            Ok(ExitMsg::UdsDead(why)) => {
-                drop(kill);
-                if !uds_retire(&why, at.elapsed(), dwell, shutdown) {
-                    return WaitOutcome::Shutdown;
-                }
-                return WaitOutcome::Reconnect;
-            }
-            Ok(ExitMsg::UartDead(why)) => {
-                log(&format!("uart 断链（{why}）；关 UDS，重开设备节点"));
-                drop(kill);
-                return WaitOutcome::UartDead;
-            }
+            Ok(msg) => return rr3_wait_msg(msg, kill, at, dwell, shutdown),
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 // 两个线程都已退场 = UART 面没了
                 log("uart 断链（收发线程均已退场）；关 UDS，重开设备节点");
                 return WaitOutcome::UartDead;
             }
+        }
+    }
+}
+
+/// 一条退出消息的处置（kill 半边交给本条：两条断链路都先闭合它）。
+fn rr3_wait_msg(
+    msg: ExitMsg,
+    kill: UnixStream,
+    at: Instant,
+    dwell: &mut Backoff,
+    shutdown: &AtomicBool,
+) -> WaitOutcome {
+    match msg {
+        ExitMsg::UdsDead(why) => {
+            drop(kill);
+            if !uds_retire(&why, at.elapsed(), dwell, shutdown) {
+                return WaitOutcome::Shutdown;
+            }
+            WaitOutcome::Reconnect
+        }
+        ExitMsg::UartDead(why) => {
+            log(&format!("uart 断链（{why}）；关 UDS，重开设备节点"));
+            drop(kill);
+            WaitOutcome::UartDead
         }
     }
 }
@@ -463,13 +487,12 @@ fn upstream_route(
     discarding: &mut bool,
     exit: &mpsc::Sender<ExitMsg>,
 ) {
-    match cur.as_mut() {
-        Some(s) => {
-            if rr3_route_write(s, chunk, n, dropped, discarding, exit) {
-                *cur = None;
-            }
-        }
-        None => rr3_route_discard(n, dropped, discarding),
+    let Some(s) = cur.as_mut() else {
+        rr3_route_discard(n, dropped, discarding);
+        return;
+    };
+    if rr3_route_write(s, chunk, n, dropped, discarding, exit) {
+        *cur = None;
     }
 }
 
@@ -534,16 +557,29 @@ fn downstream_loop(
     let mut cur: Option<UnixStream> = None;
     loop {
         rr3_down_swap(&mut cur, &new_src);
-        let Some(stream) = cur.as_mut() else {
-            if rr3_down_idle(&stop) {
-                return;
-            }
-            continue;
-        };
-        match rr3_down_step(stream, &mut buf, &mut tx, &exit) {
-            Some(true) => continue,
-            Some(false) => return,
-            None => cur = None,
+        if !rr3_down_drive(&mut cur, &mut buf, &mut tx, &stop, &exit) {
+            return;
+        }
+    }
+}
+
+/// 一拍下行：无连接则等一拍（关停即 false 退场），有连接则推进一块。
+/// false = 写失败退场；连接已死只清空 `cur`（下一拍重新等交接槽）。
+fn rr3_down_drive(
+    cur: &mut Option<UnixStream>,
+    buf: &mut [u8],
+    tx: &mut Rr3UartConn,
+    stop: &AtomicBool,
+    exit: &mpsc::Sender<ExitMsg>,
+) -> bool {
+    let Some(stream) = cur.as_mut() else {
+        return !rr3_down_idle(stop);
+    };
+    match rr3_down_step(stream, buf, tx, exit) {
+        Some(alive) => alive,
+        None => {
+            *cur = None;
+            true
         }
     }
 }
@@ -605,17 +641,23 @@ fn connect_with_backoff(socket: &Path, shutdown: &AtomicBool) -> Option<(UnixStr
         match UnixStream::connect(socket) {
             Ok(s) => return Some((s, waited)),
             Err(e) => {
-                log(&format!(
-                    "uds connect 失败（{e}）；{}s 后重试",
-                    backoff.peek().as_secs()
-                ));
+                rr3_connect_wait(e, &mut backoff, shutdown)?;
                 waited = true;
-                if !sleep_sliced(backoff.next(), shutdown) {
-                    return None;
-                }
             }
         }
     }
+}
+
+/// connect 失败的一拍：留痕后退避等待；None = 等待期收到关停。
+fn rr3_connect_wait(e: std::io::Error, backoff: &mut Backoff, shutdown: &AtomicBool) -> Option<()> {
+    log(&format!(
+        "uds connect 失败（{e}）；{}s 后重试",
+        backoff.peek().as_secs()
+    ));
+    if !sleep_sliced(backoff.next(), shutdown) {
+        return None;
+    }
+    Some(())
 }
 
 /// 指数退避：1s 起步 ×2 至 10s 封顶（§5.1.5 参数）。

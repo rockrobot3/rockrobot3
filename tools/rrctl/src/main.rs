@@ -59,21 +59,31 @@ fn rr3_bus_value(v: Option<&String>) -> String {
 fn resolve_bus_path(override_path: Option<&str>) -> String {
     override_path
         .map(str::to_string)
-        .or_else(|| std::env::var(RR3_BUS_PATH_ENV).ok())
-        .unwrap_or_else(|| RR3_UDS_PATH_DEFAULT.to_string())
+        .or_else(rr3_env_bus)
+        .unwrap_or_else(rr3_bus_default)
+}
+
+/// `RR3_BUS_PATH` 环境变量（未设即 None）。
+fn rr3_env_bus() -> Option<String> {
+    std::env::var(RR3_BUS_PATH_ENV).ok()
+}
+
+/// 契约默认总线路径。
+fn rr3_bus_default() -> String {
+    RR3_UDS_PATH_DEFAULT.to_string()
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (bus, cmd) = parse(&args);
     let Some(cmd) = cmd.as_deref() else { usage() };
-    match commands::run(cmd, &resolve_bus_path(bus.as_deref())) {
-        Ok(report) => println!("{report}"),
-        Err(e) => {
+    commands::run(cmd, &resolve_bus_path(bus.as_deref())).map_or_else(
+        |e| {
             eprintln!("rr3-ctl {cmd}: {e}");
             std::process::exit(1);
-        }
-    }
+        },
+        |report| println!("{report}"),
+    );
 }
 
 #[cfg(test)]

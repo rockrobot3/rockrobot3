@@ -365,11 +365,16 @@ pub fn rr3_mkmod_gen_atom(
 
     let staging = out_root.join(format!(".staging-{stem}"));
     let files = rr3_mkmod_atom_files(&stem, slot);
-    rr3_mkmod_atom_write(&staging, &files)?;
-    rr3_mkmod_atom_gate(&staging, &files)?;
+    rr3_mkmod_atom_emit(&staging, &files)?;
 
     std::fs::rename(&staging, &target)?;
     Ok(files.iter().map(|(rel, _)| target.join(rel)).collect())
+}
+
+/// staging 落盘 + 回灌门（任一步失败即整体丢弃，不留半成品）。
+fn rr3_mkmod_atom_emit(staging: &Path, files: &[(String, String)]) -> Result<(), Rr3MkmodError> {
+    rr3_mkmod_atom_write(staging, files)?;
+    rr3_mkmod_atom_gate(staging, files)
 }
 
 /// 五件套内容（相对路径 + 正文），顺序即落盘顺序。

@@ -208,7 +208,11 @@ fn arg_other(d: &mut ArgsDraft, other: &str) -> Result<(), String> {
 
 /// 参数解析（device 必给；波特率过 rr-ipc 档位表白名单——真值单点）。
 fn parse_args(argv: &[String]) -> Result<Args, String> {
-    let d = rr3_parse_draft(argv)?;
+    rr3_args_finish(rr3_parse_draft(argv)?)
+}
+
+/// 收尾：device 必给 → 档位过表 → 缺省输出名补齐。
+fn rr3_args_finish(d: ArgsDraft) -> Result<Args, String> {
     let device = d
         .device
         .ok_or("缺 <device> 参数（如 /dev/cu.usbserial-0001）")?;
@@ -335,20 +339,29 @@ fn audio_chunk_fields(v: &Value) -> Result<AudioChunk, String> {
     if v.get("format").and_then(Value::as_str) != Some("s16le") {
         return Err("format 非 s16le".into());
     }
-    let seq = v.get("seq").and_then(Value::as_u64).ok_or("缺 seq")? as u32;
-    let rate = v.get("rate").and_then(Value::as_u64).ok_or("缺 rate")? as u32;
-    let ms = v.get("ms").and_then(Value::as_u64).ok_or("缺 ms")?;
+    Ok(AudioChunk {
+        seq: rr3_u32_field(v, "seq")?,
+        rate: rr3_u32_field(v, "rate")?,
+        ms: v.get("ms").and_then(Value::as_u64).ok_or("缺 ms")?,
+        samples: rr3_pcm_samples(v)?,
+    })
+}
+
+/// 必给 u32 字段（缺字段点名原文案）。
+fn rr3_u32_field(v: &Value, key: &str) -> Result<u32, String> {
+    v.get(key)
+        .and_then(Value::as_u64)
+        .map(|n| n as u32)
+        .ok_or_else(|| format!("缺 {key}"))
+}
+
+/// `pcm_b64` → s16le 字节（缺字段/解码失败点名原文案）。
+fn rr3_pcm_samples(v: &Value) -> Result<Vec<u8>, String> {
     let b64 = v
         .get("pcm_b64")
         .and_then(Value::as_str)
         .ok_or("缺 pcm_b64")?;
-    let samples = rr3_base64_decode(b64).map_err(|e| format!("pcm_b64 解码失败: {e:?}"))?;
-    Ok(AudioChunk {
-        seq,
-        rate,
-        ms,
-        samples,
-    })
+    rr3_base64_decode(b64).map_err(|e| format!("pcm_b64 解码失败: {e:?}"))
 }
 
 /// seq 连续性记账（wrapping u32）：断档数 = (seq - prev) - 1（wrapping 域），
@@ -472,14 +485,15 @@ impl DoaTracker {
     }
 }
 
-/// 符号分离判定文案（正负都有 = 左右发声方向可分）。
+/// 符号分离判定文案（正负都有 = 左右发声方向可分）。索引 = (正 << 0) | (负 << 1)。
 fn rr3_doa_verdict(has_pos: bool, has_neg: bool) -> &'static str {
-    match (has_pos, has_neg) {
-        (true, true) => "左右符号分离 ✓（冒烟过）",
-        (true, false) => "仅正向角（对照位缺或方向映射相反）",
-        (false, true) => "仅负向角（对照位缺或方向映射相反）",
-        (false, false) => "全部近 0°（ILD 不显著，查音量/距离）",
-    }
+    const TEXT: [&str; 4] = [
+        "全部近 0°（ILD 不显著，查音量/距离）",
+        "仅正向角（对照位缺或方向映射相反）",
+        "仅负向角（对照位缺或方向映射相反）",
+        "左右符号分离 ✓（冒烟过）",
+    ];
+    TEXT[has_pos as usize | (has_neg as usize) << 1]
 }
 
 impl SeqTracker {
@@ -514,17 +528,26 @@ fn bail_with_recovery(out_path: &std::path::Path, watch: &WatchState) -> ! {
 /// 交叠（44B 头 @0 vs ≥44 偏移的数据），活线程下也安全。三路（重连失败/看门狗
 /// 停滞/磁盘写失败）共用——残片在任何退出路径都可解码。
 fn exit_with_recovery(out: &std::path::Path, watch: &WatchState, code: i32) -> ! {
-    let data_len = watch.disk_bytes.load(Ordering::Acquire) as u32;
-    let rate = watch.rate.load(Ordering::Acquire);
-    let head = wav_header(data_len, 2, rate, 16);
-    if let Err(e) = OpenOptions::new()
-        .write(true)
-        .open(out)
-        .and_then(|f| f.write_all_at(&head, 0))
-    {
+    let head = rr3_recover_head(watch);
+    if let Err(e) = rr3_head_patch(out, &head) {
         eprintln!("[rec] 恢复头补写失败 {}: {e}", out.display());
     }
     std::process::exit(code);
+}
+
+/// 恢复头（data_len 取盘侧写透字节、rate 取本端实测率）。
+fn rr3_recover_head(watch: &WatchState) -> [u8; 44] {
+    let data_len = watch.disk_bytes.load(Ordering::Acquire) as u32;
+    let rate = watch.rate.load(Ordering::Acquire);
+    wav_header(data_len, 2, rate, 16)
+}
+
+/// 恢复头位置写（不动游标，与写线程 payload 写无交叠）。
+fn rr3_head_patch(out: &std::path::Path, head: &[u8; 44]) -> std::io::Result<()> {
+    OpenOptions::new()
+        .write(true)
+        .open(out)
+        .and_then(|f| f.write_all_at(head, 0))
 }
 
 /// 读线程（收流端机制面，判据② A/B 定案改造）：**只做大块裸读**——单次
@@ -1101,24 +1124,32 @@ fn decode_drain(
     tx: &mpsc::Sender<Vec<u8>>,
     out_path: &std::path::Path,
 ) {
-    loop {
-        let assembled = match asm.pull() {
-            Ok(Some(a)) => Some(a),
-            Ok(None) => break,
-            Err((dropped, why)) => {
-                st.errors += 1;
-                st.err_streak += 1;
-                eprintln!("[rec] 帧头拒收（弃 {dropped}B 续扫）: {why}");
-                None
-            }
-        };
-        if let Some((header, payload)) = assembled {
+    while rr3_drain_once(asm, st, watch, tx, out_path) {}
+}
+
+/// 一拍出尽：false = 拆帧器已空（调用方收工）。
+fn rr3_drain_once(
+    asm: &mut FrameAssembler,
+    st: &mut DecodeState,
+    watch: &WatchState,
+    tx: &mpsc::Sender<Vec<u8>>,
+    out_path: &std::path::Path,
+) -> bool {
+    match asm.pull() {
+        Ok(Some((header, payload))) => {
             decode_frame(Rr3Frame { header, payload }, st, watch, tx, out_path);
         }
-        // 失步重同步账（三级防护第 ② 级的记账面）：坏帧弃扫已在内存即时
-        // 完成，这里只把成片损坏点名为日志（丢片由 seq 对账如实记账）。
-        rr3_resync_note(st, asm);
+        Ok(None) => return false,
+        Err((dropped, why)) => {
+            st.errors += 1;
+            st.err_streak += 1;
+            eprintln!("[rec] 帧头拒收（弃 {dropped}B 续扫）: {why}");
+        }
     }
+    // 失步重同步账（三级防护第 ② 级的记账面）：坏帧弃扫已在内存即时
+    // 完成，这里只把成片损坏点名为日志（丢片由 seq 对账如实记账）。
+    rr3_resync_note(st, asm);
+    true
 }
 
 /// 连续拆帧失败达阈值即记一次失步重同步账并清零。
@@ -1147,12 +1178,15 @@ fn decode_frame(
             st.err_streak = 0;
             st.ingest(chunk, frame.header.src_task, st.errors, watch, tx, out_path);
         }
-        Err(e) => {
-            st.errors += 1;
-            st.err_streak += 1;
-            eprintln!("[rec] 事件门拒收: {e}");
-        }
+        Err(e) => rr3_frame_reject(st, &e),
     }
+}
+
+/// 拒收记账：错误数 + 连续失败数推进，并点名拒因。
+fn rr3_frame_reject(st: &mut DecodeState, e: &str) {
+    st.errors += 1;
+    st.err_streak += 1;
+    eprintln!("[rec] 事件门拒收: {e}");
 }
 
 /// 收兵第一段：停流旗 → 读线程退场 → 解武装 → 关通道让写线程排空；
@@ -1190,13 +1224,18 @@ fn finish_and_report(
 ) {
     finish_threads(threads, watch);
     rr3_finish_zero(&st, out_path);
+    rr3_finish_summary(&st, watch, out_path, doa);
+}
+
+/// 收兵汇总：实测率补真头 + 总数行（`--doa` 再打方位角汇总）。
+fn rr3_finish_summary(st: &DecodeState, watch: &WatchState, out_path: &std::path::Path, doa: bool) {
     let measured = measured_rate(
         st.rate_anchor,
         st.last_frame,
         st.total_bytes / 4,
         st.declared_rate,
     );
-    rr3_finish_head(out_path, &st, watch, measured);
+    rr3_finish_head(out_path, st, watch, measured);
     if doa {
         println!("{}", st.doa.summary());
     }
@@ -1249,13 +1288,10 @@ fn rr3_head_write(out_path: &std::path::Path, data_len: u32, measured: u32) {
 
 /// wav 建档（失败即退 1，文案逐字保留）。
 fn rr3_wav_create(out_path: &std::path::Path) -> File {
-    match File::create(out_path) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("rr3-audio-rec: wav 建档失败 {}: {e}", out_path.display());
-            std::process::exit(1);
-        }
-    }
+    File::create(out_path).unwrap_or_else(|e| {
+        eprintln!("rr3-audio-rec: wav 建档失败 {}: {e}", out_path.display());
+        std::process::exit(1);
+    })
 }
 
 /// 跨线程共享账的初值（三线程按需克隆）。

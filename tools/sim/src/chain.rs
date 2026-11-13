@@ -809,14 +809,20 @@ fn rr3_chain_evidence(
 /// 三段进程内日志留痕（brain 动作数 / interact 挂起 / act 落角）。
 fn rr3_chain_logs(ctx: &Rr3ChainCtx, report: &mut String) -> Result<(), String> {
     report.push_str(rr3_section("全链留痕（进程内日志）").as_str());
+    rr3_chain_log_head(ctx, report)?;
+    let intent = rr3_chain_act(ctx)?;
+    report.push_str(&format!("act: {intent}\n"));
+    Ok(())
+}
+
+/// 留痕前两段（brain 轮次 / interact 挂起）。
+fn rr3_chain_log_head(ctx: &Rr3ChainCtx, report: &mut String) -> Result<(), String> {
     let turn = rr3_chain_turn(ctx)?;
     report.push_str(&format!("brain: {turn}\n"));
     let tts = rr3_chain_tts(ctx)?;
     report.push_str(&format!(
         "interact: {tts}（表情机 talk 自动挂起，sim 档无显示件）\n"
     ));
-    let intent = rr3_chain_act(ctx)?;
-    report.push_str(&format!("act: {intent}\n"));
     Ok(())
 }
 

@@ -110,10 +110,12 @@ fn rr3_bridge_set(
     socket: &mut Option<PathBuf>,
     baud: &mut u32,
 ) -> Result<(), String> {
-    match flag {
-        "--uart" => *uart = Some(PathBuf::from(v)),
-        "--socket" => *socket = Some(PathBuf::from(v)),
-        _ => *baud = rr3_arg_baud(v)?,
+    if flag == "--uart" {
+        *uart = Some(PathBuf::from(v));
+    } else if flag == "--socket" {
+        *socket = Some(PathBuf::from(v));
+    } else {
+        *baud = rr3_arg_baud(v)?;
     }
     Ok(())
 }
