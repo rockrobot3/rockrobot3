@@ -1,0 +1,247 @@
+# 平台环境流水线：五类芯片的构建/执行环境验证（x86_64 主门在 gate）。
+# 拆分自 ci.yml（2026-11-13）：按职责分开，job 正文原样搬运；
+# 判据仍以 tools/ci/check.sh 与 tools/ci/*.sh 为唯一真源。
+name: platforms
+on:
+  push:
+    branches: [main, "dev/**"]
+  pull_request:
+  workflow_dispatch:
+  # UTC 周日 18:00 = 北京周一 02:00：重工具链档（esp）与全平台固定跑一轮。
+  schedule:
+    - cron: "0 18 * * 0"
+permissions:
+  contents: read
+concurrency:
+  group: platforms-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  # 芯片平台环境矩阵（除 esp32 外的三条非 x86 面）：
+  #   瑞芯微 RK3566/RK3588 → aarch64-musl；进迭时空 SpacemiT K1/K3 → riscv64-musl；
+  #   x86_64（英特尔 / AMD）→ 原生 `conventions` 全量门，无需交叉。
+  # 每个平台做三件事：① 交叉构建七件静态产物；② `file` 断言目标 ISA + 全静态；
+  # ③ qemu-user 把产物在目标 ISA 上真跑一次（证明"环境能执行"，不只是能编译）。
+  # brain 的 ureq+ring 需目标 C 工具链，归板上原生构建（同 pack-bundle ③ 分工）。
+  cross-artifacts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - chip: 瑞芯微（RK3566/RK3588）
+            triple: aarch64-unknown-linux-musl
+            arch: "ARM aarch64"
+            qemu: qemu-aarch64-static
+          - chip: 进迭时空（SpacemiT K1/K3）
+            triple: riscv64gc-unknown-linux-musl
+            arch: "RISC-V"
+            qemu: qemu-riscv64-static
+    name: cross / ${{ matrix.chip }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      # Ubuntu 只有 qemu-user-static 一个包（内含 qemu-aarch64-static /
+      # qemu-riscv64-static 等全部架构）；没有 per-arch 独立包，装错名 apt 退 100。
+      - name: 安装 qemu-user-static
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user-static
+      - name: 交叉构建 + ELF 断言（失败把日志尾部打成注解，便于远端归因）
+        run: |
+          set -o pipefail
+          if ! bash tools/ci/cross-artifacts.sh "${{ matrix.triple }}" "${{ matrix.arch }}" 2>&1 | tee /tmp/cross.log; then
+            tail -c 3000 /tmp/cross.log | sed 's/^/::error title=cross-artifacts::/'
+            exit 1
+          fi
+      - name: qemu 目标 ISA 执行冒烟（产物真能跑起来）
+        run: |
+          rel="/tmp/rr3-build/${{ matrix.triple }}/release"
+          for b in rrd rr3-ctl; do
+            out=$("${{ matrix.qemu }}" "$rel/$b" --help 2>&1) && rc=0 || rc=$?
+            echo "$out" | head -3
+            if echo "$out" | grep -qiE "exec format error|Exec format error|could not open"; then
+              echo "FAIL  $b 在 ${{ matrix.triple }} 上无法执行" >&2
+              exit 1
+            fi
+            echo "PASS  $b 可在 ${{ matrix.triple }} 执行（rc=$rc）"
+          done
+      - name: 上传静态产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.triple }}
+          path: /tmp/rr3-build/${{ matrix.triple }}/release/{rrd,rr3-ctl,rr3-act,rr3-connect,rr3-interact,rr3-sense,rr3-power}
+          if-no-files-found: error
+          retention-days: 7
+
+  # 重工具链 ESP 构建档（A 任务构建面）：espup 钉版 v0.17.1 + ESP-IDF v5.2.2 克隆 +
+  # 乐鑫 esp-clang + ldproxy——冷跑 20 分钟量级，不与每次 dev 推送抢跑账：手动触发或
+  # 合入 main 的 PR 才跑（发布门前置）。两门各自 SKIP 纪律不变：前置缺位 = SKIP 明说，
+  # 在位但编译失败/产物不在树 = 红。
+  # ESP32 芯片平台环境（esp32 / esp32s3 双档，xtensa + espidf 五门）。
+  # 每次 push 都跑：这是唯一能证明 ESP32 环境可构建的载体；冷跑约 20 分钟，
+  # 靠下面三处 cache（espup/工具链/IDF）把常跑压到分钟级。
+  esp32-gates:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # 缓存面：espup 可执行、esp 工具链、ESP-IDF 与工具目录。键钉版本，
+      # 升 espup/IDF 必须改键（与下方安装命令同批改），否则会吃旧工具链。
+      - name: 缓存 esp 工具链与 ESP-IDF
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/bin/espup
+            ~/.rustup/toolchains/esp
+            ~/.espressif
+            ~/.cargo/bin/ldproxy
+          key: esp-${{ runner.os }}-v0.17.1-idf5.2.2
+      - name: 安装 esp 工具链（espup 钉版，esp32 + esp32s3 双档）
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          if [ ! -x "$HOME/.local/bin/espup" ]; then
+            curl -fsSL https://github.com/esp-rs/espup/releases/download/v0.17.1/espup-x86_64-unknown-linux-gnu \
+              -o "$HOME/.local/bin/espup"
+            chmod +x "$HOME/.local/bin/espup"
+          fi
+          "$HOME/.local/bin/espup" install --targets esp32,esp32s3
+      - name: 安装 ldproxy
+        run: command -v ldproxy >/dev/null || cargo install ldproxy --locked
+      - name: 克隆 ESP-IDF v5.2.2（版本钉与 tools/espidf-std-hello/README.md 登记表同源）
+        run: |
+          idf="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
+          if [ ! -d "$idf/.git" ]; then
+            mkdir -p "$HOME/.espressif/frameworks"
+            git clone --depth 1 -b v5.2.2 --recursive \
+              https://github.com/espressif/esp-idf.git "$idf"
+          fi
+          "$idf/install.sh" esp32 esp32s3
+      - name: classic ESP32 外设基座门（debug + release）
+        run: |
+          # espup 生成的环境导出（LIBCLANG_PATH 等）供 +esp 工具链取用
+          # shellcheck disable=SC1091
+          . "$HOME/export-esp.sh"
+          set -o pipefail
+          if ! bash tools/ci/esp32-periph-base-check.sh 2>&1 | tee /tmp/g.log; then
+            tail -c 4000 /tmp/g.log | sed 's/^/::error title=esp32-periph-base::/'
+            exit 1
+          fi
+      - name: ESP32-S3 外设基座门（debug + release + 单测编译面）
+        run: |
+          # shellcheck disable=SC1091
+          . "$HOME/export-esp.sh"
+          set -o pipefail
+          if ! bash tools/ci/esp32s3-periph-base-check.sh 2>&1 | tee /tmp/g.log; then
+            tail -c 4000 /tmp/g.log | sed 's/^/::error title=esp32s3-periph-base::/'
+            exit 1
+          fi
+      - name: classic ESP32 UART echo 固件门（release）
+        run: |
+          # shellcheck disable=SC1091
+          . "$HOME/export-esp.sh"
+          set -o pipefail
+          if ! bash tools/ci/esp-uart-echo-check.sh 2>&1 | tee /tmp/g.log; then
+            tail -c 4000 /tmp/g.log | sed 's/^/::error title=esp-uart-echo::/'
+            exit 1
+          fi
+      - name: ESP-IDF std 构建链冒烟门（xtensa-esp32-espidf）
+        run: |
+          # shellcheck disable=SC1091
+          . "$HOME/export-esp.sh"
+          set -o pipefail
+          if ! bash tools/ci/espidf-std-check.sh 2>&1 | tee /tmp/g.log; then
+            tail -c 4000 /tmp/g.log | sed 's/^/::error title=espidf-std::/'
+            exit 1
+          fi
+      - name: ESP-IDF 哨兵构建门（双证之①编译面）
+        run: |
+          # shellcheck disable=SC1091
+          . "$HOME/export-esp.sh"
+          set -o pipefail
+          if ! bash tools/ci/espidf-sentinel-check.sh 2>&1 | tee /tmp/g.log; then
+            tail -c 4000 /tmp/g.log | sed 's/^/::error title=espidf-sentinel::/'
+            exit 1
+          fi
+      - name: rr3-act / rr3-sense espidf 档编译面门（esp32 + esp32s3）
+        run: |
+          # shellcheck disable=SC1091
+          . "$HOME/export-esp.sh"
+          set -o pipefail
+          if ! bash tools/ci/rr3-act-sense-espidf-check.sh 2>&1 | tee /tmp/g.log; then
+            tail -c 4000 /tmp/g.log | sed 's/^/::error title=act-sense-espidf::/'
+            exit 1
+          fi
+
+  # IPC-T-003 跨架构对拍（ADR-0006 后果项，平台条件脚本——不进门禁步序，
+  # 但 ubuntu runner 恰好具备全部平台条件：x86_64 宿主 + QEMU arm64 仿真 +
+  # Docker + espup 装的 esp 工具链（第④路 xtensa 对拍））。--strict：任何
+  # 一步 SKIP 即不放行（退 2）。
+  # QEMU 仿真下容器内 cargo 构建较慢属预期；rust-cache 与 conventions/lint 共享加速。
+  ipct003:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      - uses: docker/setup-qemu-action@v3
+      - name: 安装 esp 工具链（espup 预编译直下 → +esp，第④路 xtensa 对拍）
+        run: |
+          # 钉版 v0.17.1（2026-04-17 发布）——latest 漂移会破工具链可重现性；
+          # 升级方式：核对 esp-rs/espup release 资产名后改此处版本号
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL https://github.com/esp-rs/espup/releases/download/v0.17.1/espup-x86_64-unknown-linux-gnu \
+            -o "$HOME/.local/bin/espup"
+          chmod +x "$HOME/.local/bin/espup"
+          "$HOME/.local/bin/espup" install --targets esp32
+      - name: IPC-T-003 跨架构对拍（--strict）
+        run: |
+          # espup 生成的环境导出（LIBCLANG_PATH 等）供 +esp 工具链取用
+          # shellcheck disable=SC1091
+          [ -f "$HOME/export-esp.sh" ] && . "$HOME/export-esp.sh"
+          bash tools/ci/ipct003.sh --strict
+
+  # 门禁之外的 lint 拆步：fmt 与 clippy 各自独立失败，一步红即整 job 红，
+  # 失败归因不用翻混合日志。绿色基线 = 提交 fd0942c（rustfmt 全仓归一 + clippy 清零）。
+  # 宿主等价面（macOS）：本地开发环境与 CI 的编译器/链接器/系统库不同，
+  # "本地绿、CI 红"的另一半来自宿主差异。本 job 在 macOS 上把 workspace 全量测试
+  # 与全部独立工程的测试按门禁 ④/⑥ 同口径跑一遍——它不替代 ubuntu 上的门禁，
+  # 只回答"换宿主后行为是否一致"。esp 条件工程（xtensa/espidf）按门禁同口径排除。
+  host-macos:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      - name: workspace 全量测试（macOS 宿主）
+        working-directory: base/runtime
+        run: cargo test --workspace
+      - name: 独立工程测试（门禁 ④/⑥ 同口径；esp 条件工程除外）
+        run: |
+          set -o pipefail
+          for m in $(find modules tools base/ota -name Cargo.toml \
+                     -not -path "*/target/*" -not -path "base/runtime/*" \
+                     -not -path "tools/esp32-uart-echo/*" -not -path "tools/espidf-std-hello/*" \
+                     -not -path "tools/espidf-sentinel/*" -not -path "tools/esp32-periph-base/*" \
+                     | sort); do
+            echo "=== $m ==="
+            cargo test -q --manifest-path "$m"
+          done
+

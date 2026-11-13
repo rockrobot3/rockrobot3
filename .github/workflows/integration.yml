@@ -1,0 +1,94 @@
+# 集成演练流水线：真装、装配冒烟、全链闭环、点验矩阵。
+# 拆分自 ci.yml（2026-11-13）：按职责分开，job 正文原样搬运；
+# 判据仍以 tools/ci/check.sh 与 tools/ci/*.sh 为唯一真源。
+name: integration
+on:
+  push:
+    branches: [main, "dev/**"]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  # 发行版快路轨冒烟（0.0.2 T5 / D8，ADR-0013 裁定 5 首证）：单步容器
+  # （rust:bookworm，glibc 自洽，本机产物装本机 deb）内构建 → rr3-pack 出 deb →
+  # dpkg -i → rrd 装配单正门起 5 模块 + rr3-brain 缺格点名。macOS 本机无法真装
+  # deb（方案 P1），真装只认这个 job 的远端回执。
+  distro-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      # 与其余 job 同源：runner 预装 rustc 版本不受控，① 现在编 brain（ureq/rustls
+      # /ring MSRV 面），工具链必须钉 stable 而非吃镜像预装版
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      - name: deb 装机冒烟（rust:bookworm 容器）
+        run: bash tools/ci/distro-smoke.sh
+
+  # 保底轨装配冒烟（0.0.2 修复批）：post-build.sh 装机布局 / entry 绝对化 /
+  # config 随装 / 坏模块警告不阻断。纯 bash + 系统工具，夹具侧模拟 Buildroot
+  # 目标根（TARGET_DIR），不需要 Docker 或 Buildroot 全量构建。
+  buildroot-assembly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: 保底轨装配冒烟（post-build.sh）
+        run: bash tools/ci/buildroot-assembly-smoke.sh
+
+  # D9 装配演练（0.0.2 T6）：装配单驱动 boot + 六 Rust 模块真进程（批N32 件四起
+  # brain 也是 Rust），判据六模块全 running + denied_publish = 0。
+  sim-assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 装配演练（构建 + rr3-sim --profile）
+        run: bash tools/ci/sim-assemble.sh
+
+  # 批F4 全链闭环演练（§5.2 判据 10 sim 档）：采集→意图→判向→转向→表情六真
+  # 进程 mock 闭环 + 总线观察者取证。
+  sim-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 全链闭环演练（构建 + rr3-sim --chain）
+        run: bash tools/ci/sim-chain.sh
+
+  # 点验矩阵出数入口（0.0.5 批M MC-10 L-1）：`tools/ci/matrix.sh` 此前**无任何调用方**
+  # （不在 check.sh、不在 ci.yml）——本 job 让它真跑并出一行矩阵（architecture §12.6
+  # 七列 / H3），产出**人工搬进** docs/status.md 矩阵行。出数 ≠ 判据：判据真源仍是
+  # tools/ci/*.sh 与 check.sh 十步，矩阵只如实记"本环境实跑了什么、跑出什么"。
+  # 非 --strict：⑦ 时序达标无固定载体（E4 真板专属，云 runner 是共享 x86、时间非硬件
+  # 时间），默认口径如实记"未跑"不冒领 PASS、退 0；矩阵出现 FAIL 列时退 1（job 红）。
+  matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      # ① 的 ipct003.sh 第③路 arm64 容器真跑（docker run --platform linux/arm64）
+      # 需要 binfmt——runner 缺省没有，缺它容器真跑失败（非 SKIP），① 被误判
+      # "对拍破裂"致 job 红。ipct003 job 有同一步，此处与之同源。
+      - uses: docker/setup-qemu-action@v3
+      - name: 点验矩阵出数（bash tools/ci/matrix.sh）
+        run: bash tools/ci/matrix.sh
+

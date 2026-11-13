@@ -3185,8 +3185,8 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/gat
 （`rr-registry/tests/contract.rs` `esp32_mini_profile_binds_bridged_minimal_shape` 红）。
 
 **2026-11-13 CI 覆盖面重构（"本地只写代码，构建与测试在远端"）**：本地资源有限且
-环境不标准（macOS + 非标工具链），编译/测试/集成一律以远端回执为准。`ci.yml` 由
-"八 job"扩为 **12 job**，并把门禁唯一入口固定在 CI：
+环境不标准（macOS + 非标工具链），编译/测试/集成一律以远端回执为准。原 `ci.yml` 单文件（八 job）先扩为 12 job、再按职责拆成 **三条流水线**
+（`gate.yml` / `platforms.yml` / `integration.yml`），门禁唯一入口固定在 CI：
 
 | job | 作用 | 触发 |
 |---|---|---|
