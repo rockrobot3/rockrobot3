@@ -114,9 +114,17 @@ fn rr3_upstream_rpc(v: &Value) -> Result<(u64, Option<String>, Value), String> {
         .get("id")
         .and_then(Value::as_u64)
         .ok_or("缺 id（要求无符号整数）")?;
-    let method = v.get("method").and_then(Value::as_str).map(str::to_string);
-    let params = v.get("params").cloned().unwrap_or(Value::Null);
-    Ok((id, method, params))
+    Ok((id, rr3_rpc_method(v), rr3_rpc_params(v)))
+}
+
+/// method 原件（Response 帧合法无 method）。
+fn rr3_rpc_method(v: &Value) -> Option<String> {
+    v.get("method").and_then(Value::as_str).map(str::to_string)
+}
+
+/// params 原件（缺省 Null）。
+fn rr3_rpc_params(v: &Value) -> Value {
+    v.get("params").cloned().unwrap_or(Value::Null)
 }
 
 /// JSON-RPC 版本门。
@@ -220,11 +228,13 @@ fn histogram_text(intervals: &[u128]) -> String {
 
 /// 目标三元组（host 侧拼装；与 matrix.sh C12 证据门的正则同口径）。
 fn target_triple() -> String {
-    match std::env::consts::OS {
-        "macos" => format!("{}-apple-darwin", std::env::consts::ARCH),
-        "linux" => format!("{}-unknown-linux-gnu", std::env::consts::ARCH),
-        other => format!("{}-unknown-{other}", std::env::consts::ARCH),
-    }
+    const SUFFIX: [(&str, &str); 2] = [("macos", "apple-darwin"), ("linux", "unknown-linux-gnu")];
+    let os = std::env::consts::OS;
+    let suffix = SUFFIX
+        .iter()
+        .find(|(k, _)| *k == os)
+        .map_or_else(|| format!("unknown-{os}"), |(_, s)| (*s).to_string());
+    format!("{}-{suffix}", std::env::consts::ARCH)
 }
 
 /// C12 证据文件（三样契约：环境指纹/采样窗口/样本数/原始数据，四标记词逐一
@@ -363,12 +373,18 @@ fn rr3_register(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (String, u6
 /// 首帧必须 Request/rr3.register（形状/畸形退 1），返回 id 与 params。
 fn rr3_reg_params(frame: Rr3Frame) -> (u64, Value) {
     match parse_upstream(frame) {
-        Ok((Rr3PayloadType::Request, id, m, params, _)) if m.as_deref() == Some("rr3.register") => {
-            (id, params)
-        }
-        Ok((ty, _, m, _, _)) => rr3_register_shape(ty, m),
+        Ok(up) => rr3_reg_shape(up),
         Err(e) => rr3_register_bad(&e),
     }
+}
+
+/// 已拆帧形状门：必须 Request/rr3.register，否则点名退 1。
+fn rr3_reg_shape(up: (Rr3PayloadType, u64, Option<String>, Value, Value)) -> (u64, Value) {
+    let (ty, id, m, params, _) = up;
+    if ty == Rr3PayloadType::Request && m.as_deref() == Some("rr3.register") {
+        return (id, params);
+    }
+    rr3_register_shape(ty, m)
 }
 
 /// 首帧形状错：点名收到什么，退 1。
@@ -475,10 +491,17 @@ fn rr3_beat_judge(
 /// 单拍帧必须是 Request/rr3.heartbeat（形状/畸形违约 exit 1），返回应答 id。
 fn rr3_beat_id(n: usize, frame: Rr3Frame) -> u64 {
     match parse_upstream(frame) {
-        Ok((Rr3PayloadType::Request, id, m, _, _)) if m.as_deref() == Some("rr3.heartbeat") => id,
-        Ok((ty, _, m, _, _)) => rr3_beat_shape(n, ty, m),
+        Ok((ty, id, m, _, _)) => rr3_beat_ok(n, ty, id, m),
         Err(e) => rr3_beat_bad(n, &e),
     }
+}
+
+/// 已拆帧形状门：必须 Request/rr3.heartbeat，否则点名退 1。
+fn rr3_beat_ok(n: usize, ty: Rr3PayloadType, id: u64, m: Option<String>) -> u64 {
+    if ty == Rr3PayloadType::Request && m.as_deref() == Some("rr3.heartbeat") {
+        return id;
+    }
+    rr3_beat_shape(n, ty, m)
 }
 
 /// 单拍形状错：点名收到什么，退 1。
@@ -773,13 +796,11 @@ fn rr3_parity_shape(ty: Rr3PayloadType, id: u64, m: Option<String>) -> Rr3Parity
 /// ④ 三方两腿对拍：板回向量在册 / 契约腿（宿主 runner == 期望）/ 确定性腿
 /// （板 == 宿主 runner，bit-for-bit）。返回 FAIL 数。
 fn rr3_parity_judge(board_parity: Option<&Value>, parity_ms: u128) -> u32 {
-    match board_parity {
-        Some(bv) => rr3_parity_legs(bv, parity_ms),
-        None => {
-            eprintln!("FAIL  ④ 板回 parity 应答未收到（点名 diag/parity 无应答）");
-            1
-        }
-    }
+    let Some(bv) = board_parity else {
+        eprintln!("FAIL  ④ 板回 parity 应答未收到（点名 diag/parity 无应答）");
+        return 1;
+    };
+    rr3_parity_legs(bv, parity_ms)
 }
 
 /// 板回后的三条腿：向量在册 / 契约腿 / 确定性腿。返回 FAIL 数。

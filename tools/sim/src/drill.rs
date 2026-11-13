@@ -381,7 +381,12 @@ fn rr3_run_dir(exe: &Path) -> Option<PathBuf> {
     if d.file_name() == Some(std::ffi::OsStr::new("deps")) {
         d = d.parent()?.to_path_buf();
     }
-    (d.join("rrd").is_file() || d.join("rr3-sim").is_file()).then_some(d)
+    rr3_bin_marker(&d).then_some(d)
+}
+
+/// 同层有 rrd 或 rr3-sim 产物即认作 bin 目录。
+fn rr3_bin_marker(d: &Path) -> bool {
+    d.join("rrd").is_file() || d.join("rr3-sim").is_file()
 }
 
 /// 三个二进制的缺省路径（全部随 [`rr3_bin_dir`] 同层）。不在 `paths.rs` 单独

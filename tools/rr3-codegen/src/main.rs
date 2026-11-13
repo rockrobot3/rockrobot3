@@ -66,43 +66,46 @@ fn topic_listed(arr: &[Value], want: &str) -> bool {
 
 /// face-expressions.toml 取 expressions 全集与 board_subset（fail-closed 同上）。
 fn face_exprs(face: &Value, errs: &mut Vec<String>) -> (Vec<String>, Vec<String>) {
-    let mut arr_of = |key: &str| -> Vec<String> {
-        match face.get(key).and_then(Value::as_array) {
-            Some(a) => {
-                let v: Vec<_> = a
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect();
-                if v.len() != a.len() {
-                    errs.push(format!(
-                        "contracts/face-expressions.toml {key} 含非字符串项"
-                    ));
-                }
-                v
-            }
-            None => {
-                errs.push(format!("contracts/face-expressions.toml 缺 {key}"));
-                Vec::new()
-            }
-        }
-    };
-    let all = arr_of("expressions");
-    let subset = arr_of("board_subset");
+    let all = rr3_toml_strs(face, "expressions", errs);
+    let subset = rr3_toml_strs(face, "board_subset", errs);
     // 子集闭合：board_subset 每项必须在全集在册且不重复（契约文件自身的形状校验，
     // 坏了宁可红也不生成带病副本）
-    for s in &subset {
+    rr3_subset_ok(&all, &subset, errs);
+    (all, subset)
+}
+
+/// 契约文件的一个字符串数组键（缺段/含非字符串项逐条点名；缺失回空表）。
+fn rr3_toml_strs(face: &Value, key: &str, errs: &mut Vec<String>) -> Vec<String> {
+    let Some(a) = face.get(key).and_then(Value::as_array) else {
+        errs.push(format!("contracts/face-expressions.toml 缺 {key}"));
+        return Vec::new();
+    };
+    let v: Vec<String> = a
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect();
+    if v.len() != a.len() {
+        errs.push(format!(
+            "contracts/face-expressions.toml {key} 含非字符串项"
+        ));
+    }
+    v
+}
+
+/// 子集闭合两项判据：在册（全集内）与去重，逐项留痕。
+fn rr3_subset_ok(all: &[String], subset: &[String], errs: &mut Vec<String>) {
+    for s in subset {
         if !all.iter().any(|a| a == s) {
             errs.push(format!("board_subset 项 \"{s}\" 不在 expressions 全集"));
         }
     }
     let mut seen = std::collections::BTreeSet::new();
-    for s in &subset {
+    for s in subset {
         if !seen.insert(s.as_str()) {
             errs.push(format!("board_subset 项 \"{s}\" 重复"));
         }
     }
-    (all, subset)
 }
 
 /// 读行程档案（批N3 件五门 g）：`hardware/esp32-mini/axis/*.toml` 是板侧行程
@@ -125,12 +128,17 @@ fn axis_travel_rows(root: &Path, errs: &mut Vec<String>) -> Vec<(String, u32, u3
 fn rr3_axis_rows(entries: Vec<PathBuf>, errs: &mut Vec<String>) -> Vec<(String, u32, u32, u32)> {
     let mut rows: Vec<(String, u32, u32, u32)> = Vec::new();
     for path in entries {
-        match axis_row_of(&path) {
-            Ok(row) => rows.push(row),
-            Err(es) => errs.extend(es),
-        }
+        rr3_axis_row_into(&path, errs, &mut rows);
     }
     rows
+}
+
+/// 单档案落一行；坏档的逐条拒因折进 errs（不短路后续档案）。
+fn rr3_axis_row_into(path: &Path, errs: &mut Vec<String>, rows: &mut Vec<(String, u32, u32, u32)>) {
+    match axis_row_of(path) {
+        Ok(row) => rows.push(row),
+        Err(es) => errs.extend(es),
+    }
 }
 
 /// 档案目录读面：缺席与空表各是一条独立拒因（都属"行程真值点没有档案"的
@@ -224,32 +232,21 @@ fn axis_doc_of(path: &Path) -> Result<Value, String> {
 
 /// schema 钉 1（旧版显式拒收）。
 fn rr3_axis_schema(v: Value, path: &Path) -> Result<Value, String> {
-    match v.get("schema").and_then(Value::as_integer) {
-        Some(1) => Ok(v),
-        other => Err(format!(
-            "{} schema = {other:?} ≠ 1（升版须同批改生成器）",
-            path.display()
-        )),
+    let schema = v.get("schema").and_then(Value::as_integer);
+    if schema == Some(1) {
+        return Ok(v);
     }
+    Err(format!(
+        "{} schema = {schema:?} ≠ 1（升版须同批改生成器）",
+        path.display()
+    ))
 }
 
 /// 档案身份面：`pin` 非空且其末段必须等于文件名 stem——instance 是档案的
 /// 消歧锚，两者不一致说明档案被改名却没改 pin。
 fn axis_ident(path: &Path, v: &Value) -> Result<String, String> {
-    let stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .map(str::to_string)
-        .ok_or_else(|| format!("{} 文件名不可读", path.display()))?;
-    let pin = match v.get("pin").and_then(Value::as_str) {
-        Some(p) if !p.is_empty() => p,
-        other => {
-            return Err(format!(
-                "{} pin = {other:?} 非非空文本（外键对账锚）",
-                path.display()
-            ))
-        }
-    };
+    let stem = rr3_file_stem(path)?;
+    let pin = rr3_pin_of(path, v)?;
     let tail = pin.rsplit('.').next().unwrap_or(pin);
     if tail != stem {
         return Err(format!(
@@ -262,12 +259,32 @@ fn axis_ident(path: &Path, v: &Value) -> Result<String, String> {
     Ok(stem)
 }
 
+/// 档案文件名 stem（不可读即点名）。
+fn rr3_file_stem(path: &Path) -> Result<String, String> {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .map(str::to_string)
+        .ok_or_else(|| format!("{} 文件名不可读", path.display()))
+}
+
+/// `pin` 须非空文本（外键对账锚）。
+fn rr3_pin_of<'a>(path: &Path, v: &'a Value) -> Result<&'a str, String> {
+    match v.get("pin").and_then(Value::as_str) {
+        Some(p) if !p.is_empty() => Ok(p),
+        other => Err(format!(
+            "{} pin = {other:?} 非非空文本（外键对账锚）",
+            path.display()
+        )),
+    }
+}
+
 /// 三键取数：非负整数且在 u32 值域内，越界与类型不对同一句点名。
 fn axis_u32(v: &Value, key: &str, path: &Path) -> Result<u32, String> {
-    match v.get(key).and_then(Value::as_integer) {
-        Some(n) if (0..=u32::MAX as i64).contains(&n) => Ok(n as u32),
-        other => Err(format!("{} {key} = {other:?} 非非负整数", path.display())),
+    let n = v.get(key).and_then(Value::as_integer);
+    if let Some(n) = n.filter(|n| (0..=u32::MAX as i64).contains(n)) {
+        return Ok(n as u32);
     }
+    Err(format!("{} {key} = {n:?} 非非负整数", path.display()))
 }
 
 /// 生成 topics_gen.rs 文本（板侧 include 的常量表；头注点名生成器与真值点，

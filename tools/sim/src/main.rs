@@ -111,11 +111,23 @@ mod run {
         log_path: &Path,
         report: &mut String,
     ) -> Result<(), String> {
-        rr3_wait_ready(rrctl, socket, log_path, report)?;
-        rr3_publish_once(peer, socket, m_b, log_path, report)?;
+        rr3_sim_bring_up(rrctl, peer, socket, m_b, log_path, report)?;
         rr3_ctl_audit(rrctl, socket, log_path, report)?;
         rr3_prove_stream(report);
         Ok(())
+    }
+
+    /// 前两段：等 resident running → 外部发布者一次性发布并退场。
+    fn rr3_sim_bring_up(
+        rrctl: &Path,
+        peer: &Path,
+        socket: &Path,
+        m_b: &Path,
+        log_path: &Path,
+        report: &mut String,
+    ) -> Result<(), String> {
+        rr3_wait_ready(rrctl, socket, log_path, report)?;
+        rr3_publish_once(peer, socket, m_b, log_path, report)
     }
 
     /// 3. 轮询等 resident 到 running（rr3-ctl 尚未就绪时连接失败按"还没好"重试）。

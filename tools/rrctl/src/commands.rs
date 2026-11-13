@@ -49,8 +49,13 @@ fn rr3_reject_msg(err: &Value) -> &str {
 pub fn run(cmd: &str, bus: &str) -> Result<String, String> {
     rr3_cmd_known(cmd)?;
     let envelope = rr3_ctl_query(bus, &format!("rr3.ctl.{cmd}"))?;
-    rr3_ctl_ensure(cmd, &envelope)?;
-    rr3_ctl_render(cmd, &envelope)
+    rr3_ctl_answer(cmd, &envelope)
+}
+
+/// 信封先行判拒、成功再分派渲染（判据次序：先 ensure 后 render）。
+fn rr3_ctl_answer(cmd: &str, envelope: &Value) -> Result<String, String> {
+    rr3_ctl_ensure(cmd, envelope)?;
+    rr3_ctl_render(cmd, envelope)
 }
 
 /// 命令必须在白名单（未知命令点名可用项）。
@@ -67,40 +72,63 @@ fn rr3_ctl_ensure(cmd: &str, envelope: &Value) -> Result<(), String> {
     rr3_ctl_reject(cmd, envelope).map_or(Ok(()), Err)
 }
 
+/// 渲染器签名（信封 → 人读文本）。
+type Renderer = fn(&Value) -> Result<String, String>;
+
+/// 命令 → 渲染器（表驱动，与 COMMANDS 白名单同名）。
+const RENDERERS: [(&str, Renderer); 5] = [
+    ("status", format_status),
+    ("health", format_health),
+    ("logs", format_logs),
+    ("counters", format_counters),
+    ("reboot", format_reboot),
+];
+
 /// 成功信封按命令分派到各自的渲染器。
 fn rr3_ctl_render(cmd: &str, envelope: &Value) -> Result<String, String> {
-    match cmd {
-        "status" => format_status(envelope),
-        "health" => format_health(envelope),
-        "logs" => format_logs(envelope),
-        "counters" => format_counters(envelope),
-        "reboot" => format_reboot(envelope),
+    RENDERERS.iter().find(|(name, _)| *name == cmd).map_or_else(
         // COMMANDS 白名单已把 cmd 限定在六者之内；其余到这里必有 result（不会发生）
-        _ => Err(format!("{cmd}: 应答形状意外（无 result 也无 error）")),
-    }
+        || Err(format!("{cmd}: 应答形状意外（无 result 也无 error）")),
+        |(_, render)| render(envelope),
+    )
 }
 
 /// 一次完整往返：连接 → 发请求帧 → 收应答帧 → 解析 JSON 信封（result 或 error 原样带回）
 #[cfg(unix)]
 fn rr3_ctl_query(bus: &str, method: &str) -> Result<Value, String> {
     use std::io::Write as _;
+
+    let mut stream = rr3_ctl_connect(bus)?;
+    let frame = rr3_ctl_frame(method);
+    // 整帧一次 write_all（rr3_frame_write 的口径），不按字段分次写
+    rr_ipc::rr3_frame_write(&mut stream, &frame).map_err(|e| format!("写帧失败: {e:?}"))?;
+    let _ = std::io::stdout().flush();
+    rr3_ctl_reply(&mut stream)
+}
+
+/// 控制连接：连不上/设读超时失败都点名（rrd 在跑吗？--bus-path 对吗？）。
+#[cfg(unix)]
+fn rr3_ctl_connect(bus: &str) -> Result<std::os::unix::net::UnixStream, String> {
     use std::path::Path;
 
-    use rr_ipc::{
-        opcode, rr3_body_encode, rr3_body_split, rr3_frame_read, rr3_frame_write, Rr3Frame,
-        Rr3Header, Rr3PayloadType,
-    };
-
-    let mut stream = rr_ipc::Rr3UdsListener::rr3_connect(Path::new(bus))
+    let stream = rr_ipc::Rr3UdsListener::rr3_connect(Path::new(bus))
         .map_err(|e| format!("连接 {bus} 失败: {e}（rrd 在跑吗？--bus-path 对吗？）"))?;
     stream
         .set_read_timeout(Some(RR3_CTL_READ_TIMEOUT))
         .map_err(|e| format!("设读超时失败: {e}"))?;
+    Ok(stream)
+}
+
+/// 请求帧组包（dst=rrd、src_task=0、载荷 CRC 与体一致）。
+#[cfg(unix)]
+fn rr3_ctl_frame(method: &str) -> rr_ipc::Rr3Frame {
+    use rr_ipc::{opcode, rr3_body_encode, Rr3Frame, Rr3Header, Rr3PayloadType};
+
     let body = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": {}})
         .to_string()
         .into_bytes();
     let payload = rr3_body_encode(Rr3PayloadType::Request, &body);
-    let frame = Rr3Frame {
+    Rr3Frame {
         header: Rr3Header {
             opcode: opcode::SEND,
             flags: 0,
@@ -117,14 +145,18 @@ fn rr3_ctl_query(bus: &str, method: &str) -> Result<Value, String> {
             payload_crc32: rr_ipc::rr3_crc32(&payload),
         },
         payload,
-    };
-    // 整帧一次 write_all（rr3_frame_write 的口径），不按字段分次写
-    rr3_frame_write(&mut stream, &frame).map_err(|e| format!("写帧失败: {e:?}"))?;
-    let _ = std::io::stdout().flush();
-    let reply = rr3_frame_read(&mut stream)
+    }
+}
+
+/// 收一帧应答：前缀分流 + 必须 Response + 体解析成 JSON。
+#[cfg(unix)]
+fn rr3_ctl_reply(stream: &mut std::os::unix::net::UnixStream) -> Result<Value, String> {
+    use rr_ipc::Rr3PayloadType;
+
+    let reply = rr_ipc::rr3_frame_read(stream)
         .map_err(|e| format!("读应答失败（{RR3_CTL_READ_TIMEOUT:?} 内无帧或对端断开）: {e:?}"))?;
-    let (ty, body) =
-        rr3_body_split(&reply.payload).map_err(|e| format!("应答 payload 前缀非法: {e:?}"))?;
+    let (ty, body) = rr_ipc::rr3_body_split(&reply.payload)
+        .map_err(|e| format!("应答 payload 前缀非法: {e:?}"))?;
     if ty != Rr3PayloadType::Response {
         return Err(format!("应答 payload 类型 {ty:?} 不是 Response"));
     }
@@ -205,12 +237,16 @@ fn format_status(envelope: &Value) -> Result<String, String> {
 /// `result` 与其 `modules` 数组（缺件逐级点名）。
 fn rr3_ctl_modules(envelope: &Value) -> Result<(&Value, &[Value]), String> {
     let result = rr3_ctl_result(envelope)?;
-    let modules = result
+    Ok((result, rr3_modules_of(result)?))
+}
+
+/// `result.modules` 数组切片（缺件点名）。
+fn rr3_modules_of(result: &Value) -> Result<&[Value], String> {
+    result
         .get("modules")
         .and_then(Value::as_array)
-        .map(|a| a.as_slice())
-        .ok_or_else(|| "应答缺 result.modules".to_string())?;
-    Ok((result, modules))
+        .map(Vec::as_slice)
+        .ok_or_else(|| "应答缺 result.modules".to_string())
 }
 
 /// 应答 `result`（缺件点名）。
@@ -281,32 +317,47 @@ fn rr3_logs_text(lines: &[Value]) -> String {
 /// rrd 自有键（如 `boots`，无前缀）——渲染按模块名前缀分组成人读表，
 /// 自有键归 `rrd` 组；空表打"无计数"。
 fn format_counters(envelope: &Value) -> Result<String, String> {
-    let counters = envelope
-        .get("result")
-        .and_then(|r| r.get("counters"))
-        .and_then(Value::as_object)
-        .ok_or("应答缺 result.counters")?;
+    let counters = rr3_counters_of(envelope)?;
     if counters.is_empty() {
         return Ok("（无计数）".to_string());
     }
+    let rows = rr3_counter_rows(counters)?;
+    Ok(render_table(&["MODULE", "KEY", "VALUE"], &rows))
+}
+
+/// `result.counters` 对象（缺件点名）。
+fn rr3_counters_of(envelope: &Value) -> Result<&serde_json::Map<String, Value>, String> {
+    envelope
+        .get("result")
+        .and_then(|r| r.get("counters"))
+        .and_then(Value::as_object)
+        .ok_or_else(|| "应答缺 result.counters".to_string())
+}
+
+/// 全表键拆成 `(模块, 键, 计数)` 并按模块/键序定渲染序。
+fn rr3_counter_rows(counters: &serde_json::Map<String, Value>) -> Result<Vec<Vec<String>>, String> {
     let mut rows: Vec<(String, String, u64)> = Vec::with_capacity(counters.len());
     for (k, v) in counters {
-        let n = v
-            .as_u64()
-            .ok_or_else(|| format!("计数 {k} 的值不是 u64: {v}"))?;
-        let (module, key) = match k.split_once('/') {
-            Some((m, rest)) => (m.to_string(), rest.to_string()),
-            None => ("rrd".to_string(), k.clone()),
-        };
-        rows.push((module, key, n));
+        rows.push(rr3_counter_row(k, v)?);
     }
     // 不依赖 JSON 对象的迭代序（serde_json feature 可换底层 Map）：显式排序定渲染
     rows.sort();
-    let rows = rows
+    Ok(rows
         .into_iter()
         .map(|(m, k, n)| vec![m, k, n.to_string()])
-        .collect::<Vec<_>>();
-    Ok(render_table(&["MODULE", "KEY", "VALUE"], &rows))
+        .collect())
+}
+
+/// 单条计数：值必须 u64；键按首个 `/` 拆模块前缀，无前缀归 `rrd` 组。
+fn rr3_counter_row(k: &str, v: &Value) -> Result<(String, String, u64), String> {
+    let n = v
+        .as_u64()
+        .ok_or_else(|| format!("计数 {k} 的值不是 u64: {v}"))?;
+    let (module, key) = match k.split_once('/') {
+        Some((m, rest)) => (m.to_string(), rest.to_string()),
+        None => ("rrd".to_string(), k.to_string()),
+    };
+    Ok((module, key, n))
 }
 
 /// `reboot` 系统重启（0.0.4 批C append）：CLI 不加本地门（见模块头注释），

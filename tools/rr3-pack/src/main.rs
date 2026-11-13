@@ -96,10 +96,10 @@ fn usage() -> String {
 }
 
 fn rr3_need(args: &[String], i: usize, flag: &str) -> Result<String, String> {
-    match args.get(i + 1) {
-        Some(v) if !v.is_empty() => Ok(v.clone()),
-        _ => Err(format!("{flag} 缺参数\n{}", usage())),
-    }
+    args.get(i + 1)
+        .filter(|v| !v.is_empty())
+        .cloned()
+        .ok_or_else(|| format!("{flag} 缺参数\n{}", usage()))
 }
 
 /// 单选项步进：值选项消费两槽、开关消费一槽；返回消费的槽数。
@@ -128,12 +128,16 @@ fn pack_arg_value(
 
 /// 路径族选项的目标位（三件；非路径族回 `None`）。
 fn pack_arg_path<'a>(cfg: &'a mut Rr3PackConfig, flag: &str) -> Option<&'a mut PathBuf> {
-    match flag {
-        "--payload" => Some(&mut cfg.payload),
-        "--repo" => Some(&mut cfg.repo),
-        "--out" => Some(&mut cfg.out),
-        _ => None,
+    if flag == "--payload" {
+        return Some(&mut cfg.payload);
     }
+    if flag == "--repo" {
+        return Some(&mut cfg.repo);
+    }
+    if flag == "--out" {
+        return Some(&mut cfg.out);
+    }
+    None
 }
 
 /// 文本族选项落位（两件 + 未知选项拒收）。
@@ -346,9 +350,19 @@ fn rr3_names_nonempty(names: &[String], dir: &Path) -> Result<(), String> {
 /// 路径 = `--out` 值加 `.stage` 后缀（与产物相邻，清掉即重来，不污染别处）。
 pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
     let (names, profile_name, truth) = rr3_stage_check(cfg)?;
+    rr3_stage_tree(cfg, &names, &profile_name, &truth)
+}
+
+/// 骨架 + 逐模块装配（预验已过，这里只落树）。
+fn rr3_stage_tree(
+    cfg: &Rr3PackConfig,
+    names: &[String],
+    profile_name: &str,
+    truth: &rrd::profile::Rr3RuntimeTruthSet,
+) -> Result<PathBuf, String> {
     let (stage, root) = rr3_stage_root(cfg)?;
-    rr3_stage_skeleton(cfg, &stage, &root, &profile_name, &truth)?;
-    rr3_stage_modules(cfg, &root, &names)?;
+    rr3_stage_skeleton(cfg, &stage, &root, profile_name, truth)?;
+    rr3_stage_modules(cfg, &root, names)?;
     Ok(stage)
 }
 
@@ -437,11 +451,17 @@ fn rr3_bin_ready(cfg: &Rr3PackConfig, bin: &str) -> Result<(), String> {
 /// deb 骨架：目录 + 两个入口产物 + control/postinst。
 fn rr3_stage_layout(cfg: &Rr3PackConfig, stage: &Path) -> Result<(), String> {
     rr3_stage_dirs(stage)?;
-    fs::copy(cfg.payload.join("rrd"), stage.join("usr/bin/rrd"))
-        .map_err(|e| format!("复制 rrd 失败: {e}"))?;
-    fs::copy(cfg.payload.join("rr3-ctl"), stage.join("usr/bin/rr3-ctl"))
-        .map_err(|e| format!("复制 rr3-ctl 失败: {e}"))?;
+    rr3_stage_bins(cfg, stage)?;
     rr3_stage_debian(cfg, stage)
+}
+
+/// 两个入口产物落 usr/bin（错误文案带产物名）。
+fn rr3_stage_bins(cfg: &Rr3PackConfig, stage: &Path) -> Result<(), String> {
+    for bin in ["rrd", "rr3-ctl"] {
+        fs::copy(cfg.payload.join(bin), stage.join("usr/bin").join(bin))
+            .map_err(|e| format!("复制 {bin} 失败: {e}"))?;
+    }
+    Ok(())
 }
 
 /// 骨架目录三件。
@@ -603,13 +623,23 @@ fn rr3_stage_module(cfg: &Rr3PackConfig, root: &Path, name: &str) -> Result<(), 
     let mod_src = cfg.payload.join("rr3-modules").join(name);
     let staged = root.join("modules").join(name);
     let (facts, entry_path) = rr3_stage_manifest(&mod_src, &staged, name)?;
-    if facts.lang == "python" {
-        rr3_stage_py(&mod_src, &staged, &entry_path, name)?;
-    } else {
-        rr3_stage_bin(&mod_src, &entry_path, name)?;
-    }
+    rr3_stage_lang(&mod_src, &staged, &entry_path, name, &facts.lang)?;
     rr3_stage_cfg(cfg, &staged, name)?;
     rr3_stage_opt(cfg, &staged, name)
+}
+
+/// 产物按 lang 分型落位（python = pkg 树 + shim；其余 = 注入 bin 按 entry 落位）。
+fn rr3_stage_lang(
+    mod_src: &Path,
+    staged: &Path,
+    entry_path: &Path,
+    name: &str,
+    lang: &str,
+) -> Result<(), String> {
+    if lang == "python" {
+        return rr3_stage_py(mod_src, staged, entry_path, name);
+    }
+    rr3_stage_bin(mod_src, entry_path, name)
 }
 
 /// manifest 改写落位 + entry 父目录就绪；返回 facts 与 entry 装机路径。

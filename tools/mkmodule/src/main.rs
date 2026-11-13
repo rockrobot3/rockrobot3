@@ -29,11 +29,11 @@ fn main() {
 
 /// 原子件五件套：`--atom <名> <格位> [原子根目录]`。
 fn run_atom(args: &[String]) {
-    if args.len() < 3 || args.len() > 4 {
+    if !(3..=4).contains(&args.len()) {
         usage();
     }
     let out_root = rr3_out_root(args.get(3).map(String::as_str).unwrap_or("modules"), "原子");
-    let files = rr3_gen(|| rr3_mkmod::rr3_mkmod_gen_atom(&args[1], &args[2], &out_root));
+    let files = rr3_gen(rr3_mkmod::rr3_mkmod_gen_atom(&args[1], &args[2], &out_root));
     print_files("原子件五件套", &files);
 }
 
@@ -43,7 +43,7 @@ fn run_module(name: &str, out: Option<&str>, argc: usize) {
         usage();
     }
     let out_root = rr3_out_root(out.unwrap_or("modules"), "输出");
-    let files = rr3_gen(|| rr3_mkmod::rr3_mkmod_generate(name, &out_root));
+    let files = rr3_gen(rr3_mkmod::rr3_mkmod_generate(name, &out_root));
     print_files("模块骨架", &files);
     println!("\n下一步：在 contracts/topics.toml 登记主题（见模块 README）");
 }
@@ -51,16 +51,16 @@ fn run_module(name: &str, out: Option<&str>, argc: usize) {
 /// 输出根目录：建目录失败即点名退 1（`kind` 区分"输出/原子"两口径文案）。
 fn rr3_out_root(raw: &str, kind: &str) -> PathBuf {
     let root = PathBuf::from(raw);
-    if let Err(e) = std::fs::create_dir_all(&root) {
+    std::fs::create_dir_all(&root).unwrap_or_else(|e| {
         eprintln!("无法创建{kind}根目录 {}: {e}", root.display());
         std::process::exit(1);
-    }
+    });
     root
 }
 
 /// 生成调用：失败即点名退 1。
-fn rr3_gen(f: impl FnOnce() -> Result<Vec<PathBuf>, rr3_mkmod::Rr3MkmodError>) -> Vec<PathBuf> {
-    match f() {
+fn rr3_gen(r: Result<Vec<PathBuf>, rr3_mkmod::Rr3MkmodError>) -> Vec<PathBuf> {
+    match r {
         Ok(files) => files,
         Err(e) => {
             eprintln!("生成失败: {e}");
