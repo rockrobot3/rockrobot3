@@ -14,5 +14,9 @@ components = ["rustfmt", "clippy"]
 # 交叉 target 必须与钉版同一份声明：CI 的 ipct003（aarch64 字节对拍）与
 # arm64-artifacts（musl 静态产物）都直接 cargo build --target；只声明 channel
 # 会让这两个 job 在"目标不存在"上红（2026-11-12 T2 首跑实证）。
-targets = ["aarch64-unknown-linux-gnu", "aarch64-unknown-linux-musl"]
+targets = [
+    "aarch64-unknown-linux-gnu",   # 瑞芯微 / 树莓派（字节对拍与动态档）
+    "aarch64-unknown-linux-musl",  # 瑞芯微 / 树莓派（静态部署档）
+    "riscv64gc-unknown-linux-musl", # 进迭时空 SpacemiT（RISC-V 静态部署档）
+]
 profile = "minimal"
