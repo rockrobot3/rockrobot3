@@ -204,32 +204,33 @@ pub fn rr3_servo_parse_args(args: &Value, cfg: &Rr3ServoCfg) -> Result<(u16, u64
 fn rr3_servo_angle(args: &Value, cfg: &Rr3ServoCfg) -> Result<u16, String> {
     let angle = args
         .get("angle_deg")
-        .ok_or_else(|| "缺 angle_deg（int，行程内角度）".to_string())?;
+        .ok_or("缺 angle_deg（int，行程内角度）")?;
     let angle = angle
         .as_u64()
         .ok_or_else(|| format!("angle_deg 必须是非负整数，收到 {angle}"))?;
     let angle = u16::try_from(angle).map_err(|_| format!("angle_deg 超出 u16 范围: {angle}"))?;
     // 行程/时限的值域判定留件（零堆枚举，批N24 件三），文案在此渲染逐字
     // （act 册 §9 契约字面量，每句落在唯一一处）
-    servo::rr3_servo_travel(angle, cfg).map_err(|e| match e {
-        servo::Rr3ServoTravelError::OutOfRange {
-            angle_deg,
-            min_deg,
-            max_deg,
-        } => format!("angle_deg={angle_deg} 超出行程 [{min_deg}, {max_deg}]"),
-    })?;
+    servo::rr3_servo_travel(angle, cfg).map_err(
+        |servo::Rr3ServoTravelError::OutOfRange {
+             angle_deg,
+             min_deg,
+             max_deg,
+         }| format!("angle_deg={angle_deg} 超出行程 [{min_deg}, {max_deg}]"),
+    )?;
     Ok(angle)
 }
 
 /// move_ms：缺省/Null 走时限缺省；给值则非负整数 + 值域判定（留件）。
 fn rr3_servo_move(args: &Value, cfg: &Rr3ServoCfg) -> Result<u64, String> {
-    let move_ms = match args.get("move_ms") {
-        None | Some(Value::Null) => None,
-        Some(v) => Some(
+    let move_ms = args
+        .get("move_ms")
+        .filter(|v| !v.is_null())
+        .map(|v| {
             v.as_u64()
-                .ok_or_else(|| format!("move_ms 必须是非负整数，收到 {v}"))?,
-        ),
-    };
+                .ok_or_else(|| format!("move_ms 必须是非负整数，收到 {v}"))
+        })
+        .transpose()?;
     servo::rr3_servo_timeout(move_ms, cfg).map_err(|e| match e {
         servo::Rr3ServoTimeoutError::ZeroMs => "move_ms 必须大于 0".to_string(),
         servo::Rr3ServoTimeoutError::BeyondLimit { ms, limit } => {

@@ -190,21 +190,17 @@ fn rr3_itact_volume(p: &toml::Value, cur: u32) -> Result<u32, String> {
 fn rr3_itact_panel(v: &toml::Value) -> Result<Rr3PanelCfg, String> {
     let mut panel = Rr3PanelCfg::default();
     if let Some(p) = rr3_itact_sect(v, "panel") {
-        let mut t = panel.max_conns;
-        rr3_cfg_u64(p, "max_conns", "panel", &mut t)?;
-        panel.max_conns = t.max(1);
-        let mut t = panel.read_timeout_ms;
-        rr3_cfg_u64(p, "read_timeout_ms", "panel", &mut t)?;
-        panel.read_timeout_ms = t.max(1);
-        let mut t = panel.header_limit;
-        rr3_cfg_u64(p, "header_limit", "panel", &mut t)?;
-        panel.header_limit = t.max(1);
-        let mut t = panel.body_limit;
-        rr3_cfg_u64(p, "body_limit", "panel", &mut t)?;
-        panel.body_limit = t.max(1);
-        let mut t = panel.call_timeout_ms;
-        rr3_cfg_u64(p, "call_timeout_ms", "panel", &mut t)?;
-        panel.call_timeout_ms = t.max(1);
+        let fields: [(&str, &mut u64); 5] = [
+            ("max_conns", &mut panel.max_conns),
+            ("read_timeout_ms", &mut panel.read_timeout_ms),
+            ("header_limit", &mut panel.header_limit),
+            ("body_limit", &mut panel.body_limit),
+            ("call_timeout_ms", &mut panel.call_timeout_ms),
+        ];
+        for (key, slot) in fields {
+            rr3_cfg_u64(p, key, "panel", slot)?;
+            *slot = (*slot).max(1);
+        }
     }
     Ok(panel)
 }
@@ -213,13 +209,14 @@ fn rr3_itact_panel(v: &toml::Value) -> Result<Rr3PanelCfg, String> {
 /// 值必须在册（同 non_pointable 白名单对账口径），在册外点名拒 boot。
 fn rr3_itact_selftest(v: &toml::Value) -> Result<Rr3SelftestCfg, String> {
     let mut selftest = Rr3SelftestCfg::default();
-    if let Some(s) = rr3_itact_sect(v, "selftest") {
-        if let Some(name) = s.get("face_expect").and_then(toml::Value::as_str) {
-            selftest.face_expect = rr3_face_expect(name)?;
-        }
-        if let Some(e) = s.get("expect") {
-            selftest.expect = rr3_itact_expect(e)?;
-        }
+    let Some(s) = rr3_itact_sect(v, "selftest") else {
+        return Ok(selftest);
+    };
+    if let Some(name) = s.get("face_expect").and_then(toml::Value::as_str) {
+        selftest.face_expect = rr3_face_expect(name)?;
+    }
+    if let Some(e) = s.get("expect") {
+        selftest.expect = rr3_itact_expect(e)?;
     }
     Ok(selftest)
 }
@@ -280,10 +277,12 @@ fn expect_leg(expect: &mut Rr3SelftestExpect, leg: &str, sval: &str) -> Result<(
 
 /// 固定腿三态落位（`leg` 已由调用方守卫限定在册）。
 fn rr3_leg_put(expect: &mut Rr3SelftestExpect, leg: &str, st: &'static str) {
-    match leg {
-        "speaker" => expect.speaker = st,
-        "relay" => expect.relay = st,
-        _ => expect.face = st,
+    if leg == "speaker" {
+        expect.speaker = st;
+    } else if leg == "relay" {
+        expect.relay = st;
+    } else {
+        expect.face = st;
     }
 }
 
@@ -299,10 +298,12 @@ fn rr3_leg_state(leg: &str, sval: &str) -> Result<&'static str, String> {
 
 /// 单腿预期落位（腿名册与三态闭集逐键对账；未知腿名/在册外值点名拒）。
 fn rr3_expect_set(expect: &mut Rr3SelftestExpect, k: &str, sval: &str) -> Result<(), String> {
-    match k {
-        "wiring" => expect.wiring = expect_wiring(sval)?,
-        "contracts" => expect.contracts = expect_contr(sval)?,
-        _ => return rr3_expect_leg_key(expect, k, sval),
+    if k == "wiring" {
+        expect.wiring = expect_wiring(sval)?;
+    } else if k == "contracts" {
+        expect.contracts = expect_contr(sval)?;
+    } else {
+        return rr3_expect_leg_key(expect, k, sval);
     }
     Ok(())
 }
@@ -320,8 +321,7 @@ fn rr3_expect_leg_key(expect: &mut Rr3SelftestExpect, k: &str, sval: &str) -> Re
 /// face 段：non_pointable 必填（在册表情白名单逐条对账）、节拍与兜底表情
 /// 缺省回落 legacy 值；default_expression 必须在册。
 fn rr3_itact_face(v: &toml::Value) -> Result<Rr3FaceCfg, String> {
-    let face_sect =
-        rr3_itact_sect(v, "face").ok_or_else(|| "config 缺 [rr3-interact.face] 段".to_string())?;
+    let face_sect = rr3_itact_sect(v, "face").ok_or("config 缺 [rr3-interact.face] 段")?;
     let non_pointable = rr3_face_nonpt(face_sect)?;
     // 表情节拍与兜底表情（批N4 件五 I-17/M-2/M-3）：缺键回落 legacy 值；
     // default_expression 必须在册（同 non_pointable 白名单对账）

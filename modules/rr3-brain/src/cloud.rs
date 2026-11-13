@@ -146,11 +146,7 @@ pub(crate) fn rr3_secrets_get(reference: &str) -> Option<String> {
     let data: Value = serde_json::from_str(&text).ok()?;
     let val = data.get("keys")?.get(reference)?.as_str()?;
     let val = val.trim();
-    if val.is_empty() {
-        None
-    } else {
-        Some(val.to_string())
-    }
+    Some(val).filter(|s| !s.is_empty()).map(|s| s.to_string())
 }
 
 // ---------- HTTP 与编码纯函数（自 cloud/__init__.py 迁入） ----------
@@ -198,14 +194,14 @@ pub(crate) fn rr3_http_post(
     } else {
         req.set("Authorization", &format!("Bearer {key}"))
     };
-    match req.send_bytes(body) {
-        Ok(resp) => Ok((resp.status(), rr3_read_body(url, resp)?)),
+    let (status, resp) = match req.send_bytes(body) {
+        Ok(resp) => (resp.status(), resp),
         // 4xx/5xx：urllib HTTPError 对位——状态码与错误体照回（调用方折业务失败）
-        Err(ureq::Error::Status(code, resp)) => Ok((code, rr3_read_body(url, resp)?)),
-        Err(e) => Err(format!("云端不可达 {url}: {e}")),
-    }
+        Err(ureq::Error::Status(code, resp)) => (code, resp),
+        Err(e) => return Err(format!("云端不可达 {url}: {e}")),
+    };
+    Ok((status, rr3_read_body(url, resp)?))
 }
-
 /// 应答体读尽（read-until-close 语义对 urllib resp.read() 同形状——TTS 响应无
 /// Content-Length、服务端发完即断，按流读尽即得）。读侧强制策略帽：云端/中间人
 /// 返回超大响应时不能把板子的内存顶穿；读侧走 `take(cap+1)`，多读 1 字节
@@ -428,10 +424,9 @@ impl Rr3LlmClient {
         if self.mode == Some(Rr3LlmMode::Local) {
             return Ok(String::new());
         }
-        match &self.key_ref {
-            None => rr3_cloud_api_key(), // 旧路径：通用环境变量键
-            Some(r) => rr3_ref_key(r),
-        }
+        self.key_ref
+            .as_deref()
+            .map_or_else(rr3_cloud_api_key, rr3_ref_key)
     }
 }
 
@@ -492,13 +487,9 @@ impl Rr3LlmClient {
         // 只拼 `/chat/completions`——GLM `/api/paas/v4`、Qwen `/compatible-mode/v1`
         // 与 DeepSeek `/v1` 同形接入，不按厂商猜版本段（ADR-0023）。
         let url = format!("{}/chat/completions", self.base_url);
-        let resp = match self.rr3_llm_post(&url, &key, &body) {
-            Ok(resp) => resp,
-            Err(e) => {
-                self.history.rr3_rollback_last();
-                return Err(e);
-            }
-        };
+        let resp = self
+            .rr3_llm_post(&url, &key, &body)
+            .inspect_err(|_| self.history.rr3_rollback_last())?;
         self.rr3_take_reply(&resp)
     }
 
@@ -523,13 +514,11 @@ impl Rr3LlmClient {
 
     /// 应答形状收敛 + 历史入账：取不出即回滚并报形状不符。
     fn rr3_take_reply(&mut self, resp: &[u8]) -> Result<String, String> {
-        match rr3_reply_text(resp) {
-            Some(t) => {
-                self.history.rr3_assistant_turn(&t);
-                Ok(t)
-            }
-            None => Err(self.rr3_shape_fail()),
-        }
+        let Some(t) = rr3_reply_text(resp) else {
+            return Err(self.rr3_shape_fail());
+        };
+        self.history.rr3_assistant_turn(&t);
+        Ok(t)
     }
 
     /// 应答形状不符：回滚本轮 user 入账并回拒因文案（历史不入账）。
@@ -595,10 +584,9 @@ pub(crate) fn rr3_key_set_of(key_ref: &Option<String>, mode: Option<Rr3LlmMode>)
     if mode == Some(Rr3LlmMode::Local) {
         return true;
     }
-    match key_ref {
-        None => rr3_cloud_api_key().is_ok(),
-        Some(r) => rr3_key_ref_set(r),
-    }
+    key_ref
+        .as_deref()
+        .map_or_else(|| rr3_cloud_api_key().is_ok(), rr3_key_ref_set)
 }
 
 /// 引用式 key_ref 是否就位：`env:` 看环境变量非空；裸名看 secrets 现读。

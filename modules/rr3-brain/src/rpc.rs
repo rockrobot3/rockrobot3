@@ -35,7 +35,7 @@ pub(crate) fn rr3_ops_snapshot(cfg: &Rr3BrainCfg) -> Result<Value, String> {
         .doc
         .get("rr3-brain")
         .and_then(|b| b.get("cloud"))
-        .ok_or_else(|| "config 缺 [rr3-brain.cloud] 段".to_string())?;
+        .ok_or("config 缺 [rr3-brain.cloud] 段")?;
     let cloud_str = |key: &str| -> Result<Value, String> {
         cloud
             .get(key)
@@ -114,10 +114,10 @@ fn rr3_py_type_name(v: &Value) -> &'static str {
         Value::Null => "NoneType",
         Value::Bool(_) => "bool",
         Value::Number(n) => {
-            if n.is_i64() || n.is_u64() {
-                "int"
-            } else {
+            if n.is_f64() {
                 "float"
+            } else {
+                "int"
             }
         }
         Value::String(_) => "str",
@@ -280,7 +280,7 @@ fn rr3_ops_apply(
 /// 写臂根段：`[rr3-brain]` 缺席即回错。
 fn rr3_ops_brain_mut(doc: &mut Value) -> Result<&mut Value, String> {
     doc.get_mut("rr3-brain")
-        .ok_or_else(|| "config 缺 [rr3-brain] 段".to_string())
+        .ok_or("config 缺 [rr3-brain] 段".to_string())
 }
 
 /// 写源映射（Python rr3_ops_write 尾段同形状，B9 自 apply 抽出）：dialog →
@@ -293,7 +293,7 @@ fn rr3_ops_target(
 ) -> Result<(&'static str, String), String> {
     let section = if group == "dialog" {
         "dialog"
-    } else if group == "asr" || group == "tts" || slot == "timeout_s" || rr3_no_model_rows(brain) {
+    } else if ["asr", "tts"].contains(&group) || slot == "timeout_s" || rr3_no_model_rows(brain) {
         // asr/tts/timeout 恒写 cloud；llm 组无模型行时写行无处落，同落 cloud
         "cloud"
     } else {
@@ -342,11 +342,12 @@ fn rr3_ops_store(
     if section_key == "model" {
         return rr3_row_store(brain, key, new);
     }
-    if section_key == "dialog" && brain.get("dialog").is_none() {
+    if section_key == "dialog" {
         brain
             .as_object_mut()
             .expect("brain 段是对象（TOML 表同构）")
-            .insert("dialog".to_string(), json!({}));
+            .entry("dialog")
+            .or_insert(json!({}));
     }
     let section = brain
         .get_mut(section_key)
@@ -456,10 +457,11 @@ fn rr3_row_active_name(rows: &[Value]) -> Option<String> {
 /// 模式/key_ref/key 是否就位/active——**只回 `key_set` 布尔，永无密钥明文**。
 pub(crate) fn rr3_model_list(cfg: &Rr3BrainCfg) -> Result<Value, String> {
     let rows = rr3_model_rows(&cfg.doc)?;
-    let mut models = Vec::with_capacity(rows.len());
-    for (i, row) in rows.iter().enumerate() {
-        models.push(rr3_model_row(row, i)?);
-    }
+    let models = rows
+        .iter()
+        .enumerate()
+        .map(|(i, row)| rr3_model_row(row, i))
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(json!({ "models": models, "active": rr3_row_active_name(&rows) }))
 }
 
@@ -467,10 +469,11 @@ pub(crate) fn rr3_model_list(cfg: &Rr3BrainCfg) -> Result<Value, String> {
 /// active——只回 `key_set` 布尔，永无密钥明文。
 fn rr3_model_row(row: &Value, i: usize) -> Result<Value, String> {
     let v = rr3_row_view(row, i)?;
-    let mode_enum = match v.mode {
-        "local" => Some(Rr3LlmMode::Local),
-        _ => Some(Rr3LlmMode::Api),
-    };
+    let mode_enum = Some(if v.mode == "local" {
+        Rr3LlmMode::Local
+    } else {
+        Rr3LlmMode::Api
+    });
     Ok(json!({
         "name": v.name,
         "base_url": rr3_row_str(row, "base_url", i)?,
@@ -497,18 +500,17 @@ fn rr3_row_view<'a>(row: &'a Value, i: usize) -> Result<Rr3RowView<'a>, String> 
     if name.trim().is_empty() {
         return Err(format!("模型行 #{i} 缺 name"));
     }
-    let mode = match rr3_row_str(row, "mode", i)?.trim() {
-        "" => "api",
-        v => v,
+    let mode = rr3_row_str(row, "mode", i)?.trim();
+    let mode = if mode.is_empty() { "api" } else { mode };
+    let api_format = rr3_row_str(row, "api_format", i)?.trim();
+    let api_format = if api_format.is_empty() {
+        "openai"
+    } else {
+        api_format
     };
-    let api_format = match rr3_row_str(row, "api_format", i)?.trim() {
-        "" => "openai",
-        v => v,
-    };
-    let key_ref = match rr3_row_str(row, "api_key_ref", i)?.trim() {
-        "" => None,
-        v => Some(v.to_string()),
-    };
+    let key_ref = Some(rr3_row_str(row, "api_key_ref", i)?.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
     Ok(Rr3RowView {
         name,
         mode,
@@ -575,12 +577,12 @@ fn rr3_key_ref_input(name: &str, args: &Value) -> Result<(Option<String>, bool),
     if s.chars().any(char::is_whitespace) {
         return Err(format!("模型行 {name} api_key_ref 不得含空白: '{s}'"));
     }
-    if let Some(var) = s.strip_prefix(crate::cloud::RR3_KEY_REF_ENV_PREFIX) {
-        if var.is_empty() || var.chars().any(char::is_whitespace) {
-            return Err(format!(
-                "模型行 {name} api_key_ref 的 env: 后须变量名（非空、无空白）: '{s}'"
-            ));
-        }
+    if s.strip_prefix(crate::cloud::RR3_KEY_REF_ENV_PREFIX)
+        .is_some_and(|var| var.is_empty() || var.chars().any(char::is_whitespace))
+    {
+        return Err(format!(
+            "模型行 {name} api_key_ref 的 env: 后须变量名（非空、无空白）: '{s}'"
+        ));
     }
     Ok((Some(s.to_string()), false))
 }
@@ -604,13 +606,13 @@ fn rr3_model_row_input<'a>(name: &str, args: &'a Value) -> Result<Rr3ModelRowInp
     let api_format = rr3_api_format_of(name, args)?;
     let mode = rr3_mode_of(name, args)?;
     let (key_ref, key_ref_clear) = rr3_key_ref_input(name, args)?;
-    let active = match args.get("active") {
-        None => None,
-        Some(v) => Some(
+    let active = args
+        .get("active")
+        .map(|v| {
             v.as_bool()
-                .ok_or_else(|| format!("模型行 {name} active 须布尔"))?,
-        ),
-    };
+                .ok_or_else(|| format!("模型行 {name} active 须布尔"))
+        })
+        .transpose()?;
     Ok(Rr3ModelRowInput {
         base_url,
         model_id,
@@ -631,11 +633,11 @@ fn rr3_model_upsert(rows: &mut Vec<Value>, name: &str, args: &Value) -> Result<(
         .enumerate()
         .any(|(j, r)| j != i && r.get("active").and_then(Value::as_bool) == Some(true));
     let prev_active = rows[i].get("active").and_then(Value::as_bool) == Some(true);
-    let active = match inp.active {
-        Some(a) => a,
-        None if is_new => !others_active, // 表内无 active（空表/结构坏）→ 新行接任
-        None => prev_active,
-    };
+    let active = inp.active.unwrap_or(if is_new {
+        !others_active // 表内无 active（空表/结构坏）→ 新行接任
+    } else {
+        prev_active
+    });
     rr3_row_fill(rows, i, name, &inp, active)?;
     if active {
         rr3_row_deactivate(rows, i);
@@ -645,13 +647,13 @@ fn rr3_model_upsert(rows: &mut Vec<Value>, name: &str, args: &Value) -> Result<(
 
 /// 行槽定位（B9 自 upsert 抽出）：同名行下标；缺席即补空行、返回 (下标, 是否新增)
 fn rr3_row_slot(rows: &mut Vec<Value>, name: &str) -> (usize, bool) {
-    match rows
+    let Some(i) = rows
         .iter()
         .position(|r| r.get("name").and_then(Value::as_str) == Some(name))
-    {
-        Some(i) => (i, false),
-        None => (rr3_row_push(rows), true),
-    }
+    else {
+        return (rr3_row_push(rows), true);
+    };
+    (i, false)
 }
 
 /// 补空行并回其下标（upsert 新行落位）。
@@ -827,9 +829,10 @@ fn rr3_model_commit(
     op: &str,
     name: &str,
 ) -> Result<Value, String> {
-    let path = cfg.config_path.clone().ok_or_else(|| {
-        "模型行写面未接 config 路径（cfg.config_path 未注入）——本次未改任何文件".to_string()
-    })?;
+    let path = cfg
+        .config_path
+        .clone()
+        .ok_or("模型行写面未接 config 路径（cfg.config_path 未注入）——本次未改任何文件")?;
     let old_text = std::fs::read_to_string(&path)
         .map_err(|e| format!("读 config {} 失败: {e}", path.display()))?;
     let new_text = rr3_block_rewrite(&old_text, &rows)?;
@@ -841,7 +844,7 @@ fn rr3_model_commit(
     let brain = doc
         .get_mut("rr3-brain")
         .and_then(Value::as_object_mut)
-        .ok_or_else(|| "config 缺 [rr3-brain] 段".to_string())?;
+        .ok_or("config 缺 [rr3-brain] 段")?;
     brain.insert("model".to_string(), Value::Array(rows.clone()));
     cfg.doc = doc;
     cfg.model = parsed.model;
@@ -886,9 +889,10 @@ pub(crate) fn rr3_model_test_arm(cfg: &Rr3BrainCfg, args: &Value) -> Result<Valu
     if base_url.is_empty() || model_id.is_empty() {
         return Err(format!("模型行 {name} 缺 base_url/model_id"));
     }
-    let mode = match row.get("mode").and_then(Value::as_str).unwrap_or("api") {
-        "local" => Rr3LlmMode::Local,
-        _ => Rr3LlmMode::Api,
+    let mode = if row.get("mode").and_then(Value::as_str).unwrap_or("api") == "local" {
+        Rr3LlmMode::Local
+    } else {
+        Rr3LlmMode::Api
     };
     let key_ref = row
         .get("api_key_ref")
@@ -898,21 +902,25 @@ pub(crate) fn rr3_model_test_arm(cfg: &Rr3BrainCfg, args: &Value) -> Result<Valu
         .map(|s| s.to_string());
     let timeout_s = rr3_cloud_cfg_of(&cfg.doc)?.timeout_s;
     let client = Rr3LlmClient::new(base_url, model_id, timeout_s, key_ref, Some(mode));
-    match client.rr3_probe() {
-        Ok((latency_ms, mock)) => Ok(json!({
-            "ok": true,
-            "name": name,
-            "status": 200,
-            "latency_ms": latency_ms,
-            "mock": mock,
-        })),
-        Err(e) => Ok(json!({
-            "ok": false,
-            "name": name,
-            "latency_ms": 0,
-            "error": e,
-        })),
-    }
+    Ok(client.rr3_probe().map_or_else(
+        |e| {
+            json!({
+                "ok": false,
+                "name": name,
+                "latency_ms": 0,
+                "error": e,
+            })
+        },
+        |(latency_ms, mock)| {
+            json!({
+                "ok": true,
+                "name": name,
+                "status": 200,
+                "latency_ms": latency_ms,
+                "mock": mock,
+            })
+        },
+    ))
 }
 
 #[cfg(test)]

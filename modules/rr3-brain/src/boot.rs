@@ -185,13 +185,11 @@ fn rr3_wake_ack(v: &Value) -> Result<String, String> {
 fn rr3_wake_phrases(v: &Value) -> Result<Vec<String>, String> {
     let arr = v
         .as_array()
-        .ok_or_else(|| "config [rr3-brain.wake] phrases 须字符串数组".to_string())?;
-    let mut out = Vec::with_capacity(arr.len());
-    for item in arr {
-        if let Some(s) = rr3_wake_phrase(item)? {
-            out.push(s);
-        }
-    }
+        .ok_or("config [rr3-brain.wake] phrases 须字符串数组")?;
+    let out: Vec<String> = arr
+        .iter()
+        .filter_map(|item| rr3_wake_phrase(item).transpose())
+        .collect::<Result<Vec<String>, String>>()?;
     if out.is_empty() {
         return Err("config [rr3-brain.wake] phrases 须至少一个非空短语".to_string());
     }
@@ -202,7 +200,7 @@ fn rr3_wake_phrases(v: &Value) -> Result<Vec<String>, String> {
 fn rr3_wake_phrase(item: &Value) -> Result<Option<String>, String> {
     let s = item
         .as_str()
-        .ok_or_else(|| "config [rr3-brain.wake] phrases 项须字符串".to_string())?
+        .ok_or("config [rr3-brain.wake] phrases 项须字符串")?
         .trim();
     Ok(if s.is_empty() {
         None
@@ -526,13 +524,12 @@ fn rr3_bus_sect(doc: &Value) -> Option<&Value> {
 /// 整数且 >0（<=0 与 ops/set 写臂同判据）。
 fn rr3_dialog_ms_of(doc: &Value) -> Result<i64, String> {
     let dialog = rr3_brain_sect(doc, "dialog")?;
-    let v = match dialog.get("max_utterance_ms") {
-        Some(v) => v,
-        None => return Ok(RR3_DIALOG_MAX_UTTERANCE_DEFAULT_MS),
+    let Some(v) = dialog.get("max_utterance_ms") else {
+        return Ok(RR3_DIALOG_MAX_UTTERANCE_DEFAULT_MS);
     };
     let n = v
         .as_i64()
-        .ok_or_else(|| "config [rr3-brain.dialog] max_utterance_ms 须整数".to_string())?;
+        .ok_or("config [rr3-brain.dialog] max_utterance_ms 须整数")?;
     if n <= 0 {
         return Err(format!(
             "config [rr3-brain.dialog] max_utterance_ms 须 >0，收到 {n}"

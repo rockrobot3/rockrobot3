@@ -34,12 +34,10 @@ pub enum Rr3LedEffect {
 
 impl Rr3LedEffect {
     pub fn rr3_led_effect_parse(s: &str) -> Option<Self> {
-        match s {
-            "on" => Some(Self::On),
-            "off" => Some(Self::Off),
-            "blink" => Some(Self::Blink),
-            _ => None,
-        }
+        // 值 ↔ 枚举单点对照（与 RR3_LED_EFFECT_VALUES 同值同序）
+        let table: [(&str, Self); 3] =
+            [("on", Self::On), ("off", Self::Off), ("blink", Self::Blink)];
+        table.iter().find(|(w, _)| *w == s).map(|(_, e)| *e)
     }
 
     pub fn rr3_led_effect_str(&self) -> &'static str {

@@ -130,13 +130,10 @@ impl Rr3PowerDispatcher {
     /// battery 拍：读数 → 周期流 → 低电边沿。HAL 读数失败 = 设备/传输级，上抛
     /// 致命；失败先计入 counters（0.0.5 批I P-2：数据新鲜度可观测），再走退出语义。
     fn rr3_battery_beat(&mut self, now: Instant, bus: &BusHandle) -> Result<(), String> {
-        let st = match self.dev.battery() {
-            Ok(st) => st,
-            Err(e) => {
-                bus.counter_bump("battery_read_fail", 1);
-                return Err(format!("电池读数失败（{}）: {e}", self.backend));
-            }
-        };
+        let st = self.dev.battery().map_err(|e| {
+            bus.counter_bump("battery_read_fail", 1);
+            format!("电池读数失败（{}）: {e}", self.backend)
+        })?;
         self.battery_seq += 1;
         bus.publish(
             RR3_BATTERY_STATE_TOPIC,
