@@ -171,18 +171,23 @@ fn rr3_rpc_body(payload: &[u8]) -> Result<Value, (i32, String)> {
     })
 }
 
-fn param_str(params: &Value, key: &str) -> Result<String, (i32, String)> {
-    let Some(s) = params
+/// 字符串参数（借用取法）：形状判据单点在 `param_ref`，拥有版 `param_str` 只
+/// 是它在需要所有权处的薄包装（Event 转发每帧取一次 topic，借用即省一次分配）。
+fn param_ref<'a>(params: &'a Value, key: &str) -> Result<&'a str, (i32, String)> {
+    params
         .get(key)
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
-    else {
-        return Err((
-            Rr3StatusCode::Invalid as i32,
-            format!("缺 params.{key}（要求非空字符串）"),
-        ));
-    };
-    Ok(s.to_string())
+        .ok_or_else(|| {
+            (
+                Rr3StatusCode::Invalid as i32,
+                format!("缺 params.{key}（要求非空字符串）"),
+            )
+        })
+}
+
+fn param_str(params: &Value, key: &str) -> Result<String, (i32, String)> {
+    param_ref(params, key).map(str::to_owned)
 }
 
 pub fn rr3_rpc_manifest(params: &Value) -> Result<String, (i32, String)> {
@@ -191,6 +196,11 @@ pub fn rr3_rpc_manifest(params: &Value) -> Result<String, (i32, String)> {
 
 pub fn rr3_rpc_topic_param(params: &Value) -> Result<String, (i32, String)> {
     param_str(params, "topic")
+}
+
+/// `params.topic` 的借用取法（Event 转发热路径专用：每帧一条，不复制字符串）。
+pub fn rr3_rpc_topic_ref(params: &Value) -> Result<&str, (i32, String)> {
+    param_ref(params, "topic")
 }
 
 /// `rr3.call` 的参数形状：`topic` 必填非空字符串，`args` 可选（缺省 `Null`）。
@@ -523,5 +533,21 @@ mod tests {
             rr3_rpc_deny_status(&Rr3PublishDeny::NotRegistered { topic: "t".into() }),
             Rr3StatusCode::Invalid
         );
+    }
+
+    /// topic 借用取法与拥有版同一判据：同值、同错误文案、空串/非串同拒
+    /// （Event 转发热路径用借用版省一次 String 分配，口径不许分家）
+    #[test]
+    fn topic_ref_and_owned_param_share_one_judgement() {
+        let ok = json!({"topic": "rr3-sense/capture/dump"});
+        assert_eq!(rr3_rpc_topic_ref(&ok).unwrap(), "rr3-sense/capture/dump");
+        assert_eq!(rr3_rpc_topic_param(&ok).unwrap(), "rr3-sense/capture/dump");
+        for bad in [json!({}), json!({"topic": ""}), json!({"topic": 1})] {
+            let e_ref = rr3_rpc_topic_ref(&bad).unwrap_err();
+            let e_own = rr3_rpc_topic_param(&bad).unwrap_err();
+            assert_eq!(e_ref, e_own, "两取法必须同一判据: {bad}");
+            assert_eq!(e_ref.0, Rr3StatusCode::Invalid as i32);
+            assert!(e_ref.1.contains("params.topic"), "{}", e_ref.1);
+        }
     }
 }

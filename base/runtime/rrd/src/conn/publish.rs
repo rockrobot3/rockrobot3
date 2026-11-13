@@ -38,14 +38,19 @@ pub(super) fn rr3_publish(
     me: &Rr3Peer,
     body: &[u8],
 ) -> Result<Rr3Flow, String> {
-    let (parsed, topic) = match rr3_pub_parse(out, me, body) {
+    let parsed = match rr3_pub_body(out, me, body) {
         Ok(v) => v,
         Err(flow) => return Ok(flow),
     };
-    if let Some(flow) = rr3_pub_gate(out, ctx, me, body, &topic) {
+    // topic 借用已解析体（每帧一条 Event，不复制字符串）；parsed 活到本函数尾
+    let topic = match rr3_pub_topic(out, me, body, &parsed) {
+        Ok(t) => t,
+        Err(flow) => return Ok(flow),
+    };
+    if let Some(flow) = rr3_pub_gate(out, ctx, me, body, topic) {
         return Ok(flow);
     }
-    rr3_pub_fan(ctx, me, body, &topic, &parsed);
+    rr3_pub_fan(ctx, me, body, topic, &parsed);
     Ok(Rr3Flow::Keep)
 }
 
@@ -53,18 +58,6 @@ pub(super) fn rr3_publish(
 fn rr3_pub_fan(ctx: &Rr3ConnCtx, me: &Rr3Peer, body: &[u8], topic: &str, parsed: &Value) {
     rr3_pub_forward(ctx, me, body, topic);
     rr3_pub_batt(ctx, topic, parsed);
-}
-
-/// Event 体的解析与 topic 提取。两条形状错（非 JSON / 缺坏 topic）都回 Invalid 帧
-/// 并保持连接：`Err` 携带已应答的 `Keep`，调用方不再重复回帧。
-fn rr3_pub_parse(
-    out: &Arc<Mutex<UnixStream>>,
-    me: &Rr3Peer,
-    body: &[u8],
-) -> Result<(Value, String), Rr3Flow> {
-    let parsed = rr3_pub_body(out, me, body)?;
-    let topic = rr3_pub_topic(out, me, body, &parsed)?;
-    Ok((parsed, topic))
 }
 
 /// Event 体的 JSON 形状门（非 JSON 回 Invalid 帧并保持连接）。
@@ -85,13 +78,13 @@ fn rr3_pub_body(out: &Arc<Mutex<UnixStream>>, me: &Rr3Peer, body: &[u8]) -> Resu
 }
 
 /// topic 参数提取与坏形应答（缺/坏 `topic` 回 Invalid 帧，不断连）。
-fn rr3_pub_topic(
+fn rr3_pub_topic<'a>(
     out: &Arc<Mutex<UnixStream>>,
     me: &Rr3Peer,
     body: &[u8],
-    parsed: &Value,
-) -> Result<String, Rr3Flow> {
-    match rr3_rpc_topic_param(parsed) {
+    parsed: &'a Value,
+) -> Result<&'a str, Rr3Flow> {
+    match rr3_rpc_topic_ref(parsed) {
         Ok(t) => Ok(t),
         Err((_, msg)) => {
             rr3_reply_err(
