@@ -1611,8 +1611,11 @@ else
     gs_fn_lines=$((gs_end - gs_start + 1))
     gs_reads=$(awk -v s="$gs_start" -v e="$gs_end" \
       'NR>=s && NR<=e && /read_to_string/' "$gs_file" | wc -l | tr -d ' ')
-    gs_shapes=$(grep -rhoE 'fn rr3_[a-z_0-9]*(from_text|is_empty|contains|check)[a-z_0-9]*\(' \
-      base/runtime/rr-registry/src/*.rs | sort -u | wc -l | tr -d ' ')
+    # 扫描面 = rr-registry 全树（按内容、不按文件名）：结构拆分后同形小函数可能
+    # 住在子模块里，只扫 src/*.rs 会让计数随搬文件"假降"，门也就此失明。
+    gs_shapes=$(find base/runtime/rr-registry/src -name '*.rs' -not -path '*/tests/*' -print0 \
+      | xargs -0 grep -hoE 'fn rr3_[a-z_0-9]*(from_text|is_empty|contains|check)[a-z_0-9]*\(' \
+      | sort -u | wc -l | tr -d ' ')
     gs_check() {
       gs_name=$1
       gs_got=$2
