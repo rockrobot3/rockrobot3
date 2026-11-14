@@ -1,5 +1,7 @@
 //! httpd 纯逻辑层单测（自同名单测模块原样抽出，判据不变）。
 
+use super::*;
+
 /// P1-3 写口令牌校验：合法 token 通过、缺/错/坏 JSON 拒绝。
 #[test]
 fn admin_token_check() {

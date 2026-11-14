@@ -255,7 +255,7 @@ unsafe fn wifi_ap_configure() -> Result<&'static str, i32> {
     Ok(ssid)
 }
 
-unsafe fn wifi_sta_set_credentials(ssid: &[u8], pass: &[u8]) -> i32 {
+unsafe fn wifi_sta_set_cred(ssid: &[u8], pass: &[u8]) -> i32 {
     // FFI 边界自守（静态审计 B16）：定长数组越界复制＝panic＝整板 abort，这里把
     // "上层忘了校形"折成错误码走事务回退，永不 panic（读窄缝已同域校验，本关是
     // 第二道墙）。
@@ -270,7 +270,7 @@ unsafe fn wifi_sta_set_credentials(ssid: &[u8], pass: &[u8]) -> i32 {
 
 /// 有界等连（连上＝**DHCP 得 IP**，判据见函数内注记）：[`WIFI_CONNECT_WAIT_MS`]
 /// 上限、[`WIFI_POLL_MS`] 步进；超窗即 false（调用方如实应答——不猜不造）。
-unsafe fn wifi_sta_wait_connected() -> bool {
+unsafe fn wifi_sta_wait_conn() -> bool {
     // 判据＝**DHCP 得 IP**（`esp_netif_get_ip_info` 的 ip.addr 非 0），批N15 件二
     // 真板取证实锤的缺陷修复：原判据 `esp_wifi_sta_get_ap_info` 在关联瞬态
     // （auth/assoc→run，4-way 握手前）即返 ESP_OK——坏凭据被误判成功→不回退→
@@ -305,11 +305,11 @@ unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWriteResult {
     // apply 新凭据（disconnect 返回值不看——未连态不阻断 apply 链；
     // set/connect 任一败一律进回退分支）
     esp_wifi_disconnect();
-    let mut apply_ok = wifi_sta_set_credentials(ssid.as_bytes(), pass.as_bytes()) == ESP_OK;
+    let mut apply_ok = wifi_sta_set_cred(ssid.as_bytes(), pass.as_bytes()) == ESP_OK;
     if apply_ok {
         apply_ok = esp_wifi_connect() == ESP_OK;
     }
-    if apply_ok && wifi_sta_wait_connected() {
+    if apply_ok && wifi_sta_wait_conn() {
         return Rr3WifiWriteResult {
             ok: true,
             connected: true,
@@ -334,7 +334,7 @@ unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWriteResult {
     match &old {
         Some(c) => {
             esp_wifi_disconnect();
-            if wifi_sta_set_credentials(c.ssid.as_bytes(), c.pass().as_bytes()) == ESP_OK {
+            if wifi_sta_set_cred(c.ssid.as_bytes(), c.pass().as_bytes()) == ESP_OK {
                 let _ = esp_wifi_connect();
             }
         }
@@ -342,7 +342,7 @@ unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWriteResult {
             esp_wifi_disconnect();
         }
     }
-    let connected = wifi_sta_wait_connected();
+    let connected = wifi_sta_wait_conn();
     Rr3WifiWriteResult {
         ok: true,
         connected,
@@ -358,7 +358,7 @@ unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWriteResult {
 /// `option_env!` 回落 → 都缺＝缺席照常**（NVS 空时与批N13 逐字零回归）。
 /// NVS init 前移到本段（读链前件）——失败＝起栈链无健康前件，点名缺席
 /// （不 erase——不毁既有分区）；真机 env 永远缺席的机制订正见模块文档凭据节。
-pub(crate) fn rr3_board_httpd_spawn(bus: &Arc<Mutex<Bus>>) {
+pub(crate) fn rr3_httpd_spawn(bus: &Arc<Mutex<Bus>>) {
     let bus = Arc::clone(bus);
     // ① NVS init 前移（批N14 件一）：凭据读链前件，兼 WiFi 校准数据存储
     if unsafe { nvs_flash_init() } != ESP_OK {
@@ -454,7 +454,7 @@ unsafe fn wifi_bringup(ssid: &[u8], pass: &[u8]) -> Result<&'static str, i32> {
     // STA 凭据（helper 共用——写口 apply/回退同款；位形已在 spawn 前验）；
     // ap-only 档空凭据不配置 STA，只起 AP
     if !ssid.is_empty() {
-        esp_ok(wifi_sta_set_credentials(ssid, pass))?;
+        esp_ok(wifi_sta_set_cred(ssid, pass))?;
     }
     esp_ok(esp_wifi_start())?;
     // STA 关联发起（批N15 件二真板取证实锤的缺陷修复：esp_wifi_start 只起驱动
@@ -507,7 +507,7 @@ unsafe fn httpd_register(bus: &Arc<Mutex<Bus>>) -> Result<(), i32> {
 }
 
 /// WiFi 起栈 + httpd 起与注册（unsafe 集中段；NVS init 已前移到
-/// [`rr3_board_httpd_spawn`]——本段只做起栈链与服务工作面）。
+/// [`rr3_httpd_spawn`]——本段只做起栈链与服务工作面）。
 unsafe fn start_httpd(
     bus: &Arc<Mutex<Bus>>,
     cred_source: &str,

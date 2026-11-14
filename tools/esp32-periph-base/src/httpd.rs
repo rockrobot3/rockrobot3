@@ -30,7 +30,7 @@
 //!   组包纯函数＋写口 body 解析/应答组包纯函数。表↔分派零漂移由
 //!   `route_table_matches_dispatch` 单测钉死（同 host `route_table_matches_dispatch`
 //!   形状）。
-//! - **unsafe 壳层**（[`rr3_board_httpd_spawn`]）：WiFi STA 起栈（裸 sys——
+//! - **unsafe 壳层**（[`rr3_httpd_spawn`]）：WiFi STA 起栈（裸 sys——
 //!   [`wifi_init_config_t`] 手抄 v5.2.2 `WIFI_INIT_CONFIG_DEFAULT()` 宏展开，
 //!   字段真值逐项对表本项目生成 sdkconfig，见 [`wifi_default_config`]）＋
 //!   `httpd_start` ＋注册白名单 handler。
@@ -383,4 +383,4 @@ mod serve;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use serve::rr3_board_httpd_spawn;
+pub(crate) use serve::rr3_httpd_spawn;
