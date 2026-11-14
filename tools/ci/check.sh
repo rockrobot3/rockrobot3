@@ -1285,7 +1285,8 @@ fi
 #         pin/<field>  ← 装配单模块 RR3_PIN_KEYS（⑨-a 同款 awk，声明数判等）；
 #         role/<req>   ← contracts/roles.toml requires 逐项（⑨-a 同款拆词）；
 #         domain/<f>   ← 装配单模块 RR3_DOMAIN_KEYS（声明数判等）；
-#         axis/<field> ← rr-hal-api lib.rs RR3_ACT_PROFILE_FIELDS 十四键。
+#         axis/<field> ← rr-hal-api 的 RR3_ACT_PROFILE_FIELDS 十四键（该常量已
+#                        按契约族拆进 src/ 子模块，扫描面随内容走、不钉单文件名）。
 #       分子 = ∪ 每端点 covers 申报（panel/server.rs RR3_PANEL_ROUTES 第三列 ＋
 #       板侧 httpd.rs RR3_BOARD_ROUTES 第三列，批N13 件二扩入两源同扫），
 #       元素形制 = <集合>/<单段字段>、集合词表自 RR3_PANEL_COVER_SETS 导出——未申报
@@ -1332,7 +1333,10 @@ awk '
 awk '/const RR3_DOMAIN_KEYS/{f=1} f{print} f && /\];/{exit}' $prof_src \
   | grep -oE '"[^"]+"' | tr -d '"' | sed 's/^/domain\//' | sort -u > "$gd_dom"
 gd_dom_decl="$(grep -h -m1 -oE 'RR3_DOMAIN_KEYS: \[&str; [0-9]+\]' $prof_src | grep -oE '[0-9]+\]' | tr -d ']')"
-awk '/pub const RR3_ACT_PROFILE_FIELDS/{f=1} f{print} f && /^\];/{exit}' base/runtime/rr-hal-api/src/lib.rs \
+# axis 路：定义点可能在 lib.rs 或任一契约族子模块（文件拆分不失锚），逐文件取一次。
+while IFS= read -r f; do
+  awk '/pub const RR3_ACT_PROFILE_FIELDS/{f=1} f{print} f && /^\];/{exit}' "$f"
+done < <(find base/runtime/rr-hal-api/src -name '*.rs' -not -path '*/tests/*' | sort) \
   | grep -oE 'key: "[^"]+"' | sed 's/key: "/axis\//;s/"$//' | sort -u > "$gd_axis"
 # —— covers 原串导出（两源同一段扫描逻辑复用，批N13 件二扩入板侧）：
 #     host 侧 RR3_PANEL_ROUTES 区段 ＋ 板侧 RR3_BOARD_ROUTES 区段

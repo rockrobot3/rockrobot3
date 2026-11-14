@@ -81,12 +81,13 @@ def _item_end(src, head_at):
 
 def production_part(src):
     """截掉测试面：**测试专用 cfg 门**（`test` 裸项/`all(…test…)`）的 mod 块
-    整体截断、单项（fn/const/use/…）就地剔除，其后即生产面。
+    整体摘除、单项（fn/const/use/…）就地剔除，其余文本原样保留。
 
-    只认"cfg(test) 属性（可连挂其他属性）+ 项"形状——mod 之后整段是测试
-    尾巴；逐项门是散点测试辅助，只摘项不伤其后生产（`fn main` 必须留在
-    度量内，实测 rr3-audio-rec main CC 46 曾被整段藏出）。入参须是
-    strip_code 之后的文本：注释/字符串里提到 `#[cfg(test)]` 不构成依据。"""
+    只认"cfg(test) 属性（可连挂其他属性）+ 项"形状；逐项门是散点测试辅助，
+    只摘项不伤其后生产（`fn main` 必须留在度量内，实测 rr3-audio-rec main
+    CC 46 曾被整段藏出）。测试 mod 亦只摘块、不截尾——生产项可以排在测试
+    模块之后（httpd.rs 实证），位置不是判据。入参须是 strip_code 之后的
+    文本：注释/字符串里提到 `#[cfg(test)]` 不构成依据。"""
     pos = 0
     while True:
         m = TEST_ATTR.search(src, pos)
@@ -100,7 +101,14 @@ def production_part(src):
             pos = m.end()
             continue
         if im.group(1) == "mod":
-            return src[: m.start()]
+            # 测试专用 mod：只摘掉这个 mod 块，不截断其后文本——此前按"mod 之后
+            # 整段是测试尾巴"直接截尾，实测把 httpd.rs 测试模块之后的生产段
+            # （线程起子与白名单 CString 自证）整段藏出度量，拆分搬文件后才暴露。
+            # 语法上生产项完全可以排在测试模块之后，度量不得以位置代替判据。
+            end = _item_end(src, m.start() + im.end(1))
+            src = src[: m.start()] + src[end:]
+            pos = m.start()
+            continue
         end = _item_end(src, m.start() + im.end(1))
         src = src[: m.start()] + src[end:]
         pos = m.start()

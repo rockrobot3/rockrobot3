@@ -13,7 +13,6 @@ mod parse;
 mod surgery;
 mod surgery_gates;
 mod surgery_pins;
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use rr_registry::Rr3AssembleDemand;

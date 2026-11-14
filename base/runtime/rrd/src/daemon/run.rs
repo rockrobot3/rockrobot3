@@ -81,7 +81,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     // 只在装配单正门定格——`--manifest` 后门未跑装配链，"无降级"是未知而非事实，
     // 读面须为 null（[] 会被误读成"确认无降级"）。
     if cfg.profile.is_some() {
-        let _ = crate::rr3_degrade_notes_set(rr3_degrade_json(&boot.degrade));
+        let _ = crate::rr3_degrade_set(rr3_degrade_json(&boot.degrade));
     }
     // bind/cleanup/accept 走 trait 工厂（ADR-0008）：端点与监听语义上提到 rr-ipc，
     // Conn 类型仍是 UnixStream——conn.rs 的读写循环与 socket 专有门（读超时/shutdown）不动。
