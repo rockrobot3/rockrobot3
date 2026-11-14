@@ -28,7 +28,10 @@ pub(crate) use spawn::rr3_act_spawn_reflex;
 
 #[cfg(test)]
 mod tests {
-    use super::probe::{rr3_opt_face, rr3_shared_rule};
+    use super::probe::rr3_opt_face;
+    // 桥共享判据只在宿主档存在（板档无跨进程命令面，探活臂同门），用例随其同门。
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    use super::probe::rr3_shared_rule;
     use super::*;
     use crate::led::Rr3LedEffect;
     use rr_hal_api::Rr3HalError;
@@ -140,6 +143,7 @@ saturate_notice_ms = 500
 
     /// 桥共享判据：只有舵机面与音频面同选 esp32 才归 sense 独占。
     #[test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn shared_rule_only_when_both_esp32() {
         assert!(rr3_shared_rule("esp32", "esp32"));
         assert!(!rr3_shared_rule("esp32", "linux"));

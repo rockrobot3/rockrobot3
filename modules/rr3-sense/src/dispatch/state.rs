@@ -12,6 +12,9 @@ use crate::doa_ring::Rr3DoaRing;
 use crate::tts_gate::Rr3TtsGate;
 use crate::vad::Rr3VadState;
 
+// 点头推进只在宿主桥档存在（板档无命令旁路生产者，见 `nod::rr3_nod_advance` 的门），
+// 导入随消费者同门，否则 espidf 档是"未解析导入"。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use super::nod::rr3_nod_advance;
 use super::pcm::Rr3FrameBuf;
 use super::Rr3SenseDispatcher;
