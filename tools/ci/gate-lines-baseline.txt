@@ -26,4 +26,14 @@
 # 2026-11-14 七拆：rr-hal-api lib 1197→59 + 八契约族件；rrd daemon 1196→25 + 六件、
 #   profile/boot 1007→23 + 三件；rr-bus-api client 1124→28 + 五件；rr-registry
 #   validate 898→26 + 五件 → 23→18。
-18
+# 2026-11-14 八拆（audio/sim/sentinel/bridge）：rr-hal esp32audio 1461→59 + 六件、
+#   macaudio 822→39 + 五件；tools/sim chain 1058→38、assemble 1014→37、brain 800→29
+#   （各三到五件）；sentinel-harness main 1090→89 + 五件；bridge link 976→11 + 四件
+#   → 18→11。
+# 2026-11-14 九拆（收口）：rrd profile/parse 999→19、profile_checks 970→21、
+#   supervisor 854→237、registry/lifecycle 767→12、tests/register_publish 734→25、
+#   profile/tests/boot 634→11；rr3-interact mech 1199→384（测试与 parity 两腿留本件）、
+#   panel/exec 641→85；rr3-act boot 938→293；rr3-sense dispatch 791→307；
+#   pi-periph-base main 732→109 → 11→0。
+# **0 = 铁律落地**：此后任何 ≥600 行的 .rs 新增即红，无需再降基线。
+0
