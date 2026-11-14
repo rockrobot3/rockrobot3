@@ -1171,7 +1171,7 @@ fi
 #       1) 单点在位：装配单模块（profile/boot.rs）定义 pub const RR3_CONTRACT_BOOKS（字面唯一份）；
 #       2) 判据面共读：contracts.rs 的 RR3_CONTRACT_FILES 定义必须引用该常量
 #          （判据面再现字面数组 = 第二份清单 = 红）；
-#       3) 打包面共读：rr3-pack 必须调 rrd::profile::rr3_truth_set 照单
+#       3) 打包面共读：rr3-pack（src/ 全树，含拆分后的 pack/ 子模块）必须调 rrd::profile::rr3_truth_set 照单
 #          收口（打包面自带清单 = 块-15 同病 = 红）；
 #       4) 第二份字面零命中：全仓 .rs 产码不得再现四册并列清单字面（单点定义行
 #          与 tests/ 判据面豁免——判据钉四册点名是判据不是清单）。
@@ -1187,7 +1187,7 @@ if ! grep -q 'pub const RR3_CONTRACT_FILES: \[&str; 4\] = crate::profile::RR3_CO
   gate_z_fail=1
   printf 'FAIL  ⑨-z 判据面清单未共读单点（base/runtime/rrd/src/contracts.rs 的 RR3_CONTRACT_FILES 须引用 crate::profile::RR3_CONTRACT_BOOKS——自检判据面不得自带第二份字面，基-40）\n'
 fi
-if ! grep -q 'rrd::profile::rr3_truth_set(' tools/rr3-pack/src/main.rs; then
+if ! grep -rq 'rrd::profile::rr3_truth_set(' tools/rr3-pack/src; then
   gate_z_fail=1
   printf 'FAIL  ⑨-z 打包面未共读真值点（tools/rr3-pack 须调 rrd::profile::rr3_truth_set 照单收口——打包面自带清单即块-15 同病，基-25/实-12）\n'
 fi

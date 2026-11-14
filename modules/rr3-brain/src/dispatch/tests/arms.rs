@@ -195,21 +195,6 @@ fn event_arm_vad_offset_triggers_full_turn() {
     assert_eq!(bus.bumps_of("rounds_audible"), 1);
 }
 
-/// intent 发布体取用（整轮走通的观测面；恰一次发布）
-fn dp_published_intent(bus: &FakeTurnBus) -> Value {
-    let intents = bus.published_of(RR3_TOPIC_INTENT);
-    assert_eq!(intents.len(), 1, "整轮恰发布一次 intent");
-    intents.into_iter().next().unwrap()
-}
-
-/// 多轮用例取**最后一条** intent（前轮已发布过，不能用恰一次断言）
-fn dp_last_intent(bus: &FakeTurnBus) -> Value {
-    bus.published_of(RR3_TOPIC_INTENT)
-        .last()
-        .cloned()
-        .expect("至少一轮 intent")
-}
-
 /// 节拍臂时长判停触发整轮：0 封顶 onset 即刻到点（Python
 /// test_duration_cap_expires 同款零等待技巧）
 #[test]
