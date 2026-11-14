@@ -46,7 +46,7 @@ mod plan;
 #[cfg(test)]
 mod tests;
 
-pub use axis::*;
+use axis::*;
 pub use params::*;
 pub use paths::*;
 pub use plan::*;

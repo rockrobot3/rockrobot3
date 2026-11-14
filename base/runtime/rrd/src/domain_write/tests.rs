@@ -165,9 +165,12 @@ mod execute_tests {
 
     /// 装配单最小夹具（profile.rs GOOD 锚同族缩减：一域 + 一舵机轴 pin +
     /// budget/slots 段全显式）——装载链预核要全链过，段缺即红。
-    /// 文本 = 数据夹具单一真值（src/testdata/）+ 本夹具独有的 hardware/对账尾段。
+    /// 文本 = 数据夹具单一真值（`<manifest>/src/testdata/`）+ 本夹具独有的 hardware/ 尾段。
     const PROFILE: &str = concat!(
-        include_str!("testdata/profile_host_prefix.toml"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/testdata/profile_host_prefix.toml"
+        )),
         r#"
 [bindings]
 "act.servo" = "rr3-act"
@@ -177,7 +180,10 @@ alsa_device = "default"
 link_ifname = "wlan0"
 
 "#,
-        include_str!("testdata/pin_servo_pan.toml"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/testdata/pin_servo_pan.toml"
+        )),
         r#"
 [[pin]]
 role = "power.charger.meter"
@@ -196,16 +202,22 @@ present = ["act.servo", "power.charger"]
     );
 
     /// 接线档夹具（§4.3 九字段，profile.rs 测试区 GOOD_WIRING 同形状）：单一真值
-    /// `src/testdata/wiring_bottom.toml`。单线组只挂 vcc/gnd（对 [[pin]] 增删
+    /// `<manifest>/src/testdata/wiring_bottom.toml`。单线组只挂 vcc/gnd（对 [[pin]] 增删
     /// 免疫——⑦-a 不点名 pin_id），net=rail5v 在夹具域在册（⑦-b）。不复制真仓
     /// default/wiring.toml——它引 batt/rail3v3 域与真机 pin 集，与最小装配单必然
     /// 失配，写口预核红例必须由真实判据产生、不由夹具失配产生。
-    const WIRING: &str = include_str!("testdata/wiring_bottom.toml");
+    const WIRING: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/testdata/wiring_bottom.toml"
+    ));
 
     /// rr3-act 的 servo 件装配清单（profile.rs 测试区 stage_servo_module 同形状）：
     /// 装载链门 c 对 kind=power 挂轨角色执法⑨ 覆盖判据——无 stage 件则一切
     /// "合法过写"用例被 ⑨ 误红（写口预核要全链过，夹具必须供件申报面）。
-    const ASSEMBLE: &str = include_str!("testdata/servo_assemble.toml");
+    const ASSEMBLE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/testdata/servo_assemble.toml"
+    ));
 
     struct Fixture {
         dir: PathBuf,
