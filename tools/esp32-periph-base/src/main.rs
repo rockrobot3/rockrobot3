@@ -415,7 +415,7 @@ fn main() {
     //「NVS 优先（cred 模块）→ 编译期 option_env! 注入回落（RR3_BOARD_WIFI_SSID/PASS，
     //值不落仓）」，都缺 fail-honest 点名后缺席，板其余功能照常；细节见 [httpd]/[cred]
     //模块文档。（clone 同前——须在 cmd_loop move 前）
-    httpd::rr3_board_httpd_spawn(&bus);
+    httpd::rr3_httpd_spawn(&bus);
     spawn_planes(ctl, rt, bus);
 
     // ---- 批D 采集冒烟 + 音频上行：INMP441 双麦 @ I2S0（classic 4/27/26，S3 6/15/7）----
