@@ -18,4 +18,4 @@
 #   rr-hal esp32_uart、rr-ipc protocol/header、rr-mech control、rr-registry atom/depends、
 #   rrd assembly/cli/manifest/topics_load/wiring、rr3-act intent、rr3-interact boot、
 #   rr3-power dispatch、rr3-sense boot、pi-periph-base ports → 53→38。
-31
+30
