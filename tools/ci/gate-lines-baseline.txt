@@ -23,4 +23,7 @@
 #   + sim/{parse,source,sink,periph,tests}；rr3-brain rpc 1436→13 + rpc/{ops,model,tests}；
 #   cloud 1365→29 + cloud/{cfg,client,payload,retry,testkit,tests}；rr3-audio-rec main
 #   1514→156 + 十件会话职责件；rrd tests/support 189→29 + 四夹具件 → 38→23。
-23
+# 2026-11-14 七拆：rr-hal-api lib 1197→59 + 八契约族件；rrd daemon 1196→25 + 六件、
+#   profile/boot 1007→23 + 三件；rr-bus-api client 1124→28 + 五件；rr-registry
+#   validate 898→26 + 五件 → 23→18。
+18
