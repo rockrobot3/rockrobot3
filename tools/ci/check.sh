@@ -442,7 +442,8 @@ fi
 #     记档位适用（非空且为 host|rtos|bare 子集，缺/非法即 fail-closed；0.0.5 批M
 #     MC-10 L-2 扩读，收 R-8——此前只读 status、tier_scope 门禁不读）。normal 格的落点
 #     件须 mech.rs + 模块运行机制实体（composite.rs / dispatch.rs / rpc.rs——0.0.8 W-A
-#     拆分后多落点，批N26 件二订正）两腿各 ≥1（腿一 fn parity_leg1_*、腿二
+#     拆分后多落点，批N26 件二订正；其实体的 tests/ 子目录同计：单测随结构化拆分搬走
+#     时门按内容执法、不按文件名执法）两腿各 ≥1（腿一 fn parity_leg1_*、腿二
 #     fn parity_leg2_*，命名即机器锚）；只有腿一记未达标（§4.0.3：否则恒输出 0 的空件
 #     照样过门）。件形由 module.toml `lang` 数据位判（rust|python，缺/非法即 fail-closed，
 #     不再用 `[ ! -f mech.rs ]` 存在性启发式猜）——lang=python 两件式件（无 atoms/*.rs
@@ -537,15 +538,24 @@ parity_gate() {
       # 件级精确归属：对拍函数名须带本件名前缀（fn parity_leg1_<件名>_*）——
       # 模块级粗扫会让同模块异件互充数（battery 没写、charger 写了也能过），
       # 与 C10"不许空件充数"同理。atom.name 与目录名一致性已由批E 断言钉死。
-      leg1="$(cat "$atom_dir/mech.rs" "$mod_dir/src/composite.rs" \
-                "$mod_dir/src/dispatch.rs" "$mod_dir/src/rpc.rs" 2>/dev/null \
-                | grep -cE "fn parity_leg1_${atom_name}_[a-z0-9_]+" || true)"
-      leg2="$(cat "$atom_dir/mech.rs" "$mod_dir/src/composite.rs" \
-                "$mod_dir/src/dispatch.rs" "$mod_dir/src/rpc.rs" 2>/dev/null \
-                | grep -cE "fn parity_leg2_${atom_name}_[a-z0-9_]+" || true)"
-      leg1="${leg1:-0}"; leg2="${leg2:-0}"
+      # 扫描面 = mech.rs + 运行机制实体（composite/dispatch/rpc）**及其测试子目录**：
+      # 0.0.8 结构化拆分后，机制实体的单测可能搬进 `<实体>/tests/`，门按内容执法、
+      # 不按文件名执法（搬文件不失锚）。
+      leg1=0; leg2=0
+      mech_files=("$atom_dir/mech.rs" "$mod_dir/src/composite.rs" "$mod_dir/src/dispatch.rs" "$mod_dir/src/rpc.rs")
+      mech_dirs=("$mod_dir/src/composite" "$mod_dir/src/dispatch" "$mod_dir/src/rpc")
+      while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        leg1=$((leg1 + $(grep -cE "fn parity_leg1_${atom_name}_[a-z0-9_]+" "$f" || true)))
+        leg2=$((leg2 + $(grep -cE "fn parity_leg2_${atom_name}_[a-z0-9_]+" "$f" || true)))
+      done < <(printf '%s\n' "${mech_files[@]}" | while IFS= read -r f; do [ -f "$f" ] && printf '%s\n' "$f"; done)
+      while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        leg1=$((leg1 + $(grep -cE "fn parity_leg1_${atom_name}_[a-z0-9_]+" "$f" || true)))
+        leg2=$((leg2 + $(grep -cE "fn parity_leg2_${atom_name}_[a-z0-9_]+" "$f" || true)))
+      done < <(for d in "${mech_dirs[@]}"; do [ -d "$d" ] && find "$d" -name '*.rs' -print; done)
       if [ "$leg1" -ge 1 ] && [ "$leg2" -ge 1 ]; then
-        printf 'PASS  ⑧-a %s→%s: 两腿齐（leg1=%s leg2=%s，扫描 mech.rs + composite/dispatch/rpc.rs；lang=%s tier_scope=%s）\n' "$atom_name" "$slot" "$leg1" "$leg2" "$lang" "$tier_scope"
+        printf 'PASS  ⑧-a %s→%s: 两腿齐（leg1=%s leg2=%s，扫描 mech.rs + composite/dispatch/rpc(.rs|/)；lang=%s tier_scope=%s）\n' "$atom_name" "$slot" "$leg1" "$leg2" "$lang" "$tier_scope"
       else
         printf 'FAIL  ⑧-a %s→%s: normal 格两腿不齐（leg1=%s leg2=%s）——只有腿一记未达标（§4.0.3 判据②；lang=%s tier_scope=%s）\n' "$atom_name" "$slot" "$leg1" "$leg2" "$lang" "$tier_scope"
         rc=1
