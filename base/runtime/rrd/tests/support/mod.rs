@@ -18,12 +18,36 @@
 
 #![allow(dead_code)] // 各测试文件按需取用，没用到不算死码
 
+// 四个子模块共用的依赖单点在这里（子模块经 `use super::*` 取用）：拆件前它们同处
+// 一个文件，按文件拆分后导入表必须上提到父模块，否则每个子件各抄一份。
+use std::collections::VecDeque;
+use std::io::{BufRead, BufReader};
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdout, Command, Stdio};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use rr_ipc::{
+    opcode, rr3_body_encode, rr3_body_split, rr3_frame_read, rr3_frame_write, Rr3Frame,
+    Rr3FrameError, Rr3Header, Rr3PayloadType,
+};
+use serde_json::{json, Value};
+
 mod client;
 mod fixture;
 mod frames;
 mod inst;
 
+// 四组各自是独立子模块，重导出即 support 的对外面：某个测试二进制只消费其中
+// 一两组时，其余组的 glob 重导出会被判"未用导入"——那是按测试二进制分别算的
+// 口径产物，不是漏用，统一在本行放行（组内符号仍受拆件前同款 dead_code 纪律）。
+#[allow(unused_imports)]
 pub use client::*;
+#[allow(unused_imports)]
 pub use fixture::*;
+#[allow(unused_imports)]
 pub use frames::*;
+#[allow(unused_imports)]
 pub use inst::*;
