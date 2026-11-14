@@ -3,6 +3,9 @@ use std::sync::atomic::Ordering;
 
 use serde_json::Value;
 
+#[cfg(target_os = "macos")]
+use super::cfg::RR3_TTS_BACKEND_MAC_SAY;
+
 use super::*;
 
 // ---------- 纯函数面 ----------
