@@ -3244,6 +3244,15 @@ pi-periph-base ports、rrctl commands、sim main、rr3-brain boot 夹具/用例�
 ③测试体搬目录后 `include_str!`/`include_bytes!` 的相对基准跟着文件走——仓内夹具一律
 `concat!(env!("CARGO_MANIFEST_DIR"), ...)` 定位，不再写 `../` 层级。
 
+**2026-11-14 第三批（基线 35→28）**：rr-registry platform 1157→193（head/ctl/caps/
+conf/cons/view）、assemble 1133→288（item/empty/asm+tests）、rr-ipc UART 1192→528
+（excl/term+tests）、rrd 测试支撑 1193→29（inst/frames/client/fixture）、rr3-brain
+dispatch 1714→546（wake/turn/arms/tts + tests 四段）、rr3-pack 1513→158
+（args/copy/stage/deb + tests）、esp32-periph-base httpd 1112→386（serve+tests）。
+另两条拆分纪律：④结构体被兄弟子模块读字段时，字段同样要 `pub(super)`（只开结构体
+不开字段 = E0616）；⑤搬走测试后，"按文件名扫机制实体"的门（⑧-a 两腿计数、⑨-z
+打包面共读）扫描面必须同步按内容扩到 `<实体>/tests/` 与 `src/` 全树，否则静默漏扫。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
