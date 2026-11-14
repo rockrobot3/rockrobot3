@@ -157,7 +157,7 @@ fn rr3_ctl_health(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
     };
     Ok(json!({
         "modules": modules,
-        "degraded": crate::rr3_degrade_notes_get(),
+        "degraded": crate::rr3_degrade_get(),
     }))
 }
 
