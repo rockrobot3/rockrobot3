@@ -28,9 +28,9 @@ impl Rr3TurnBus for BusHandle {
 /// 唤醒判决 + LLM 段的产物（`rr3_turn_reply` 出、主编排消费）：`ack` 标记本轮是
 /// 固定应答（TTS 段可复用预合成 PCM），`llm_ms` 为 `-` 表示本轮未进 LLM。
 pub(super) struct Rr3TurnReply {
-    text: String,
-    llm_ms: String,
-    ack: bool,
+    pub(super) text: String,
+    pub(super) llm_ms: String,
+    pub(super) ack: bool,
 }
 
 /// cloud 三客户端整体（批N32 迁移件2：Python composite 装配段同形状——asr/tts
