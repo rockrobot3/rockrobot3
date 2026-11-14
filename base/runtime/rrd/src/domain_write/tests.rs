@@ -247,17 +247,26 @@ present = ["act.servo", "power.charger"]
         std::fs::write(&profile, PROFILE).unwrap();
         std::fs::write(
             dir.join("contracts/slots.toml"),
-            include_str!("../../../../contracts/slots.toml"),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../contracts/slots.toml"
+            )),
         )
         .unwrap();
         std::fs::write(
             dir.join("contracts/roles.toml"),
-            include_str!("../../../../contracts/roles.toml"),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../contracts/roles.toml"
+            )),
         )
         .unwrap();
         std::fs::write(
             dir.join("contracts/devices.toml"),
-            include_str!("../../../../contracts/devices.toml"),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../contracts/devices.toml"
+            )),
         )
         .unwrap();
         // 平台事实表：从仓根复制真册（test 面相对 CARGO_MANIFEST_DIR）

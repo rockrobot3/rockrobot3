@@ -4,11 +4,6 @@ use super::*;
 
 // ---------- TTS 下行流分帧（Python test_composite.TestTtsPcmFrames 对位） ----------
 
-/// 确定性伪 PCM（s16le，字节值随下标变化，便于逐块断言原样切分）
-fn pcm_bytes(n: usize) -> Vec<u8> {
-    (0..n).map(|i| (i % 251) as u8).collect()
-}
-
 /// 空 PCM 零帧且水位不动
 #[test]
 fn frames_empty_yields_no_frames_and_seq_unchanged() {

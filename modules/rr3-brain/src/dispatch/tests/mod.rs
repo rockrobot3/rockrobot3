@@ -140,3 +140,23 @@ impl Rr3TurnBus for FakeTurnBus {
         }
     }
 }
+
+/// intent 发布体取用（整轮走通的观测面；恰一次发布）
+fn dp_published_intent(bus: &FakeTurnBus) -> Value {
+    let intents = bus.published_of(RR3_TOPIC_INTENT);
+    assert_eq!(intents.len(), 1, "整轮恰发布一次 intent");
+    intents.into_iter().next().unwrap()
+}
+
+/// 多轮用例取**最后一条** intent（前轮已发布过，不能用恰一次断言）
+fn dp_last_intent(bus: &FakeTurnBus) -> Value {
+    bus.published_of(RR3_TOPIC_INTENT)
+        .last()
+        .cloned()
+        .expect("至少一轮 intent")
+}
+
+/// 确定性伪 PCM（s16le，字节值随下标变化，便于逐块断言原样切分）
+fn pcm_bytes(n: usize) -> Vec<u8> {
+    (0..n).map(|i| (i % 251) as u8).collect()
+}
