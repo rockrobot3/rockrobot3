@@ -7,8 +7,9 @@ use super::*;
 /// 为什么队列必须挂在连接上而不是全局：fd 会被复用，全局 map 会把上一条连接遗留的帧投给新连接
 /// （评审裁定里明令不换 fd-keyed 全局 map）。也不动生产代码——顺序无关性本就该由读侧承担。
 pub struct RrdClient {
-    stream: UnixStream,
-    pending: VecDeque<Rr3Frame>,
+    // 同 support 兄弟模块可读：inst 侧夹具按同一连接布帧（拆件前同处一个文件）。
+    pub(super) stream: UnixStream,
+    pub(super) pending: VecDeque<Rr3Frame>,
 }
 
 /// 一次"挑帧"最多扫多少帧。扫不到就是**夹具 bug**（谓词写错、或 rrd 真没发这一帧），
