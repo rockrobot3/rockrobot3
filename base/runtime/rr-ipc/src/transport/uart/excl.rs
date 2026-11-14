@@ -2,7 +2,7 @@
 
 use super::*;
 
-const TCSANOW: i32 = 0;
+pub(super) const TCSANOW: i32 = 0;
 /// `flock(2)` 操作码（sys/file.h，macOS 与 Linux 同值）：排他锁 + 非阻塞。
 const LOCK_EX: i32 = 2;
 const LOCK_NB: i32 = 4;
@@ -10,34 +10,34 @@ const LOCK_NB: i32 = 4;
 extern "C" {
     /// `open(2)` 是变参：这里只用两参形状（path, oflag）
     #[link_name = "open"]
-    fn c_open(path: *const CChar, oflag: i32, ...) -> i32;
+    pub(super) fn c_open(path: *const CChar, oflag: i32, ...) -> i32;
     #[link_name = "close"]
-    fn c_close(fd: i32) -> i32;
+    pub(super) fn c_close(fd: i32) -> i32;
     #[link_name = "read"]
-    fn c_read(fd: i32, buf: *mut std::ffi::c_void, count: usize) -> isize;
+    pub(super) fn c_read(fd: i32, buf: *mut std::ffi::c_void, count: usize) -> isize;
     #[link_name = "write"]
-    fn c_write(fd: i32, buf: *const std::ffi::c_void, count: usize) -> isize;
+    pub(super) fn c_write(fd: i32, buf: *const std::ffi::c_void, count: usize) -> isize;
     #[link_name = "tcgetattr"]
-    fn c_tcgetattr(fd: i32, termios_p: *mut Termios) -> i32;
+    pub(super) fn c_tcgetattr(fd: i32, termios_p: *mut Termios) -> i32;
     #[link_name = "tcsetattr"]
-    fn c_tcsetattr(fd: i32, optional_actions: i32, termios_p: *const Termios) -> i32;
+    pub(super) fn c_tcsetattr(fd: i32, optional_actions: i32, termios_p: *const Termios) -> i32;
     #[link_name = "tcflush"]
-    fn c_tcflush(fd: i32, queue_selector: i32) -> i32;
+    pub(super) fn c_tcflush(fd: i32, queue_selector: i32) -> i32;
     /// `flock(2)`：open file description 级排他锁（排他账本的锁面，见模块注记）。
     #[link_name = "flock"]
     fn c_flock(fd: i32, operation: i32) -> i32;
     #[link_name = "cfmakeraw"]
-    fn c_cfmakeraw(termios_p: *mut Termios);
+    pub(super) fn c_cfmakeraw(termios_p: *mut Termios);
     #[link_name = "cfsetispeed"]
-    fn c_cfsetispeed(termios_p: *mut Termios, speed: SpeedT) -> i32;
+    pub(super) fn c_cfsetispeed(termios_p: *mut Termios, speed: SpeedT) -> i32;
     #[link_name = "cfsetospeed"]
-    fn c_cfsetospeed(termios_p: *mut Termios, speed: SpeedT) -> i32;
+    pub(super) fn c_cfsetospeed(termios_p: *mut Termios, speed: SpeedT) -> i32;
     /// `poll(2)`：nfds_t 宽度平台不同（macOS u32 / Linux u64），经 [`NfdsT`] 对表。
     #[link_name = "poll"]
-    fn c_poll(fds: *mut PollFd, nfds: NfdsT, timeout: i32) -> i32;
+    pub(super) fn c_poll(fds: *mut PollFd, nfds: NfdsT, timeout: i32) -> i32;
     /// `fcntl(2)` 是变参：这里只用 (fd, F_GETFL) 与 (fd, F_SETFL, flags) 两形状。
     #[link_name = "fcntl"]
-    fn c_fcntl(fd: i32, cmd: i32, ...) -> i32;
+    pub(super) fn c_fcntl(fd: i32, cmd: i32, ...) -> i32;
 }
 
 /// 波特率 → `speed_t`。115200（默认）/ 9600（P3 合法降速）/ 921600 / 1.5M / 2M
