@@ -130,13 +130,33 @@ jobs:
           key: esp-${{ runner.os }}-v0.17.1-idf5.2.2
       - name: 安装 esp 工具链（espup 钉版，esp32 + esp32s3 双档）
         run: |
+          # 网络面三类失败（资产下载 / 工具链源 / 组件缓存）都是外因，单次失败
+          # 不该整轮判红；有界重试 3 次，仍败则把日志尾部写成注解——没有注解时
+          # check-run 只剩 "exit code 1"，根因不可见（2026-11-14 实测一整轮无归因）。
+          set -o pipefail
           mkdir -p "$HOME/.local/bin"
           if [ ! -x "$HOME/.local/bin/espup" ]; then
-            curl -fsSL https://github.com/esp-rs/espup/releases/download/v0.17.1/espup-x86_64-unknown-linux-gnu \
-              -o "$HOME/.local/bin/espup"
+            for i in 1 2 3; do
+              if curl -fsSL --retry 3 --retry-delay 3 \
+                   https://github.com/esp-rs/espup/releases/download/v0.17.1/espup-x86_64-unknown-linux-gnu \
+                   -o "$HOME/.local/bin/espup"; then
+                break
+              fi
+              echo "::warning title=espup 下载::第 ${i} 次失败，5s 后重试"
+              sleep 5
+            done
             chmod +x "$HOME/.local/bin/espup"
           fi
-          "$HOME/.local/bin/espup" install --targets esp32,esp32s3
+          for i in 1 2 3; do
+            if "$HOME/.local/bin/espup" install --targets esp32,esp32s3 2>&1 | tee /tmp/espup.log; then
+              exit 0
+            fi
+            echo "::warning title=espup install::第 ${i} 次失败，10s 后重试"
+            sleep 10
+          done
+          errs=$(tail -3 /tmp/espup.log | tr '\n' ' ')
+          echo "::error title=espup install::连续 3 次失败（网络/镜像/工具链源）：${errs:0:700}"
+          exit 1
       - name: 安装 ldproxy
         run: command -v ldproxy >/dev/null || cargo install ldproxy --locked
       - name: 克隆 ESP-IDF v5.2.2（版本钉与 tools/espidf-std-hello/README.md 登记表同源）
@@ -230,12 +250,32 @@ jobs:
       - name: 安装 esp 工具链（espup 预编译直下 → +esp，第④路 xtensa 对拍）
         run: |
           # 钉版 v0.17.1（2026-04-17 发布）——latest 漂移会破工具链可重现性；
-          # 升级方式：核对 esp-rs/espup release 资产名后改此处版本号
+          # 升级方式：核对 esp-rs/espup release 资产名后改此处版本号。
+          # 有界重试与注解口径同 esp32-gates 的安装步（网络面失败不留白）。
+          set -o pipefail
           mkdir -p "$HOME/.local/bin"
-          curl -fsSL https://github.com/esp-rs/espup/releases/download/v0.17.1/espup-x86_64-unknown-linux-gnu \
-            -o "$HOME/.local/bin/espup"
-          chmod +x "$HOME/.local/bin/espup"
-          "$HOME/.local/bin/espup" install --targets esp32
+          if [ ! -x "$HOME/.local/bin/espup" ]; then
+            for i in 1 2 3; do
+              if curl -fsSL --retry 3 --retry-delay 3 \
+                   https://github.com/esp-rs/espup/releases/download/v0.17.1/espup-x86_64-unknown-linux-gnu \
+                   -o "$HOME/.local/bin/espup"; then
+                break
+              fi
+              echo "::warning title=espup 下载::第 ${i} 次失败，5s 后重试"
+              sleep 5
+            done
+            chmod +x "$HOME/.local/bin/espup"
+          fi
+          for i in 1 2 3; do
+            if "$HOME/.local/bin/espup" install --targets esp32 2>&1 | tee /tmp/espup.log; then
+              exit 0
+            fi
+            echo "::warning title=espup install::第 ${i} 次失败，10s 后重试"
+            sleep 10
+          done
+          errs=$(tail -3 /tmp/espup.log | tr '\n' ' ')
+          echo "::error title=espup install::连续 3 次失败（网络/镜像/工具链源）：${errs:0:700}"
+          exit 1
       - name: IPC-T-003 跨架构对拍（--strict）
         run: |
           # espup 生成的环境导出（LIBCLANG_PATH 等）供 +esp 工具链取用
