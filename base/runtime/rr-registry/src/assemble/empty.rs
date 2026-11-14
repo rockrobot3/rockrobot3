@@ -1,7 +1,5 @@
 //! L-5 空面规则：两数组皆空须明写 no_injection，与注入面互斥。
 
-use super::*;
-
 /// 两数组均在文本中出现且均为空（L-5 空面的前件）。
 fn rr3_empty_surface(
     handles_present: bool,
