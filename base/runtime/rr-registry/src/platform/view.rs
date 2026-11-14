@@ -88,11 +88,16 @@ impl Rr3ConflictEntry {
 mod tests {
     use super::*;
 
-    // include_str! 以本文件所在目录为基准：src → rr-registry → runtime → base → 仓库根
-    const ESP32: &str = include_str!("../../../../contracts/platform/esp32.toml");
-    const ESP32S3: &str = include_str!("../../../../contracts/platform/esp32s3.toml");
-    const RK3566: &str = include_str!("../../../../contracts/platform/rk3566.toml");
-    const RPI4: &str = include_str!("../../../../contracts/platform/raspberry-pi-4.toml");
+    // 仓内文件一律以 CARGO_MANIFEST_DIR 定位（模块目录搬家不再改相对层级）。
+    macro_rules! repo_file {
+        ($p:literal) => {
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../", $p))
+        };
+    }
+    const ESP32: &str = repo_file!("contracts/platform/esp32.toml");
+    const ESP32S3: &str = repo_file!("contracts/platform/esp32s3.toml");
+    const RK3566: &str = repo_file!("contracts/platform/rk3566.toml");
+    const RPI4: &str = repo_file!("contracts/platform/raspberry-pi-4.toml");
 
     /// 四份在册平台表全部可解析（演练两份的"空集显式"是裁定②的形状，不是缺段）
     #[test]
