@@ -119,7 +119,7 @@ fn frame_read_half_frame_times_out() {
         .expect("写半帧失败");
     let (tx, rx) = std::sync::mpsc::channel();
     let worker = std::thread::spawn(move || {
-        let mut io = crate::UartIo {
+        let mut io = crate::uart::UartIo {
             uart: &mut conn,
             pre: Some(rr_periph_proto::RR3_MAGIC_FIRST),
         };

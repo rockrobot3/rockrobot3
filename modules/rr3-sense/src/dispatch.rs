@@ -17,24 +17,33 @@
 //! 发布/读帧失败 Err 上抛致命：模块不装"活着"，死交给 supervisor 按
 //! restart_policy=always 重启（rrd 的进程语义）。
 
+mod nod;
+mod pan;
+mod pcm;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod servo_rpc;
+mod state;
+mod tick;
+
 use std::time::{Duration, Instant};
 
 use rr3mod::{BusHandle, Dispatcher};
-// 反射旁路是宿主桥档符号（Rr3PeriphCmd，rr-hal backend 宿主档门，批N8 件三）
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use rr_hal::backend::Rr3PeriphCmd;
-use rr_hal::Rr3PcmStream;
 use rr_hal_api::Rr3AudioCfg;
 use rr_hal_api::Rr3AudioSource;
 use serde_json::{json, Value};
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use servo_rpc::rr3_sense_servo;
+
 use crate::boot::Rr3SenseConfig;
 use crate::capture;
-use crate::capture::Rr3DoaFix;
-use crate::doa_ring::{rr3_ring_feed, Rr3DoaRing};
+use crate::doa_ring::Rr3DoaRing;
 use crate::rpc;
 use crate::tts_gate::Rr3TtsGate;
-use crate::vad::{self, Rr3VadEdge, Rr3VadState};
+use crate::vad::Rr3VadState;
+
+use nod::Rr3NodState;
+use pcm::Rr3FrameBuf;
 
 /// 本模块 exposes 的唯一事务面主题（module.toml [rpc].exposes 同源）
 const RR3_DUMP_TOPIC: &str = "rr3-sense/capture/dump";
@@ -123,127 +132,6 @@ pub(crate) struct Rr3SenseDispatcher {
     read_pool: Rr3FrameBuf,
 }
 
-impl Rr3SenseDispatcher {
-    /// 装配构造（main.rs 装配段调用）：探活句柄/命令旁路/后端名/开源形状由
-    /// boot.rs 编排产出；frames_per_tick 预计算、VAD 状态机、判向窗策略收口、
-    /// ring（channels≥2 才分配）构造即初始化，与原主循环语义一致。
-    pub(crate) fn new(
-        source: Box<dyn Rr3AudioSource>,
-        cmd_tx: Option<rr_hal::backend::Rr3AudioCmdProducer>,
-        backend: &'static str,
-        open_cfg: Rr3AudioCfg,
-        cfg: Rr3SenseConfig,
-    ) -> Self {
-        let frames_per_tick =
-            capture::rr3_frames_per_tick(cfg.audio.sample_rate, cfg.audio.frame_ms);
-        let vad = Rr3VadState::rr3_vad_new(cfg.vad, cfg.audio.frame_ms);
-        let doa_cfg = capture::Rr3DoaCfg {
-            sample_rate_hz: cfg.audio.sample_rate,
-            frame_ms: cfg.audio.frame_ms,
-            mic_baseline_mm: cfg.doa.mic_baseline_mm,
-            window_rms_min: cfg.doa.window_rms_min,
-            bin_threshold_deg: cfg.doa.bin_threshold_deg,
-        };
-        let doa_ring = if cfg.audio.channels >= 2 {
-            Some(Rr3DoaRing::rr3_ring_new(
-                (cfg.audio.sample_rate as u64 * cfg.doa.window_ms / 1000) as usize,
-                cfg.audio.channels as usize,
-            ))
-        } else {
-            None
-        };
-        Self {
-            source,
-            backend,
-            open_cfg,
-            cfg,
-            frames_per_tick,
-            vad,
-            tick: Duration::from_millis(cfg.audio.frame_ms),
-            seq: 0,
-            cmd_tx,
-            tts_gate: Rr3TtsGate::default(),
-            pending_pan: None,
-            pending_nod: None,
-            doa_cfg,
-            doa_ring,
-            read_pool: Rr3FrameBuf::default(),
-        }
-    }
-
-    /// 点头手势推进（宿主桥档专用）：蓄势段（回中位）到点下发后，按
-    /// `nod_hold_ms` 再下发上仰段并清账。两段各自计数（`reflex_tilt_cmds`），
-    /// 板侧应答失败不回插——手势是示意动作，丢一次可接受，重试会拉长手势。
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    fn rr3_nod_step(&mut self, now: Instant, bus: &BusHandle) {
-        let Some(st) = self.pending_nod else {
-            return;
-        };
-        let Some(tx) = self.cmd_tx.as_ref() else {
-            self.pending_nod = None;
-            return;
-        };
-        self.pending_nod = rr3_nod_advance(tx, bus, st, now);
-    }
-}
-
-/// 点头推进：蓄势段/上仰段到点即下发并推进，`None` = 手势结束。
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn rr3_nod_advance(
-    tx: &rr_hal::backend::Rr3AudioCmdProducer,
-    bus: &BusHandle,
-    st: Rr3NodState,
-    now: Instant,
-) -> Option<Rr3NodState> {
-    if let Some(next) = rr3_nod_dip_step(tx, bus, st, now) {
-        return Some(next);
-    }
-    if rr3_nod_lift_due(&st, now) {
-        rr3_nod_tilt(tx, bus, st.lift_deg);
-        eprintln!("反射环: 点头示意 tilt={}°", st.lift_deg);
-        return None;
-    }
-    Some(st)
-}
-
-/// 蓄势段：到点即下发并标记已蓄势（`None` = 未到点或已蓄势）。
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn rr3_nod_dip_step(
-    tx: &rr_hal::backend::Rr3AudioCmdProducer,
-    bus: &BusHandle,
-    st: Rr3NodState,
-    now: Instant,
-) -> Option<Rr3NodState> {
-    if !rr3_nod_dip_due(&st, now) {
-        return None;
-    }
-    rr3_nod_tilt(tx, bus, st.dip_deg);
-    eprintln!("反射环: 点头蓄势 tilt={}°", st.dip_deg);
-    Some(Rr3NodState {
-        dip_sent: true,
-        ..st
-    })
-}
-
-/// 蓄势段到点判据（未蓄势且时刻已到）。
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn rr3_nod_dip_due(st: &Rr3NodState, now: Instant) -> bool {
-    !st.dip_sent && now >= st.dip_at
-}
-
-/// 上仰段到点判据（已蓄势且时刻已到）。
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn rr3_nod_lift_due(st: &Rr3NodState, now: Instant) -> bool {
-    st.dip_sent && now >= st.lift_at
-}
-
-/// 单脚下发：命令旁路 + 计数（蓄势/上仰两段共用）。
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn rr3_nod_tilt(tx: &rr_hal::backend::Rr3AudioCmdProducer, bus: &BusHandle, deg: u16) {
-    tx.rr3_cmd_push(Rr3PeriphCmd::ServoTilt(deg));
-    bus.counter_bump(RR3_REFLEX_TILT_CMDS_KEY, 1);
-}
-
 impl Dispatcher for Rr3SenseDispatcher {
     /// 点名应答三臂（dump／ops/list／兜底）：现行主循环 Request 臂逐字迁——
     /// 成功臂 Ok(json!) 应答，兜底臂 Err 点名（serve 折 `{"error": e}`，wire
@@ -287,212 +175,6 @@ impl Dispatcher for Rr3SenseDispatcher {
     }
 }
 
-impl Rr3SenseDispatcher {
-    /// 门控喂帧：`ms` 缺席即整帧忽略（帧体适配口径与上游同款）。
-    fn rr3_gate_feed(&mut self, body: &Value) {
-        let Some(ms) = body.get("ms").and_then(Value::as_u64) else {
-            return;
-        };
-        self.tts_gate.rr3_tts_gate_feed(
-            Instant::now(),
-            ms,
-            self.cfg.reflex.gate_gap_ms,
-            self.cfg.reflex.gate_tail_ms,
-        );
-    }
-
-    /// 拍尾段：VAD 节拍 → 点头手势推进 → 节奏（失败原样上抛）。
-    fn rr3_tick_tail(
-        &mut self,
-        pcm: &Rr3PcmStream,
-        now: Instant,
-        bus: &BusHandle,
-    ) -> Result<(), String> {
-        self.rr3_vad_beat(pcm, now, bus)?;
-
-        // 点头手势推进（0.0.8 批）：与 VAD 边沿无关，每拍看时刻——蓄势/上仰
-        // 两段按 config 时序到点下发（宿主桥档专用，espidf 档无旁路自然跳过）
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        self.rr3_nod_step(now, bus);
-
-        self.rr3_pace(now);
-        Ok(())
-    }
-
-    /// 读一拍：从缓冲池取"帧×声道"采样点（池里有足够容量就不分配），欠载按
-    /// 实填数截断；缓冲随 [`Rr3PcmStream`] 走完本拍后在 `on_tick` 尾归还。
-    fn rr3_read_frame(&mut self) -> Result<(Rr3PcmStream, usize), String> {
-        let need = self.frames_per_tick * self.cfg.audio.channels as usize;
-        let mut buf = self.read_pool.rr3_take(need);
-        let done = self
-            .source
-            .read(&mut buf)
-            .map_err(|e| format!("读帧失败({}): {e}", self.backend))?;
-        buf.truncate(done);
-        Ok((
-            Rr3PcmStream {
-                cfg: self.open_cfg,
-                samples: buf,
-            },
-            done,
-        ))
-    }
-
-    /// 判向窗积累 + 下混入总线 + 采集新鲜度记账（自 on_tick 拆出的发布步）：
-    /// 原始双通道帧在下混**前**入 ring（双麦原始通道只在此一用）；判向本身挪到
-    /// onset 边沿整窗回看。空帧另账（欠载饿死信号），帧账在发布成功后 +1——记账
-    /// = 真上了总线的帧数（发布失败即 exit，临死一帧不入账）。返回总线 mono 帧。
-    fn rr3_tick_pub(
-        &mut self,
-        raw: Rr3PcmStream,
-        done: usize,
-        bus: &BusHandle,
-    ) -> Result<Rr3PcmStream, String> {
-        rr3_ring_feed(self.doa_ring.as_mut(), &raw.samples);
-        // 多通道下混 mono 入总线（R14）：双麦原始多通道只供 sense 内部（DoA 随批F2），
-        // 总线承载恒 mono——brain 消费面零改动；单麦链路 channels=1 时零拷贝等价
-        let pcm = rr3_pcm_downmix(raw);
-        self.rr3_frame_book(bus, done);
-        self.rr3_pcm_pub(bus, &pcm)?;
-        Ok(pcm)
-    }
-
-    /// 采集新鲜度记账：空帧另账（欠载饿死信号），流序自增（单点续号）。
-    fn rr3_frame_book(&mut self, bus: &BusHandle, done: usize) {
-        if done == 0 {
-            bus.counter_bump(RR3_PCM_EMPTY_FRAMES_KEY, 1);
-        }
-        self.seq += 1;
-    }
-
-    /// 帧发布 + 成帧计数（seq 已在调用方续号）。
-    fn rr3_pcm_pub(&self, bus: &BusHandle, pcm: &Rr3PcmStream) -> Result<(), String> {
-        bus.publish(
-            capture::RR3_PCM_TOPIC,
-            rpc::rr3_pcm_event_body(self.seq, pcm),
-        )?;
-        bus.counter_bump(RR3_PCM_FRAMES_KEY, 1);
-        Ok(())
-    }
-
-    /// 自 pacing：补足本节拍剩余时间（sim read 即时返回的关键；抖动可接受——
-    /// v0.0.1 的 pcm 流只供联调，时序对齐挂 M5）。
-    fn rr3_pace(&self, now: Instant) {
-        let spent = now.elapsed();
-        if spent < self.tick {
-            std::thread::sleep(self.tick - spent);
-        }
-    }
-
-    /// VAD 边沿拍（B9 自 on_tick 拆出；本轮按沿分臂）：本函数只做门判与编排，
-    /// 发布/判向/反射环各自成件。判据全量入参（门控/DoA/时序）不变。
-    fn rr3_vad_beat(
-        &mut self,
-        pcm: &Rr3PcmStream,
-        now: Instant,
-        bus: &BusHandle,
-    ) -> Result<(), String> {
-        let Some(edge) = self.vad.rr3_vad_feed(&pcm.samples) else {
-            return Ok(());
-        };
-        // 拍时刻入参（`now`）统一用作门判基准：本拍内不二次读时钟，
-        // 门判/节点计划与 tick 同一条时间轴（espidf 档计划面不落，
-        // 旧版此处另取 `Instant::now()` 让 `now` 在该档成死参）。
-        let gate_open = self.tts_gate.rr3_tts_gate_open(now);
-        // 播放期门控（B批 b2）：门开只弃 onset 发布（扬声器自声不再触发听声
-        // 转头），VAD 状态机照喂不中断；offset 与门无关照发
-        if matches!(edge, Rr3VadEdge::Onset { .. }) && gate_open {
-            bus.counter_bump(RR3_VAD_ONSET_GATED_KEY, 1);
-            eprintln!("播放期门控: onset 弃发布（TTS 回声中）");
-            return Ok(());
-        }
-        let doa_deg = self.rr3_vad_publish(&edge, bus)?;
-        match edge {
-            Rr3VadEdge::Onset { .. } => self.rr3_vad_pan(doa_deg, gate_open),
-            Rr3VadEdge::Offset { .. } => self.rr3_vad_stop(now, bus),
-        }
-        Ok(())
-    }
-
-    /// 边沿发布（两沿同址）：DoA 仅 onset 判（offset 静音无方向可判），判向窗 =
-    /// ring 线性化快照（最近 window_ms 的原始立体声）交机制纯函数；单声道链路
-    /// ring 不分配 → 恒 None，事件体不带 doa（与旧版等价）。onset 时 VAD 已证
-    /// ≥min_speech_ms 连续有声帧，能量门对 onset 路径恒过。返回判向角供反射环。
-    fn rr3_vad_publish(
-        &mut self,
-        edge: &Rr3VadEdge,
-        bus: &BusHandle,
-    ) -> Result<Option<i32>, String> {
-        let doa = self.rr3_vad_doa(edge);
-        bus.publish(
-            vad::RR3_VAD_START_TOPIC,
-            rpc::rr3_vad_event_body(self.seq, *edge, doa.map(|d| rpc::rr3_doa_field(&d))),
-        )?;
-        Ok(doa.map(|d| d.deg))
-    }
-
-    /// 判向段：仅 onset 有方向可判，判向窗 = ring 线性化快照（单声道链路恒 None）。
-    fn rr3_vad_doa(&self, edge: &Rr3VadEdge) -> Option<Rr3DoaFix> {
-        match (edge, self.doa_ring.as_ref()) {
-            (Rr3VadEdge::Onset { .. }, Some(ring)) => {
-                let snap = ring.rr3_ring_snapshot();
-                capture::rr3_doa_fix(&snap, self.cfg.audio.channels, &self.doa_cfg)
-            }
-            _ => None,
-        }
-    }
-
-    /// onset 反射环（B批 b2 起 onset 判向；2026-10-21 EMI 避让改判停后动作）：
-    /// 实际发布后才换算存 pending（被门弃掉的 onset 不进 pending），判停才
-    /// 实际下发——激磁尖峰不落采集窗。判向缺档自然无目标，机制面零特判。
-    fn rr3_vad_pan(&mut self, doa_deg: Option<i32>, gate_open: bool) {
-        let Some(deg) = doa_deg else { return };
-        self.pending_pan = rr3_reflex_pan(
-            self.cfg.reflex.enable,
-            self.cfg.reflex.deadband_deg,
-            deg,
-            gate_open,
-        );
-    }
-
-    /// offset 反射环：判停（语音采集完毕）下发 pending pan 并排 nod 手势。旁路
-    /// 下发是宿主桥档行为（Rr3PeriphCmd，rr-hal backend 宿主档门）；espidf 档
-    /// pending 自然落空，take 即弃，不进旁路（批N8 件三）。
-    fn rr3_vad_stop(&mut self, now: Instant, bus: &BusHandle) {
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        self.rr3_pan_apply(now, bus);
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-        {
-            self.pending_pan.take();
-            let _ = (now, bus);
-        }
-    }
-
-    /// 判停动作：pan 下发 + 记账，随后按 config 时序排点头手势。
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    fn rr3_pan_apply(&mut self, now: Instant, bus: &BusHandle) {
-        let Some(target) = self.pending_pan.take() else {
-            return;
-        };
-        let Some(tx) = self.cmd_tx.as_ref() else {
-            return;
-        };
-        tx.rr3_cmd_push(Rr3PeriphCmd::ServoPan(target));
-        bus.counter_bump(RR3_REFLEX_PAN_CMDS_KEY, 1);
-        eprintln!("反射环: 判停后下发 pan={target}°");
-        // 点头示意（0.0.8 批）：pan 之后接一手势，时序量全在 config；
-        // nod_deg=0 时计划为 None
-        let nod = rr3_reflex_nod_plan(
-            RR3_REFLEX_TILT_CENTER_DEG,
-            self.cfg.reflex.nod_deg,
-            self.cfg.reflex.nod_delay_ms,
-            self.cfg.reflex.nod_hold_ms,
-            now,
-        );
-        self.pending_nod = nod;
-    }
-}
-
 /// 兜底面点名：exposes 清单（宿主档另含舵机命令面）。
 fn rr3_sense_unknown(topic: &str) -> String {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -502,181 +184,15 @@ fn rr3_sense_unknown(topic: &str) -> String {
     format!("rr3-sense 只 exposes {RR3_DUMP_TOPIC}/{RR3_OPS_LIST_TOPIC}{servo}，收到 {topic}")
 }
 
-/// 流级单声道化（R14 + 2026-10-31 实机订正）：`cfg.channels` 归 1、rate/bit_depth
-/// 不动、samples 收缩为**能量最高通道**（不平均——双麦平均下混实测梳状滤波，
-/// ASR 质量显著劣于单通道）；`channels <= 1` 时原样返回（零改动）。自 capture/
-/// mech.rs 迁入（0.0.5 批I 深挖收口：`Rr3PcmStream` 是承载层数据类型，件面只留
-/// 纯切片机制——C7 白名单外件面不得引用 rr_hal 具体类型）；纯切片选道
-/// [`capture::rr3_pcm_best_channel`] 仍在件内。
-fn rr3_pcm_downmix(pcm: Rr3PcmStream) -> Rr3PcmStream {
-    if pcm.cfg.channels <= 1 {
-        return pcm;
-    }
-    Rr3PcmStream {
-        cfg: Rr3AudioCfg {
-            channels: 1,
-            ..pcm.cfg
-        },
-        samples: capture::rr3_pcm_best_channel(&pcm.samples, pcm.cfg.channels),
-    }
-}
-
-/// 点头手势两段计划（纯数据；时序在 [`rr3_reflex_nod_plan`] 一次算定）：
-/// 蓄势段 = 回 tilt 中位，上仰段 = 中位 + nod_deg。两段各自到点下发。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Rr3NodState {
-    dip_deg: u16,
-    lift_deg: u16,
-    dip_at: Instant,
-    lift_at: Instant,
-    dip_sent: bool,
-}
-
-/// 反射环换算（纯函数）：onset 判向角 → pan 目标角。全量判据过不了 = `None`
-/// （不转头）：未启用 / 门开（播放回声）/ 死区内（正前方说话免抖动）。
-/// 目标 = 中位 + clamp(deg, ±摆幅)——正负号直通（右声源右转头），板侧行程
-/// fail-closed 之外这里是第二道软件限幅。
-fn rr3_reflex_pan(enable: bool, deadband_deg: i32, doa_deg: i32, gate_open: bool) -> Option<u16> {
-    if !enable || gate_open || doa_deg.abs() < deadband_deg {
-        return None;
-    }
-    Some(rr3_pan_swing(doa_deg))
-}
-
-/// 判向角 → pan 目标（中位 + ±摆幅限幅）。
-fn rr3_pan_swing(doa_deg: i32) -> u16 {
-    let swing = doa_deg.clamp(-RR3_REFLEX_PAN_SWING_DEG, RR3_REFLEX_PAN_SWING_DEG);
-    (RR3_REFLEX_PAN_CENTER_DEG + swing) as u16
-}
-
-/// 点头手势计划（纯函数）：pan 下发时刻 `now` → 两段 tilt 目标与到点时刻。
-/// `nod_deg = 0` = 不做手势（旧版逐点等价）。目标 = tilt 中位（蓄势）→ 中位 +
-/// `nod_deg`（上仰）；绝对角越出舵机全域 0..=180 不生成（板侧行程 fail-closed
-/// 是最终裁决，这里只防无意义负角）。
-/// 仅宿主桥档消费（espidf 档无命令旁路）；保留定义供测试与机制面同源。
-#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
-fn rr3_reflex_nod_plan(
-    center_deg: i32,
-    nod_deg: i32,
-    delay_ms: u64,
-    hold_ms: u64,
-    now: Instant,
-) -> Option<Rr3NodState> {
-    if nod_deg == 0 {
-        return None;
-    }
-    let lift_deg = center_deg + nod_deg;
-    if !(0..=180).contains(&lift_deg) {
-        return None;
-    }
-    Some(Rr3NodState {
-        dip_deg: center_deg as u16,
-        lift_deg: lift_deg as u16,
-        dip_at: now + Duration::from_millis(delay_ms),
-        lift_at: now + Duration::from_millis(delay_ms + hold_ms),
-        dip_sent: false,
-    })
-}
-
-/// 采集帧缓冲池：把"每拍新分配一块 Vec"改成"稳态复用同一块"。
-///
-/// `take` 出的缓冲随本拍 `Rr3PcmStream` 走完读帧→发布→VAD，拍尾 `put` 归还；
-/// 容量够下一拍就继续用（mono 链路稳态零分配），不够就丢弃由下次 `take`
-/// 重新分配。语义与逐拍 `vec![0; need]` 等价：每拍拿到的都是全零、长度
-/// `need` 的可写缓冲。
-#[derive(Default)]
-struct Rr3FrameBuf {
-    spare: Vec<i16>,
-}
-
-impl Rr3FrameBuf {
-    /// 取一块长度恰为 `need` 的全零缓冲（池里有富余容量的块就不分配）。
-    fn rr3_take(&mut self, need: usize) -> Vec<i16> {
-        let mut buf = std::mem::take(&mut self.spare);
-        buf.clear();
-        buf.resize(need, 0);
-        buf
-    }
-
-    /// 归还本拍缓冲：容量够下一拍才留下（不足不占坑，由下次 take 重分配）。
-    fn rr3_put(&mut self, samples: Vec<i16>, need: usize) {
-        if samples.capacity() >= need {
-            self.spare = samples;
-        }
-    }
-}
-
-/// 舵机命令面（A9，桥单所有者）：args `{"pan":0..=180}` / `{"tilt":0..=180}`，
-/// 至少一键；逐轴推入持桥音频源的命令旁路（板侧执行前回执）。`cmd_tx` 缺位 =
-/// 本进程不是桥所有者（音频后端非 esp32）——fail-closed 点名拒，不另开 UART。
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn rr3_sense_servo(
-    tx: Option<&rr_hal::backend::Rr3AudioCmdProducer>,
-    args: &Value,
-) -> Result<Value, String> {
-    let (pan, tilt, n) = rr3_servo_axes(args)?;
-    if n == 0 {
-        return Err("舵机命令需 pan/tilt 至少一键（0..=180）".into());
-    }
-    let Some(tx) = tx else {
-        return Err("舵机命令面未就绪：本进程不持有外设桥（音频后端须为 esp32）".into());
-    };
-    rr3_servo_push(tx, pan, tilt);
-    Ok(json!({ "queued": n }))
-}
-
-/// 逐轴推入命令旁路（缺键 = 本轴不下发）。
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn rr3_servo_push(tx: &rr_hal::backend::Rr3AudioCmdProducer, pan: Option<u16>, tilt: Option<u16>) {
-    if let Some(p) = pan {
-        tx.rr3_cmd_push(Rr3PeriphCmd::ServoPan(p));
-    }
-    if let Some(t) = tilt {
-        tx.rr3_cmd_push(Rr3PeriphCmd::ServoTilt(t));
-    }
-}
-
-/// 双轴角度解码（缺键 = 本轴不下发）与下发键数。
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn rr3_servo_axes(args: &Value) -> Result<(Option<u16>, Option<u16>, u32), String> {
-    let pan = rr3_axis_deg(args, "pan")?;
-    let tilt = rr3_axis_deg(args, "tilt")?;
-    let n = u32::from(pan.is_some()) + u32::from(tilt.is_some());
-    Ok((pan, tilt, n))
-}
-
-/// 单轴角度门：缺键/Null = 本轴不下发；非整数或 >180 逐键点名（板侧行程裁决前
-/// 的协议级 fail-closed，不预钳不猜）。
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn rr3_axis_deg(args: &Value, key: &str) -> Result<Option<u16>, String> {
-    match args.get(key) {
-        None | Some(Value::Null) => Ok(None),
-        Some(v) => rr3_deg_of(v, key),
-    }
-}
-
-/// 单轴角度值域：整数且 ≤180（越界逐键点名）。
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn rr3_deg_of(v: &Value, key: &str) -> Result<Option<u16>, String> {
-    let n = v
-        .as_u64()
-        .ok_or_else(|| format!("{key} 应为整数角度（0..=180）"))?;
-    rr3_deg_cap(key, n)?;
-    Ok(Some(n as u16))
-}
-
-/// 单轴角度上界（0..=180，越界逐键点名）。
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn rr3_deg_cap(key: &str, n: u64) -> Result<(), String> {
-    if n > 180 {
-        return Err(format!("{key} 越界 0..=180: {n}"));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
+    use super::nod::rr3_reflex_nod_plan;
+    use super::pan::rr3_reflex_pan;
+    use super::pcm::{rr3_pcm_downmix, Rr3FrameBuf};
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    use super::servo_rpc::{rr3_axis_deg, rr3_sense_servo};
     use super::*;
+    use rr_hal::Rr3PcmStream;
 
     /// A9 舵机命令面：单轴门 + 非桥主 fail-closed（无 cmd_tx 不许另开 UART）。
     #[cfg(any(target_os = "linux", target_os = "macos"))]
