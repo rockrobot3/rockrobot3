@@ -45,14 +45,36 @@ pub fn rr3_reflex_loop(cfg: Rr3ReflexCfg, bus: BusHandle) {
     let mut seq: u64 = 0;
     let mut ticks: u64 = 0;
     let mut window_start = Instant::now();
+    let mut next = window_start;
     loop {
-        // 环位：控制律的挂点。v0.0.1 最小环为空转，电机实装后同节拍换掉这一行
-        std::thread::sleep(period);
+        // 环位：控制律的挂点。v0.0.1 最小环为空转，电机实装后同节拍换掉这一行。
+        // 定时用绝对截止推进（见 [`rr3_next_wait`]）：相对 `sleep(period)` 每拍都把
+        // 调度开销叠进周期，越长越偏——真板实测 1000Hz 实跑 888Hz。
+        std::thread::sleep(rr3_next_wait(&mut next, period, Instant::now()));
         ticks += 1;
         let now = Instant::now();
         if now.duration_since(window_start) >= window {
             rr3_reflex_settle(&bus, &mut det, &mut seq, ticks, window_ms, expect);
             rr3_reflex_mark(&bus, &mut ticks, &mut window_start, now);
+        }
+    }
+}
+
+/// 下一拍等待额（绝对截止累加）。
+///
+/// `sleep(period)` 是相对睡眠：每拍都把"睡醒到下一次调用"的调度开销叠进周期，
+/// 误差随时间线性累积。改为维护绝对截止 `next`（每拍只加 period），单拍晚醒的
+/// 时差由下一拍自动少睡补回，长时间平均周期回到 period 本身。
+///
+/// 落后超过一整拍时不追帧（基准重置到 `now + period`）：连续补睡会把 CPU 打满，
+/// 控制环宁肯丢一拍也不自伤——丢拍已被饱和检测（`ticks < expect/2`）覆盖。
+fn rr3_next_wait(next: &mut Instant, period: Duration, now: Instant) -> Duration {
+    *next += period;
+    match next.checked_duration_since(now) {
+        Some(rest) => rest,
+        None => {
+            *next = now + period;
+            period
         }
     }
 }
@@ -119,5 +141,32 @@ mod tests {
             "半拍线（rr-core 判定）"
         );
         assert_eq!(rr3_reflex_rate_hz(250, 250), 1000);
+    }
+
+    /// 绝对截止定时：晚醒的时差由下一拍少睡补回，落后超一拍则重置不追帧。
+    /// 2026-11-16 真板实测的相对睡眠欠账（1000Hz→888Hz）由本函数的补回语义消掉。
+    #[test]
+    fn next_wait_absorbs_oversleep_and_never_catches_up_storms() {
+        let period = Duration::from_micros(1000);
+        let t0 = Instant::now();
+        let mut next = t0;
+        assert_eq!(
+            rr3_next_wait(&mut next, period, t0),
+            period,
+            "准时：等满一拍"
+        );
+        let late = t0 + Duration::from_micros(1300);
+        assert_eq!(
+            rr3_next_wait(&mut next, period, late),
+            Duration::from_micros(700),
+            "晚醒 300µs：下一拍只睡 700µs（截止不漂）"
+        );
+        let way_late = t0 + Duration::from_millis(50);
+        assert_eq!(
+            rr3_next_wait(&mut next, period, way_late),
+            period,
+            "落后超一拍：不补睡，按整拍重排"
+        );
+        assert_eq!(next, way_late + period, "基准重置到 now+period");
     }
 }
