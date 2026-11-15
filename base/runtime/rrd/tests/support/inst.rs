@@ -93,6 +93,10 @@ fn rr3_listen_profile(socket: &Path) -> (PathBuf, PathBuf) {
 /// 未知二进制段的 exec 早期现场），空载只要 ~100ms；旧值 5s/3s 因此让线级用例间歇 spawn
 /// 超时。20s = 实测最坏值 ×2 以上余量。**行为上的否定断言不走这里**——那是
 /// `rr3_assert_no_log` 的显式时长，判断据是"窗口内没出现"。
+/// 2026-11-15 复核：重负载下的 `→ running` 超时**不是**本常量不够——根因是面板缺省
+/// 8080 在并行测试二进制间撞口，interact 绑不上即退 1、rrd 反复重启（夹具已改注入
+/// `RR3_PANEL_ADDR=127.0.0.1:0`，三份并发 + 全量编译复跑 3/3 绿）。超时值维持 20s，
+/// 不拿放宽判据掩盖真故障。
 pub const READY_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// 从子进程 stdout 逐行收集（`RrdTest` 与 `SimPeer` 共用一份口径）。

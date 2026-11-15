@@ -26,11 +26,17 @@ pub struct Rr3PanelShared {
 pub fn rr3_panel_serve(shared: Arc<Rr3PanelShared>) -> Result<(), String> {
     let addr = rr3_panel_addr();
     let listener = TcpListener::bind(&addr).map_err(|e| format!("绑面板 {addr} 失败: {e}"))?;
+    // 打印**实际**监听地址：配置面允许 `:0`（内核分配临时口，并行实例/测试隔离用），
+    // 只回显配置串时 `127.0.0.1:0` 会让人以为端口就是 0。
+    let bound = listener
+        .local_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|_| addr.clone());
     eprintln!(
-        "面板就绪: http://{addr}（{}端点，控制全走 RPC 归属门）",
+        "面板就绪: http://{bound}（{}端点，控制全走 RPC 归属门）",
         RR3_PANEL_ROUTES.len()
     );
-    rr3_panel_warn_addr(&addr);
+    rr3_panel_warn_addr(&bound);
     rr3_accept_loop(listener, shared, Arc::new(AtomicUsize::new(0)), || {
         std::thread::Builder::new().name("rr3-panel-conn".into())
     })

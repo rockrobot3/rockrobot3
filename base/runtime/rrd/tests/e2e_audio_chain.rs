@@ -90,6 +90,12 @@ fn audio_chain_sense_to_interact_end_to_end() {
         &[
             ("RR3_SENSE_CONFIG", cfg_arg.as_str()),
             ("RR3_INTERACT_CONFIG", inter_cfg_arg.as_str()),
+            // 面板口隔离：缺省 8080 是**单实例**假设，并行测试二进制（或开发机上
+            // 已跑着的面板实例）会把真 interact 的 bind 撞掉——它 fail-closed 退 1，
+            // rrd 按 policy=always 反复重启，用例等 running 等不到（2026-11-15 重
+            // 负载复现：三份同用例并发，两份必红）。`:0` = 内核分配临时口，面板日
+            // 志打印实际绑定地址；本用例不连面板，只要它绑得上。
+            ("RR3_PANEL_ADDR", "127.0.0.1:0"),
         ],
     );
 
