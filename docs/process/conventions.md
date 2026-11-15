@@ -3222,11 +3222,20 @@ publish 首跑即全绿——amd64（`ubuntu-latest`）与 arm64（`ubuntu-24.04
 ```sh
 docker run --rm -p 8080:8080 -p 18080:18080 \
   -v rr3-data:/var/lib/rockrobot3 \
-  ghcr.io/rockrobot3/rockrobot3:0.0.9
+  ghcr.io/rockrobot3/rockrobot3:0.0.11
 ```
 
 包可见性默认私有：匿名拉取前须在 GitHub Packages 把该包改为 Public（一次性设置，
-不属流水线可自动化面）；`0.0.9` 为多架构清单，`*-amd64` / `*-arm64` 是单架构腿。
+不属流水线可自动化面）；`0.0.11` 为多架构清单，`*-amd64` / `*-arm64` 是单架构腿。
+
+**第二发布回执（2026-11-15，冒烟步首考）**：`v0.0.11`（锚提交 `0333473`）两腿冒烟全绿
+——推完即验"镜像能跑"三件（`/usr/bin/rrd`、`contracts/topics.toml`、
+`profiles/distro.toml`）＋镜像内 `rrd` 真执行打用法。这一步首考就抓到 **`v0.0.10` 的
+"半绿"**：amd64 腿绿、arm64 腿镜像内 rrd 起不来（构建腿 `ubuntu-24.04-arm` 的 glibc
+高于运行基座 bookworm 的 2.36），基座提到 `debian:13-slim` 后同一条腿转绿。
+两条教训入册：①"推上去了"不等于"能跑"，发布面必须有同架构执行冒烟；②冒烟失败注解
+必须自带现场（rc + 输出前三行），首版只说"不可运行"，白跑一轮才定位。
+`0.0.10` 单架构腿仍留在 registry（arm64 腿不可用），消费面请用 `0.0.11` 及以后。
 
 **芯片平台 × 流水线环境验证（主要芯片全覆盖）**：
 
