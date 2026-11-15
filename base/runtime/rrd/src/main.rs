@@ -5,6 +5,8 @@
 
 use rr_ipc::RR3_CONTRACT_SCHEMA_VERSION;
 use rr_registry::{Rr3TopicSet, RR3_MANIFEST_SCHEMA_VERSION};
+#[cfg(unix)]
+use rrd::rr3_unit_log_dir;
 use rrd::{cli, profile, rr3_banner, topics_load};
 // 只在非 Unix 分支用得到：Unix 侧这句文案压根不参与编译，不 gate 会有未使用导入告警。
 #[cfg(not(unix))]
@@ -83,6 +85,14 @@ fn rr3_banner_print(
         // 装配单的可见凭证：绝对路径（0.0.2 方案 Q3：装机正门），与 CWD 无关
         println!("rrd: 装配单已加载: {}", p.display());
     }
+    // 模块崩溃现场落在 per-unit 日志（spawn 时 stderr 接 `<socket>.log/<unit>.log`）。
+    // 启动即点明目录：否则"连续崩溃达上限 → 运行时降级"那行日志只报结果不指现场
+    // （2026-11-16 真板实证——interact 因声卡缺件连崩 5 次，根因只在该文件里）。
+    #[cfg(unix)]
+    println!(
+        "rrd: per-unit 日志目录: {}（模块崩溃现场在此）",
+        rr3_unit_log_dir(&cfg.socket).display()
+    );
 }
 
 /// 叠加层横幅段：路径一行 + 每条新增主题一行（键序由调用方给）。
