@@ -3217,7 +3217,16 @@ publish 首跑即全绿——amd64（`ubuntu-latest`）与 arm64（`ubuntu-24.04
 各自构建 + 推单架构镜像，merge 腿合并多架构清单并同步 `latest`；制品标签
 `0.0.9` / `0.0.9-amd64` / `0.0.9-arm64`，都落在 `ghcr.io/rockrobot3/rockrobot3`。
 发布前门禁三工作流（gate / integration / platforms）在同一提交上全绿，发布面因此
-不是"未验代码的镜像"。
+不是"未验代码的镜像"。**消费面**（镜像内装机树与 deb 同源，入口即 rrd 守护）：
+
+```sh
+docker run --rm -p 8080:8080 -p 18080:18080 \
+  -v rr3-data:/var/lib/rockrobot3 \
+  ghcr.io/rockrobot3/rockrobot3:0.0.9
+```
+
+包可见性默认私有：匿名拉取前须在 GitHub Packages 把该包改为 Public（一次性设置，
+不属流水线可自动化面）；`0.0.9` 为多架构清单，`*-amd64` / `*-arm64` 是单架构腿。
 
 **芯片平台 × 流水线环境验证（主要芯片全覆盖）**：
 
