@@ -98,6 +98,30 @@ jobs:
             -t "${IMAGE}:${tag}-${{ matrix.arch }}" /tmp/rr3-image
           docker push "${IMAGE}:${tag}-${{ matrix.arch }}"
 
+      # 推完即验：镜像能起来、装机树在、二进制能执行。判据放在**同架构原生
+      # runner** 上（不跨架构模拟），gem 与发布件一致。`rrd --help` 的退出码是 1
+      # （缺装配面属用法错），所以判输出而不是判退出码——只断言"它真跑起来了"。
+      # 三条断言各自独立：容器起不来 / 装机树缺件 / 二进制不可执行，归因不混。
+      - name: 镜像冒烟（同架构真跑：可执行面 + 装机树 + rrd 用法输出）
+        run: |
+          tag="${{ steps.meta.outputs.tag }}"
+          img="${IMAGE}:${tag}-${{ matrix.arch }}"
+          if ! docker run --rm --entrypoint sh "$img" -c '
+                test -x /usr/bin/rrd || { echo "缺 /usr/bin/rrd"; exit 1; }
+                test -f /usr/lib/rockrobot3/contracts/topics.toml || { echo "缺 contracts/topics.toml"; exit 1; }
+                test -f /usr/lib/rockrobot3/profiles/distro.toml || { echo "缺 profiles/distro.toml"; exit 1; }
+              '; then
+            echo "::error title=image-smoke::装机树缺件（镜像内的运行面不完整）"
+            exit 1
+          fi
+          out=$(docker run --rm "$img" --help 2>&1) || true
+          echo "$out" | head -2
+          if ! printf '%s' "$out" | grep -q "用法: rrd"; then
+            echo "::error title=image-smoke::镜像内 rrd 未打印用法（制品不可运行）"
+            exit 1
+          fi
+          echo "PASS  镜像冒烟：$img 可执行且装机树完整"
+
   merge:
     needs: build
     runs-on: ubuntu-latest
