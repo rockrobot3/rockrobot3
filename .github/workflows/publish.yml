@@ -127,21 +127,25 @@ jobs:
 
       # 运行冒烟（比 --help 强一档）：镜像内按装机面真起 rrd，六模块全 spawn、零拒绝。
       # 判据与 tools/ci/distro-smoke.sh ⑧ 同源，差别只在载体是发布镜像而非 deb 装机；
-      # 容器无硬件面 → 显式 sim 探测档 + mock 云，装配单在容器内**副本**上做 sim 变换
-      # （镜像内原件不动，与演练沙箱同一语义）。这一步回答的是"发布件能不能真跑起来"。
+      # 容器无硬件面 → 显式 sim 探测档 + mock 云。装配单**不能**搬到 /tmp 单文件：
+      # modules-root = 装配单的祖父目录（profile/boot/load.rs 的定位判据），单文件复制会
+      # 让模块发现面打空。故复制整棵装机树做影子根，只在副本上把 hal_backend 改 sim
+      # （镜像内原件不动，与演练沙箱同一语义）。这一步回答"发布件能不能真跑起来"。
       - name: 镜像运行冒烟（sim 探测档：六模块真起 + 零拒绝）
         run: |
           tag="${{ steps.meta.outputs.tag }}"
           img="${IMAGE}:${tag}-${{ matrix.arch }}"
           set -o pipefail
-          if ! docker run --rm --entrypoint sh "$img" -c '
+          rc=0
+          docker run --rm --entrypoint sh "$img" -c '
                 set -e
-                cp /usr/lib/rockrobot3/profiles/distro.toml /tmp/p.toml
-                sed -i "s/^hal_backend = \"linux\"/hal_backend = \"sim\"/" /tmp/p.toml
+                cp -a /usr/lib/rockrobot3 /tmp/rr3root
+                sed -i "s/^hal_backend = \"linux\"/hal_backend = \"sim\"/" /tmp/rr3root/profiles/distro.toml
+                grep -q "hal_backend = \"sim\"" /tmp/rr3root/profiles/distro.toml
                 RR3_DATA_DIR=/tmp RR3_BRAIN_CLOUD=mock RR3_PROBE=sim \
                   /usr/bin/rrd --socket /tmp/s.rrd \
-                    --contracts /usr/lib/rockrobot3/contracts \
-                    --profile /tmp/p.toml >/tmp/rrd.log 2>&1 &
+                    --contracts /tmp/rr3root/contracts \
+                    --profile /tmp/rr3root/profiles/distro.toml >/tmp/rrd.log 2>&1 &
                 pid=$!
                 ok=""
                 for _ in $(seq 1 45); do
@@ -153,23 +157,29 @@ jobs:
                   sleep 1
                 done
                 if [ -z "$ok" ]; then
-                  echo "FAIL 六模块未起齐（镜像内 rrd 日志尾部）"
-                  tail -25 /tmp/rrd.log
+                  echo "FAIL 六模块未起齐"
+                  tail -30 /tmp/rrd.log
                   kill $pid 2>/dev/null || true
                   exit 1
                 fi
                 if grep -q "拒绝 boot" /tmp/rrd.log; then
-                  echo "FAIL 出现拒绝 boot（装配面在镜像内不成立）"
+                  echo "FAIL 出现拒绝 boot"
                   grep -n "拒绝 boot" /tmp/rrd.log | head -5
+                  tail -10 /tmp/rrd.log
                   kill $pid 2>/dev/null || true
                   exit 1
                 fi
                 kill $pid 2>/dev/null || true
                 echo "PASS 六模块起齐且零拒绝"
-              ' 2>&1 | tail -30; then
-            echo "::error title=image-run-smoke::镜像内 rrd 未能起齐六模块（日志尾部见上）"
+              ' >/tmp/img-smoke.log 2>&1 || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "--- 镜像运行冒烟日志尾部 ---"
+            tail -30 /tmp/img-smoke.log
+            brief=$(tail -12 /tmp/img-smoke.log | tr '\n' ' ')
+            echo "::error title=image-run-smoke::未起齐（rc=$rc）：${brief:0:700}"
             exit 1
           fi
+          tail -2 /tmp/img-smoke.log
 
   merge:
     needs: build
