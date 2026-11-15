@@ -47,7 +47,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 /// 目录）。同机多实例（测试 `/tmp/rr3-m2-*.sock`、产线 `/var/run/rock3-ipc.sock`）
 /// 天然按实例隔离，不需要新 CLI 键；只算路径不建目录不打开，副作用留给调用方。
 #[cfg(unix)]
-pub(crate) fn rr3_unit_log_dir(bus_path: &Path) -> PathBuf {
+pub fn rr3_unit_log_dir(bus_path: &Path) -> PathBuf {
     let mut dir = bus_path.as_os_str().to_os_string();
     dir.push(".log");
     PathBuf::from(dir)
