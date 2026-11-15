@@ -114,10 +114,13 @@ jobs:
             echo "::error title=image-smoke::装机树缺件（镜像内的运行面不完整）"
             exit 1
           fi
-          out=$(docker run --rm "$img" --help 2>&1) || true
-          echo "$out" | head -2
+          out=$(docker run --rm "$img" --help 2>&1) || rc=$?
+          echo "$out" | head -3
           if ! printf '%s' "$out" | grep -q "用法: rrd"; then
-            echo "::error title=image-smoke::镜像内 rrd 未打印用法（制品不可运行）"
+            # 失败必须自带现场：只写"不可运行"时根因（glibc 版本、权限、入口）不可见。
+            # 2026-11-15 首版注解没带输出，arm64 腿红了一轮却只能靠推断——补现场。
+            brief=$(printf '%s' "$out" | head -3 | tr '\n' ' ')
+            echo "::error title=image-smoke::镜像内 rrd 未打印用法（rc=${rc:-0}）：${brief:0:600}"
             exit 1
           fi
           echo "PASS  镜像冒烟：$img 可执行且装机树完整"
