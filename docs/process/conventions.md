@@ -3206,6 +3206,13 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/gat
 | `esp32-gates` | xtensa/espidf 五门（ESP32 / S3 双档），工具链与 IDF 走缓存 | push / PR / 手动 / 周程 |
 | `publish`（`publish.yml`） | 运行镜像发布到 `ghcr.io/rockrobot3/rockrobot3`：amd64/arm64 原生构建 → 单架构镜像 → 多架构清单合并；镜像根 = rr3-pack stage 树 | 打 `v*` 标签 / main（edge）/ 手动 |
 
+**首发布回执（2026-11-15）**：`v0.0.9` 标签（锚提交 `e445f14`，dev/hubs-01）触发
+publish 首跑即全绿——amd64（`ubuntu-latest`）与 arm64（`ubuntu-24.04-arm`）两条原生腿
+各自构建 + 推单架构镜像，merge 腿合并多架构清单并同步 `latest`；制品标签
+`0.0.9` / `0.0.9-amd64` / `0.0.9-arm64`，都落在 `ghcr.io/rockrobot3/rockrobot3`。
+发布前门禁三工作流（gate / integration / platforms）在同一提交上全绿，发布面因此
+不是"未验代码的镜像"。
+
 **芯片平台 × 流水线环境验证（主要芯片全覆盖）**：
 
 | 芯片平台 | 目标/工具链 | CI 载体 | 环境判据 |
