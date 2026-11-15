@@ -129,6 +129,11 @@ jobs:
             ~/.cargo/bin/ldproxy
           key: esp-${{ runner.os }}-v0.17.1-idf5.2.2
       - name: 安装 esp 工具链（espup 钉版，esp32 + esp32s3 双档）
+        env:
+          # espup 用 GitHub API 解析工具链版本；共享 runner 出口 IP 常撞匿名配额
+          # （2026-11-15 实测：连续 3 次全 403 Forbidden，重试也救不了时间窗内的配额）。
+          # 带上仓库 token 后请求按身份配额走，这才是那次红的根因处置；重试只是兜底。
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           # 网络面三类失败（资产下载 / 工具链源 / 组件缓存）都是外因，单次失败
           # 不该整轮判红；有界重试 3 次，仍败则把日志尾部写成注解——没有注解时
@@ -151,11 +156,11 @@ jobs:
             if "$HOME/.local/bin/espup" install --targets esp32,esp32s3 2>&1 | tee /tmp/espup.log; then
               exit 0
             fi
-            echo "::warning title=espup install::第 ${i} 次失败，10s 后重试"
-            sleep 10
+            echo "::warning title=espup install::第 ${i} 次失败，$((i * 15))s 后重试"
+            sleep $((i * 15))
           done
           errs=$(tail -3 /tmp/espup.log | tr '\n' ' ')
-          echo "::error title=espup install::连续 3 次失败（网络/镜像/工具链源）：${errs:0:700}"
+          echo "::error title=espup install::连续 3 次失败（网络/镜像/工具链源/API 配额）：${errs:0:700}"
           exit 1
       - name: 安装 ldproxy
         run: command -v ldproxy >/dev/null || cargo install ldproxy --locked
@@ -248,6 +253,10 @@ jobs:
           workspaces: base/runtime
       - uses: docker/setup-qemu-action@v3
       - name: 安装 esp 工具链（espup 预编译直下 → +esp，第④路 xtensa 对拍）
+        env:
+          # 同 esp32-gates：espup 的版本解析走 GitHub API，匿名配额在共享 runner
+          # 出口 IP 上会整窗 403（2026-11-15 实测），带 token 按身份配额走。
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           # 钉版 v0.17.1（2026-04-17 发布）——latest 漂移会破工具链可重现性；
           # 升级方式：核对 esp-rs/espup release 资产名后改此处版本号。
@@ -270,11 +279,11 @@ jobs:
             if "$HOME/.local/bin/espup" install --targets esp32 2>&1 | tee /tmp/espup.log; then
               exit 0
             fi
-            echo "::warning title=espup install::第 ${i} 次失败，10s 后重试"
-            sleep 10
+            echo "::warning title=espup install::第 ${i} 次失败，$((i * 15))s 后重试"
+            sleep $((i * 15))
           done
           errs=$(tail -3 /tmp/espup.log | tr '\n' ' ')
-          echo "::error title=espup install::连续 3 次失败（网络/镜像/工具链源）：${errs:0:700}"
+          echo "::error title=espup install::连续 3 次失败（网络/镜像/工具链源/API 配额）：${errs:0:700}"
           exit 1
       - name: IPC-T-003 跨架构对拍（--strict）
         run: |
