@@ -90,6 +90,12 @@ python3 缺位按 SKIP 纪律明说）。四条判据：**重复率硬门槛 3%*
 （`*.rs`/`*.toml`/`*.py`/`*.html`/`*.sh`）即红——⑫ 度量只读 `git ls-files`，
 新源码没 `git add` 就不进度量也不进构建，而白名单策略下它连 `git status` 的
 常规输出里都不显眼（静默漏面）；扫描器自身失败同红（fail-closed）。
+**2026-11-15 补第四条（shell 展开截断门）**：追踪的 `*.sh` 里，可执行行出现
+`$name` 紧跟非 ASCII 字节即红（整行注释跳过）。根因实测：bash 3.2（macOS 默认
+`/bin/bash`）在 C locale 下把多字节首字节并进变量名，`set -u` 当场 unbound——
+`tools/deploy/stage-image.sh` 末行 `$out（arch=…` 在开发机退 1，而 CI 的 bash 5
+不复现（本地红、CI 绿最难查）。写法统一 `${name}`，语义不变；同批把全仓 25 处
+同款写法一次收口。
 
 **2026-11-10 lint 并门步（①c/①d/④b，已建成）**：CI 的 lint job（rustfmt
 --check + clippy -D warnings，仓内全工程）此前不在本地门禁里，手工折行与

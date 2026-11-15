@@ -50,4 +50,4 @@ for b in rrd rr3-ctl rr3-act rr3-connect rr3-interact rr3-sense rr3-power; do
     exit 1
   fi
 done
-echo "PASS  $target 静态产物七件（rrd + rr3-ctl + 五模块，$arch）"
+echo "PASS  $target 静态产物七件（rrd + rr3-ctl + 五模块，${arch}）"

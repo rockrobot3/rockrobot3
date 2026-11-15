@@ -776,7 +776,7 @@ else
   printf 'PASS  ⑨-w 板侧零实现 crate 依赖（esp32-periph-base，rr-hal/rr-bus/rrd 三件钉住）\n'
 fi
 # 4) 承载面必依 rr-bus-api 且禁列 rr-bus（依赖键 = 形状匹配，同判据 3 口径，不误伤
-#    注释与 rr-bus-api 自身；枚举复用判据 1 的 $unit_manifests）
+#    注释与 rr-bus-api 自身；枚举复用判据 1 的 ${unit_manifests}）
 for c in $unit_manifests; do
   if grep -qE '^[[:space:]]*rr-bus-api[[:space:]]*=' "$c" \
      && ! grep -qE '^[[:space:]]*rr-bus[[:space:]]*=' "$c"; then
@@ -1579,6 +1579,25 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     else
       printf 'PASS  ⑬ 源码面无非入册新件（rs/toml/py/html/sh）\n'
     fi
+  fi
+  # shell 展开截断门（2026-11-15 实测补齐）：`$name` 紧跟非 ASCII 字节时，bash 3.2
+  # （macOS 默认 /bin/bash）在 C locale 下把多字节首字节并进变量名，`set -u` 当场
+  # unbound——stage-image.sh 末行 `$out（arch=…` 即在开发机退 1，而 CI 的 bash 5
+  # 不复现（本地红、CI 绿，比反向更难查）。判据：可执行行（整行注释跳过）里出现
+  # `$标识符` 紧跟非 ASCII 即红；写法统一 `${标识符}`，语义完全不变。
+  hy_sh="$(git -c core.quotepath=false ls-files '*.sh' | while IFS= read -r f; do
+    LC_ALL=C awk -v F="$f" '
+      { line=$0; sub(/^[ \t]+/,"",line); if (line ~ /^#/) next }
+      match($0, /\$[A-Za-z_][A-Za-z0-9_]*/) {
+        nxt = substr($0, RSTART+RLENGTH, 1);
+        if (nxt != "" && nxt !~ /^[ -~]$/) print F ": " $0;
+      }' "$f" 2>/dev/null
+  done | head -5)"
+  if [ -n "$hy_sh" ]; then
+    printf 'FAIL  ⑬ shell 变量展开后紧跟非 ASCII（bash 3.2 下 unbound，须写 ${name}）:\n%s\n' "$hy_sh"
+    hyg_fail=1
+  else
+    printf 'PASS  ⑬ shell 展开截断（$name 后接 ASCII 或写成 ${name}）\n'
   fi
 else
   printf 'SKIP  ⑬ 非 git 工作树——仓面卫生门不执行\n'

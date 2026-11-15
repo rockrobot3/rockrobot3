@@ -33,7 +33,7 @@ mkdir -p "$B/bin" "$B/profiles" "$B/contracts" "$B/hardware" "$B/modules"
 for name in rrd rr3-ctl; do
   src=$( cd "$ROOT/base/runtime" && rr3_cargo_artifact "$TARGET" release "$name" ) \
     || die "$name 产物定位失败"
-  [ -f "$src" ] || die "$name 未构建: $src（先跑 bash tools/ci/arm64-cross-check.sh）"
+  [ -f "$src" ] || die "$name 未构建: ${src}（先跑 bash tools/ci/arm64-cross-check.sh）"
   install -m755 "$src" "$B/bin/$name"
 done
 
@@ -53,7 +53,7 @@ for m in rr3-act rr3-connect rr3-interact rr3-power rr3-sense; do
   if [ -z "$src" ]; then
     src=$( cd "$ROOT/modules/$m" && rr3_cargo_artifact "$TARGET" release "$m" ) \
       || die "$m 产物定位失败"
-    [ -f "$src" ] || die "$m 未构建: $src（先跑 bash tools/ci/arm64-cross-check.sh）"
+    [ -f "$src" ] || die "$m 未构建: ${src}（先跑 bash tools/ci/arm64-cross-check.sh）"
   fi
   mkdir -p "$B/modules/$m"
   install -m755 "$src" "$B/modules/$m/$m"

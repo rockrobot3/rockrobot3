@@ -53,7 +53,7 @@ want="/usr/lib/rockrobot3/modules/rr3-sense/$entry_rel"
 if grep -q "^entry[[:space:]]*=[[:space:]]*\"$want\"$" "$dst"; then
 	ok "entry 已改写为装机绝对路径 $want"
 else
-	bad "entry 未绝对化（期望 $want）"
+	bad "entry 未绝对化（期望 ${want}）"
 fi
 if diff <(grep -v '^entry[[:space:]]*=' "$src") \
 	<(grep -v '^entry[[:space:]]*=' "$dst") >/dev/null; then

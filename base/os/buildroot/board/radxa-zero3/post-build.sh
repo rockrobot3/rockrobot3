@@ -1,7 +1,7 @@
 #!/bin/bash
 # post-build.sh —— 目标根文件系统装配（Buildroot post-build，宿主侧执行）。
-# 运行环境由 Buildroot 提供：$TARGET_DIR（目标根）、$BINARIES_DIR（镜像产物目录）、
-# $HOST_DIR（宿主工具）。档位：脚本就绪；实测=板上（串口出 shell + rrd 自启）。
+# 运行环境由 Buildroot 提供：${TARGET_DIR}（目标根）、${BINARIES_DIR}（镜像产物目录）、
+# ${HOST_DIR}（宿主工具）。档位：脚本就绪；实测=板上（串口出 shell + rrd 自启）。
 #
 # 五件事（对应 base/os/README.md 的交付物清单）：
 #   1. rrd 开机自启（BusyBox init 的 /etc/init.d/S99rrd）；
@@ -34,7 +34,7 @@ install -d -m 0755 \
 	"$TARGET/data" \
 	"$TARGET/extlinux"
 
-# rrd 与模块二进制由 aarch64 交叉编译后放到 $BINARIES_DIR（交付方式见
+# rrd 与模块二进制由 aarch64 交叉编译后放到 ${BINARIES_DIR}（交付方式见
 # patches/README.md 的"产物注入"一节）；缺席只警告不阻断——镜像结构
 # 仍应可构建，产物齐装是板上/容器侧收口项。
 for bin in rrd rr3-ctl; do
@@ -89,7 +89,7 @@ if [ -d "$BINARIES_DIR/rr3-modules" ]; then
 		# entry 必须可装机：仓相对、不含 . / .. 段；且不含 sed 分隔符 |（改写安全）
 		case "$entry_rel" in
 			/*|.|..|./*|../*|*/.|*/..|*/./*|*/../*|*\|*)
-				echo "post-build.sh: 警告：模块 $name entry 不可装机（$entry_rel：绝对路径 / . 与 .. 段 / 含 |），整模块跳过" >&2
+				echo "post-build.sh: 警告：模块 $name entry 不可装机（${entry_rel}：绝对路径 / . 与 .. 段 / 含 |），整模块跳过" >&2
 				continue
 				;;
 		esac
@@ -109,7 +109,7 @@ if [ -d "$BINARIES_DIR/rr3-modules" ]; then
 		# 改写复核：装机 manifest 的 entry 必须恰为新绝对路径（防同型错位回归）
 		check="$(sed -n 's/^entry[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$mod_dst/module.toml" | head -n 1)"
 		if [ "$check" != "/usr/lib/rockrobot3/modules/$name/$entry_rel" ]; then
-			echo "post-build.sh: 警告：模块 $name entry 改写复核不一致（得 $check），整模块跳过" >&2
+			echo "post-build.sh: 警告：模块 $name entry 改写复核不一致（得 ${check}），整模块跳过" >&2
 			rm -rf "$mod_dst"
 			continue
 		fi
