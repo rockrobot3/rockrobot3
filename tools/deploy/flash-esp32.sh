@@ -44,7 +44,7 @@ while [ $# -gt 0 ]; do
       [ $# -ge 2 ] || { echo "FAIL  --port 需要设备路径参数" >&2; exit 2; }
       PORT="$2"; shift 2 ;;
     --check-only) CHECK_ONLY=1; shift ;;
-    *) echo "FAIL  未知参数: $1（用法见脚本头注释）" >&2; exit 2 ;;
+    *) echo "FAIL  未知参数: ${1}（用法见脚本头注释）" >&2; exit 2 ;;
   esac
 done
 
@@ -56,7 +56,7 @@ export CARGO_TERM_COLOR=never
 echo "== ① 工具链门（espflash 4.x + esp 工具链/rust-src + ldproxy + esp-clang + IDF v5.2.2）=="
 espflash_ver="$(espflash --version 2>/dev/null)" || die "espflash 未安装（cargo install espflash --locked）"
 # ${…} 截断必加：bash 3.2（macOS 默认）C locale 下把全角字符首字节并入变量名，
-# $espflash_ver（ 直接写即 unbound variable——本脚本三处同坑（2026-10-22 实测）
+# 裸写法 `$espflash_ver` 紧跟全角括号即 unbound variable——本脚本三处同坑（2026-10-22 实测）
 if ! printf '%s\n' "$espflash_ver" | grep -qE '^espflash 4\.'; then
   die "espflash 非 4.x: ${espflash_ver}（版本钉 4.x，实测 4.6.0）"
 fi

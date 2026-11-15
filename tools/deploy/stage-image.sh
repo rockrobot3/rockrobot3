@@ -28,10 +28,10 @@ fi
 
 rel="${CARGO_TARGET_DIR:-/tmp/rr3-build}/release"
 for b in rrd rr3-ctl rr3-pack; do
-  [ -x "$rel/$b" ] || { echo "缺产物 $rel/$b（先原生 cargo build --release）" >&2; exit 1; }
+  [ -x "$rel/$b" ] || { echo "缺产物 $rel/${b}（先原生 cargo build --release）" >&2; exit 1; }
 done
 for m in act brain connect interact sense power; do
-  [ -x "$rel/rr3-$m" ] || { echo "缺产物 $rel/rr3-$m（先原生 cargo build --release）" >&2; exit 1; }
+  [ -x "$rel/rr3-$m" ] || { echo "缺产物 $rel/rr3-${m}（先原生 cargo build --release）" >&2; exit 1; }
 done
 
 pay="$(mktemp -d)"
@@ -55,4 +55,4 @@ stage="$pkg.stage"
 rm -rf "$out"
 cp -a "$stage" "$out"
 rm -rf "$stage" "$pkgdir"
-echo "PASS  镜像根就位: $out（arch=$arch，version=$ver）"
+echo "PASS  镜像根就位: ${out}（arch=${arch}，version=${ver}）"

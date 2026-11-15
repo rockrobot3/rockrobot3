@@ -70,7 +70,7 @@ else
 fi
 tar -xzf "$BUNDLE" -C "$stage" --strip-components=1
 for f in bin/rrd bin/rr3-ctl contracts/topics.toml; do
-  [ -f "$stage/$f" ] || die "解包后缺 $f（包内容与 A10 契约不符）"
+  [ -f "$stage/$f" ] || die "解包后缺 ${f}（包内容与 A10 契约不符）"
 done
 
 # 期望模块集：从 rrd 单元命令行取 --profile，读其 [enabled_slots] 键（模块名）
@@ -96,12 +96,12 @@ rollback() {
     done
     systemctl reset-failed rrd >/dev/null 2>&1 || true
     systemctl start rrd >/dev/null 2>&1 || true
-    die "已回滚到上一版（该树在 $ROOT，二进制备份在 $binbk）"
+    die "已回滚到上一版（该树在 ${ROOT}，二进制备份在 ${binbk}）"
   fi
   die "首次安装失败且无上一版可回退（新树已删除，请查 journalctl -u rrd）"
 }
 
-echo "安装 $top → $ROOT（rrd 停机窗口内整树换位）"
+echo "安装 $top → ${ROOT}（rrd 停机窗口内整树换位）"
 systemctl stop rrd
 # Restart=always 会在超时被 SIGKILL 后自动拉起；停稳确认必须在换树之前，
 # 否则"新树已就位、旧进程还在跑"的假窗口会把健康探针引到旧进程上。
@@ -154,4 +154,4 @@ done
 
 echo "PASS  新树已就位：$(sed -n 's/^commit=//p' "$ROOT/BUNDLE_VERSION")"
 echo "      模块：$(printf '%s ' $expected)"
-echo "      上一版保留在 $backup（人工回滚：停 rrd → 换回该树与 bin/ 二进制）"
+echo "      上一版保留在 ${backup}（人工回滚：停 rrd → 换回该树与 bin/ 二进制）"

@@ -75,7 +75,7 @@ echo "== ③ 依赖通道（板上有外网则直连 crates.io；无外网则预
 # 首跑真板踩实）——对本脚本 ④ 实际构建的三个 manifest 各自 fetch
 for m in brain sense interact; do
   if ! rrun "cd $RMT_SRC/modules/rr3-$m && cargo fetch --locked"; then
-    echo "cargo fetch 失败（rr3-$m）：板无外网时在宿主 \`cargo vendor --versioned-dirs <vendor_dir>\`，" >&2
+    echo "cargo fetch 失败（rr3-${m}）：板无外网时在宿主 \`cargo vendor --versioned-dirs <vendor_dir>\`，" >&2
     echo "把 vendor/ 与指向它的 .cargo/config.toml 一并同步上板，或改用有网环境后重跑。" >&2
     exit 1
   fi

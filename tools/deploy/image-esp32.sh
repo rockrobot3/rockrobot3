@@ -36,7 +36,7 @@ BUILD=debug
 while [ $# -gt 0 ]; do
   case "$1" in
     --release) BUILD=release; shift ;;
-    *) echo "FAIL  未知参数: $1（用法见脚本头注释）" >&2; exit 2 ;;
+    *) echo "FAIL  未知参数: ${1}（用法见脚本头注释）" >&2; exit 2 ;;
   esac
 done
 
