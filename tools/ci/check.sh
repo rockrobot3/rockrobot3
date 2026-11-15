@@ -227,9 +227,11 @@ if [ "$found_mod" -eq 0 ]; then
   fail=1
 fi
 
-# ⑥b 部署面配置漂移门的**工具自检**（批N38 件二）。真板比对要 ssh 与装机树，CI/本机
-# 不可达；可机械判的是**判据本身**——工具用临时夹具跑三例（干净过／改一字节红／缺件红），
-# 判据腐化即红。漂移的现场比对归板上线 runbook（boards §10 步④）与 build-onboard 报告段。
+# ⑥b 部署面配置漂移门的**工具自检**（批N38 件二；2026-11-16 扩面到装配单与 unit）。
+# 真板比对要 ssh 与装机树，CI/本机不可达；可机械判的是**判据本身**——工具用临时夹具跑
+# 六例（三类齐全／unit 口径忽略 ExecStart／config 改字节／装配单漂移／unit 非 ExecStart
+# 行漂移／unit 缺件），判据腐化即红。漂移的现场比对归板上线 runbook（boards §10 步④）
+# 与 build-onboard 报告段。
 step "⑥b 部署面配置漂移门·工具自检（verify-board-config --self-test）"
 run bash tools/deploy/verify-board-config.sh --self-test
 
