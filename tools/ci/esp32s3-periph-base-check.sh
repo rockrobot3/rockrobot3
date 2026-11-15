@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# crates 下载抖动兜底（本地与 CI 同口径）：esp 门的构建走镜像源，共享出口偶发
+# "transfer too slow / transferred 0 bytes"（2026-11-15 实测：一轮 20 分钟的 esp 门
+# 白跑在 winnow 的下载上）。cargo 自带重试默认 3 次、低速阈值 10B/30s 太紧，这里放宽；
+# 依赖源与锁文件都不动。
+export CARGO_NET_RETRY="${CARGO_NET_RETRY:-10}"
+export CARGO_HTTP_TIMEOUT="${CARGO_HTTP_TIMEOUT:-120}"
+export CARGO_HTTP_LOW_SPEED_LIMIT="${CARGO_HTTP_LOW_SPEED_LIMIT:-1}"
 # ESP32-S3 外设底座构建门（W1/T2，批N35 件八）。与 esp32-periph-base-check.sh
 # 同款门禁形态：宿主工具链 check 必红（xtensa + build-std + esp-idf-sys），本脚本
 # 单独覆盖。SKIP 纪律同款：工具链缺位 = SKIP（退出 0 并明说）；在位但编译失败 = FAIL；

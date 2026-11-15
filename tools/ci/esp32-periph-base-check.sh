@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# crates 下载抖动兜底（本地与 CI 同口径）：esp 门的构建走镜像源，共享出口偶发
+# "transfer too slow / transferred 0 bytes"（2026-11-15 实测：一轮 20 分钟的 esp 门
+# 白跑在 winnow 的下载上）。cargo 自带重试默认 3 次、低速阈值 10B/30s 太紧，这里放宽；
+# 依赖源与锁文件都不动。
+export CARGO_NET_RETRY="${CARGO_NET_RETRY:-10}"
+export CARGO_HTTP_TIMEOUT="${CARGO_HTTP_TIMEOUT:-120}"
+export CARGO_HTTP_LOW_SPEED_LIMIT="${CARGO_HTTP_LOW_SPEED_LIMIT:-1}"
 # ESP32 外设底座构建门（0.0.5 增补轮五 批B）。check.sh ④/⑥ 显式排除
 # tools/esp32-periph-base：xtensa-esp32-espidf 目标编译需 esp fork 工具链
 # （cargo +esp）+ build-std + esp-idf-sys（ESP-IDF v5.2.2 本地克隆 + ldproxy +
