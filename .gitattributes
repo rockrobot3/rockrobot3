@@ -1,0 +1,15 @@
+# 换行归一（2026-11-16，Windows 平台腿首跑实证）
+#
+# 本仓文本一律 LF。根因：Windows runner 的 Git 默认 core.autocrlf=true，checkout
+# 会把文本转成 CRLF；而装载面与测试大量使用 include_str! + `"\n"` 的 replace/断言
+# ——CRLF 下全部失配，表现为"与换行无关的测试在 Windows 上莫名红"（首跑 4 处红里
+# 3 处是这个根因）。归一后跨平台文本逐字节一致，判据无需分平台写两套。
+* text=auto eol=lf
+
+# 二进制面不做换行转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.gz binary
+*.wav binary
