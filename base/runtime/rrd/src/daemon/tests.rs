@@ -2,6 +2,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use rr_bus::{RR3_BROADCAST_DST_TASK, RR3_TASK_RRD};
 use rr_ipc::{rr3_body_split, Rr3PayloadType, Rr3UdsListener};
@@ -9,7 +10,7 @@ use serde_json::json;
 
 use super::boot::{rr3_backend_summary, rr3_boot_summary, rr3_degrade_json};
 use super::ctl::rr3_socket_acl_grant;
-use super::task::rr3_conn_acquire;
+use super::task::{rr3_conn_acquire, Rr3RefuseGate};
 use super::tick::rr3_power_frame;
 
 /// 并发连接槽（本轮审计）：到上限拒新、释放后可再申请、Drop 归还计数。
@@ -25,6 +26,40 @@ fn conn_slots_reject_over_limit_and_recover_on_drop() {
     let c = rr3_conn_acquire(&live, 2).expect("释放后可再申请");
     drop((b, c));
     assert_eq!(live.load(Ordering::Relaxed), 0);
+}
+
+/// 满员拒连日志节流：首条即时、窗口内只计数、窗口到点汇总带被压次数。
+/// 拒连退避本身（50ms）不进单测——它是时间行为，由这里的状态机覆盖"不刷屏"。
+#[test]
+fn refuse_gate_logs_first_then_summarizes() {
+    let mut g = Rr3RefuseGate::default();
+    let t0 = Instant::now();
+    let first = g.rr3_refuse_note(t0, 64, 64).expect("首条必须即时打印");
+    assert!(first.contains("在服 64 条"), "首条须带在服数: {first}");
+    assert!(
+        g.rr3_refuse_note(t0 + Duration::from_millis(1), 64, 64)
+            .is_none(),
+        "窗口内不得逐条打印"
+    );
+    assert!(
+        g.rr3_refuse_note(t0 + Duration::from_secs(4), 64, 64)
+            .is_none(),
+        "窗口未到不打印"
+    );
+    let sum = g
+        .rr3_refuse_note(t0 + Duration::from_secs(5), 64, 64)
+        .expect("窗口到点必须汇总");
+    assert!(sum.contains("另有 2 次"), "汇总须带被压次数: {sum}");
+    assert!(
+        g.rr3_refuse_note(t0 + Duration::from_secs(5), 64, 64)
+            .is_none(),
+        "汇总后同一时刻的拒连计入新窗口"
+    );
+    let sum = g
+        .rr3_refuse_note(t0 + Duration::from_secs(10), 63, 64)
+        .expect("下一窗口到点必须再汇总");
+    assert!(sum.contains("在服 63 条"), "汇总须带当前在服数: {sum}");
+    assert!(sum.contains("另有 1 次"), "新窗口只数本窗口内: {sum}");
 }
 
 /// 低电兜底点名帧的形状钉死（0.0.2 Q4）：Notification、src=rrd、dst=广播、

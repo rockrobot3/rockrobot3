@@ -152,16 +152,82 @@ pub(super) struct Rr3AcceptCtx {
     pub(super) counters_gate: Arc<Mutex<crate::counters::Rr3CountersGate>>,
 }
 
-/// accept 主循环（永不返回）：持续性错误退避 200ms，并发连接上限 64
+/// accept 主循环（永不返回）：持续性错误退避 200ms，满员退避 50ms，并发上限 64。
 pub(super) fn rr3_daemon_accept(listener: Rr3UdsListener, ctx: Rr3AcceptCtx) -> ! {
     const RR3_MAX_CONNS: usize = 64;
     let live = Arc::new(AtomicUsize::new(0));
+    let mut gate = Rr3RefuseGate::default();
     loop {
-        let Some((stream, slot)) = rr3_accept_pair(&listener, &live, RR3_MAX_CONNS) else {
-            continue;
-        };
-        rr3_spawn_conn(stream, ctx.rr3_conn_ctx(), slot);
+        match rr3_accept_pair(&listener, &live, RR3_MAX_CONNS) {
+            Rr3AcceptGain::Conn(stream, slot) => rr3_spawn_conn(stream, ctx.rr3_conn_ctx(), slot),
+            // 满员不是错误，但绝不能空转：无退避时重连风暴会以"accept→拒→记日志"
+            // 的速度打满一个核并把 rrd 日志写穿（日志写入是同步 append）。50ms 的
+            // 代价是容量释放后新连接最多多等一拍；收益是尝试率封顶 20 次/秒。
+            Rr3AcceptGain::Full => {
+                let live_n = live.load(Ordering::Relaxed);
+                if let Some(line) = gate.rr3_refuse_note(Instant::now(), live_n, RR3_MAX_CONNS) {
+                    rr3_log(&line);
+                }
+                thread::sleep(RR3_FULL_BACKOFF);
+            }
+            // accept 失败已在 rr3_accept_pair 内退避，这里直接进入下一拍。
+            Rr3AcceptGain::Retry => {}
+        }
     }
+}
+
+/// 满员拒连退避（见 `rr3_daemon_accept` 的注释）。
+const RR3_FULL_BACKOFF: Duration = Duration::from_millis(50);
+
+/// 满员拒连日志的汇总窗口：首条即时打，窗口内的后续拒连只计数。
+const RR3_REFUSE_LOG_EVERY: Duration = Duration::from_secs(5);
+
+/// 满员拒连的日志节流器。
+///
+/// 为什么需要它：拒连日志本身是同步 append，重连风暴下"每条一行"等于把
+/// 可观测性通道变成写放大源——磁盘被写满后 journal/OTA/配置写全灭。
+/// 首条必须即时可见（运维要知道"现在满员"），窗口内的次数不丢账（汇总时报），
+/// 这样既不会被刷屏，也不会把真实规模报小。
+#[derive(Default)]
+pub(super) struct Rr3RefuseGate {
+    last: Option<Instant>,
+    suppressed: u64,
+}
+
+impl Rr3RefuseGate {
+    /// 记一次拒连：应打印时返回文案，否则计入被压掉的次数并返回 `None`。
+    pub(super) fn rr3_refuse_note(
+        &mut self,
+        now: Instant,
+        live: usize,
+        max: usize,
+    ) -> Option<String> {
+        match self.last {
+            None => {
+                self.last = Some(now);
+                Some(format!("连接数超上限 {max}，拒绝新连接（在服 {live} 条）"))
+            }
+            Some(t) if now.saturating_duration_since(t) >= RR3_REFUSE_LOG_EVERY => {
+                let n = std::mem::take(&mut self.suppressed);
+                self.last = Some(now);
+                Some(format!(
+                    "连接数超上限 {max}，拒绝新连接（在服 {live} 条；过去 {}s 另有 {n} 次拒连未逐条打印）",
+                    RR3_REFUSE_LOG_EVERY.as_secs()
+                ))
+            }
+            Some(_) => {
+                self.suppressed = self.suppressed.saturating_add(1);
+                None
+            }
+        }
+    }
+}
+
+/// accept 一拍的结果：成功连接 / 满员拒连 / 可重试（accept 失败已退避）。
+enum Rr3AcceptGain {
+    Conn(UnixStream, Rr3ConnSlot),
+    Full,
+    Retry,
 }
 
 impl Rr3AcceptCtx {
@@ -179,28 +245,26 @@ impl Rr3AcceptCtx {
     }
 }
 
-/// 取一条连接：accept 失败退避后回 None；并发满拒连并点名后回 None。
+/// 取一条连接：accept 失败退避后回 `Retry`；并发满回 `Full`（由主循环退避与记账）。
 fn rr3_accept_pair(
     listener: &Rr3UdsListener,
     live: &Arc<AtomicUsize>,
     max: usize,
-) -> Option<(UnixStream, Rr3ConnSlot)> {
+) -> Rr3AcceptGain {
     const RR3_ACCEPT_ERR_BACKOFF: Duration = Duration::from_millis(200);
-    let stream = listener
-        .rr3_accept()
-        .map_err(|e| {
+    let stream = match listener.rr3_accept() {
+        Ok(stream) => stream,
+        Err(e) => {
             rr3_log(&format!("accept 失败（继续服务）: {e}"));
             thread::sleep(RR3_ACCEPT_ERR_BACKOFF);
-        })
-        .ok()?;
-    let Some(slot) = rr3_conn_acquire(live, max) else {
-        rr3_log(&format!(
-            "连接数超上限 {max}，拒绝新连接（在服 {} 条）",
-            live.load(Ordering::Relaxed)
-        ));
-        return None;
+            return Rr3AcceptGain::Retry;
+        }
     };
-    Some((stream, slot))
+    match rr3_conn_acquire(live, max) {
+        Some(slot) => Rr3AcceptGain::Conn(stream, slot),
+        // 连接对象在此 drop：对端立刻看到 EOF，不会以为"连上了只是没应答"。
+        None => Rr3AcceptGain::Full,
+    }
 }
 
 /// 连接线程：线程退出（含 panic）必归还并发槽；起不来只拒这一条连接。
