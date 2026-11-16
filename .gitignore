@@ -19,6 +19,8 @@
 !README_zh.md
 !LICENSE
 !.dockerignore
+# 供应链策略（cargo-deny 判据唯一真源，CI gate 的 supply job 执法）
+!deny.toml
 # 换行归一规则（跨平台 checkout 一致，见文件内注释）
 !.gitattributes
 # 仓根统一构建配置（P0-5）：target-dir / EMBUILD_ROOT 指向源码区外，须入库

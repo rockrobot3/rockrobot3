@@ -40,6 +40,15 @@ CI 单一事实源在 [`.github/workflows/`](../../.github/workflows)（gate / p
 `.gitcode/workflows/` 路径作废，`.gitcode/` 已删除），本脚本才是实际门禁。
 **合入前必须本地跑绿**，退出码非 0 即不合入。
 
+## 供应链审计入口：`supply-audit.sh`
+
+[supply-audit.sh](supply-audit.sh) 不发散策略，只枚举工程根并逐项调用
+`cargo deny check --locked`：工程根 = `base/runtime` 工作区 + `modules/`、`tools/`、
+`base/ota/` 下各自带锁文件的独立工程（工作区成员不重复执法）。判据唯一真源是仓根
+[`deny.toml`](../../deny.toml)——许可证显式白名单、RustSec 公告、来源白名单、通配依赖。
+本机未装 cargo-deny 时 SKIP 并明说；CI 以 `--strict` 执法，工具缺位即红（不由 SKIP
+冒充通过）。
+
 ## 点验矩阵出数入口：`matrix.sh`
 
 [matrix.sh](matrix.sh) 不改判据、只出数（0.0.5 批K H3/C12/C11）：按 architecture §12.6

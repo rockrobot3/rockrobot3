@@ -112,6 +112,32 @@ jobs:
         # 工程（批N8 件三）：宿主 linux 档照常进本 lint 步与门禁 ④/⑥（不整目录排除），
         # espidf 档归专用门。
 
+  # 供应链门（cargo-deny）：许可证 / RustSec 公告 / 来源白名单 / 通配依赖。
+  # 策略唯一真源 = 仓根 deny.toml，工程根枚举与汇总在 tools/ci/supply-audit.sh；
+  # 本 job 只负责装工具（预编译，不占 runner 编译时间）与把失败压成注解。
+  supply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 安装 cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - name: 供应链审计（全部工程根，--strict）
+        run: |
+          # 失败压成单行注解：匿名日志接口 403，注解是唯一公开可读的归因通道。
+          set -o pipefail
+          if ! bash tools/ci/supply-audit.sh --strict 2>&1 | tee /tmp/supply.log; then
+            bad=$(grep -E '^(FAIL|error\[)' /tmp/supply.log | head -6 | tr '\n' ' ')
+            if [ -z "${bad}" ]; then
+              bad=$(tail -3 /tmp/supply.log | tr '\n' ' ')
+            fi
+            echo "::error title=supply::${bad:0:900}"
+            exit 1
+          fi
+
   # 脚本语法门：CI 的全部判据最终都落在 tools/ci/*.sh 上——脚本自身写坏时，
   # 门禁会"看起来跑过了"。bash -n 不执行、零副作用，覆盖全部追踪脚本。
   scripts:

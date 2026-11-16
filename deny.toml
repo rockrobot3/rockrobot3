@@ -1,0 +1,57 @@
+# 供应链策略唯一真源（2026-11-16 建）：依赖许可证、RustSec 安全公告、来源白名单
+# 与通配依赖。执法入口是 CI `gate.yml` 的 `supply` job，脚本
+# `tools/ci/supply-audit.sh` 负责枚举工程根并逐项调用 cargo-deny。
+#
+# 判据只约束第三方依赖：本仓全部工程 `license = "UNLICENSED"` 且 `publish = false`，
+# 属私有件，不参与对外分发面（licenses.private 显式忽略）。
+#
+# 许可证策略是**显式白名单**：新增许可证必须改本文件（可评审、可回滚），不用
+# "OSI/FSF 自动放行"这类隐式扩展——隐式规则会让依赖树里的许可证变化绕过评审。
+# 白名单依据 2026-11-16 全工程根依赖实测（MIT/Apache-2.0/ISC/Unicode-3.0/
+# BSD-3-Clause/Unlicense/CDLA-Permissive-2.0 七类，无 copyleft 依赖）。
+[licenses]
+# 私有件（publish = false）不参与许可证判据
+private = { ignore = true }
+# 许可证文本识别置信度下限：低置信度按未知处理，不静默放行
+confidence-threshold = 0.9
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "CC0-1.0",
+    "Unlicense",
+    "MPL-2.0",
+    "BSL-1.0",
+    "OpenSSL",
+    # Unicode 数据与 ICU 组件（icu_* / unicode-ident / webpki-roots 一类）
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "CDLA-Permissive-2.0",
+]
+
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# 未维护告警只对直接依赖执法：传递依赖的未维护件按升级节奏处理，
+# 全图执法会让每次推送都因上游陈账变红，噪音淹没真问题。
+unmaintained = "workspace"
+# yanked 版本是"可复现性"问题不是漏洞，告警留痕不拦门
+yanked = "warn"
+
+[bans]
+# 同一依赖多版本不判红（跨目标/FFI 边界常见），但必须被看见
+multiple-versions = "warn"
+# 通配版本要求（`*`）会让锁文件失去审计意义，一律拒
+wildcards = "deny"
+
+[sources]
+# 只允许 crates.io 与仓内 path 依赖；git 源须先在 allow-git 显式登记
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
