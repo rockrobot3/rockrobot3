@@ -271,6 +271,7 @@ mod tests {
     }
 
     /// 唯一 temp 目录（pid + 纳秒后缀，批H5 教训：只 pid 会撞上一轮遗留目录）
+    #[cfg(unix)]
     fn rr3_test_prov_dir(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -281,6 +282,7 @@ mod tests {
 
     /// ETXTBSY 瞬态重试（linux_link 同款：fs::write 假脚本后立刻 spawn，
     /// ubuntu runner 偶发 Text file busy）
+    #[cfg(unix)]
     fn rr3_test_txtbsy_retry<T>(
         mut f: impl FnMut() -> Result<T, Rr3HalError>,
     ) -> Result<T, Rr3HalError> {
@@ -299,6 +301,11 @@ mod tests {
     /// 假 nmcli：自 `export NMCONF_HOME=<conf>`（测试进程零 set_var 竞态——
     /// 环境只进子进程），以 $NMCONF_HOME/rr3-provision 为连接配置文件模拟
     /// NM 的持久化语义：add/modify 写文件、delete 删文件、在册查询列文件。
+    ///
+    /// 门控 `unix`：夹具是**可执行 sh 脚本**（靠权限位 0o755 被 spawn），
+    /// 非 Unix 无执行面——Windows 原生测试编译面由 2026-11-16 平台腿暴露，
+    /// 该能力判据整体按 unix 门控（不是打补丁式跳测）。
+    #[cfg(unix)]
     fn rr3_test_nm_script(tag: &str, extra: &str) -> (PathBuf, PathBuf) {
         let dir = rr3_test_prov_dir(tag);
         let conf = dir.join("nmconf");
@@ -351,6 +358,7 @@ exit 9
 
     /// MC-6 主判据（工单原文）："connect → 重启 → 仍在册" + "forget 后连接
     /// 配置真消失"——同一 NMCONF_HOME 夹具下重新构造后端 = 重启后查在册。
+    #[cfg(unix)]
     #[test]
     fn nm_store_persists_across_reconstruct() {
         let (script, conf_file) = rr3_test_nm_script("persist", "");
@@ -384,6 +392,7 @@ exit 9
     }
 
     /// 换网 = 同名 profile 更新（add 后再 connect 走 modify 路径，锚名不变）
+    #[cfg(unix)]
     #[test]
     fn nm_store_second_connect_updates_same_profile() {
         let (script, conf_file) = rr3_test_nm_script("update", "");
@@ -401,6 +410,7 @@ exit 9
     }
 
     /// 未连先忘幂等：不在册时 forget 直接 Ok（连 delete 都不发）
+    #[cfg(unix)]
     #[test]
     fn nm_store_forget_is_idempotent_when_absent() {
         let (script, conf_file) = rr3_test_nm_script("forget-empty", "");
@@ -411,6 +421,7 @@ exit 9
     }
 
     /// NM 空值语义：在册但 SSID 域为 `--`/空 → None，不编造空 SSID
+    #[cfg(unix)]
     #[test]
     fn nm_store_ssid_rejects_nm_empty_marker() {
         let (script, conf_file) = rr3_test_nm_script("empty-ssid", "");
@@ -423,6 +434,7 @@ exit 9
     }
 
     /// 超时守护：假 nmcli 睡 3 s，超时 100 ms——到点 kill 且显式回错点名超时值
+    #[cfg(unix)]
     #[test]
     fn nm_store_timeout_kills_slow_child() {
         let (script, conf_file) = rr3_test_nm_script("tmo", "sleep 3\n");
@@ -441,6 +453,7 @@ exit 9
     }
 
     /// 退出非零：显式回错带 stderr 原文，不静默装成功
+    #[cfg(unix)]
     #[test]
     fn nm_store_nonzero_exit_fails_loudly() {
         let (script, conf_file) = rr3_test_nm_script(
