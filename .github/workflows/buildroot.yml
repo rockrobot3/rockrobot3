@@ -174,27 +174,60 @@ jobs:
           done
           find /tmp/br-out/images -maxdepth 3 -type f | head -20
 
-      - name: 全量构建（defconfig + make）
-        env:
-          RR3_REPO_ROOT: ${{ github.workspace }}
+      - name: 应用 defconfig
         run: |
           set -o pipefail
-          # BR2_DL_DIR 显式钉到预置缓存所在目录：O= 输出树下的默认 dl 路径
-          # 与预置点不一致时，Buildroot 仍会去 ftp.denx.de 重下（2026-11-16 实测）。
+          # BR2_DL_DIR 显式钉到缓存目录：O= 输出树下的默认 dl 路径与预置点
+          # 不一致时，Buildroot 会重下（2026-11-16 实测）。
           if ! make -C /tmp/buildroot O=/tmp/br-out BR2_DL_DIR=/tmp/buildroot/dl \
               rock3_zero3_defconfig > /tmp/br-defconfig.log 2>&1; then
             echo "::error title=br-defconfig::rock3_zero3_defconfig 失败"
             tail -8 /tmp/br-defconfig.log
             exit 1
           fi
+
+      # U-Boot 单包先跑：2026-11-17 全量构建在 uboot 阶段失败，而失败注解被
+      # "pyerrors.h" 这类含 error 的路径污染，根因读不出来。这一拍把失败面
+      # 锁到 U-Boot，失败时打印干净的末段并留日志 artifact（下一拍全量可以
+      # 直接跳过已构建的包）。
+      - name: 预构建 U-Boot（快速定位）
+        run: |
+          set -o pipefail
+          if ! make -C /tmp/buildroot O=/tmp/br-out BR2_DL_DIR=/tmp/buildroot/dl \
+              uboot > /tmp/br-uboot.log 2>&1; then
+            errs=$(grep -nE "error:|Error [0-9]|fatal:|No rule|Stop\." /tmp/br-uboot.log | tail -12 | tr '\n' ' ')
+            echo "::error title=br-uboot::U-Boot 构建失败｜${errs:0:1200}"
+            echo "---- 末 80 行 ----"
+            tail -80 /tmp/br-uboot.log
+            exit 1
+          fi
+          tail -3 /tmp/br-uboot.log
+
+      - name: 全量构建（make）
+        env:
+          RR3_REPO_ROOT: ${{ github.workspace }}
+        run: |
+          set -o pipefail
           if ! make -C /tmp/buildroot O=/tmp/br-out BR2_DL_DIR=/tmp/buildroot/dl \
               -j"$(nproc)" > /tmp/br-build.log 2>&1; then
             phase=$(grep -E "^>>>" /tmp/br-build.log | tail -3 | tr '\n' ' ')
-            errs=$(grep -iE "error|Error [0-9]|failed|fatal|No rule|不存在" /tmp/br-build.log | tail -8 | tr '\n' ' ')
-            echo "::error title=br-build::Buildroot 全量 make 失败｜阶段=${phase:0:300}｜错误=${errs:0:700}"
+            errs=$(grep -E "error:|Error [0-9]|fatal:|No rule|Stop\." /tmp/br-build.log | tail -8 | tr '\n' ' ')
+            echo "::error title=br-build::Buildroot 全量 make 失败｜阶段=${phase:0:300}｜错误=${errs:0:800}"
             exit 1
           fi
           tail -5 /tmp/br-build.log
+
+      - name: 上传构建日志（失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildroot-logs
+          path: |
+            /tmp/br-defconfig.log
+            /tmp/br-uboot.log
+            /tmp/br-build.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       # 镜像名真值在 genimage.cfg（`image <名>.img`），CI 不写第二份字面量：
       # 2026-11-17 审计发现旧断言硬写 sdcard.img，而 genimage 实际产出
