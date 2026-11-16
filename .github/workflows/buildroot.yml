@@ -197,8 +197,10 @@ jobs:
           # 诊断拍的价值就在"快失败"。
           if ! make -C /tmp/buildroot O=/tmp/br-out BR2_DL_DIR=/tmp/buildroot/dl \
               -j"$(nproc)" uboot > /tmp/br-uboot.log 2>&1; then
-            errs=$(grep -nE "error:|Error [0-9]|fatal:|No rule|Stop\." /tmp/br-uboot.log | tail -12 | tr '\n' ' ')
-            echo "::error title=br-uboot::U-Boot 构建失败｜${errs:0:1200}"
+            errs=$(grep -nE "error:|Error [0-9]|fatal:|No rule|Stop\.|Failed|too old" /tmp/br-uboot.log | tail -12 | tr '\n' ' ')
+            # dtc 版本是 scripts_dtc 失败的第一现场：缺文件/版本过旧都在这里现形。
+            dtc_v=$([ -x /tmp/br-out/host/bin/dtc ] && /tmp/br-out/host/bin/dtc -v 2>&1 | head -1 || echo MISSING)
+            echo "::error title=br-uboot::U-Boot 构建失败｜dtc=${dtc_v}｜${errs:0:1000}"
             echo "---- 末 80 行 ----"
             tail -80 /tmp/br-uboot.log
             exit 1

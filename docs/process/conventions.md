@@ -3529,6 +3529,19 @@ cfg 守卫挤在一个函数里）。处置——按后端拆成 `rr3_src_linux`
 验证——rr-ota **35**、rr3-ota-ctl **14** tests；重复率 **0.56%**、CC 均值 2.49 /
 峰值 **11**，基线 `cc_max_fn` 12→**11**（只降不升）；`check.sh` 全绿。
 
+**2026-11-17 buildroot U-Boot 根因（FORMAT_ITB ↔ binman 无该目标）**：证据——
+U-Boot v2024.10 的 `u-boot.itb` 目标包在 `ifdef U_BOOT_ITS` 里，只有
+`CONFIG_SPL_FIT_SOURCE` / `CONFIG_USE_SPL_FIT_GENERATOR` 才定义；rk3566 的
+defconfig 走 binman（`CONFIG_SPL_LOAD_FIT`/`CONFIG_FIT`），该目标不存在，而
+Buildroot 的 `FORMAT_ITB` 把它加进 `UBOOT_MAKE_TARGET` → 精确复现
+`No rule to make target 'u-boot.itb'`。binman 的
+`arch/arm/dts/rockchip-u-boot.dtsi` 把 `idbloader.img` 与 `u-boot.itb` 写成
+子产物 `filename`，`make all` 会生成这两个文件。处置——defconfig 去掉
+`FORMAT_ITB`，改 `FORMAT_CUSTOM_NAME="idbloader.img u-boot.itb"`（只加拷贝
+清单、不加 make 目标），补 `NEEDS_PYLIBFDT`/`NEEDS_PYELFTOOLS`；失败注解补
+dtc 版本（scripts_dtc 第一现场）。验证——YAML/`check.sh` 绿；全量回执由本次
+`[buildroot-full]` 触发。
+
 **2026-11-17 status 里程碑对表（M1 Buildroot 行）**：事实——M1 行只写"全量
 make 构建缺"，未记 2026-11-17 两次 CI 尝试与失败阶段，读者会误以为从未试过。
 处置——追加对表段：custom git 源、两次红在 uboot 阶段、诊断拍/失败日志
