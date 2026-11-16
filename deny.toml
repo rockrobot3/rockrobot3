@@ -48,6 +48,10 @@ yanked = "warn"
 multiple-versions = "warn"
 # 通配版本要求（`*`）会让锁文件失去审计意义，一律拒
 wildcards = "deny"
+# 私有件（publish = false）的 path/git 依赖不写 version 是 Cargo 常规形态，
+# crates.io 本身也不允许发布非 dev 的 path 依赖——工具语义已把私有件豁免、公开件
+# 继续执法，故不用 skip 名单逐 crate 开口子（名单会随结构调整漂移）。
+allow-wildcard-paths = true
 
 [sources]
 # 只允许 crates.io 与仓内 path 依赖；git 源须先在 allow-git 显式登记
