@@ -48,6 +48,44 @@ pub struct Rr3OtaExpect<'a> {
 
 /// 解析 manifest：首行 + 八个固定字段，顺序不可变。
 pub fn rr3_manifest_parse(bytes: &[u8]) -> Result<Rr3OtaManifest<'_>, String> {
+    let lines = rr3_manifest_lines(bytes)?;
+    let kind = rr3_field(lines[1], "kind")?;
+    let platform = rr3_field(lines[2], "platform")?;
+    let board = rr3_field(lines[3], "board")?;
+    let version = rr3_field(lines[4], "version")?;
+    let image = rr3_field(lines[5], "image")?;
+    let bytes = rr3_field(lines[6], "bytes")?;
+    let sha256 = rr3_field(lines[7], "sha256")?;
+    let key_id = rr3_field(lines[8], "key_id")?;
+    rr3_manifest_meta(kind, platform, board, version, image)?;
+    let (bytes, sha256, key_id) = rr3_manifest_ids(bytes, sha256, key_id)?;
+    Ok(Rr3OtaManifest {
+        kind,
+        platform,
+        board,
+        version,
+        image,
+        bytes,
+        sha256,
+        key_id,
+    })
+}
+
+/// 数值/摘要字段：字节数、镜像 SHA-256、签发 key_id。
+fn rr3_manifest_ids(
+    bytes: &str,
+    sha256: &str,
+    key_id: &str,
+) -> Result<(u64, [u8; 32], [u8; 8]), String> {
+    Ok((
+        rr3_u64_parse(bytes, "bytes")?,
+        rr3_hex_decode(sha256, "sha256")?,
+        rr3_hex_decode(key_id, "key_id")?,
+    ))
+}
+
+/// 字节层形制：上限、UTF-8/ASCII、LF 结尾、无空行、九行、首行。
+fn rr3_manifest_lines(bytes: &[u8]) -> Result<Vec<&str>, String> {
     if bytes.len() > RR3_OTA_MANIFEST_MAX {
         return Err(format!(
             "manifest 过长（{} 字节 > 上限 {RR3_OTA_MANIFEST_MAX}）",
@@ -80,15 +118,17 @@ pub fn rr3_manifest_parse(bytes: &[u8]) -> Result<Rr3OtaManifest<'_>, String> {
             lines[0]
         ));
     }
-    let kind = rr3_field(lines[1], "kind")?;
-    let platform = rr3_field(lines[2], "platform")?;
-    let board = rr3_field(lines[3], "board")?;
-    let version = rr3_field(lines[4], "version")?;
-    let image = rr3_field(lines[5], "image")?;
-    let bytes = rr3_field(lines[6], "bytes")?;
-    let sha256 = rr3_field(lines[7], "sha256")?;
-    let key_id = rr3_field(lines[8], "key_id")?;
+    Ok(lines)
+}
 
+/// 字段值域：kind 封闭词、平台/板型词形、版本三段、image 单路径分量。
+fn rr3_manifest_meta(
+    kind: &str,
+    platform: &str,
+    board: &str,
+    version: &str,
+    image: &str,
+) -> Result<(), String> {
     if kind != RR3_OTA_KIND_ROOTFS {
         return Err(format!(
             "kind={kind:?} 不在本版支持面（只认 {RR3_OTA_KIND_ROOTFS:?}）"
@@ -97,18 +137,7 @@ pub fn rr3_manifest_parse(bytes: &[u8]) -> Result<Rr3OtaManifest<'_>, String> {
     rr3_token_check(platform, 32, "platform")?;
     rr3_token_check(board, 32, "board")?;
     rr3_version_parse(version)?;
-    rr3_image_name_check(image)?;
-    let bytes = rr3_u64_parse(bytes, "bytes")?;
-    Ok(Rr3OtaManifest {
-        kind,
-        platform,
-        board,
-        version,
-        image,
-        bytes,
-        sha256: rr3_hex_decode(sha256, "sha256")?,
-        key_id: rr3_hex_decode(key_id, "key_id")?,
-    })
+    rr3_image_name_check(image)
 }
 
 /// 按固定字段序渲染 manifest（以 LF 结尾，签名就签这份字节）。

@@ -19,6 +19,7 @@
 
 mod args;
 mod bootconf_cmd;
+mod sign_cmd;
 
 use std::process::ExitCode;
 
@@ -48,11 +49,16 @@ fn main() -> ExitCode {
         Some("switch") => bootconf_cmd::rr3_cmd_switch_args(&argv[1..]),
         Some("factory") => bootconf_cmd::rr3_cmd_factory_args(&argv[1..]),
         Some("rollback") => bootconf_cmd::rr3_cmd_rollback(&argv[1..]),
+        Some("keypub") => sign_cmd::rr3_cmd_keypub(&argv[1..]),
+        Some("manifest") => sign_cmd::rr3_cmd_manifest(&argv[1..]),
+        Some("sign") => sign_cmd::rr3_cmd_sign(&argv[1..]),
+        Some("verify") => sign_cmd::rr3_cmd_verify(&argv[1..]),
         Some(other) => Err(args::rr3_use(format!(
-            "未知子命令 {other:?}（在册：slots / switch / factory / rollback）"
+            "未知子命令 {other:?}（在册：slots / switch / factory / rollback / keypub / manifest / sign / verify）"
         ))),
         None => Err(args::rr3_use(
-            "缺子命令（在册：slots / switch / factory / rollback）".into(),
+            "缺子命令（在册：slots / switch / factory / rollback / keypub / manifest / sign / verify）"
+                .into(),
         )),
     };
     match outcome {
@@ -71,8 +77,9 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
     use crate::bootconf_cmd::*;
+    use crate::sign_cmd::*;
     use rr_ota::bootenv;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     /// 打印的标签必须与 rr-ota 常量逐一对应（否则文档与代码就分家了）
     #[test]
@@ -253,5 +260,220 @@ mod tests {
         assert!(m.contains("读 env 配置"), "{m}");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---- OTA 签名/验签子命令（ADR-0026） ----
+
+    use rr_ota::sign;
+
+    const IMAGE: &[u8] = b"rr3-rootfs-test-image";
+    const SEED: [u8; 32] = [7u8; 32];
+
+    struct OtaFixture {
+        dir: PathBuf,
+        image: PathBuf,
+        key: PathBuf,
+        pubkey: PathBuf,
+        manifest: PathBuf,
+        sig: PathBuf,
+    }
+
+    impl OtaFixture {
+        fn new(tag: &str) -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("rr3-ota-sign-{}-{tag}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let image = dir.join("rr3-rootfs-rk3566-0.0.8.img");
+            std::fs::write(&image, IMAGE).unwrap();
+            let key = write_key(&dir.join("sign.key"), &SEED);
+            Self {
+                pubkey: dir.join("sign.pub"),
+                manifest: dir.join("rr3-ota.manifest"),
+                sig: dir.join("rr3-ota.sig"),
+                dir,
+                image,
+                key,
+            }
+        }
+
+        fn prepare(&self) {
+            let key = self.key.to_string_lossy().into_owned();
+            rr3_cmd_keypub(&[
+                "--key-file".into(),
+                key.clone(),
+                "--out-pub".into(),
+                self.pubkey.to_string_lossy().into_owned(),
+            ])
+            .expect("keypub");
+            rr3_cmd_manifest(&[
+                "--image".into(),
+                self.image.to_string_lossy().into_owned(),
+                "--platform".into(),
+                "rk3566".into(),
+                "--board".into(),
+                "radxa-zero3".into(),
+                "--version".into(),
+                "0.0.8".into(),
+                "--key-file".into(),
+                key.clone(),
+                "--out".into(),
+                self.manifest.to_string_lossy().into_owned(),
+            ])
+            .expect("manifest");
+            rr3_cmd_sign(&[
+                "--manifest".into(),
+                self.manifest.to_string_lossy().into_owned(),
+                "--key-file".into(),
+                key,
+                "--sig-out".into(),
+                self.sig.to_string_lossy().into_owned(),
+            ])
+            .expect("sign");
+        }
+
+        fn verify_args(&self) -> Vec<String> {
+            vec![
+                "--manifest".into(),
+                self.manifest.to_string_lossy().into_owned(),
+                "--sig".into(),
+                self.sig.to_string_lossy().into_owned(),
+                "--pub".into(),
+                self.pubkey.to_string_lossy().into_owned(),
+                "--platform".into(),
+                "rk3566".into(),
+                "--board".into(),
+                "radxa-zero3".into(),
+            ]
+        }
+    }
+
+    impl Drop for OtaFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn write_key(path: &Path, seed: &[u8; 32]) -> PathBuf {
+        std::fs::write(path, format!("{}\n", sign::rr3_hex_encode(seed))).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        path.to_path_buf()
+    }
+
+    /// 生成 → 签名 → 验签全链；镜像篡改必须拒。
+    #[test]
+    fn ota_sign_verify_flow_is_end_to_end() {
+        let f = OtaFixture::new("flow");
+        f.prepare();
+        let mut args = f.verify_args();
+        args.extend(["--current-version".into(), "0.0.7".into()]);
+        let msg = rr3_cmd_verify(&args).expect("验签应通过");
+        assert!(msg.contains("验签通过") && msg.contains("rk3566"), "{msg}");
+
+        let text = std::fs::read(&f.manifest).unwrap();
+        let m = sign::rr3_manifest_parse(&text).unwrap();
+        assert_eq!(m.bytes, IMAGE.len() as u64);
+        assert_eq!(m.key_id, sign::rr3_key_id(&sign::rr3_pubkey(&SEED)));
+
+        std::fs::write(&f.image, [IMAGE, b"x"].concat()).unwrap();
+        let (m, c) = rr3_cmd_verify(&args).unwrap_err();
+        assert_eq!(c, ExitCode::from(1), "篡改镜像属校验失败");
+        assert!(m.contains("镜像校验失败"), "{m}");
+    }
+
+    /// 用错私钥签名必须拒；私钥权限过宽必须拒。
+    #[test]
+    fn sign_rejects_wrong_key_and_loose_permissions() {
+        let f = OtaFixture::new("wrong-key");
+        f.prepare();
+        let other = write_key(&f.dir.join("other.key"), &[9u8; 32]);
+        let e = rr3_cmd_sign(&[
+            "--manifest".into(),
+            f.manifest.to_string_lossy().into_owned(),
+            "--key-file".into(),
+            other.to_string_lossy().into_owned(),
+            "--sig-out".into(),
+            f.dir.join("other.sig").to_string_lossy().into_owned(),
+        ])
+        .unwrap_err();
+        assert_eq!(e.1, ExitCode::from(1));
+        assert!(e.0.contains("key_id"), "{:?}", e.0);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&f.key, std::fs::Permissions::from_mode(0o644)).unwrap();
+            let e = rr3_cmd_keypub(&["--key-file".into(), f.key.to_string_lossy().into_owned()])
+                .unwrap_err();
+            assert_eq!(e.1, ExitCode::from(1));
+            assert!(e.0.contains("0600"), "{:?}", e.0);
+        }
+    }
+
+    /// 降级门与开关互斥；platform/board 不匹配必须拒。
+    #[test]
+    fn verify_enforces_downgrade_and_target_policy() {
+        let f = OtaFixture::new("policy");
+        f.prepare();
+        let mut args = f.verify_args();
+        args.extend(["--current-version".into(), "0.0.8".into()]);
+        let (m, c) = rr3_cmd_verify(&args).unwrap_err();
+        assert_eq!(c, ExitCode::from(1));
+        assert!(m.contains("拒绝降级"), "{m}");
+
+        args.push("--allow-downgrade".into());
+        rr3_cmd_verify(&args).expect("显式允许降级应通过");
+
+        let e = rr3_cmd_verify(&[
+            "--manifest".into(),
+            f.manifest.to_string_lossy().into_owned(),
+            "--sig".into(),
+            f.sig.to_string_lossy().into_owned(),
+            "--pub".into(),
+            f.pubkey.to_string_lossy().into_owned(),
+            "--allow-downgrade".into(),
+        ])
+        .unwrap_err();
+        assert_eq!(e.1, ExitCode::from(2), "无 current 的降级开关是用法错");
+        assert!(e.0.contains("--current-version"), "{:?}", e.0);
+
+        let mut wrong = f.verify_args();
+        wrong[7] = "raspberry-pi-4".into();
+        wrong.extend(["--current-version".into(), "0.0.7".into()]);
+        let (m, c) = rr3_cmd_verify(&wrong).unwrap_err();
+        assert_eq!(c, ExitCode::from(1));
+        assert!(m.contains("platform 不匹配"), "{m}");
+    }
+
+    /// manifest 元数据不合法时在生成面拒，不产生半成品。
+    #[test]
+    fn manifest_rejects_bad_metadata() {
+        let f = OtaFixture::new("metadata");
+        let mk = |version: &str, platform: &str| -> Vec<String> {
+            vec![
+                "--image".into(),
+                f.image.to_string_lossy().into_owned(),
+                "--platform".into(),
+                platform.into(),
+                "--board".into(),
+                "radxa-zero3".into(),
+                "--version".into(),
+                version.into(),
+                "--key-file".into(),
+                f.key.to_string_lossy().into_owned(),
+                "--out".into(),
+                f.manifest.to_string_lossy().into_owned(),
+            ]
+        };
+        for (version, platform) in [("0.0", "rk3566"), ("0.0.8", "RK3566")] {
+            let (m, c) = rr3_cmd_manifest(&mk(version, platform)).unwrap_err();
+            assert_eq!(c, ExitCode::from(1), "非法元数据属业务拒");
+            assert!(m.contains("拒绝生成 manifest"), "{m}");
+            assert!(!f.manifest.exists(), "被拒不得留下 manifest");
+        }
     }
 }
