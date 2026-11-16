@@ -173,13 +173,14 @@ jobs:
             exit 1
           fi
 
-      - name: 注入 BINARIES_DIR（rrd / rr3-ctl / 五模块）
+      - name: 注入 BINARIES_DIR（rrd / rr3-ctl / rr3-ota-ctl / 五模块）
         run: |
           set -euo pipefail
           rel=/tmp/rr3-build/aarch64-unknown-linux-musl/release
           mkdir -p /tmp/br-out/images/rr3-modules
           install -m 0755 "$rel/rrd" /tmp/br-out/images/rrd
           install -m 0755 "$rel/rr3-ctl" /tmp/br-out/images/rr3-ctl
+          install -m 0755 "$rel/rr3-ota-ctl" /tmp/br-out/images/rr3-ota-ctl
           for m in act connect interact sense power; do
             d=/tmp/br-out/images/rr3-modules/rr3-$m
             mkdir -p "$d"

@@ -20,12 +20,13 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   export CARGO_TARGET_DIR=/tmp/rr3-target
   REL=$CARGO_TARGET_DIR/release
 
-  echo "== ① 构建：base/runtime 工作区 + 六个 Rust 模块 + rr3-ctl + rr3-pack =="
+  echo "== ① 构建：base/runtime 工作区 + 六个 Rust 模块 + rr3-ctl + rr3-ota-ctl + rr3-pack =="
   cargo build -q --locked --release --manifest-path base/runtime/Cargo.toml -p rrd
   for m in act brain connect interact sense power; do
     cargo build -q --locked --release --manifest-path "modules/rr3-$m/Cargo.toml"
   done
   cargo build -q --locked --release --manifest-path tools/rrctl/Cargo.toml
+  cargo build -q --locked --release --manifest-path base/ota/rr3-ota-ctl/Cargo.toml
   cargo build -q --locked --release --manifest-path tools/rr3-pack/Cargo.toml
 
   echo "== ② 打包器单测（D8 判据：打包脚本单测）=="
@@ -35,7 +36,7 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   PAY=/tmp/rr3-payload
   rm -rf "$PAY"
   mkdir -p "$PAY/rr3-modules"
-  cp "$REL/rrd" "$REL/rr3-ctl" "$PAY/"
+  cp "$REL/rrd" "$REL/rr3-ctl" "$REL/rr3-ota-ctl" "$PAY/"
   for m in act brain connect interact sense power; do
     mkdir -p "$PAY/rr3-modules/rr3-$m"
     cp "$REL/rr3-$m" "$PAY/rr3-modules/rr3-$m/bin"
@@ -85,6 +86,7 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   }
   must_exec /usr/bin/rrd
   must_exec /usr/bin/rr3-ctl
+  must_exec /usr/bin/rr3-ota-ctl
   must_file /usr/lib/systemd/system/rrd.service
   must_dir /var/lib/rockrobot3 # postinst 建目录（RR3_DATA_DIR，0.0.6 批E-R3）
   # 注：本文件 ⑤-⑧ 整体在 docker bash -c 单引号串内，注释/文案禁用 ASCII 撇号

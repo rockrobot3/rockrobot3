@@ -84,9 +84,12 @@ fn rr3_stage_names(cfg: &Rr3PackConfig) -> Result<Vec<String>, String> {
     rr3_module_names(&cfg.payload)
 }
 
-/// 两个入口产物在场门（缺席逐件点名）。
+/// 入口产物单一清单：rrd / rr3-ctl / rr3-ota-ctl（在场门与落盘共用）。
+const RR3_PAYLOAD_BINS: [&str; 3] = ["rrd", "rr3-ctl", "rr3-ota-ctl"];
+
+/// 入口产物在场门（缺席逐件点名）。
 fn rr3_payload_bins(cfg: &Rr3PackConfig) -> Result<(), String> {
-    for bin in ["rrd", "rr3-ctl"] {
+    for bin in RR3_PAYLOAD_BINS {
         rr3_bin_ready(cfg, bin)?;
     }
     Ok(())
@@ -97,7 +100,7 @@ fn rr3_bin_ready(cfg: &Rr3PackConfig, bin: &str) -> Result<(), String> {
     let p = cfg.payload.join(bin);
     if !p.is_file() {
         return Err(format!(
-            "注入产物 {bin} 缺席: {}（约定 --payload 下有 rrd、rr3-ctl、rr3-modules/<name>/{{bin,manifest.toml}}）",
+            "注入产物 {bin} 缺席: {}（约定 --payload 下有 rrd、rr3-ctl、rr3-ota-ctl、rr3-modules/<name>/{{bin,manifest.toml}}）",
             p.display()
         ));
     }
@@ -111,9 +114,9 @@ fn rr3_stage_layout(cfg: &Rr3PackConfig, stage: &Path) -> Result<(), String> {
     rr3_stage_debian(cfg, stage)
 }
 
-/// 两个入口产物落 usr/bin（错误文案带产物名）。
+/// 入口产物落 usr/bin（错误文案带产物名）。
 fn rr3_stage_bins(cfg: &Rr3PackConfig, stage: &Path) -> Result<(), String> {
-    for bin in ["rrd", "rr3-ctl"] {
+    for bin in RR3_PAYLOAD_BINS {
         fs::copy(cfg.payload.join(bin), stage.join("usr/bin").join(bin))
             .map_err(|e| format!("复制 {bin} 失败: {e}"))?;
     }

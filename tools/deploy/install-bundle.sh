@@ -58,7 +58,7 @@ trap cleanup EXIT
 # 新 rrd + 旧 profile 直接崩溃循环。备份与树备份同生命周期。
 rm -rf "$binbk"
 mkdir -p "$binbk"
-for b in rrd rr3-ctl; do
+for b in rrd rr3-ctl rr3-ota-ctl; do
   [ -f "$BIN/$b" ] && cp -a "$BIN/$b" "$binbk/$b"
 done
 
@@ -69,7 +69,7 @@ else
   mkdir -p "$stage"
 fi
 tar -xzf "$BUNDLE" -C "$stage" --strip-components=1
-for f in bin/rrd bin/rr3-ctl contracts/topics.toml; do
+for f in bin/rrd bin/rr3-ctl bin/rr3-ota-ctl contracts/topics.toml; do
   [ -f "$stage/$f" ] || die "解包后缺 ${f}（包内容与 A10 契约不符）"
 done
 
@@ -83,11 +83,11 @@ fi
 rollback() {
   echo "FAIL  新树启动验证未过，回滚" >&2
   systemctl stop rrd >/dev/null 2>&1 || true
-  rm -f "$BIN/.rrd.new" "$BIN/.rr3-ctl.new"
+  rm -f "$BIN/.rrd.new" "$BIN/.rr3-ctl.new" "$BIN/.rr3-ota-ctl.new"
   rm -rf "$ROOT"
   if [ -d "$backup" ]; then
     mv "$backup" "$ROOT"
-    for b in rrd rr3-ctl; do
+    for b in rrd rr3-ctl rr3-ota-ctl; do
       if [ -f "$binbk/$b" ]; then
         install -m755 "$binbk/$b" "$BIN/$b"
       elif [ -f "$ROOT/bin/$b" ]; then
@@ -128,7 +128,7 @@ trap - EXIT
 
 # 二进制替换同样在回滚保护内：这里失败若直接退出，会留下"新树 + 旧 rrd"
 # 的半更新态，正是本脚本要消灭的故障面。
-for b in rrd rr3-ctl; do
+for b in rrd rr3-ctl rr3-ota-ctl; do
   install -m755 "$ROOT/bin/$b" "$BIN/.$b.new" || rollback
   mv -f "$BIN/.$b.new" "$BIN/$b" || rollback
 done

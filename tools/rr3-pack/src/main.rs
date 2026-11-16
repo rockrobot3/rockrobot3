@@ -2,7 +2,7 @@
 //!
 //! 输入两份真值，装配各自薄装（保底轨 post-build.sh 读同一注入格式，两轨不互抄装配）：
 //! - `--payload` 注入产物（两轨同源约定，与 buildroot post-build.sh 同一口径）：
-//!   `rrd`、`rr3-ctl`；rust 模块 `rr3-modules/<name>/{bin,manifest.toml}`；
+//!   `rrd`、`rr3-ctl`、`rr3-ota-ctl`；rust 模块 `rr3-modules/<name>/{bin,manifest.toml}`；
 //!   python 模块 `rr3-modules/<name>/{pkg/,manifest.toml}`（`pkg/` = 包树，
 //!   如 `rr3_brain/`；entry 装机产物是打包器生成的 shim，见下）；
 //! - `--repo` 仓根：`profiles/<name>.toml`（`--profile` 选机型，缺省 distro——H4/C2 批K
@@ -16,7 +16,7 @@
 //!   打包先按装载同判据预验装配单，坏单不得出包）。
 //!
 //! staging 装配是纯 Rust（macOS 可跑可单测），deb 布局：
-//! `/usr/bin/{rrd,rr3-ctl}` + `/usr/lib/rockrobot3/{profiles,contracts,modules,hardware}` +
+//! `/usr/bin/{rrd,rr3-ctl,rr3-ota-ctl}` + `/usr/lib/rockrobot3/{profiles,contracts,modules,hardware}` +
 //! `/usr/lib/systemd/system/rrd.service` + `DEBIAN/{control,postinst}`。
 //!
 //! **内容改写只有两处**（除此外字节零差异）：①entry 装机改写（modules/README.md：

@@ -5,7 +5,7 @@
 #   stage-image.sh /tmp/rr3-img amd64 0.0.6
 #
 # 前置：调用方已在**目标平台原生**构建好 release 产物（rrd / 六模块 / rr3-ctl /
-# rr3-pack）。本脚本不编译、不下载，只做 载荷组装 → rr3-pack --stage-only →
+# rr3-ota-ctl / rr3-pack）。本脚本不编译、不下载，只做 载荷组装 → rr3-pack --stage-only →
 # 把 `*.stage` 树移到 <stage-out>，供 Containerfile 以该目录为构建上下文。
 #
 # 为什么不用交叉：镜像是"装机面"，必须与目标架构的原生产物一致；amd64 用
@@ -27,7 +27,7 @@ if [ -z "$out" ] || [ -z "$arch" ]; then
 fi
 
 rel="${CARGO_TARGET_DIR:-/tmp/rr3-build}/release"
-for b in rrd rr3-ctl rr3-pack; do
+for b in rrd rr3-ctl rr3-ota-ctl rr3-pack; do
   [ -x "$rel/$b" ] || { echo "缺产物 $rel/${b}（先原生 cargo build --release）" >&2; exit 1; }
 done
 for m in act brain connect interact sense power; do
@@ -37,7 +37,7 @@ done
 pay="$(mktemp -d)"
 trap 'rm -rf "$pay"' EXIT
 mkdir -p "$pay/rr3-modules"
-cp "$rel/rrd" "$rel/rr3-ctl" "$pay/"
+cp "$rel/rrd" "$rel/rr3-ctl" "$rel/rr3-ota-ctl" "$pay/"
 for m in act brain connect interact sense power; do
   mkdir -p "$pay/rr3-modules/rr3-$m"
   cp "$rel/rr3-$m" "$pay/rr3-modules/rr3-$m/bin"

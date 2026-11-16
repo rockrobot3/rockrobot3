@@ -36,6 +36,10 @@ for name in rrd rr3-ctl; do
   [ -f "$src" ] || die "$name 未构建: ${src}（先跑 bash tools/ci/arm64-cross-check.sh）"
   install -m755 "$src" "$B/bin/$name"
 done
+src=$( cd "$ROOT/base/ota/rr3-ota-ctl" && rr3_cargo_artifact "$TARGET" release rr3-ota-ctl ) \
+  || die "rr3-ota-ctl 产物定位失败"
+[ -f "$src" ] || die "rr3-ota-ctl 未构建: ${src}（先跑 bash tools/ci/arm64-cross-check.sh）"
+install -m755 "$src" "$B/bin/rr3-ota-ctl"
 
 NATIVE_DIR=${RR3_BUNDLE_NATIVE_DIR:-}
 natives=""
@@ -71,7 +75,7 @@ cat > "$B/BUNDLE_VERSION" <<EOF
 commit=$COMMIT
 built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 target=$TARGET
-components=rrd,rr3-ctl,rr3-act,rr3-connect,rr3-interact,rr3-power,rr3-sense
+components=rrd,rr3-ctl,rr3-ota-ctl,rr3-act,rr3-connect,rr3-interact,rr3-power,rr3-sense
 natives=${natives%,}
 EOF
 
