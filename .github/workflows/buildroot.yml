@@ -91,3 +91,116 @@ jobs:
             file "$f"
           done
           echo "PASS  Linux ${LINUX_VER} + v6.12 板级 dts 回移：两个变体 dtb 构建通过"
+
+  # 全量镜像（M1 构建半边）：小时级重活，只在显式提交信息带 [buildroot-full] 或
+  # workflow_dispatch 时跑；日常 buildroot 改动只跑上面的 dtb 门。
+  image:
+    needs: dtb-backport
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[buildroot-full]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 释放磁盘（Buildroot 全量构建）
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+          df -h /
+
+      - name: 安装 Buildroot 宿主依赖
+        run: |
+          set -o pipefail
+          sudo apt-get update -qq 2>&1 | tail -3
+          if ! sudo apt-get install -y -qq build-essential git wget cpio unzip rsync bc \
+              bison flex libssl-dev libncurses-dev python3 file 2>&1 | tail -5; then
+            echo "::error title=br-deps::Buildroot 宿主依赖安装失败"
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+
+      - name: 取 Buildroot 2024.02.11 并叠 configs/board
+        run: |
+          set -o pipefail
+          ok=0
+          for _ in 1 2 3; do
+            rm -rf /tmp/buildroot
+            if git clone --depth 1 --branch 2024.02.11 \
+                https://github.com/buildroot/buildroot.git /tmp/buildroot; then
+              ok=1
+              break
+            fi
+            sleep 3
+          done
+          if [ "$ok" != 1 ]; then
+            echo "::error title=br-clone::Buildroot 2024.02.11 clone 失败"
+            exit 1
+          fi
+          cp -a base/os/buildroot/configs/. /tmp/buildroot/configs/
+          cp -a base/os/buildroot/board/. /tmp/buildroot/board/
+          ls /tmp/buildroot/configs/rock3_zero3_defconfig /tmp/buildroot/board/radxa-zero3/patches/
+
+      - name: 交叉构建注入产物（aarch64-musl 静态）
+        run: |
+          set -o pipefail
+          if ! bash tools/ci/cross-artifacts.sh aarch64-unknown-linux-musl \
+              'ARM aarch64' static > /tmp/stage-build.log 2>&1; then
+            echo "::error title=stage-build::板侧产物交叉构建失败"
+            tail -8 /tmp/stage-build.log
+            exit 1
+          fi
+
+      - name: 注入 BINARIES_DIR（rrd / rr3-ctl / 五模块）
+        run: |
+          set -euo pipefail
+          rel=/tmp/rr3-build/aarch64-unknown-linux-musl/release
+          mkdir -p /tmp/br-out/images/rr3-modules
+          install -m 0755 "$rel/rrd" /tmp/br-out/images/rrd
+          install -m 0755 "$rel/rr3-ctl" /tmp/br-out/images/rr3-ctl
+          for m in act connect interact sense power; do
+            d=/tmp/br-out/images/rr3-modules/rr3-$m
+            mkdir -p "$d"
+            install -m 0755 "$rel/rr3-$m" "$d/bin"
+            install -m 0644 "modules/rr3-$m/module.toml" "$d/manifest.toml"
+          done
+          find /tmp/br-out/images -maxdepth 3 -type f | head -20
+
+      - name: 全量构建（defconfig + make）
+        env:
+          RR3_REPO_ROOT: ${{ github.workspace }}
+        run: |
+          set -o pipefail
+          if ! make -C /tmp/buildroot O=/tmp/br-out rock3_zero3_defconfig > /tmp/br-defconfig.log 2>&1; then
+            echo "::error title=br-defconfig::rock3_zero3_defconfig 失败"
+            tail -8 /tmp/br-defconfig.log
+            exit 1
+          fi
+          if ! make -C /tmp/buildroot O=/tmp/br-out -j"$(nproc)" > /tmp/br-build.log 2>&1; then
+            echo "::error title=br-build::Buildroot 全量 make 失败"
+            grep -iE "error|Error [0-9]|failed|fatal" /tmp/br-build.log | tail -10
+            exit 1
+          fi
+          tail -5 /tmp/br-build.log
+
+      - name: 镜像产物断言
+        run: |
+          set -euo pipefail
+          img=/tmp/br-out/images/sdcard.img
+          if [ ! -s "$img" ]; then
+            echo "::error title=br-image::sdcard.img 未生成"
+            ls -l /tmp/br-out/images | head
+            exit 1
+          fi
+          ls -l "$img"
+          sha256sum "$img"
+          fdisk -l "$img" | head -20 || true
+          for b in rk3566-radxa-zero-3w.dtb rk3566-radxa-zero-3e.dtb; do
+            if [ ! -s "/tmp/br-out/images/$b" ]; then
+              echo "::error title=br-dtb::$b 不在 images"
+              exit 1
+            fi
+            echo "PASS  $b"
+          done
+          echo "PASS  Buildroot 2024.02.11 全量构建：sdcard.img 产出"
