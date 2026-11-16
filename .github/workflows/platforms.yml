@@ -127,6 +127,26 @@ jobs:
             fi
             echo "PASS  $b 可在 ${{ matrix.chip }} 执行"
           done
+      # 契约面从"能执行"升到"字节等价"：各芯片环境真跑 ipct003_dump，header 行与
+      # contracts/golden/event-header-128.hex 逐字节比对——128B 头布局在目标 ISA 的
+      # 真实执行环境里成立，不再只靠编译期 const 断言（IPC-T-003 的运行时补面）。
+      - name: 协议字节契约真跑（跨芯片 golden 对拍）
+        run: |
+          set -o pipefail
+          rel="/tmp/rr3-build/${{ matrix.triple }}/release"
+          case "${{ matrix.mode }}" in
+            native) "$rel/ipct003_dump" > /tmp/ipct003.txt ;;
+            musl) docker run --rm --platform "${{ matrix.platform }}" \
+                    -v "$rel:/b:ro" alpine:3.20 "/b/ipct003_dump" > /tmp/ipct003.txt ;;
+            gnu) qemu-riscv64 -L /usr/riscv64-linux-gnu "$rel/ipct003_dump" > /tmp/ipct003.txt ;;
+          esac
+          got=$(sed -n 's/^header //p' /tmp/ipct003.txt | head -1)
+          want=$(cat contracts/golden/event-header-128.hex)
+          if [ "$got" != "$want" ]; then
+            echo "::error title=chip-contract::${{ matrix.chip }} 的 128B 头与 golden 不一致（got=${got:0:64}）"
+            exit 1
+          fi
+          echo "PASS  128B 头 golden 在 ${{ matrix.chip }}（${{ matrix.triple }}）执行环境逐字节一致"
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:

@@ -7,8 +7,10 @@
 #   CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER=riscv64-linux-gnu-gcc \
 #     cross-artifacts.sh riscv64gc-unknown-linux-gnu 'RISC-V' any
 #
-# 机制与目标分离：构建集合（rrd + rr3-ctl + 五模块）、产物在树断言、ELF 架构断言
-# 都只有一份；各芯片平台的差异只是数据——目标三元组、`file` 的架构串、静态断言开关。
+# 机制与目标分离：构建集合（rrd + rr3-ctl + 五模块 + 协议契约探针）、产物在树断言、
+# ELF 架构断言都只有一份；各芯片平台的差异只是数据——目标三元组、`file` 的架构串、
+# 静态断言开关。协议契约探针 `ipct003_dump` 不进产品清单，只供各芯片环境真跑
+# 128B 头 golden 对拍（调用方按 native/musl/gnu 三种方式执行）。
 # 与 tools/deploy/pack-bundle.sh ① 同源；brain 不在列——ureq+rustls(ring) 需
 # 目标 C 工具链，归板上原生构建（pack-bundle 的 ③ 与 build-onboard.sh 同一分工）。
 #
@@ -53,9 +55,11 @@ for m in act connect interact sense power; do
   cargo build -q --locked --release --target "$target" \
     --manifest-path "modules/rr3-$m/Cargo.toml"
 done
+cargo build -q --locked --release --target "$target" \
+  --manifest-path base/runtime/Cargo.toml -p rr-ipc --bin ipct003_dump
 
 rel="$CARGO_TARGET_DIR/$target/release"
-for b in rrd rr3-ctl rr3-act rr3-connect rr3-interact rr3-sense rr3-power; do
+for b in rrd rr3-ctl rr3-act rr3-connect rr3-interact rr3-sense rr3-power ipct003_dump; do
   if [ ! -x "$rel/$b" ]; then
     echo "FAIL  产物不在树: $rel/$b" >&2
     exit 1
@@ -72,4 +76,4 @@ for b in rrd rr3-ctl rr3-act rr3-connect rr3-interact rr3-sense rr3-power; do
     exit 1
   fi
 done
-echo "PASS  $target 七件产物（${arch}，断言=${assert}）"
+echo "PASS  $target 七件产物＋协议契约探针（${arch}，断言=${assert}）"
