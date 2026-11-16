@@ -3431,7 +3431,9 @@ panic 73、长名 0。
 不损失可用性；拒连是运维事实，首条必须可见、规模不能报小。处置——accept
 结果分 `Conn/Full/Retry` 三态；`Full` 走 50ms 退避（尝试率封顶 20 次/秒），
 日志用 `Rr3RefuseGate` 时间窗节流：首条即时、5s 窗口内只计数、窗口到点汇总
-"另有 N 次"，窗口状态机有单测。验证——`cargo test -p rrd --lib` 308 passed
+"另有 N 次"，窗口状态机有单测；拒连同时累加 rrd 自有计数键 `conn_refused`
+（`ctl.counters` 可见）——节流只压打印，不压真实次数。验证——
+`cargo test -p rrd --lib` 308 passed
 （新增 `refuse_gate_logs_first_then_summarizes`）；①b **768 passed**；度量
 重复率 0.64%、CC 2.49/13、panic 73、长名 0；`check.sh` 全绿。风险边界——
 退避期间释放的连接最多多等 50ms（控制面重连窗口以秒计，不敏感）；本件不

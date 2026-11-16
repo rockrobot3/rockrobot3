@@ -165,6 +165,10 @@ pub(super) fn rr3_daemon_accept(listener: Rr3UdsListener, ctx: Rr3AcceptCtx) -> 
             // 代价是容量释放后新连接最多多等一拍；收益是尝试率封顶 20 次/秒。
             Rr3AcceptGain::Full => {
                 let live_n = live.load(Ordering::Relaxed);
+                // 账与日志分开：计数键逐次累加（ctl.counters 可读），日志按窗口
+                // 汇总——节流只压打印，不压真实次数。
+                rr3_lock(&ctx.shared)
+                    .rr3_reg_ctr_bump(crate::counters::RR3_COUNTERS_REFUSED_KEY, 1);
                 if let Some(line) = gate.rr3_refuse_note(Instant::now(), live_n, RR3_MAX_CONNS) {
                     rr3_log(&line);
                 }

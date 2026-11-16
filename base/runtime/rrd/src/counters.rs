@@ -37,6 +37,10 @@ static RR3_COUNTERS_STORE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// `boots` 是 rrd 自有的计数键（启动自增，不走心跳），聚合表里的保留字面量
 pub const RR3_COUNTERS_BOOTS_KEY: &str = "boots";
 
+/// `conn_refused` 是 rrd 自有的计数键：并发槽满的累计拒连数。日志按 5s 窗口
+/// 节流，这个键不节流——"现在有多少次拒连"必须能读到数，不能只看刷屏频率。
+pub const RR3_COUNTERS_REFUSED_KEY: &str = "conn_refused";
+
 /// 持久化文件名（固定挂在数据目录下）
 const COUNTERS_FILE: &str = "counters.json";
 /// 原子写序的临时文件名（同目录，rename 原子覆盖）
