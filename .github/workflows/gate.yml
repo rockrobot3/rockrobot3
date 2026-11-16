@@ -148,6 +148,39 @@ jobs:
             exit 1
           fi
 
+  # ALSA 真后端编译门（覆盖缺口）：`--features alsa` 不是默认特性，conventions
+  # 的 check.sh（默认特性）与 macOS 腿都不编译 `linux.rs` 与 backend 的 alsa
+  # 分支——没有本 job，那半边代码只在板子上第一次编译。只做 check（含测试目标
+  # 编译），不打开音频设备：运行期行为归板上批。
+  alsa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      - name: 安装 ALSA 开发头
+        run: |
+          set -o pipefail
+          if ! sudo apt-get update -qq 2>&1 | tail -2; then
+            echo "::warning title=apt::apt-get update 失败，继续尝试安装"
+          fi
+          if ! sudo apt-get install -y -qq libasound2-dev pkg-config 2>&1 | tee /tmp/apt-alsa.log; then
+            why=$(grep -iE "unable to locate|has no installation candidate|depends|error" /tmp/apt-alsa.log | tail -3 | tr '\n' ' ')
+            echo "::error title=apt-alsa::${why:0:700}"
+            exit 1
+          fi
+      - name: rr-hal alsa 特性全目标编译
+        run: |
+          set -o pipefail
+          if ! cargo check --all-targets -p rr-hal --features alsa 2>&1 | tee /tmp/alsa.log; then
+            errs=$(grep -E "error(\[|:)" /tmp/alsa.log | head -4 | tr '\n' ' ')
+            echo "::error title=alsa::${errs:0:900}"
+            exit 1
+          fi
+
   # 脚本语法门：CI 的全部判据最终都落在 tools/ci/*.sh 上——脚本自身写坏时，
   # 门禁会"看起来跑过了"。bash -n 不执行、零副作用，覆盖全部追踪脚本。
   scripts:
