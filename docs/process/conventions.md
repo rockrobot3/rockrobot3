@@ -3268,6 +3268,23 @@ CI"往返，本地无法复跑。SKIP 纪律：仅 `RR3_SMOKE_ALLOW_SKIP=1` 时�
 判据共用一个脚本 `tools/ci/cross-artifacts.sh`（差异只有三元组、架构串、静态断言
 开关与构建器），esp 家族共用 `.github/actions/esp-toolchain` 安装面。
 
+**2026-11-16 平台矩阵重构回执**（commit `138d419`，run 43803306704 三 workflow 全绿）：
+
+- **重复面收单点**：esp 工具链安装（esp32-gates 与 ipct003 各写一份）与"失败压注解"
+  模板（六个门各写一份）收为 `.github/actions/{esp-toolchain,guarded-run}`，
+  `platforms.yml` 330→212 行；删除恒真的 `if` 与零调用方的 `host-check-target.sh`。
+- **覆盖补齐**：`cross-artifacts` 由两腿扩为三腿——英特尔/AMD 原生（七件 + 原生执行）、
+  瑞芯微 aarch64-musl（七件 + 容器执行）、进迭时空 riscv64-gnu（apt 交叉 gcc +
+  qemu-user 执行）；执行判据从"没报 exec format error"升到"真打印预期用法"。
+- **首跑四红与根因**（均已修，如实留痕）：① 我新写的 `$assert）`/`$arch）` 触 ⑬-4
+  变量展开截断门；② native 腿被 `rust-lld` 判红（gnu 目标须系统链接器）；③ musl
+  cross 链路过宿主 `cc`（`collect2: ld returned`）→ 改 gnu 交叉链；④ riscv gnu 的
+  std 未声明（`can't find crate for core`）——`rust-toolchain.toml` 的 `targets` 必须
+  与矩阵同批改，正是该文件注释预警过的形态。
+- **口径**：本轮起本地不承担编译/集成验证（本机算力与环境非标准），`check.sh` 的
+  重编译步以 CI `gate` 的回执为权威；本地只做 YAML/脚本语法与 §2 静态门。本表每一腿
+  的结论都有远端回执支撑。
+
 纪律：① **不在源码区做任何编译/集成/构建**（`.cargo/config.toml` 已把 target-dir
 指到 `/tmp`，CI 侧只跑远端）；② 新增需要"跑起来"的验证，先加进 `check.sh` 或本表
 的 job，再谈"本地没跑过"；③ 同一 ref 的旧运行由 `concurrency` 自动取消，避免排队
