@@ -3521,6 +3521,14 @@ cfg 守卫挤在一个函数里）。处置——按后端拆成 `rr3_src_linux`
 `('modules/rr3-power/src/boot.rs', 2000)`；撤回后复绿。局限如实写：动态等待、
 阻塞 IO、锁内长临界区不在扫面，归评审与运行时观测。
 
+**2026-11-17 验签链单点化 + CC 峰值 11**：事实——`verify` 与 `install` 各写
+一份"解析 → 取公钥 → 验签 → 目标/降级 → 镜像摘要"的五步链（ADR-0026 要单点），
+`rr3_verify_args` / `rr3_cmd_install` / `rr3_manifest_parse` 三处 CC 12。处置——
+抽 `rr3_check_pkg`（verify/install 共用**唯一验签链**；install 只在写前复解析
+原文做摘要判据，不二次验签）、`rr3_key_src` / `rr3_downgrade_ok`、`rr3_meta_fields`。
+验证——rr-ota **35**、rr3-ota-ctl **14** tests；重复率 **0.56%**、CC 均值 2.49 /
+峰值 **11**，基线 `cc_max_fn` 12→**11**（只降不升）；`check.sh` 全绿。
+
 **2026-11-17 status 里程碑对表（M6 OTA 行）**：事实——M6 行仍写"U-Boot env
 写侧未实装 / `rr3-ota-ctl` 三子命令"，与 HEAD 不符：`rr-ota/src/bootenv.rs`
 已实装（0.0.8 P1 审计件五），CLI 已九子命令，ADR-0026 签名/验签链已落地。
