@@ -60,7 +60,7 @@ if [ "$DRY" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
 fi
 
 if ! command -v "$BIN" >/dev/null 2>&1 && [ ! -x "$BIN" ]; then
-	echo "找不到可执行 $BIN：先按文档「产物供给」装到 PATH（本脚本不构建）" >&2
+	echo "找不到可执行 ${BIN}：先按文档「产物供给」装到 PATH（本脚本不构建）" >&2
 	exit 1
 fi
 
@@ -107,8 +107,8 @@ trap 'exit 130' INT TERM
 
 echo "[audio-rec] 编排：stop rrd → 等 $DEV 释放 → $BIN $DEV --secs $SECS --baud $BAUD --out $OUT"
 if [ "$DRY" -eq 1 ]; then
-	echo "[audio-rec] --dry-run：不执行停链/收流（目标文件 $OUT / 日志 $LOG）"
-	RESTORE=0
+	echo "[audio-rec] --dry-run：不执行停链/收流（目标文件 ${OUT} / 日志 ${LOG}）"
+	trap - EXIT
 	exit 0
 fi
 
@@ -136,7 +136,7 @@ set +e
 rc=${PIPESTATUS[0]}
 set -e
 
-echo "[audio-rec] 收流退出码=$rc；wav=$OUT；日志=$LOG" >&2
+echo "[audio-rec] 收流退出码=${rc}；wav=${OUT}；日志=${LOG}" >&2
 if [ -s "$LOG" ]; then
 	grep -E 'gaps=|restarts=|seq|分片|重连|坏帧' "$LOG" | tail -20 >&2 || true
 fi
