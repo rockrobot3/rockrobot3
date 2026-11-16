@@ -3306,13 +3306,16 @@ Windows 半边结项。首跑 4 处红全部是**跨平台假设**而非产品�
 **2026-11-16 供应链门建成（`supply`）**：`gate.yml` 新增 `supply` job，仓根
 [`deny.toml`](../../deny.toml) 是策略唯一真源，[`tools/ci/supply-audit.sh`](../../tools/ci/supply-audit.sh)
 枚举 **22** 个工程根（`base/runtime` 工作区 + `modules/`/`tools/`/`base/ota/` 独立工程）
-逐个 `cargo deny check --locked`。四类判据：①许可证**显式白名单**（2026-11-16 全根
+逐个 `cargo deny --locked check`。四类判据：①许可证**显式白名单**（2026-11-16 全根
 实测只有 MIT / Apache-2.0 / ISC / Unicode-3.0 / BSD-3-Clause / Unlicense /
 CDLA-Permissive-2.0 七类，无 copyleft；私有件 `publish = false` 显式忽略）；②RustSec
 公告（未维护项只对直接依赖执法，避免上游陈账把每次推送染红）；③来源白名单（仅
 crates.io + 仓内 path）；④通配版本依赖拒绝。本地无 cargo-deny 时 SKIP 明说，CI
 `--strict` 工具缺位即红。`deny.toml` 已进 `.gitignore` 白名单（默认忽略所有策略下
-必须显式登记）。
+必须显式登记）。**首跑红与根因**（如实留痕）：`--locked` 写在子命令 `check` 之后，
+cargo-deny 的公共选项只认子命令之前（`cli/common.html`），22 个工程根全部瞬时失败；
+注解侧同时暴露第二处缺陷——只取 head 时逐工程 FAIL 行把唯一的命令级错误挤出上限，
+已改为"诊断行优先 → FAIL 行 → 日志尾部"三级回退，脚本失败时也回显日志首行。
 
 
 **2026-11-13 源文件行数上限（⑭，新立）**：每个 `.rs` 源文件必须 **<600 行**
