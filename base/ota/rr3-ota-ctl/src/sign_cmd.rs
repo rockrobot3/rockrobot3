@@ -42,40 +42,49 @@ pub(crate) fn rr3_cmd_keypub(args: &[String]) -> Result<String, (String, ExitCod
     }
 }
 
-/// manifest：从镜像与元数据生成严格 manifest（sha256/bytes/key_id 由本命令算）。
-pub(crate) fn rr3_cmd_manifest(args: &[String]) -> Result<String, (String, ExitCode)> {
-    let image = PathBuf::from(
-        rr3_val_arg(args, "--image", "manifest 必须显式传 --image <镜像路径>").map_err(rr3_use)?,
-    );
+/// manifest 的参数面（六个必填；解析与执行分离，主流程只做生成与落盘）。
+struct Rr3ManifestArgs {
+    image: PathBuf,
+    platform: String,
+    board: String,
+    version: String,
+    key: PathBuf,
+    out: PathBuf,
+}
+
+fn rr3_manifest_args(args: &[String]) -> Result<Rr3ManifestArgs, (String, ExitCode)> {
+    let image =
+        rr3_val_arg(args, "--image", "manifest 必须显式传 --image <镜像路径>").map_err(rr3_use)?;
     let platform =
         rr3_val_arg(args, "--platform", "manifest 必须显式传 --platform").map_err(rr3_use)?;
     let board = rr3_val_arg(args, "--board", "manifest 必须显式传 --board").map_err(rr3_use)?;
     let version =
         rr3_val_arg(args, "--version", "manifest 必须显式传 --version").map_err(rr3_use)?;
-    let key = PathBuf::from(
-        rr3_val_arg(args, "--key-file", "manifest 必须显式传 --key-file").map_err(rr3_use)?,
-    );
-    let out = PathBuf::from(
-        rr3_val_arg(args, "--out", "manifest 必须显式传 --out <manifest 路径>").map_err(rr3_use)?,
-    );
-    let seed = rr3_read_seed(&key)?;
-    let (sha256, bytes) = sign::rr3_image_digest(&image)
+    let key = rr3_val_arg(args, "--key-file", "manifest 必须显式传 --key-file").map_err(rr3_use)?;
+    let out =
+        rr3_val_arg(args, "--out", "manifest 必须显式传 --out <manifest 路径>").map_err(rr3_use)?;
+    Ok(Rr3ManifestArgs {
+        image: PathBuf::from(image),
+        platform,
+        board,
+        version,
+        key: PathBuf::from(key),
+        out: PathBuf::from(out),
+    })
+}
+
+/// manifest：从镜像与元数据生成严格 manifest（sha256/bytes/key_id 由本命令算）。
+pub(crate) fn rr3_cmd_manifest(args: &[String]) -> Result<String, (String, ExitCode)> {
+    let a = rr3_manifest_args(args)?;
+    let seed = rr3_read_seed(&a.key)?;
+    let (sha256, bytes) = sign::rr3_image_digest(&a.image)
         .map_err(|e| (format!("拒绝生成 manifest：{e}"), ExitCode::from(1)))?;
-    let image_name = image
-        .file_name()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| {
-            (
-                format!("镜像路径没有合法文件名：{image:?}"),
-                ExitCode::from(1),
-            )
-        })?
-        .to_string();
+    let image_name = rr3_image_name(&a.image)?;
     let m = sign::Rr3OtaManifest {
         kind: sign::RR3_OTA_KIND_ROOTFS,
-        platform: &platform,
-        board: &board,
-        version: &version,
+        platform: &a.platform,
+        board: &a.board,
+        version: &a.version,
         image: &image_name,
         bytes,
         sha256,
@@ -84,13 +93,27 @@ pub(crate) fn rr3_cmd_manifest(args: &[String]) -> Result<String, (String, ExitC
     let text = sign::rr3_manifest_render(&m);
     sign::rr3_manifest_parse(text.as_bytes())
         .map_err(|e| (format!("拒绝生成 manifest：{e}"), ExitCode::from(1)))?;
-    rr3_write_atomic(&out, text.as_bytes())?;
+    rr3_write_atomic(&a.out, text.as_bytes())?;
     Ok(format!(
         "manifest 已生成：{}（image={image_name} bytes={bytes} sha256={} key_id={}）",
-        out.display(),
+        a.out.display(),
         sign::rr3_hex_encode(&sha256),
         sign::rr3_hex_encode(&m.key_id)
     ))
+}
+
+/// 镜像文件名：manifest 只记单个路径分量，取不到合法文件名即拒。
+fn rr3_image_name(image: &Path) -> Result<String, (String, ExitCode)> {
+    image
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            (
+                format!("镜像路径没有合法文件名：{image:?}"),
+                ExitCode::from(1),
+            )
+        })
 }
 
 /// sign：对 manifest 原始字节签名；manifest 的 key_id 必须与私钥派生值一致。

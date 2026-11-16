@@ -3480,6 +3480,14 @@ rrctl 仅覆盖其中 6 个；③A/B OTA 行写"CLI 三子命令 / 落盘 fsync 
 **不新增 ADR 总表文件**——README 已是导航真值，另立总表等于造第二真值点。
 验证——`check.sh` ⑤ 文档门通过；五份文件名与目录逐字一致。
 
+**2026-11-17 复杂度回归（`rr3_cmd_manifest` 13 → 拆分）**：事实——本轮收口
+时 CC 均值 2.49，峰值 13 在 rr-hal，但 OTA CLI 的 `rr3_cmd_manifest` 已到 13
+（与峰值并列），其判定点大半来自 8 个重复的 `rr3_val_arg + map_err` 参数样板。
+处置——参数面抽成 `Rr3ManifestArgs` / `rr3_manifest_args`，镜像文件名抽
+`rr3_image_name`，主流程只留生成 / 复核 / 落盘；CLI 行为与文案逐字不变。
+验证——`rr3-ota-ctl` 14 tests、clippy/fmt 全绿；CC 峰值仍 13（仅 rr-hal），
+均值 2.49、重复率 0.64%、panic 73、长名 0；`check.sh` 全绿。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
