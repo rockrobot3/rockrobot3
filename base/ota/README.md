@@ -66,7 +66,7 @@ root=LABEL 标签（原子落盘）。槽位镜像写入（往 rr_b 落整镜像
 两者必须二选一。
 
 边界：`verify` 只读，不写任何槽位；`install` 只接受**普通文件**目标，
-先验签、再临时件复核、fsync、rename；块设备/槽位写入、`rr3.ctl.ota`
+先验签、再临时件复核、fsync 临时件、rename、fsync 父目录；块设备/槽位写入、`rr3.ctl.ota`
 在线入口与 U-Boot 回滚链仍归 M6 板上批。公钥按 `ota/keys/<key_id>.pub`
 随安装树只读分发，私钥永不进镜像、仓库与设备。文法与信任模型见
 [ADR-0026](../../docs/process/adr/ADR-0026-OTA镜像签名与验签链.md)。

@@ -3452,6 +3452,17 @@ MC-8① 判 (c) 的"声明未生效"文案逐字不动。同批落装载门 `cut
 （新增 `battery_cutoff_must_stay_below_low`）；装载门文案含"阈值倒挂"与
 "ADR-0027"；度量重复率 0.64%、CC 2.49/13、panic 73、长名 0；`check.sh` 全绿。
 
+**2026-11-17 A1d 补（staging 落盘补父目录 fsync）**：事实——`install` 与
+`rr3_write_atomic` 只 fsync 临时文件再 rename；文件内容耐久、目录项不耐久，
+断电窗口里可能丢名字或留半状态。判据——ADR-0026 的"fsync → rename"只覆盖
+内容半边，目录项落盘是另一半；staging 是板上 OTA 的落点，不能把半状态留给 M6。
+处置——rename 后对父目录 fsync，失败即报错并明说"rename 已生效，但断电后
+目录项可能丢失"；非 unix 平台按 no-op（生产目标是 Linux 板）。验证——
+`rr3-ota-ctl` 测试 13→**15**（原子写回读 + 目录 fsync 成功；缺目录拒并点名）；
+`sign_cmd.rs` 456 行 + `sign_cmd/tests.rs` 30 行（均 <600，新用例独立成文件
+避免顶穿 `main.rs` 599 行）；度量重复率 0.64%、CC 2.49/13、panic 73、长名 0；
+`check.sh` 全绿。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
