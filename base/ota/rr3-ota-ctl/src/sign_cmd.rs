@@ -3,6 +3,7 @@
 //! 机制全在 `rr-ota::sign`；本文件只做参数形制、文件读写与原子落盘。
 //! 四个子命令都不缺省碰任何路径：私钥、manifest、签名、镜像、公钥都必须显式给。
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -266,26 +267,31 @@ fn rr3_read_bytes(path: &Path, what: &str) -> Result<Vec<u8>, (String, ExitCode)
 }
 
 fn rr3_read_capped(path: &Path, what: &str, max: u64) -> Result<Vec<u8>, (String, ExitCode)> {
-    let len = std::fs::metadata(path)
+    // 用 take(max+1) 而不是先 metadata 再 read：文件可在两次调用之间被换大，
+    // 读取上界必须由同一次读取本身保证。
+    let mut file = std::fs::File::open(path).map_err(|e| {
+        (
+            format!("读{what} {} 失败：{e}", path.display()),
+            ExitCode::from(1),
+        )
+    })?;
+    let mut buf = Vec::new();
+    file.by_ref()
+        .take(max.saturating_add(1))
+        .read_to_end(&mut buf)
         .map_err(|e| {
             (
                 format!("读{what} {} 失败：{e}", path.display()),
                 ExitCode::from(1),
             )
-        })?
-        .len();
-    if len > max {
+        })?;
+    if buf.len() as u64 > max {
         return Err((
-            format!("{what} {} 过大（{len} 字节 > 上限 {max}）", path.display()),
+            format!("{what} {} 过大（> 上限 {max} 字节）", path.display()),
             ExitCode::from(1),
         ));
     }
-    std::fs::read(path).map_err(|e| {
-        (
-            format!("读{what} {} 失败：{e}", path.display()),
-            ExitCode::from(1),
-        )
-    })
+    Ok(buf)
 }
 
 /// 同目录临时文件 + rename；失败清临时件，不留半成品。
