@@ -3495,7 +3495,9 @@ rrctl 仅覆盖其中 6 个；③A/B OTA 行写"CLI 三子命令 / 落盘 fsync 
 增 `alsa` job：apt 装 `libasound2-dev` + `pkg-config`，
 `cargo check --all-targets -p rr-hal --features alsa`；**只编译不打开设备**
 （运行期行为归板上批），失败压成单行注解。验证——job 与 conventions/lint 并行，
-不改 check.sh 的本地口径；首跑回执以 CI 结论为准。
+不改 check.sh 的本地口径。**首跑红一处**：job 在仓根直接 `cargo check`，报
+`could not find Cargo.toml`——补 `--manifest-path base/runtime/Cargo.toml` 后
+复跑；根因是工作目录与 workspace 布局，不是特性代码。
 
 ## 3 结构纪律
 

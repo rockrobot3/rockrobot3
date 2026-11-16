@@ -175,7 +175,8 @@ jobs:
       - name: rr-hal alsa 特性全目标编译
         run: |
           set -o pipefail
-          if ! cargo check --all-targets -p rr-hal --features alsa 2>&1 | tee /tmp/alsa.log; then
+          if ! cargo check --all-targets --manifest-path base/runtime/Cargo.toml \
+               -p rr-hal --features alsa 2>&1 | tee /tmp/alsa.log; then
             errs=$(grep -E "error(\[|:)" /tmp/alsa.log | head -4 | tr '\n' ' ')
             echo "::error title=alsa::${errs:0:900}"
             exit 1
