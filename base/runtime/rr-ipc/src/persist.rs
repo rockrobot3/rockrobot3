@@ -29,6 +29,8 @@
 //! - `rrd/src/axis.rs`：执行件标定档案（§4.4"不许出现第二条写路径"）
 //! - `modules/rr3-brain/src/config_store.rs`：模型行改写（只存 api_key_ref，无密钥）
 //! - `modules/rr3-interact/src/panel/secrets.rs`：模型凭据（建 tmp 即 0600）
+//! - `base/ota/rr3-ota-ctl`：manifest/签名/公钥的原子写（A1 起；install 的
+//!   staging 落位复用 [`rr3_sync_dir`] 做目录项落盘）
 
 // no_std crate 的 std 显式恢复（evidence.rs 同径写法）：本模块是 std::fs 文件面，
 // 与 evidence 同门编译（linux/macos/windows；权限位在非 unix 忽略）。
@@ -85,7 +87,7 @@ pub fn rr3_store_perm(path: &Path, tmp: &Path, body: &[u8], mode: u32) -> Result
     // rename 的目录项持久化要父目录 fsync 才成立——不刷则掉电可能静默回旧值
     // （凭据/标定/计数全受影响）。失败不致命（tmpfs 等不支持时 EINVAL）：
     // 文件级保证仍在，比没有强；调用方无需感知。
-    rr3_dir_sync(path);
+    let _ = rr3_sync_dir(path);
     Ok(())
 }
 
@@ -98,15 +100,17 @@ fn rr3_store_full(tmp: &Path, body: &[u8], mode: u32) -> Result<(), String> {
         .map_err(|e| format!("fsync {} 失败: {e}", tmp.display()))
 }
 
-/// 父目录 fsync（尽力而为，失败静默）。
-fn rr3_dir_sync(path: &Path) {
-    let Some(parent) = path.parent() else {
-        return;
+/// 父目录 fsync（机制）：rename 的目录项要在掉电后仍然成立，必须刷父目录。
+///
+/// 错误交回调用方——**策略分属两侧**：通用落盘（[`rr3_store_perm`]）忽略它
+/// （tmpfs 等不支持时 EINVAL 不该让写失败），OTA staging 等必须确认目录项
+/// 落盘的场景可以据此 fail-closed。永远不 panic、不重试。
+pub fn rr3_sync_dir(path: &Path) -> std::io::Result<()> {
+    let dir = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
     };
-    let Ok(d) = File::open(parent) else {
-        return;
-    };
-    let _ = d.sync_all();
+    File::open(dir)?.sync_all()
 }
 
 #[cfg(test)]
@@ -127,6 +131,19 @@ mod tests {
         rr3_atomic_store(&path, &tmp, b"{\"v\":2}").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"{\"v\":2}");
         assert!(!tmp.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 目录 fsync 机制：真实目录可刷，缺目录回错误（策略由调用方选）。
+    #[cfg(unix)]
+    #[test]
+    fn sync_dir_reports_missing_parent() {
+        let dir = std::env::temp_dir().join(format!("rr3-persist-sync-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let f = dir.join("x.json");
+        rr3_sync_dir(&f).expect("父目录存在应可 fsync");
+        let missing = dir.join("no-such-sub").join("y.json");
+        assert!(rr3_sync_dir(&missing).is_err(), "缺父目录必须回错误");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
