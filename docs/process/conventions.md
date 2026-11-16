@@ -3529,6 +3529,11 @@ cfg 守卫挤在一个函数里）。处置——按后端拆成 `rr3_src_linux`
 验证——rr-ota **35**、rr3-ota-ctl **14** tests；重复率 **0.56%**、CC 均值 2.49 /
 峰值 **11**，基线 `cc_max_fn` 12→**11**（只降不升）；`check.sh` 全绿。
 
+**2026-11-17 status 口径补充（锚点与逐行增量）**：事实——表头"当前 HEAD =
+`e117d17`"与后来按行补的 A1/A2/alsa 等行并存，读者可能把"某行补过"误读成
+"整表已按最新 HEAD 实测"。处置——表头加口径段：锚点之后按行增量维护、**未注记
+的行**仍只指锚点、全表重读只在收口做。验证——`check.sh` ⑤ 文档门通过。
+
 **2026-11-17 CI 漂红审计（e2e_profile 回填用例偶发红）**：事实——
 platforms/host-macos 在 `d5acab7` 红一次（`rrd_reboot_recovers_previous_run_lines_from_disk`），
 本地重复 5/5 通过，且本次改动不涉 rrd。可疑点是环容量 64 与慢 runner 的挤占
