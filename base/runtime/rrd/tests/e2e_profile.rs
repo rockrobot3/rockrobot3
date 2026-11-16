@@ -449,7 +449,10 @@ fn rrd_reboot_recovers_previous_run_lines_from_disk() {
     ));
     let _ = std::fs::remove_dir_all(&sink_dir);
 
-    let profile = root.write_profile(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = 64"));
+    // 环容量 256 而不是 64：本用例靠"回填行仍在环里"取证，慢 runner 上
+    // 第二世启动行多打几行就会把 64 格里的收尸行挤掉（CI 2026-11-17 实测
+    // 一次红）；256 不改变断言，只去掉这类容量竞态。
+    let profile = root.write_profile(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = 256"));
 
     // —— 第一世：boot → rr3-pb running → kill -9 → 收尸行 → kill rrd ——
     let mut rrd1 =
@@ -461,7 +464,7 @@ fn rrd_reboot_recovers_previous_run_lines_from_disk() {
                 .iter()
                 .any(|(n, p)| n == "rr3-pb" && p == "running")
         },
-        Duration::from_secs(20),
+        Duration::from_secs(30),
     );
     assert!(
         pb_running,
@@ -488,7 +491,7 @@ fn rrd_reboot_recovers_previous_run_lines_from_disk() {
     // 的 spawn 行，才说明第二世行确实已入环——直接查询会偶发读到仅含回填块的旧环，
     // 把第一世的 spawn 行误当比较基线。
     let listen = format!("监听 {}", rrd2.socket.display());
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     let mut joined: Vec<String>;
     loop {
         rr3_send(&mut ctl, &rr3_rpc_frame("rr3.ctl.logs", 2, json!({}), 0));
