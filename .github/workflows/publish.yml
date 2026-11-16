@@ -170,6 +170,9 @@ jobs:
               sys.exit(1)
           print(f"PASS  多架构清单架构 {plats}（attestation {att} 条，不计入架构集）")
           PY
+          # 合并标签本身必须可拉取且装机树完整：两只单架构腿绿不等于合并清单
+          # 指向的层都在（清单指向丢失层是"看起来发布成功"的经典形态）。
+          bash tools/deploy/image-smoke.sh file "${IMAGE}:${tag}"
 
   # 板侧固件制品（2026-11-16）：classic periph-base 的 release ELF 作为 tag
   # release 的公开资产。为什么放发布流水线：固件常量（如 SCAN 驻留）改了必须
