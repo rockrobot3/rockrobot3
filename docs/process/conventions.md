@@ -3423,6 +3423,20 @@ keypub/manifest/sign/verify 端到端、错私钥 key_id、0600 权限、超大�
 二选一，缺键点名实际路径。测试 12→13；度量重复率 0.64%、CC 2.49/13、
 panic 73、长名 0。
 
+**2026-11-17 P1 连接鲁棒性（满员拒连退避与日志节流）**：事实——
+`rr3_daemon_accept` 在并发槽满时 `rr3_conn_acquire` 拒连后直接 `continue`，
+下一拍立刻再 accept，且每次拒连同步 `rr3_log` 一行；重连风暴下这是
+"accept→drop→写日志"的忙循环（尝试率无上界，rrd 日志同步 append 会被写穿）。
+判据——并发上限 64 是保护而非错误路径：满员时本就没有可服务的连接，退避
+不损失可用性；拒连是运维事实，首条必须可见、规模不能报小。处置——accept
+结果分 `Conn/Full/Retry` 三态；`Full` 走 50ms 退避（尝试率封顶 20 次/秒），
+日志用 `Rr3RefuseGate` 时间窗节流：首条即时、5s 窗口内只计数、窗口到点汇总
+"另有 N 次"，窗口状态机有单测。验证——`cargo test -p rrd --lib` 308 passed
+（新增 `refuse_gate_logs_first_then_summarizes`）；①b **768 passed**；度量
+重复率 0.64%、CC 2.49/13、panic 73、长名 0；`check.sh` 全绿。风险边界——
+退避期间释放的连接最多多等 50ms（控制面重连窗口以秒计，不敏感）；本件不
+承诺"满员时优先淘汰旧连接"。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
