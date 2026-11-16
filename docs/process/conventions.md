@@ -3402,6 +3402,16 @@ keypub/manifest/sign/verify 端到端、错私钥 key_id、0600 权限、超大�
 （提交 8484629），已按"字节形制 / 字段值域 / 数值摘要"三段拆分修复（a6254a7）；
 远端最新 run 回执以 CI 结论为准。
 
+**2026-11-17 A1b/A1c（OTA CLI 进发布面 + 签名演练）**：`rr3-ota-ctl` 进
+`cross-artifacts`（八件产物）、`distro-smoke`、`pack-arm64`、`pack-bundle`、
+`stage-image`、Buildroot `BINARIES_DIR` 注入与 ghcr `publish` 构建；
+`rr3-pack` 入口清单收敛为 `RR3_PAYLOAD_BINS` 单常量，缺件逐件点名，
+测试 13 条。新增 `tools/ci/ota-sign-smoke.sh` 与 `integration.yml` 的
+`ota-sign` job：临时测试种子走 keypub→manifest→sign→verify，正例 + 镜像篡改/
+清单篡改/错公钥/未允许降级四负例，真实私钥不进 CI。aarch64-unknown-linux-musl
+静态交叉实测：`ELF 64-bit ARM aarch64, statically linked`。`check.sh` 全绿；
+度量维持 0.56% / 2.49 / 13 / 73 / 0。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
