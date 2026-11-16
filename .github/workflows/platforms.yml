@@ -25,7 +25,7 @@ jobs:
   #   瑞芯微 RK3566/RK3588 → aarch64-musl（cargo + rust-lld 全静态）；
   #   进迭时空 SpacemiT K1/K3 → riscv64-musl（cross 镜像提供 musl 交叉工具链）。
   # 每条腿三件事同口径：① 七件产物构建 + ELF 断言；② 目标 ISA 真执行（native 直跑 /
-  # aarch64 docker binfmt / riscv64 qemu-user-static）并断言用法输出；③ 上传产物。
+  # 两条交叉腿在 alpine 目标 ISA 容器里跑）并断言用法输出；③ 上传产物。
   # brain 的 ureq+ring 需目标 C 工具链，归板上原生构建（pack-bundle ③ 同一分工）。
   cross-artifacts:
     runs-on: ubuntu-latest
@@ -68,15 +68,12 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cross
-      # binfmt 走 setup-qemu（与 ipct003 同源，已在本仓长期验证）；riscv64 用
-      # qemu-user-static 直接执行静态产物，不经 docker。
+      # binfmt 走 setup-qemu（与 ipct003 同源，已在本仓长期验证）：两条交叉腿的
+      # 执行冒烟都在目标 ISA 容器里跑。riscv64 不用 apt 装 qemu-user-static——
+      # 2026-11-16 首跑实证：apt 装包在共享 runner 上不稳定，而 musl 静态产物
+      # 在 alpine(riscv64) 里可直接执行，判据同 aarch64 腿，少一条外部依赖。
       - uses: docker/setup-qemu-action@v3
-        if: matrix.mode == 'musl'
-      - name: 安装 qemu-user-static（riscv64 执行冒烟）
-        if: matrix.mode == 'cross'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq qemu-user-static
+        if: matrix.mode != 'native'
       - name: 目标平台构建（七件产物 + ELF 断言；失败压成单行注解）
         env:
           RR3_USE_CROSS: ${{ matrix.mode == 'cross' && '1' || '0' }}
@@ -99,9 +96,8 @@ jobs:
             esac
             case "${{ matrix.mode }}" in
               native) out=$("$rel/$b" --help 2>&1) || true ;;
-              musl) out=$(docker run --rm --platform "${{ matrix.platform }}" \
+              musl | cross) out=$(docker run --rm --platform "${{ matrix.platform }}" \
                        -v "$rel:/b:ro" alpine:3.20 "/b/$b" --help 2>&1) || true ;;
-              cross) out=$(qemu-riscv64-static "$rel/$b" --help 2>&1) || true ;;
             esac
             printf '%s\n' "$out" | head -3
             if ! printf '%s' "$out" | grep -q "$want"; then

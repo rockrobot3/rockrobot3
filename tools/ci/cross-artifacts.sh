@@ -46,7 +46,12 @@ if [ "${RR3_USE_CROSS:-0}" = 1 ]; then
   eng=cross
 else
   eng=cargo
-  export RUSTFLAGS="-C linker=rust-lld"
+  # rust-lld 只在 musl 目标上启用：它让 musl 全静态链接零外部工具链；
+  # gnu 目标（原生腿）必须用系统链接器，否则找不到 crt 对象与 libc
+  # （2026-11-16 首跑实证：x86_64 原生腿被 rust-lld 判红）。
+  case "$target" in
+  *musl*) export RUSTFLAGS="-C linker=rust-lld" ;;
+  esac
 fi
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/rr3-build}"
 
