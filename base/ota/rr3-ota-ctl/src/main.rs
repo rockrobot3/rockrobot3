@@ -65,14 +65,14 @@ fn rr3_dispatch(argv: &[String]) -> Result<String, (String, ExitCode)> {
         Some(cmd @ ("switch" | "factory" | "rollback")) => {
             bootconf_cmd::rr3_dispatch(cmd, &argv[1..])
         }
-        Some(cmd @ ("keypub" | "manifest" | "sign" | "verify")) => {
+        Some(cmd @ ("keypub" | "manifest" | "sign" | "verify" | "install")) => {
             sign_cmd::rr3_dispatch(cmd, &argv[1..])
         }
         Some(other) => Err(args::rr3_use(format!(
-            "未知子命令 {other:?}（在册：slots / switch / factory / rollback / keypub / manifest / sign / verify）"
+            "未知子命令 {other:?}（在册：slots / switch / factory / rollback / keypub / manifest / sign / verify / install）"
         ))),
         None => Err(args::rr3_use(
-            "缺子命令（在册：slots / switch / factory / rollback / keypub / manifest / sign / verify）"
+            "缺子命令（在册：slots / switch / factory / rollback / keypub / manifest / sign / verify / install）"
                 .into(),
         )),
     }
@@ -337,6 +337,16 @@ mod tests {
             .expect("sign");
         }
 
+        fn install_args(&self, target: &Path) -> Vec<String> {
+            let mut args = self.verify_args();
+            args.extend([
+                "--target".into(),
+                target.to_string_lossy().into_owned(),
+                "--confirm".into(),
+            ]);
+            args
+        }
+
         fn verify_args(&self) -> Vec<String> {
             vec![
                 "--manifest".into(),
@@ -452,6 +462,42 @@ mod tests {
         let (m, c) = rr3_cmd_verify(&wrong).unwrap_err();
         assert_eq!(c, ExitCode::from(1));
         assert!(m.contains("platform 不匹配"), "{m}");
+    }
+
+    /// install：验签通过才落 staging 文件；缺 confirm、目录目标、篡改镜像都拒。
+    #[test]
+    fn install_writes_only_verified_staging_file() {
+        let f = OtaFixture::new("install");
+        f.prepare();
+        let target = f.dir.join("staging.img");
+        let mut args = f.install_args(&target);
+        args.extend(["--current-version".into(), "0.0.7".into()]);
+        let msg = rr3_cmd_install(&args).expect("验签后安装");
+        assert!(msg.contains("安装完成"), "{msg}");
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            IMAGE,
+            "目标字节必须等于镜像"
+        );
+
+        let mut no_confirm = f.verify_args();
+        no_confirm.extend(["--target".into(), target.to_string_lossy().into_owned()]);
+        let e = rr3_cmd_install(&no_confirm).unwrap_err();
+        assert_eq!(e.1, ExitCode::from(2), "缺 --confirm 是用法错");
+        assert!(e.0.contains("--confirm"), "{:?}", e.0);
+
+        let dir_target = f.dir.join("target-dir");
+        std::fs::create_dir_all(&dir_target).unwrap();
+        let e = rr3_cmd_install(&f.install_args(&dir_target)).unwrap_err();
+        assert_eq!(e.1, ExitCode::from(1));
+        assert!(e.0.contains("不是普通文件"), "{:?}", e.0);
+
+        std::fs::write(&f.image, [IMAGE, b"x"].concat()).unwrap();
+        let bad_target = f.dir.join("bad-staging.img");
+        let e = rr3_cmd_install(&f.install_args(&bad_target)).unwrap_err();
+        assert_eq!(e.1, ExitCode::from(1));
+        assert!(e.0.contains("镜像校验失败"), "{:?}", e.0);
+        assert!(!bad_target.exists(), "验签失败不得落目标");
     }
 
     /// 文本输入有上界：超大私钥/manifest 在读取前拒，不把内存读穿。
