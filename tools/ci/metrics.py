@@ -17,6 +17,11 @@
 # - 生产函数名：>20 字节计红；FFI 外部符号（AudioQueue*，名字由平台 ABI 决定）
 #   豁免。基线 = 存量 14 个 rr3_reg_* 域 API（21–25B），只降不升——新代码必须
 #   ≤20B。
+# - 长睡字面量（长阻塞主循环的静态半边）：只扫**模块与 rrd 守护**的生产路径
+#   （`modules/rr3-*` 与 `base/runtime/rrd/src`，排除 bin），计
+#   `sleep(Duration::from_millis|from_secs(数字))` 且 ≥1000ms 的落点，基线 0。
+#   局限如实写：动态等待（`sleep(tick)`）、阻塞 IO、锁内长临界区不在本项扫面，
+#   它们归评审与运行时观测；本项只钉"有人把秒级 sleep 写进主循环"这一种。
 #
 # 只用 Python 标准库，无外网依赖；python3 缺位时按 SKIP 纪律明说（CI runner 自带）。
 
@@ -30,6 +35,12 @@ import sys
 WINDOW = 10
 NAME_MAX = 20
 FFI_PREFIXES = ("AudioQueue",)
+# 长睡门槛：≥1000ms 的字面量 sleep 在模块/守护生产路径上计红。
+LONG_SLEEP_MS = 1000
+SLEEP_LITERAL = re.compile(
+    r"sleep\s*\(\s*(?:[A-Za-z_][A-Za-z0-9_]*::)*"
+    r"Duration::from_(millis|secs)\s*\(\s*([0-9_]+)\s*\)"
+)
 # cfg(test) 门 mod 的形状：属性本体 +（可连挂的其他属性）+ mod 声明。
 TEST_ATTR = re.compile(r"#\[cfg\(")
 TEST_MOD_TAIL = re.compile(
@@ -266,6 +277,7 @@ def measure(root):
     ccs = []
     long_names = []
     unwrap_sites = 0
+    long_sleeps = []
     for rel in rust_files(root):
         if "/tests/" in rel or rel.startswith("tests/") or os.path.basename(rel) == "tests.rs":
             continue
@@ -282,6 +294,7 @@ def measure(root):
         # 生产面 panic 落点（unwrap/expect）：测试面已被 production_part 截掉。
         # 此项不判"越少越好"的绝对值，只钉"不回涨"——新增落点必须同批给理由。
         unwrap_sites += len(re.findall(r"\.unwrap\(\)|\.expect\(", src))
+        long_sleeps.extend(_long_sleeps(rel, src))
         for name, body in functions(src):
             ccs.append(cyclomatic(body))
             if len(name.encode()) > NAME_MAX and not name.startswith(FFI_PREFIXES):
@@ -297,7 +310,27 @@ def measure(root):
             for rel, i in occ:
                 for k in range(WINDOW):
                     dup.add((rel, i + k))
-    return total_lines, len(dup), ccs, long_names, unwrap_sites
+    return total_lines, len(dup), ccs, long_names, unwrap_sites, long_sleeps
+
+
+def _sleep_scope(rel):
+    """长睡扫面：模块生产码与 rrd 守护主循环；bin 夹具/测试面不在内。"""
+    if rel.startswith("modules/rr3-"):
+        return True
+    return rel.startswith("base/runtime/rrd/src/") and "/bin/" not in rel
+
+
+def _long_sleeps(rel, src):
+    """该文件生产面的长睡落点（≥[`LONG_SLEEP_MS`] 的字面量）。"""
+    if not _sleep_scope(rel):
+        return []
+    out = []
+    for m in SLEEP_LITERAL.finditer(src):
+        unit, raw = m.group(1), int(m.group(2).replace("_", ""))
+        ms = raw if unit == "millis" else raw * 1000
+        if ms >= LONG_SLEEP_MS:
+            out.append((rel, ms))
+    return out
 
 
 def load_baseline(root):
@@ -309,7 +342,7 @@ def load_baseline(root):
 def main():
     root = repo_root()
     base = load_baseline(root)
-    total, dup_lines, ccs, long_names, unwrap_sites = measure(root)
+    total, dup_lines, ccs, long_names, unwrap_sites, long_sleeps = measure(root)
     if total == 0 or not ccs:
         print("FAIL  ⑫ 度量面为空（git ls-files 无生产 Rust 行）", file=sys.stderr)
         return 1
@@ -350,6 +383,16 @@ def main():
     else:
         print(f"FAIL  ⑫ 超长生产函数名 {len(long_names)} > 基线 {base['long_names_max']}："
               f"{sorted(long_names)[:8]}", file=sys.stderr)
+        ok = False
+
+    sleep_max = base.get("long_sleep_max", 0)
+    if len(long_sleeps) <= sleep_max:
+        print(f"PASS  ⑫ 生产长睡字面量 {len(long_sleeps)} ≤ 基线 {sleep_max}"
+              f"（≥{LONG_SLEEP_MS}ms，模块/rrd 主循环面；动态等待不在扫面）")
+    else:
+        print(f"FAIL  ⑫ 生产长睡字面量 {len(long_sleeps)} > 基线 {sleep_max}："
+              f"{long_sleeps[:5]}——秒级 sleep 不得进主循环，改事件等待或拆线程",
+              file=sys.stderr)
         ok = False
 
     return 0 if ok else 1

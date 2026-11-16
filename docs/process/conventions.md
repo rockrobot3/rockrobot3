@@ -3509,6 +3509,16 @@ cfg 守卫挤在一个函数里）。处置——按后端拆成 `rr3_src_linux`
 （本推送的 gate 运行）；CC 均值 2.49 / 峰值 **12**，基线 `cc_max_fn` 13→**12**
 （只降不升）；`check.sh` 全绿。
 
+**2026-11-17 长阻塞静态门（生产长睡字面量基线 0）**：事实——"长阻塞主循环"
+此前只有评审、没有机器判据；模块/守护面一旦有人写 `sleep(2s)`，检查全绿而
+看门狗窗口可能小于它。处置——[metrics.py](../../tools/ci/metrics.py) 增"生产长睡字面量"
+项：只扫 `modules/rr3-*` 与 `base/runtime/rrd/src`（排除 bin），认
+`sleep(Duration::from_millis|from_secs(数字))`（含 `std::time::Duration` 全限定）
+且 ≥1000ms，基线 `long_sleep_max = 0`；`check.sh` ⑫ 标题同步。**负例实测**——
+临时向 rr3-power 生产面注入 `sleep(from_secs(2))`，metrics 退 1 并点名
+`('modules/rr3-power/src/boot.rs', 2000)`；撤回后复绿。局限如实写：动态等待、
+阻塞 IO、锁内长临界区不在扫面，归评审与运行时观测。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
