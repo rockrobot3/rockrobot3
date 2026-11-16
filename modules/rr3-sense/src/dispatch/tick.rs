@@ -19,7 +19,10 @@ use super::nod::rr3_reflex_nod_plan;
 use super::pan::rr3_reflex_pan;
 use super::pcm::rr3_pcm_downmix;
 use super::Rr3SenseDispatcher;
-use super::{RR3_PCM_EMPTY_FRAMES_KEY, RR3_PCM_FRAMES_KEY, RR3_VAD_ONSET_GATED_KEY};
+use super::{
+    rr3_jitter_step, RR3_PCM_EMPTY_FRAMES_KEY, RR3_PCM_FRAMES_KEY, RR3_TICK_JITTER_KEY,
+    RR3_VAD_ONSET_GATED_KEY,
+};
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use super::{RR3_REFLEX_PAN_CMDS_KEY, RR3_REFLEX_TILT_CENTER_DEG};
@@ -110,6 +113,22 @@ impl Rr3SenseDispatcher {
         )?;
         bus.counter_bump(RR3_PCM_FRAMES_KEY, 1);
         Ok(())
+    }
+
+    /// 节拍抖动记账（实时性观测）：本拍开始时刻与上一拍之差即实际周期，超出
+    /// 标称 `tick` 的毫秒数取历史最大并按增量上报（rrd 聚合值 = 全局最大）。
+    /// 首拍只立基准；`Instant` 单调，回拨不可能出现。
+    pub(super) fn rr3_jitter_book(&mut self, now: Instant, bus: &BusHandle) {
+        let Some(last) = self.last_tick.replace(now) else {
+            return;
+        };
+        let period_ms = now.saturating_duration_since(last).as_millis() as u64;
+        let tick_ms = self.tick.as_millis() as u64;
+        let (max, delta) = rr3_jitter_step(self.max_jitter_ms, period_ms, tick_ms);
+        self.max_jitter_ms = max;
+        if delta > 0 {
+            bus.counter_bump(RR3_TICK_JITTER_KEY, delta);
+        }
     }
 
     /// 自 pacing：补足本节拍剩余时间（sim read 即时返回的关键；抖动可接受——

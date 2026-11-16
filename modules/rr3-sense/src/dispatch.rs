@@ -64,6 +64,11 @@ const RR3_SERVO_TOPIC: &str = "rr3-sense/servo/set";
 const RR3_PCM_FRAMES_KEY: &str = "pcm_frames";
 const RR3_PCM_EMPTY_FRAMES_KEY: &str = "pcm_empty_frames";
 
+/// 节拍抖动运维计数键（实时性观测）：单拍实际周期超出标称 `frame_ms` 的毫秒数，
+/// 取**历史最大值**。上报用"只加增量"（心跳 counters 是增量语义）：首达 7ms 加 7，
+/// 之后首次到 12ms 再加 5，rrd 聚合值即全局最大——既保留峰值又不重复计。
+const RR3_TICK_JITTER_KEY: &str = "max_jitter_ms";
+
 /// 播放期门控的订阅主题（B批 b2，contracts/topics.toml 在册）：brain 的 TTS
 /// 回放流，帧体带 `ms`（块内样点时长）——门控外推的数据源，零新契约（裁定②）。
 const RR3_TTS_PCM_TOPIC: &str = "rr3-brain/audio/tts_pcm";
@@ -130,6 +135,10 @@ pub(crate) struct Rr3SenseDispatcher {
     doa_ring: Option<Rr3DoaRing>,
     /// 采集帧缓冲池：稳态复用同一块 Vec（mono 链路每拍零分配，见 [`Rr3FrameBuf`]）
     read_pool: Rr3FrameBuf,
+    /// 上一拍开始时刻（抖动记账的基准；首拍无基准）
+    last_tick: Option<Instant>,
+    /// 历史最大节拍抖动 ms（只增；上报增量，见 [`RR3_TICK_JITTER_KEY`]）
+    max_jitter_ms: u64,
 }
 
 impl Dispatcher for Rr3SenseDispatcher {
@@ -162,6 +171,9 @@ impl Dispatcher for Rr3SenseDispatcher {
     /// 采集拍（自原 composite.rs 主循环体逐字迁，状态归 self；自 pacing 归一
     /// ——余量睡眠在本拍尾，方案 §2.6）。读帧/发布失败 Err 上抛致命。
     fn on_tick(&mut self, now: Instant, bus: &BusHandle) -> Result<(), String> {
+        // 抖动记账先于本拍工作：它量的是"上一拍开始 → 本拍开始"的实际周期，
+        // 因此包含上一拍的读写/发布耗时与唤醒延迟（真正的超时信号）。
+        self.rr3_jitter_book(now, bus);
         // 读一拍：buf 按"帧×声道"分配采样点数（F1 定形 read 收采样点 buf，
         // 返回实填采样点数，欠载按实数截断）
         let (raw, done) = self.rr3_read_frame()?;
@@ -172,6 +184,17 @@ impl Dispatcher for Rr3SenseDispatcher {
         let need = self.frames_per_tick * self.cfg.audio.channels as usize;
         self.read_pool.rr3_put(pcm.samples, need);
         Ok(())
+    }
+}
+
+/// 抖动增量：`period_ms` 超出标称节拍的毫秒数若刷新历史最大，返回
+/// `(新最大, 应上报增量)`；否则 `(原最大, 0)`。纯函数，主机可测。
+fn rr3_jitter_step(prev_max: u64, period_ms: u64, tick_ms: u64) -> (u64, u64) {
+    let over = period_ms.saturating_sub(tick_ms);
+    if over > prev_max {
+        (over, over - prev_max)
+    } else {
+        (prev_max, 0)
     }
 }
 
@@ -208,6 +231,16 @@ mod tests {
             rr3_sense_servo(None, &json!({"pan": 90})).is_err(),
             "非桥主拒"
         );
+    }
+
+    /// 节拍抖动：只保留历史最大，上报增量 = 新最大 − 旧最大（rrd 聚合即峰值）。
+    #[test]
+    fn jitter_step_keeps_running_max() {
+        assert_eq!(rr3_jitter_step(0, 20, 20), (0, 0), "刚好标称不算抖动");
+        assert_eq!(rr3_jitter_step(0, 27, 20), (7, 7), "首超 7ms 全量上报");
+        assert_eq!(rr3_jitter_step(7, 23, 20), (7, 0), "未刷新最大不重复计");
+        assert_eq!(rr3_jitter_step(7, 32, 20), (12, 5), "刷新最大只报增量");
+        assert_eq!(rr3_jitter_step(12, 1, 20), (12, 0), "周期小于标称按 0");
     }
 
     /// 流级下混：channels 归 1、rate 不动、samples 收缩；单麦原样返回（零改动）。
