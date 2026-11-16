@@ -3210,7 +3210,7 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/gat
 | `supply` | 供应链审计（cargo-deny）：许可证 / RustSec 公告 / 来源白名单 / 通配依赖；策略真值 = 仓根 `deny.toml`，全部工程根逐项执法（`tools/ci/supply-audit.sh --strict`） | push / PR / 手动 / 周程 |
 | `ipct003` / `distro-smoke` / `buildroot-assembly` / `sim-assemble` / `sim-chain` / `matrix` | 跨架构对拍、真装、装配冒烟、装配演练、全链、点验矩阵 | push / PR / 手动（`ipct003` 随 platforms 另有周程） |
 | `cross-artifacts`（矩阵） | 非 x86 芯片平台静态产物：构建七件 + ELF 断言 + **qemu 目标 ISA 执行冒烟** + 产物上传 | push / PR / 周程 |
-| `esp32-gates` | xtensa/espidf 五门（ESP32 / S3 双档），工具链与 IDF 走缓存 | push / PR / 手动 / 周程 |
+| `esp32-gates`（矩阵两腿） | xtensa/espidf 五门按芯片分腿：ESP32 腿 5 门（外设底座 / UART echo / espidf std / 哨兵 / act·sense classic 面）、ESP32-S3 腿 2 门（S3 外设底座 / act·sense S3 面）；每腿独立装本芯片工具链 | push / PR / 手动 / 周程 |
 | `publish`（`publish.yml`） | 运行镜像发布到 `ghcr.io/rockrobot3/rockrobot3`：amd64/arm64 原生构建 → 单架构镜像 → 多架构清单合并；镜像根 = rr3-pack stage 树 | 打 `v*` 标签 / main（edge）/ 手动 |
 
 **首发布回执（2026-11-15）**：`v0.0.9` 标签（锚提交 `e445f14`，dev/hubs-01）触发
@@ -3259,7 +3259,7 @@ CI"往返，本地无法复跑。SKIP 纪律：仅 `RR3_SMOKE_ALLOW_SKIP=1` 时�
 
 | 芯片平台 | 目标/工具链 | CI 载体 | 环境判据 |
 |---|---|---|---|
-| ESP32 / ESP32-S3（乐鑫，xtensa） | `esp32` / `esp32s3`（espup v0.17.1 钉版 + ESP-IDF v5.2.2） | `esp32-gates` | 外设基座 debug+release、UART echo、espidf std、哨兵、act/sense espidf 五门全编译（安装面单点 = `.github/actions/esp-toolchain`） |
+| ESP32 / ESP32-S3（乐鑫，xtensa） | `esp32` / `esp32s3`（espup v0.17.1 钉版 + ESP-IDF v5.2.2） | `esp32-gates`（按芯片两腿，`esp32` / `esp32s3` 各一腿） | ESP32 腿：外设基座 debug+release+测试编译、UART echo、espidf std、哨兵、act/sense classic 构建面；S3 腿：S3 外设基座 debug+release+测试编译、act/sense S3 check 面；每腿只装本芯片工具链（安装面单点 = `.github/actions/esp-toolchain`），六门判据零缩水 |
 | 瑞芯微 RK3566 / RK3588（aarch64） | `aarch64-unknown-linux-musl`（+ `-gnu` 字节对拍归 `ipct003`） | `cross-artifacts` 矩阵一腿（mode=musl） | 七件全静态 aarch64 产物 + ELF 断言 + docker binfmt 执行冒烟（断言打印用法） |
 | 进迭时空 SpacemiT K1/K3（RISC-V） | `riscv64gc-unknown-linux-gnu`（apt 交叉 gcc，`CARGO_TARGET_*_LINKER` 显式注入） | `cross-artifacts` 矩阵一腿（mode=gnu，assert=any） | 七件 riscv64 产物 + ELF 断言 + `qemu-riscv64-static -L <sysroot>` 执行冒烟（断言打印用法）——**2026-11-16 从"仅编译面"升到"构建 + 真执行"**；静态断言为例外：musl 交叉链不可得（cross 镜像链路过宿主 cc 失败，实测），gnu 动态链接如实登记 |
 | 英特尔 / AMD（x86_64） | 原生 `x86_64-unknown-linux-gnu` | `cross-artifacts` 原生腿 + `conventions`（全量门）+ `distro-smoke`（deb 真装） | 七件原生产物 + 原生执行冒烟 + 全量测试与门禁 ①–⑭ + 容器内真装起机（两家同 ISA/ABI，一腿覆盖，`assert=any` 因原生动态链接） |

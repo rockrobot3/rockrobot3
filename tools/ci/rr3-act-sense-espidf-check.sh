@@ -17,6 +17,10 @@ export CARGO_HTTP_LOW_SPEED_LIMIT="${CARGO_HTTP_LOW_SPEED_LIMIT:-1}"
 # 工具链缺位 = SKIP（退出 0 并明说）；工具链在位但编译失败 = FAIL；编译退出 0
 # 但产物不在树 = FAIL。板侧固件 crate 收编与 [hardware] 进位归真板批（批N9），
 # 本件范围红线 = 只建编译面。
+#
+# 芯片参数（2026-11-16 流水线按芯片拆腿）：`$1` ∈ {esp32, esp32s3, all}，缺省 all。
+# 流水线的 classic 腿传 esp32（只跑 classic 构建面）、S3 腿传 esp32s3（只跑 S3 check
+# 面），失败归因不跨芯片；本地与其余调用方不传参，整门口径与此前完全一致。
 set -uo pipefail
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "ERROR: git rev-parse --show-toplevel 失败——当前目录不在 git 仓库内。" >&2
@@ -28,6 +32,16 @@ export CARGO_TERM_COLOR=never
 # crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
 . "$root/tools/ci/cargo-artifact.sh"
 fail=0
+
+# 芯片档解析放在工具链五查之前：参数笔误要立刻报错，不能先花时间查工具链。
+chip="${1:-all}"
+case "${chip}" in
+  esp32|esp32s3|all) ;;
+  *)
+    echo "FAIL  未知芯片档「${chip}」——只认 esp32 / esp32s3 / all" >&2
+    exit 2
+    ;;
+esac
 
 # ---- 工具链缺位五查（缺一 = 整门 SKIP，同 espidf-sentinel-check.sh 口径）----
 if ! rustup toolchain list 2>/dev/null | grep -q '^esp'; then
@@ -74,38 +88,43 @@ for mod in rr3-act rr3-sense; do
       echo "PASS  $mod venv dist-info 兼容改名: ${d##*/} → ruamel.yaml-*"
     fi
   done
-  elf="$(rr3_cargo_artifact xtensa-esp32-espidf debug "$mod")" || {
-    echo "FAIL  $mod 无法解析 cargo target_directory（metadata 不可用）" >&2
-    fail=1
-    continue
-  }
-  if cargo +esp build --target xtensa-esp32-espidf \
-       --config 'source.crates-io.replace-with="rsproxy-sparse"' \
-       --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
-    if [ -f "$elf" ]; then
-      echo "PASS  $mod xtensa-esp32-espidf 构建（MC-7 半边编译面）: $elf"
+  # classic 面（esp32 档）：S3 腿跳过，避免同一条腿为另一芯片付构建时间。
+  if [ "${chip}" != esp32s3 ]; then
+    elf="$(rr3_cargo_artifact xtensa-esp32-espidf debug "$mod")" || {
+      echo "FAIL  $mod 无法解析 cargo target_directory（metadata 不可用）" >&2
+      fail=1
+      continue
+    }
+    if cargo +esp build --target xtensa-esp32-espidf \
+         --config 'source.crates-io.replace-with="rsproxy-sparse"' \
+         --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
+      if [ -f "$elf" ]; then
+        echo "PASS  $mod xtensa-esp32-espidf 构建（MC-7 半边编译面）: $elf"
+      else
+        echo "FAIL  编译退出 0 但 ELF 不在树: $elf" >&2
+        fail=1
+      fi
     else
-      echo "FAIL  编译退出 0 但 ELF 不在树: $elf" >&2
+      echo "FAIL  $mod xtensa-esp32-espidf 构建失败" >&2
       fail=1
     fi
-  else
-    echo "FAIL  $mod xtensa-esp32-espidf 构建失败" >&2
-    fail=1
   fi
   # S3 编译面（W1/T2 另一芯片档）：check 不链接，只验 target 无关代码在
   # xtensa-esp32s3-espidf 同样可编；esp-idf-sys 按 MCU=esp32s3 选 sdkconfig。
-  # 工具链不认该目标 = SKIP 该腿（与整门 SKIP 纪律同口径）。
-  if rustc +esp --print target-list 2>/dev/null | grep -qx 'xtensa-esp32s3-espidf'; then
-    if MCU=esp32s3 cargo +esp check --target xtensa-esp32s3-espidf \
-         --config 'source.crates-io.replace-with="rsproxy-sparse"' \
-         --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
-      echo "PASS  $mod xtensa-esp32s3-espidf check（S3 芯片档编译面）"
+  # 工具链不认该目标 = SKIP 该腿（与整门 SKIP 纪律同口径）；classic 腿跳过。
+  if [ "${chip}" != esp32 ]; then
+    if rustc +esp --print target-list 2>/dev/null | grep -qx 'xtensa-esp32s3-espidf'; then
+      if MCU=esp32s3 cargo +esp check --target xtensa-esp32s3-espidf \
+           --config 'source.crates-io.replace-with="rsproxy-sparse"' \
+           --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
+        echo "PASS  $mod xtensa-esp32s3-espidf check（S3 芯片档编译面）"
+      else
+        echo "FAIL  $mod xtensa-esp32s3-espidf check 失败" >&2
+        fail=1
+      fi
     else
-      echo "FAIL  $mod xtensa-esp32s3-espidf check 失败" >&2
-      fail=1
+      echo "SKIP  esp 工具链不认 xtensa-esp32s3-espidf——$mod 的 S3 腿不执行"
     fi
-  else
-    echo "SKIP  esp 工具链不认 xtensa-esp32s3-espidf——$mod 的 S3 腿不执行"
   fi
 done
 

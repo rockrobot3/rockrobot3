@@ -147,46 +147,65 @@ jobs:
   # 乐鑫 esp-clang + ldproxy——冷跑 20 分钟量级，靠 action 内三处 cache 压到分钟级。
   # 安装面与"失败压注解"模板分别收在 .github/actions/{esp-toolchain,guarded-run}
   # （2026-11-16 流水线治理：此前同一套安装写了两份、注解模板写了六份）。
-  # ESP32 芯片平台环境（esp32 / esp32s3 双档，xtensa + espidf 五门）。
+  #
+  # 按芯片拆腿（2026-11-16 二轮治理）：此前六门串行共用一个 job（实测 18–20 分钟），
+  # S3 档失败会连带掩盖 classic 档结论，且单腿只能看到"第几个 step 挂了"。矩阵按芯片
+  # 各成一条腿：每腿独立装工具链（targets 只给自己那一档）、独立跑该芯片的全部门，
+  # 失败注解的 title 带芯片前缀，归因不再跨芯片混淆。**六门判据与覆盖面零缩水**——
+  # classic 腿 5 门（periph-base / uart-echo / espidf-std / espidf-sentinel /
+  # act-sense-espidf 的 classic 面），S3 腿 2 门（S3 periph-base / act-sense 的 S3 面）。
   esp32-gates:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - chip: esp32
+            label: ESP32（classic）
+          - chip: esp32s3
+            label: ESP32-S3
+    name: esp32-gates / ${{ matrix.label }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: ./.github/actions/esp-toolchain
         with:
-          targets: esp32,esp32s3
+          # 每腿只装自己芯片的工具链：S3 腿不再为 classic 工具链付时间，反之亦然。
+          targets: ${{ matrix.chip }}
+      # 两芯片共有的外设底座门：脚本名按芯片命名（esp32-/esp32s3- 前缀），直接拼名。
       - uses: ./.github/actions/guarded-run
         with:
-          title: esp32-periph-base
+          title: ${{ matrix.chip }}-periph-base
           prelude: ~/export-esp.sh
-          command: bash tools/ci/esp32-periph-base-check.sh
+          command: bash tools/ci/${{ matrix.chip }}-periph-base-check.sh
+      # 以下三门是 classic（ESP32）专属工程：xtensa-esp32-none-elf 固件 / espidf std /
+      # 哨兵，S3 腿不适用（S3 的对应面由 periph-base 的 S3 档与 act-sense 的 S3 腿覆盖）。
       - uses: ./.github/actions/guarded-run
-        with:
-          title: esp32s3-periph-base
-          prelude: ~/export-esp.sh
-          command: bash tools/ci/esp32s3-periph-base-check.sh
-      - uses: ./.github/actions/guarded-run
+        if: matrix.chip == 'esp32'
         with:
           title: esp-uart-echo
           prelude: ~/export-esp.sh
           command: bash tools/ci/esp-uart-echo-check.sh
       - uses: ./.github/actions/guarded-run
+        if: matrix.chip == 'esp32'
         with:
           title: espidf-std
           prelude: ~/export-esp.sh
           command: bash tools/ci/espidf-std-check.sh
       - uses: ./.github/actions/guarded-run
+        if: matrix.chip == 'esp32'
         with:
           title: espidf-sentinel
           prelude: ~/export-esp.sh
           command: bash tools/ci/espidf-sentinel-check.sh
+      # 双档模块门：脚本接芯片参数（esp32 / esp32s3 / all），每条腿只跑自己那一档；
+      # 缺省 all 保持本地整门口径不变。
       - uses: ./.github/actions/guarded-run
         with:
-          title: act-sense-espidf
+          title: ${{ matrix.chip }}-act-sense
           prelude: ~/export-esp.sh
-          command: bash tools/ci/rr3-act-sense-espidf-check.sh
+          command: bash tools/ci/rr3-act-sense-espidf-check.sh ${{ matrix.chip }}
 
   # IPC-T-003 跨架构对拍（ADR-0006 后果项，平台条件脚本——不进门禁步序，
   # 但 ubuntu runner 恰好具备全部平台条件：x86_64 宿主 + QEMU arm64 仿真 +
