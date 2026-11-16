@@ -3207,6 +3207,7 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/gat
 | `host-macos` | macOS 宿主等价面：workspace 全量测试 + 独立工程测试（门禁 ④/⑥ 同口径，esp 工程除外） | push / PR / 周程 |
 | `scripts` | 全部追踪 `.sh` 的 `bash -n` 语法门（判据自身不许写坏） | push / PR / 周程 |
 | `lint` | fmt + clippy（workspace + 独立工程） | push / PR / 周程 |
+| `supply` | 供应链审计（cargo-deny）：许可证 / RustSec 公告 / 来源白名单 / 通配依赖；策略真值 = 仓根 `deny.toml`，全部工程根逐项执法（`tools/ci/supply-audit.sh --strict`） | push / PR / 手动 |
 | `ipct003` / `distro-smoke` / `buildroot-assembly` / `sim-assemble` / `sim-chain` / `matrix` | 跨架构对拍、真装、装配冒烟、装配演练、全链、点验矩阵 | push / PR / 周程 |
 | `cross-artifacts`（矩阵） | 非 x86 芯片平台静态产物：构建七件 + ELF 断言 + **qemu 目标 ISA 执行冒烟** + 产物上传 | push / PR / 周程 |
 | `esp32-gates` | xtensa/espidf 五门（ESP32 / S3 双档），工具链与 IDF 走缓存 | push / PR / 手动 / 周程 |
@@ -3299,8 +3300,19 @@ Windows 半边结项。首跑 4 处红全部是**跨平台假设**而非产品�
 指到 `/tmp`，CI 侧只跑远端）；② 新增需要"跑起来"的验证，先加进 `check.sh` 或本表
 的 job，再谈"本地没跑过"；③ 同一 ref 的旧运行由 `concurrency` 自动取消，避免排队
 里跑过时代码；④ 周程（UTC 周日 18:00 = 北京周一 02:00）把重工具链档固定跑一遍，
-防止"只在 push 绿、esp 档长期没人碰"的漂移。Windows L1 面仍无 runner 载体，敞口
-第 5 条维持（不在本表冒领）。
+防止"只在 push 绿、esp 档长期没人碰"的漂移。WSL2（Linux L2 兼容面）仍无 runner
+载体，敞口第 5 条的该半边维持（不在本表冒领）。
+
+**2026-11-16 供应链门建成（`supply`）**：`gate.yml` 新增 `supply` job，仓根
+[`deny.toml`](../../deny.toml) 是策略唯一真源，[`tools/ci/supply-audit.sh`](../../tools/ci/supply-audit.sh)
+枚举 **22** 个工程根（`base/runtime` 工作区 + `modules/`/`tools/`/`base/ota/` 独立工程）
+逐个 `cargo deny check --locked`。四类判据：①许可证**显式白名单**（2026-11-16 全根
+实测只有 MIT / Apache-2.0 / ISC / Unicode-3.0 / BSD-3-Clause / Unlicense /
+CDLA-Permissive-2.0 七类，无 copyleft；私有件 `publish = false` 显式忽略）；②RustSec
+公告（未维护项只对直接依赖执法，避免上游陈账把每次推送染红）；③来源白名单（仅
+crates.io + 仓内 path）；④通配版本依赖拒绝。本地无 cargo-deny 时 SKIP 明说，CI
+`--strict` 工具缺位即红。`deny.toml` 已进 `.gitignore` 白名单（默认忽略所有策略下
+必须显式登记）。
 
 
 **2026-11-13 源文件行数上限（⑭，新立）**：每个 `.rs` 源文件必须 **<600 行**
