@@ -46,25 +46,47 @@ pub struct Rr3OtaExpect<'a> {
     pub allow_downgrade: bool,
 }
 
-/// 解析 manifest：首行 + 八个固定字段，顺序不可变。
-pub fn rr3_manifest_parse(bytes: &[u8]) -> Result<Rr3OtaManifest<'_>, String> {
-    let lines = rr3_manifest_lines(bytes)?;
+/// manifest 的五个字符串字段（顺序与文法绑定）。
+struct Rr3Meta<'a> {
+    kind: &'a str,
+    platform: &'a str,
+    board: &'a str,
+    version: &'a str,
+    image: &'a str,
+}
+
+/// 取五个字符串字段并做值域校验（kind 封闭词 / 词形 / 版本 / 文件名）。
+fn rr3_meta_fields<'a>(lines: &[&'a str]) -> Result<Rr3Meta<'a>, String> {
     let kind = rr3_field(lines[1], "kind")?;
     let platform = rr3_field(lines[2], "platform")?;
     let board = rr3_field(lines[3], "board")?;
     let version = rr3_field(lines[4], "version")?;
     let image = rr3_field(lines[5], "image")?;
-    let bytes = rr3_field(lines[6], "bytes")?;
-    let sha256 = rr3_field(lines[7], "sha256")?;
-    let key_id = rr3_field(lines[8], "key_id")?;
     rr3_manifest_meta(kind, platform, board, version, image)?;
-    let (bytes, sha256, key_id) = rr3_manifest_ids(bytes, sha256, key_id)?;
-    Ok(Rr3OtaManifest {
+    Ok(Rr3Meta {
         kind,
         platform,
         board,
         version,
         image,
+    })
+}
+
+/// 解析 manifest：首行 + 八个固定字段，顺序不可变。
+pub fn rr3_manifest_parse(bytes: &[u8]) -> Result<Rr3OtaManifest<'_>, String> {
+    let lines = rr3_manifest_lines(bytes)?;
+    let meta = rr3_meta_fields(&lines)?;
+    let (bytes, sha256, key_id) = rr3_manifest_ids(
+        rr3_field(lines[6], "bytes")?,
+        rr3_field(lines[7], "sha256")?,
+        rr3_field(lines[8], "key_id")?,
+    )?;
+    Ok(Rr3OtaManifest {
+        kind: meta.kind,
+        platform: meta.platform,
+        board: meta.board,
+        version: meta.version,
+        image: meta.image,
         bytes,
         sha256,
         key_id,

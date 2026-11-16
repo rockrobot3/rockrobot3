@@ -167,12 +167,8 @@ struct Rr3VerifyArgs {
     allow_downgrade: bool,
 }
 
-fn rr3_verify_args(args: &[String]) -> Result<Rr3VerifyArgs, (String, ExitCode)> {
-    let manifest = PathBuf::from(
-        rr3_val_arg(args, "--manifest", "verify 必须显式传 --manifest").map_err(rr3_use)?,
-    );
-    let sig =
-        PathBuf::from(rr3_val_arg(args, "--sig", "verify 必须显式传 --sig").map_err(rr3_use)?);
+/// `--pub` / `--pub-dir` 二选一（缺一多一都拒）。
+fn rr3_key_src(args: &[String]) -> Result<(Option<PathBuf>, Option<PathBuf>), (String, ExitCode)> {
     let pubkey = rr3_opt_arg(args, "--pub")
         .map_err(rr3_use)?
         .map(PathBuf::from);
@@ -184,6 +180,26 @@ fn rr3_verify_args(args: &[String]) -> Result<Rr3VerifyArgs, (String, ExitCode)>
             "--pub 与 --pub-dir 必须二选一（单公钥文件，或按 key_id 查目录）".into(),
         ));
     }
+    Ok((pubkey, pub_dir))
+}
+
+/// 降级开关必须与当前版本成对（否则"防降级"无从判定）。
+fn rr3_downgrade_ok(allow: bool, current: Option<&String>) -> Result<(), (String, ExitCode)> {
+    if allow && current.is_none() {
+        return Err(rr3_use(
+            "--allow-downgrade 只在同时给 --current-version 时有效".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn rr3_verify_args(args: &[String]) -> Result<Rr3VerifyArgs, (String, ExitCode)> {
+    let manifest = PathBuf::from(
+        rr3_val_arg(args, "--manifest", "verify 必须显式传 --manifest").map_err(rr3_use)?,
+    );
+    let sig =
+        PathBuf::from(rr3_val_arg(args, "--sig", "verify 必须显式传 --sig").map_err(rr3_use)?);
+    let (pubkey, pub_dir) = rr3_key_src(args)?;
     let image = rr3_opt_arg(args, "--image")
         .map_err(rr3_use)?
         .map(PathBuf::from);
@@ -191,11 +207,7 @@ fn rr3_verify_args(args: &[String]) -> Result<Rr3VerifyArgs, (String, ExitCode)>
     let board = rr3_opt_arg(args, "--board").map_err(rr3_use)?;
     let current = rr3_opt_arg(args, "--current-version").map_err(rr3_use)?;
     let allow_downgrade = rr3_flag(args, "--allow-downgrade");
-    if allow_downgrade && current.is_none() {
-        return Err(rr3_use(
-            "--allow-downgrade 只在同时给 --current-version 时有效".into(),
-        ));
-    }
+    rr3_downgrade_ok(allow_downgrade, current.as_ref())?;
     Ok(Rr3VerifyArgs {
         manifest,
         sig,
@@ -239,31 +251,58 @@ fn rr3_image_path(a: &Rr3VerifyArgs, m: &sign::Rr3OtaManifest<'_>) -> PathBuf {
     })
 }
 
-/// verify：严格验签 + 目标兼容 + 可选镜像摘要核对；不写任何槽位。
-pub(crate) fn rr3_cmd_verify(args: &[String]) -> Result<String, (String, ExitCode)> {
-    let a = rr3_verify_args(args)?;
+/// 验签后的制品视图（所有权字段；manifest 原文留作 install 的复核输入）。
+struct Rr3Checked {
+    image: PathBuf,
+    bytes: u64,
+    kind: String,
+    platform: String,
+    board: String,
+    version: String,
+    key_id: [u8; 8],
+    manifest: Vec<u8>,
+}
+
+/// verify / install 共用的唯一验签链：解析 → 取公钥 → 严格验签 → 目标/降级 →
+/// 镜像摘要。两处子命令都必须走这里，禁止各自再写一份顺序（ADR-0026 裁定 3）。
+fn rr3_check_pkg(a: &Rr3VerifyArgs) -> Result<Rr3Checked, (String, ExitCode)> {
     let bytes = rr3_read_bytes(&a.manifest, "manifest")?;
     let sig = rr3_read_trimmed(&a.sig, "签名")?;
     let pre = sign::rr3_manifest_parse(&bytes)
         .map_err(|e| (format!("manifest 非法：{e}"), ExitCode::from(1)))?;
-    let pub_path = rr3_pub_path(&a, &pre);
+    let pub_path = rr3_pub_path(a, &pre);
     let pub_hex = rr3_read_trimmed(&pub_path, "公钥")?;
     let m = sign::rr3_verify_signed(&bytes, &sig, &pub_hex)
         .map_err(|e| (format!("验签失败：{e}"), ExitCode::from(1)))?;
-    sign::rr3_manifest_expect(&m, &rr3_expect(&a))
+    sign::rr3_manifest_expect(&m, &rr3_expect(a))
         .map_err(|e| (format!("目标/降级校验拒绝：{e}"), ExitCode::from(1)))?;
-    let image = rr3_image_path(&a, &m);
+    let image = rr3_image_path(a, &m);
     sign::rr3_image_check(&image, &m)
         .map_err(|e| (format!("镜像校验失败：{e}"), ExitCode::from(1)))?;
+    Ok(Rr3Checked {
+        image,
+        bytes: m.bytes,
+        kind: m.kind.to_string(),
+        platform: m.platform.to_string(),
+        board: m.board.to_string(),
+        version: m.version.to_string(),
+        key_id: m.key_id,
+        manifest: bytes,
+    })
+}
+
+/// verify：严格验签 + 目标兼容 + 可选镜像摘要核对；不写任何槽位。
+pub(crate) fn rr3_cmd_verify(args: &[String]) -> Result<String, (String, ExitCode)> {
+    let c = rr3_check_pkg(&rr3_verify_args(args)?)?;
     Ok(format!(
         "验签通过：kind={} platform={} board={} version={} image={} bytes={} key_id={}（镜像摘要一致）",
-        m.kind,
-        m.platform,
-        m.board,
-        m.version,
-        image.display(),
-        m.bytes,
-        sign::rr3_hex_encode(&m.key_id)
+        c.kind,
+        c.platform,
+        c.board,
+        c.version,
+        c.image.display(),
+        c.bytes,
+        sign::rr3_hex_encode(&c.key_id)
     ))
 }
 
@@ -276,27 +315,19 @@ pub(crate) fn rr3_cmd_install(args: &[String]) -> Result<String, (String, ExitCo
     if !rr3_flag(args, "--confirm") {
         return Err(rr3_use("install 会写目标文件，必须显式传 --confirm".into()));
     }
-    let bytes = rr3_read_bytes(&a.manifest, "manifest")?;
-    let sig = rr3_read_trimmed(&a.sig, "签名")?;
-    let pre = sign::rr3_manifest_parse(&bytes)
+    let c = rr3_check_pkg(&a)?;
+    // 原样再解析一次已验签的 manifest：install 的临时件复核要拿它做摘要判据，
+    // 不是第二次验签（验签与策略已在上一步一次完成）。
+    let m = sign::rr3_manifest_parse(&c.manifest)
         .map_err(|e| (format!("manifest 非法：{e}"), ExitCode::from(1)))?;
-    let pub_path = rr3_pub_path(&a, &pre);
-    let pub_hex = rr3_read_trimmed(&pub_path, "公钥")?;
-    let m = sign::rr3_verify_signed(&bytes, &sig, &pub_hex)
-        .map_err(|e| (format!("验签失败：{e}"), ExitCode::from(1)))?;
-    sign::rr3_manifest_expect(&m, &rr3_expect(&a))
-        .map_err(|e| (format!("目标/降级校验拒绝：{e}"), ExitCode::from(1)))?;
-    let image = rr3_image_path(&a, &m);
-    sign::rr3_image_check(&image, &m)
-        .map_err(|e| (format!("镜像校验失败：{e}"), ExitCode::from(1)))?;
-    rr3_install_file(&image, &target, &m)?;
+    rr3_install_file(&c.image, &target, &m)?;
     Ok(format!(
         "安装完成：{} → {}（version={} bytes={} key_id={}；目标为 staging 文件，块设备写入归 M6）",
-        image.display(),
+        c.image.display(),
         target.display(),
-        m.version,
-        m.bytes,
-        sign::rr3_hex_encode(&m.key_id)
+        c.version,
+        c.bytes,
+        sign::rr3_hex_encode(&c.key_id)
     ))
 }
 
