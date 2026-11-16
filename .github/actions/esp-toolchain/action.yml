@@ -14,6 +14,10 @@ runs:
   steps:
     # 缓存面：espup 可执行、esp 工具链、ESP-IDF 与工具目录。键钉版本，
     # 升 espup/IDF 必须同批改键，否则会吃旧工具链。
+    # 键里带 targets（2026-11-16 按芯片拆腿）：GitHub 缓存按 key 不可变，同一 key
+    # 只保留先存者——若 classic 腿与 S3 腿共用一个 key，后跑的那腿每次都要重装
+    # 自己芯片的 Xtensa/IDF 工具集（网络、分钟级）。按 targets 分键后各腿各存一份，
+    # 同 targets 的 job（esp32 与 ipct003）继续共享。
     - name: 缓存 esp 工具链与 ESP-IDF
       uses: actions/cache@v4
       with:
@@ -22,7 +26,7 @@ runs:
           ~/.rustup/toolchains/esp
           ~/.espressif
           ~/.cargo/bin/ldproxy
-        key: esp-${{ runner.os }}-v0.17.1-idf5.2.2
+        key: esp-${{ runner.os }}-${{ inputs.targets }}-v0.17.1-idf5.2.2
     - name: 安装 esp 工具链（espup 钉版）
       shell: bash
       env:
