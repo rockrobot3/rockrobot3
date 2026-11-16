@@ -3554,7 +3554,12 @@ tarball 步；CI 从 `genimage.cfg` 解析镜像名（不写第二份字面量�
 断言（`boot/rr_a/rr_b/rr_factory/rr_staging/data`）、生成 sha256 清单并上传
 artifact（14 天）。验证——YAML/脚本语法门通过、镜像名解析实测
 `rock3-zero3.img`；**全量构建回执由本次 `[buildroot-full]` 提交触发**（小时级，
-结论以 buildroot workflow 为准）。
+结论以 buildroot workflow 为准）。**同日第二次全量（`6fdffee`）仍红**：custom git
+已生效（阶段名 `uboot v2024.10`），失败为 `No rule to make target 'u-boot.itb'`
+＋ `scripts_dtc Error 1`；旧注解被 `pyerrors.h` 这类含 error 的路径污染，根因
+读不出来。追加处置——defconfig 与全量 make 拆步，新增 `make uboot` 预构建拍
+（失败打印干净末段），失败时上传 `br-uboot.log`/`br-build.log` artifact；下一拍
+据此定位 U-Boot 根因。
 
 **2026-11-17 status 里程碑对表（M6 OTA 行）**：事实——M6 行仍写"U-Boot env
 写侧未实装 / `rr3-ota-ctl` 三子命令"，与 HEAD 不符：`rr-ota/src/bootenv.rs`
