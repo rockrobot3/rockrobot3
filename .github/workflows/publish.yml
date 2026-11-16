@@ -169,3 +169,57 @@ jobs:
               sys.exit(1)
           print(f"PASS  多架构清单架构 {plats}（attestation {att} 条，不计入架构集）")
           PY
+
+  # 板侧固件制品（2026-11-16）：classic periph-base 的 release ELF 作为 tag
+  # release 的公开资产。为什么放发布流水线：固件常量（如 SCAN 驻留）改了必须
+  # 重编烧录，而 CI 产物要无凭据可下载；release asset 是公开、可审计、不引第三方
+  # 托管的载体。开发令牌档显式带 -dev 后缀，不冒充生产凭据。
+  #
+  # 资产是 ELF 而非裸 bin：ESP-IDF ELF 自带 bootloader/partition-table 段，
+  # 烧录侧 `espflash flash --chip esp32 <elf>` 直接生成并写入 app 镜像，保留 NVS。
+  firmware:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/esp-toolchain
+        with:
+          targets: esp32
+      - name: 构建 classic release 固件
+        env:
+          RR3_ALLOW_DEV_ADMIN_TOKEN: "1"
+        run: |
+          set -o pipefail
+          export PATH="$HOME/.cargo/bin:$PATH"
+          export IDF_PATH="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
+          export IDF_GITHUB_ASSETS=dl.espressif.com/github_assets
+          export PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.cloud.tencent.com/pypi/simple}"
+          export PIP_DEFAULT_TIMEOUT=60
+          cd tools/esp32-periph-base
+          if ! cargo +esp build --release \
+               --config 'source.crates-io.replace-with="rsproxy-sparse"' \
+               --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
+               > /tmp/fw-build.log 2>&1; then
+            errs=$(grep -E "error(\[|:)|panicked at" /tmp/fw-build.log | head -5 | tr '\n' ' ')
+            echo "::error title=fw-build::classic release 构建失败：${errs:0:800}"
+            exit 1
+          fi
+          . "$GITHUB_WORKSPACE/tools/ci/cargo-artifact.sh"
+          elf="$(rr3_cargo_artifact xtensa-esp32-espidf release esp32-periph-base)"
+          if [ ! -f "$elf" ]; then
+            echo "::error title=fw-elf::release ELF 不在树: $elf"
+            exit 1
+          fi
+          cp "$elf" "$GITHUB_WORKSPACE/rr3-periph-base-esp32-dev.elf"
+          ls -l "$GITHUB_WORKSPACE/rr3-periph-base-esp32-dev.elf"
+          sha256sum "$GITHUB_WORKSPACE/rr3-periph-base-esp32-dev.elf"
+      - name: 上传 release 资产
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: rr3-periph-base-esp32-dev.elf
+          fail_on_unmatched_files: true
