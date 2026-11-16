@@ -53,14 +53,17 @@ root=LABEL 标签（原子落盘）。槽位镜像写入（往 rr_b 落整镜像
 
     # 4. 写入前验签：目标兼容 + 可选降级门 + 镜像摘要核对
     rr3-ota-ctl verify --manifest rr3-ota.manifest --sig rr3-ota.sig \
-        --pub ota/keys/<key_id>.pub --image rr3-rootfs-rk3566-0.0.8.img \
+        --pub-dir ota/keys --image rr3-rootfs-rk3566-0.0.8.img \
         --platform rk3566 --board radxa-zero3 --current-version 0.0.7
 
     # 5. 验签后装到普通文件 staging 目标（块设备/槽位写入归 M6）
     rr3-ota-ctl install --manifest rr3-ota.manifest --sig rr3-ota.sig \
-        --pub ota/keys/<key_id>.pub --image rr3-rootfs-rk3566-0.0.8.img \
+        --pub-dir ota/keys --image rr3-rootfs-rk3566-0.0.8.img \
         --target /var/lib/rr3/staging/rr3-rootfs.img --confirm \
         --platform rk3566 --board radxa-zero3 --current-version 0.0.7
+
+`--pub-dir` 按 manifest 的 `key_id` 查 `<key_id>.pub`；单文件场景用 `--pub`，
+两者必须二选一。
 
 边界：`verify` 只读，不写任何槽位；`install` 只接受**普通文件**目标，
 先验签、再临时件复核、fsync、rename；块设备/槽位写入、`rr3.ctl.ota`
