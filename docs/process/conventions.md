@@ -3412,6 +3412,12 @@ keypub/manifest/sign/verify 端到端、错私钥 key_id、0600 权限、超大�
 静态交叉实测：`ELF 64-bit ARM aarch64, statically linked`。`check.sh` 全绿；
 度量维持 0.56% / 2.49 / 13 / 73 / 0。
 
+**2026-11-17 A1d（验签后 staging 安装原语）**：`rr3-ota-ctl install` 在
+`verify` 通过后才复制到目标同目录临时件，摘要复核 + `fsync` + `rename`；
+目标必须是普通文件（块设备/槽位写入仍归 M6），缺 `--confirm` 用法拒，
+源/目标同路径与目录目标拒，篡改镜像在落目标前拒。`rr3-ota-ctl` 测试
+11→12；度量重复率 0.62%、CC 2.49/13、panic 73、长名 0。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
