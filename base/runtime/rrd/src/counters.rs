@@ -230,14 +230,24 @@ mod tests {
     /// 路径判定三态：env 优先、linux 缺省、皆无不持久化
     #[test]
     fn path_decision_prefers_env_then_platform_default() {
+        // 期望值由 `Path::join` 生成：分隔符随平台（Windows 是 `\`），硬编码 `/`
+        // 在 Windows 上假红（2026-11-16 平台腿实证）。
+        let want = |dir: &str| {
+            Some(
+                Path::new(dir)
+                    .join(COUNTERS_FILE)
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+        };
         assert_eq!(
             rr3_path_with(Some("/tmp/rr3data"), Some("/data/rr3")),
-            Some("/tmp/rr3data/counters.json".to_string()),
+            want("/tmp/rr3data"),
             "env 有值时优先于平台缺省"
         );
         assert_eq!(
             rr3_path_with(None, Some("/data/rr3")),
-            Some("/data/rr3/counters.json".to_string()),
+            want("/data/rr3"),
             "env 无值吃平台缺省（linux rr_data 分区）"
         );
         assert_eq!(rr3_path_with(None, None), None, "皆无不持久化");
