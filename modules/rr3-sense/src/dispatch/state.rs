@@ -64,6 +64,8 @@ impl Rr3SenseDispatcher {
             doa_cfg,
             doa_ring,
             read_pool: Rr3FrameBuf::default(),
+            last_tick: None,
+            max_jitter_ms: 0,
         }
     }
 
