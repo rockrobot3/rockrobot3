@@ -29,6 +29,7 @@ echo "== ① 交叉编译（$TARGET 静态，rust-lld）=="
 export RUSTFLAGS="-C linker=rust-lld"
 cargo build -q --locked --release --manifest-path base/runtime/Cargo.toml --target "$TARGET" -p rrd
 cargo build -q --locked --release --manifest-path tools/rrctl/Cargo.toml --target "$TARGET"
+cargo build -q --locked --release --manifest-path base/ota/rr3-ota-ctl/Cargo.toml --target "$TARGET"
 # 六模块中五件走 musl 静态；**brain 不在此列**——其云端客户端用 ureq+rustls(ring)，
 # ring 需要 C 工具链（aarch64-linux-musl-gcc），与 alsa 同属"宿主交叉结构性不覆盖"类，
 # 归板上原生构建（build-onboard.sh，同 alsa 先例）。2026-10-31 教训：本脚本曾在
@@ -43,7 +44,7 @@ cargo build -q --locked --release --manifest-path tools/rr3-pack/Cargo.toml # �
 echo "== ② 组装注入产物（两轨同源约定）=="
 rm -rf "$PAY"
 mkdir -p "$PAY/rr3-modules"
-cp "$REL/rrd" "$REL/rr3-ctl" "$PAY/"
+cp "$REL/rrd" "$REL/rr3-ctl" "$REL/rr3-ota-ctl" "$PAY/"
 for m in act connect interact sense power; do
   mkdir -p "$PAY/rr3-modules/rr3-$m"
   cp "$REL/rr3-$m" "$PAY/rr3-modules/rr3-$m/bin"
@@ -71,6 +72,7 @@ STAGE="$OUT/rockrobot3_${VER}_arm64.deb.stage"
 echo "== ⑤ staging 布局断言（同 distro-smoke ⑤ 的 staging 版）=="
 test -x "$STAGE/usr/bin/rrd"
 test -x "$STAGE/usr/bin/rr3-ctl"
+test -x "$STAGE/usr/bin/rr3-ota-ctl"
 test -f "$STAGE/usr/lib/systemd/system/rrd.service"
 test -f "$STAGE/usr/lib/rockrobot3/profiles/distro.toml"
 test -f "$STAGE/usr/lib/rockrobot3/contracts/topics.toml"

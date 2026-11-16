@@ -64,7 +64,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
-      - name: 原生构建运行面（rrd / 六模块 / rr3-ctl / rr3-pack）
+      - name: 原生构建运行面（rrd / 六模块 / rr3-ctl / rr3-ota-ctl / rr3-pack）
         env:
           CARGO_TARGET_DIR: /tmp/rr3-build
         run: |
@@ -73,6 +73,7 @@ jobs:
             cargo build -q --locked --release --manifest-path "modules/rr3-$m/Cargo.toml"
           done
           cargo build -q --locked --release --manifest-path tools/rrctl/Cargo.toml
+          cargo build -q --locked --release --manifest-path base/ota/rr3-ota-ctl/Cargo.toml
           cargo build -q --locked --release --manifest-path tools/rr3-pack/Cargo.toml
 
       - name: 铺镜像根（rr3-pack stage 树）

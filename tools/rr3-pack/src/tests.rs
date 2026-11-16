@@ -41,6 +41,7 @@ fn fixture() -> (PathBuf, PathBuf) {
     fs::create_dir_all(repo.join("modules/rr3-connect")).unwrap();
     fs::write(payload.join("rrd"), "rrd-bin-bytes").unwrap();
     fs::write(payload.join("rr3-ctl"), "ctl-bin-bytes").unwrap();
+    fs::write(payload.join("rr3-ota-ctl"), "ota-ctl-bin-bytes").unwrap();
     let manifest = "[manifest]\nschema_version = 1\nname = \"rr3-act\"\nversion = \"0.0.1\"\ntype = \"module\"\nlang = \"rust\"\nentry = \"rr3-act\" # 在仓相对\n\n[provides]\ncapabilities = [\"act.servo\"]\n\n[depends]\nrequired = [\"bus.publish\"]\n\n[events]\npublishes = []\nsubscribes = []\n\n[health]\nheartbeat_ms = 1000\nwatchdog_timeout_ms = 5000\n\n[resources]\nrestart_policy = \"always\"\nmem_limit_mb = 16\nstart_priority = 40\n";
     for m in ["rr3-act", "rr3-connect"] {
         fs::write(
@@ -120,6 +121,10 @@ fn stage_tree_lays_out_deb_layout_and_rewrites_entry_only() {
     assert_eq!(
         fs::read_to_string(stage.join("usr/bin/rr3-ctl")).unwrap(),
         "ctl-bin-bytes"
+    );
+    assert_eq!(
+        fs::read_to_string(stage.join("usr/bin/rr3-ota-ctl")).unwrap(),
+        "ota-ctl-bin-bytes"
     );
     // 数据真值位：零改写
     assert_eq!(
@@ -257,6 +262,12 @@ fn missing_payload_pieces_are_named() {
     let (cfg, _) = cfg_of(&payload, &repo);
     let e = rr3_stage(&cfg).unwrap_err();
     assert!(e.contains("rrd 缺席"), "{e}");
+    // OTA CLI 缺件同样点名（签名/验签入口不能静默缺席）
+    let (payload, repo) = fixture();
+    fs::remove_file(payload.join("rr3-ota-ctl")).unwrap();
+    let (cfg, _) = cfg_of(&payload, &repo);
+    let e = rr3_stage(&cfg).unwrap_err();
+    assert!(e.contains("rr3-ota-ctl 缺席"), "{e}");
     // 模块缺 bin
     let (payload, repo) = fixture();
     fs::remove_file(payload.join("rr3-modules/rr3-act/bin")).unwrap();

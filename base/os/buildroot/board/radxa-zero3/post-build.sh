@@ -46,7 +46,7 @@ install -m 0644 "$SCRIPT_DIR/extlinux.conf" "$TARGET/extlinux/extlinux.conf"
 # rrd 与模块二进制由 aarch64 交叉编译后放到 ${BINARIES_DIR}（交付方式见
 # patches/README.md 的"产物注入"一节）；缺席只警告不阻断——镜像结构
 # 仍应可构建，产物齐装是板上/容器侧收口项。
-for bin in rrd rr3-ctl; do
+for bin in rrd rr3-ctl rr3-ota-ctl; do
 	if [ -f "$BINARIES_DIR/$bin" ]; then
 		install -m 0755 "$BINARIES_DIR/$bin" "$TARGET/usr/bin/$bin"
 	else
