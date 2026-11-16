@@ -3529,6 +3529,18 @@ cfg 守卫挤在一个函数里）。处置——按后端拆成 `rr3_src_linux`
 验证——rr-ota **35**、rr3-ota-ctl **14** tests；重复率 **0.56%**、CC 均值 2.49 /
 峰值 **11**，基线 `cc_max_fn` 12→**11**（只降不升）；`check.sh` 全绿。
 
+**2026-11-17 buildroot 全量镜像：源修正 + 产物化 + 分区断言**：事实——①image
+job 从未成功：`8d61b4d` 在全量 make 的 uboot 阶段因 ftp.denx.de 443 超时失败，
+而 `068fd97` 的 image job 是 **skipped**（此前"全量构建已成功"是误读）；②断言
+步硬写 `sdcard.img`，genimage 实际产出 `rock3-zero3.img`，即使 make 成功也会
+假红；③产物不上传，OTA 签名链没有真实载体。处置——defconfig 的 U-Boot 源改
+**custom git**（GitHub tag `v2024.10`，去掉 denx tarball 依赖），删 CI 的预塞
+tarball 步；CI 从 `genimage.cfg` 解析镜像名（不写第二份字面量）、加 GPT 分区
+断言（`boot/rr_a/rr_b/rr_factory/rr_staging/data`）、生成 sha256 清单并上传
+artifact（14 天）。验证——YAML/脚本语法门通过、镜像名解析实测
+`rock3-zero3.img`；**全量构建回执由本次 `[buildroot-full]` 提交触发**（小时级，
+结论以 buildroot workflow 为准）。
+
 **2026-11-17 status 里程碑对表（M6 OTA 行）**：事实——M6 行仍写"U-Boot env
 写侧未实装 / `rr3-ota-ctl` 三子命令"，与 HEAD 不符：`rr-ota/src/bootenv.rs`
 已实装（0.0.8 P1 审计件五），CLI 已九子命令，ADR-0026 签名/验签链已落地。

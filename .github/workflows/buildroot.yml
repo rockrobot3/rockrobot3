@@ -146,23 +146,8 @@ jobs:
           cp -a base/os/buildroot/board/. /tmp/buildroot/board/
           ls /tmp/buildroot/configs/rock3_zero3_defconfig /tmp/buildroot/board/radxa-zero3/patches/
 
-      # 2026-11-16 实测：runner 到 ftp.denx.de 连接超时，Buildroot 取不到
-      # U-Boot 2024.10 源码（随后报 No rule to make target 'u-boot.itb'）。
-      # 根因是上游镜像在 runner 不可达；按 Buildroot 的 dl 缓存语义预置源码，
-      # 不改 defconfig、不引第三方镜像。
-      - name: 预置 U-Boot 2024.10 源码（dl 缓存）
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/buildroot/dl/u-boot
-          curl -fL --retry 3 --retry-delay 2 -o /tmp/uboot.tar.gz \
-            "https://github.com/u-boot/u-boot/archive/refs/tags/v2024.10.tar.gz"
-          rm -rf /tmp/uboot-src && mkdir -p /tmp/uboot-src
-          tar -xzf /tmp/uboot.tar.gz -C /tmp/uboot-src
-          top=$(find /tmp/uboot-src -maxdepth 1 -mindepth 1 -type d | head -1)
-          tar -cjf /tmp/buildroot/dl/u-boot/u-boot-2024.10.tar.bz2 \
-            -C "$(dirname "$top")" "$(basename "$top")"
-          ls -l /tmp/buildroot/dl/u-boot/
-
+      # U-Boot 源已改 custom git（defconfig 内钉 tag）：不再依赖 ftp.denx.de 的
+      # tarball 下载面（runner 到该站的 443 连接超时，2026-11-16 实测）。
       - name: 交叉构建注入产物（aarch64-musl 静态）
         run: |
           set -o pipefail
@@ -211,18 +196,46 @@ jobs:
           fi
           tail -5 /tmp/br-build.log
 
-      - name: 镜像产物断言
+      # 镜像名真值在 genimage.cfg（`image <名>.img`），CI 不写第二份字面量：
+      # 2026-11-17 审计发现旧断言硬写 sdcard.img，而 genimage 实际产出
+      # rock3-zero3.img——即使全量 make 成功也会在断言步假红。
+      - name: 解析镜像名（genimage.cfg 单点）
+        id: img
         run: |
           set -euo pipefail
-          img=/tmp/br-out/images/sdcard.img
+          name=$(awk '$1=="image" && $2 ~ /\.img$/ { print $2; exit }' \
+            base/os/buildroot/board/radxa-zero3/genimage.cfg)
+          if [ -z "$name" ]; then
+            echo "::error title=br-image-name::genimage.cfg 找不到顶层 .img 声明"
+            exit 1
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "PASS  镜像名解析：$name"
+
+      - name: 镜像产物断言（GPT 分区 + dtb）
+        run: |
+          set -euo pipefail
+          img="/tmp/br-out/images/${{ steps.img.outputs.name }}"
           if [ ! -s "$img" ]; then
-            echo "::error title=br-image::sdcard.img 未生成"
+            echo "::error title=br-image::${{ steps.img.outputs.name }} 未生成"
             ls -l /tmp/br-out/images | head
             exit 1
           fi
           ls -l "$img"
           sha256sum "$img"
-          fdisk -l "$img" | head -20 || true
+          sfdisk -d "$img" > /tmp/br-parts.txt || {
+            echo "::error title=br-part::sfdisk 读不出分区表"
+            exit 1
+          }
+          # 分区名是 rr-ota 槽位标签的物理对应物：名字漂移 = 升级链错槽。
+          for p in boot rr_a rr_b rr_factory rr_staging data; do
+            if ! grep -q "name=\"$p\"" /tmp/br-parts.txt; then
+              echo "::error title=br-part::GPT 缺分区 $p"
+              cat /tmp/br-parts.txt
+              exit 1
+            fi
+            echo "PASS  GPT 分区 $p"
+          done
           for b in rk3566-radxa-zero-3w.dtb rk3566-radxa-zero-3e.dtb; do
             if [ ! -s "/tmp/br-out/images/$b" ]; then
               echo "::error title=br-dtb::$b 不在 images"
@@ -230,4 +243,25 @@ jobs:
             fi
             echo "PASS  $b"
           done
-          echo "PASS  Buildroot 2024.02.11 全量构建：sdcard.img 产出"
+          echo "PASS  Buildroot 2024.02.11 全量构建：${{ steps.img.outputs.name }} 产出"
+
+      - name: 生成摘要清单
+        run: |
+          set -euo pipefail
+          cd /tmp/br-out/images
+          sha256sum "${{ steps.img.outputs.name }}" ./*.ext4 ./*.dtb > checksums.txt
+          cat checksums.txt
+
+      # 产物留档是为了让 OTA 签名链有**真实载体**可签（tag/发布面消费），
+      # 不是演示下载；保留 14 天与一次全量构建的复核窗口同档。
+      - name: 上传镜像与摘要
+        uses: actions/upload-artifact@v4
+        with:
+          name: rock3-zero3-image
+          path: |
+            /tmp/br-out/images/${{ steps.img.outputs.name }}
+            /tmp/br-out/images/*.ext4
+            /tmp/br-out/images/*.dtb
+            /tmp/br-out/images/checksums.txt
+          if-no-files-found: error
+          retention-days: 14
