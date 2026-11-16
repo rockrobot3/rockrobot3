@@ -96,7 +96,10 @@ pub(crate) const AXIS_SETTLE_MS: u64 = 200;
 pub(crate) const SERVO_SLEW_STEP_DEG: u32 = 2;
 pub(crate) const SERVO_SLEW_STEP_MS: u64 = 20;
 /// SCAN 每轴每点驻留（判据② 逐点回读；串行后单点 = pan 段 + tilt 段各一次）。
-pub(crate) const SCAN_POINT_MS: u64 = 600;
+/// **2026-11-16 现场订正**：舵机由板载 5V 供电时，600ms 驻留的连续 5 点扫描
+/// 3 次里 2 次 BOD 复位；同一固件按逐轴 1.2s 节奏跑全行程 3/3 稳定。驻留提到
+/// 1200ms，把电流恢复窗口还给 5V 轨；slew 与行程不动（单条 PAN/TILT/SERVO 已过）。
+pub(crate) const SCAN_POINT_MS: u64 = 1200;
 /// 运行面自主节拍（表情微动作 + 云台扫摆；无作业时空转一拍）。
 pub(crate) const RUNTIME_TICK_MS: u64 = 10;
 
