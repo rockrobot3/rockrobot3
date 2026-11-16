@@ -3262,6 +3262,7 @@ CI"往返，本地无法复跑。SKIP 纪律：仅 `RR3_SMOKE_ALLOW_SKIP=1` 时�
 | 瑞芯微 RK3566 / RK3588（aarch64） | `aarch64-unknown-linux-musl`（+ `-gnu` 字节对拍归 `ipct003`） | `cross-artifacts` 矩阵一腿（mode=musl） | 七件全静态 aarch64 产物 + ELF 断言 + docker binfmt 执行冒烟（断言打印用法） |
 | 进迭时空 SpacemiT K1/K3（RISC-V） | `riscv64gc-unknown-linux-gnu`（apt 交叉 gcc，`CARGO_TARGET_*_LINKER` 显式注入） | `cross-artifacts` 矩阵一腿（mode=gnu，assert=any） | 七件 riscv64 产物 + ELF 断言 + `qemu-riscv64-static -L <sysroot>` 执行冒烟（断言打印用法）——**2026-11-16 从"仅编译面"升到"构建 + 真执行"**；静态断言为例外：musl 交叉链不可得（cross 镜像链路过宿主 cc 失败，实测），gnu 动态链接如实登记 |
 | 英特尔 / AMD（x86_64） | 原生 `x86_64-unknown-linux-gnu` | `cross-artifacts` 原生腿 + `conventions`（全量门）+ `distro-smoke`（deb 真装） | 七件原生产物 + 原生执行冒烟 + 全量测试与门禁 ①–⑭ + 容器内真装起机（两家同 ISA/ABI，一腿覆盖，`assert=any` 因原生动态链接） |
+| Windows（x86_64，登记平台 L1） | 原生 `x86_64-pc-windows-msvc` | `host-windows` | workspace 编译面 + ①b 全量测试（POSIX 段由 cfg 门控不参与；原子落盘/权限位类用例按 unix 能力门控；换行由 `.gitattributes` 归一 LF） |
 
 口径说明：以上是**构建/执行环境**验证（能在目标 ISA 上编译并跑起来）；真板上的
 器件读数、时序与断电证据仍属板上收口，不在本表冒领。五平台三腿的构建/断言/执行
@@ -3284,6 +3285,15 @@ CI"往返，本地无法复跑。SKIP 纪律：仅 `RR3_SMOKE_ALLOW_SKIP=1` 时�
 - **口径**：本轮起本地不承担编译/集成验证（本机算力与环境非标准），`check.sh` 的
   重编译步以 CI `gate` 的回执为权威；本地只做 YAML/脚本语法与 §2 静态门。本表每一腿
   的结论都有远端回执支撑。
+
+**2026-11-16 追加：Windows（登记平台 L1）腿建成**（commit `82ce8fa`）：`host-windows`
+在 `windows-latest` 上跑 workspace 编译面 + `cargo test --no-fail-fast`，敞口 #5 的
+Windows 半边结项。首跑 4 处红全部是**跨平台假设**而非产品缺陷：3 处 CRLF（checkout 的
+`autocrlf` 把文本转成 CRLF，而装载面/测试用 `include_str!` + `"\n"` 的 replace/断言 →
+根因修 `.gitattributes` `* text=auto eol=lf`）＋1 处路径分隔符（期望值改由 `Path::join`
+生成）。注解通道自身也修了三处：`cargo test` 不支持 `--keep-going`（改 `--no-fail-fast`）、
+`Tee-Object` 默认 UTF-16 导致零匹配（统一 `-Encoding utf8`）、`failed` 大小写不敏感误配
+（改 `-CaseSensitive`）。
 
 纪律：① **不在源码区做任何编译/集成/构建**（`.cargo/config.toml` 已把 target-dir
 指到 `/tmp`，CI 侧只跑远端）；② 新增需要"跑起来"的验证，先加进 `check.sh` 或本表
