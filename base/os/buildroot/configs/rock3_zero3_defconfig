@@ -51,11 +51,23 @@ BR2_TARGET_UBOOT_CUSTOM_REPO_URL="https://github.com/u-boot/u-boot.git"
 BR2_TARGET_UBOOT_CUSTOM_REPO_VERSION="v2024.10"
 BR2_TARGET_UBOOT_BOARD_DEFCONFIG="radxa-zero-3-rk3566"
 BR2_TARGET_UBOOT_NEEDS_DTC=y
+# binman 需要 pylibfdt（libfdt 的 Python 绑定）与 pyelftools（解析 ELF）。
+BR2_TARGET_UBOOT_NEEDS_PYLIBFDT=y
+BR2_TARGET_UBOOT_NEEDS_PYELFTOOLS=y
 # RK3566 需要 idbloader.img（SPL+TPL 合体）与 u-boot.itb 两级产物，
 # 布局中的烧写偏移见 genimage.cfg（板上核对项）。
+#
+# 为什么不用 BR2_TARGET_UBOOT_FORMAT_ITB：它把 `u-boot.itb` 加进
+# UBOOT_MAKE_TARGET，而 U-Boot 2024.10 的该目标只在 ifdef U_BOOT_ITS 下存在
+# （CONFIG_SPL_FIT_SOURCE / CONFIG_USE_SPL_FIT_GENERATOR 才定义）；rk3566 的
+# defconfig 走 binman（CONFIG_SPL_LOAD_FIT/FIT），没有这个目标——2026-11-17
+# 全量构建的 `No rule to make target 'u-boot.itb'` 即由此而来。
+# binman 的顶层镜像 `u-boot-rockchip.bin` 同时把 idbloader.img 与 u-boot.itb
+# 作为**子产物文件**写进构建目录（arch/arm/dts/rockchip-u-boot.dtsi 的
+# filename 字段）。故这里用 FORMAT_CUSTOM 列出两个文件名：只加拷贝清单、
+# 不加 make 目标，`make all` 由 binman 产出后原样拷到 BINARIES_DIR。
 BR2_TARGET_UBOOT_FORMAT_CUSTOM=y
-BR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME="idbloader.img"
-BR2_TARGET_UBOOT_FORMAT_ITB=y
+BR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME="idbloader.img u-boot.itb"
 
 # ---- 用户态包（M3 音频链路的板上依赖）---------------------------------------
 BR2_PACKAGE_ALSA_LIB=y
