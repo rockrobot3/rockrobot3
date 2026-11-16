@@ -67,8 +67,14 @@ jobs:
       - name: 安装 riscv64 交叉工具链与 qemu（gnu 目标）
         if: matrix.mode == 'gnu'
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq gcc-riscv64-linux-gnu libc6-dev-riscv64-cross qemu-user-static
+          set -o pipefail
+          sudo apt-get update -qq 2>&1 | tail -3 || true
+          if ! sudo apt-get install -y -qq gcc-riscv64-linux-gnu qemu-user 2>&1 | tee /tmp/apt.log; then
+            why=$(grep -iE "unable to locate|has no installation candidate|depends|conflicts|error" /tmp/apt.log | tail -3 | tr '\n' ' ')
+            echo "::error title=apt-riscv::${why:0:700}"
+            exit 1
+          fi
+          command -v riscv64-linux-gnu-gcc && command -v qemu-riscv64
       # binfmt 走 setup-qemu（与 ipct003 同源，已在本仓长期验证）：musl 腿的执行
       # 冒烟在目标 ISA 容器里跑。riscv-gnu 腿改用 apt 的 qemu-user-static（不经 docker）。
       - uses: docker/setup-qemu-action@v3
@@ -101,7 +107,7 @@ jobs:
               native) out=$("$rel/$b" --help 2>&1) || true ;;
               musl) out=$(docker run --rm --platform "${{ matrix.platform }}" \
                        -v "$rel:/b:ro" alpine:3.20 "/b/$b" --help 2>&1) || true ;;
-              gnu) out=$(qemu-riscv64-static -L /usr/riscv64-linux-gnu "$rel/$b" --help 2>&1) || true ;;
+              gnu) out=$(qemu-riscv64 -L /usr/riscv64-linux-gnu "$rel/$b" --help 2>&1) || true ;;
             esac
             printf '%s\n' "$out" | head -3
             if ! printf '%s' "$out" | grep -q "$want"; then
