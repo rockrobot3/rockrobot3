@@ -11,14 +11,16 @@ export CARGO_HTTP_LOW_SPEED_LIMIT="${CARGO_HTTP_LOW_SPEED_LIMIT:-1}"
 # **不在门禁步序内**（check.sh 不调它）：它依赖平台条件（Docker / aarch64 交叉目标），
 # 塞进门禁等于让无容器环境的机器永远红。登记与步序见 docs/process/conventions.md §2。
 #
-# 做四件事：
+# 做五件事：
 #   1. 宿主跑 `ipct003_dump`，header 行对 `contracts/golden/event-header-128.hex`；
 #   2. 已装 `aarch64-unknown-linux-gnu` 目标则交叉 `cargo check`——header.rs 的编译期
 #      const 断言随之在 aarch64 目标上求值（不需要链接器）；
-#   3. 有 Docker 则 `--platform linux/arm64` 容器真跑 dump，与宿主输出逐行 diff
+#   3. 已装 `riscv64gc-unknown-linux-gnu` 目标则同样交叉 `cargo check`——RISC-V 的
+#      编译期 const 布局断言独立求值（2026-11-16 平台矩阵补齐该目标后同批接入）；
+#   4. 有 Docker 则 `--platform linux/arm64` 容器真跑 dump，与宿主输出逐行 diff
 #      （三方对拍的第三方就是本 golden，第 1 步已对）。没有则 SKIP 并明说——
 #      "脚本就绪、双架构真跑待容器环境"，绝不静默当作已验证；
-#   4. 已链 esp 工具链（0.0.7 批A'）则 `cargo +esp check --target xtensa-esp32-none-elf
+#   5. 已链 esp 工具链（0.0.7 批A'）则 `cargo +esp check --target xtensa-esp32-none-elf
 #      -Z build-std=alloc,core`——golden 头 const 对拍（rr-ipc 协议层编译期求值）在该
 #      目标成立，即 IPC-T-003 第④路；xtensa 真机运行期 dump 归 0.0.7 批C UART 夹具。
 #      未装则 SKIP 并明说。默认在线直连 crates.io（CI 网络正常，build-std 构建依赖
@@ -78,8 +80,23 @@ else
   skip=1
 fi
 
+# riscv64 交叉编译（编译期 const 断言求值；同 aarch64 口径，不需要链接器）
+echo "=== [3/5] riscv64 交叉编译（编译期 const 断言） ==="
+if rustup target list --installed 2>/dev/null | grep -q '^riscv64gc-unknown-linux-gnu$'; then
+  if cargo check -q --manifest-path "$manifest" -p rr-ipc --lib \
+      --target riscv64gc-unknown-linux-gnu; then
+    echo "PASS  rr-ipc 在 riscv64gc-unknown-linux-gnu 目标编译通过（const 布局断言已在该目标求值）"
+  else
+    echo "FAIL  rr-ipc 在 riscv64 目标编译失败"
+    fail=1
+  fi
+else
+  echo "SKIP  未安装 riscv64gc-unknown-linux-gnu 目标（rust-toolchain.toml 已声明，rustup target add 即可）"
+  skip=1
+fi
+
 # linux/arm64 容器真跑 + 逐行 diff
-echo "=== [3/4] linux/arm64 容器真跑 ==="
+echo "=== [4/5] linux/arm64 容器真跑 ==="
 if command -v docker > /dev/null 2>&1; then
   # CARGO_TARGET_DIR 指到容器内临时目录：aarch64 产物不落回宿主 target，权限也不串
   if docker run --rm --platform linux/arm64 \
@@ -105,7 +122,7 @@ fi
 # xtensa 编译期 golden 对拍（0.0.7 层① 第④路；esp 工具链安装见 0.0.7 方案 §4 批A' 记录）
 # 默认在线直连 crates.io；本网络 CDN 僵死时本机跑第④路 export
 # IPCT003_CARGO_OFFLINE=1 / IPCT003_CARGO_MIRROR=1 恢复离线+镜像旧行为。
-echo "=== [4/4] xtensa 编译期 golden 对拍（esp 工具链） ==="
+echo "=== [5/5] xtensa 编译期 golden 对拍（esp 工具链） ==="
 if rustup toolchain list 2>/dev/null | grep -q '^esp'; then
   extra_cfg=()
   [ -n "${IPCT003_CARGO_OFFLINE:-}" ] && extra_cfg+=(--offline)
