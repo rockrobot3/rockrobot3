@@ -16,10 +16,12 @@ pub(crate) const RR3_USAGE: &str = "\
   rr3-ota-ctl manifest --image <镜像> --platform <平台> --board <板型> --version <版本>
                        --key-file <种子文件> --out <manifest 路径>
   rr3-ota-ctl sign --manifest <manifest> --key-file <种子文件> --sig-out <签名文件>
-  rr3-ota-ctl verify --manifest <manifest> --sig <签名文件> --pub <公钥文件>
+  rr3-ota-ctl verify --manifest <manifest> --sig <签名文件>
+                      (--pub <公钥文件> | --pub-dir <公钥目录>)
                       [--image <镜像>] [--platform <平台>] [--board <板型>]
                       [--current-version <版本>] [--allow-downgrade]
-  rr3-ota-ctl install --manifest <manifest> --sig <签名文件> --pub <公钥文件>
+  rr3-ota-ctl install --manifest <manifest> --sig <签名文件>
+                      (--pub <公钥文件> | --pub-dir <公钥目录>)
                       --image <镜像> --target <普通文件> --confirm
                       [--platform <平台>] [--board <板型>]
                       [--current-version <版本>] [--allow-downgrade]

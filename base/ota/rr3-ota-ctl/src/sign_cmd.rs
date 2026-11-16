@@ -135,7 +135,8 @@ pub(crate) fn rr3_cmd_sign(args: &[String]) -> Result<String, (String, ExitCode)
 struct Rr3VerifyArgs {
     manifest: PathBuf,
     sig: PathBuf,
-    pubkey: PathBuf,
+    pubkey: Option<PathBuf>,
+    pub_dir: Option<PathBuf>,
     image: Option<PathBuf>,
     platform: Option<String>,
     board: Option<String>,
@@ -149,8 +150,17 @@ fn rr3_verify_args(args: &[String]) -> Result<Rr3VerifyArgs, (String, ExitCode)>
     );
     let sig =
         PathBuf::from(rr3_val_arg(args, "--sig", "verify 必须显式传 --sig").map_err(rr3_use)?);
-    let pubkey =
-        PathBuf::from(rr3_val_arg(args, "--pub", "verify 必须显式传 --pub").map_err(rr3_use)?);
+    let pubkey = rr3_opt_arg(args, "--pub")
+        .map_err(rr3_use)?
+        .map(PathBuf::from);
+    let pub_dir = rr3_opt_arg(args, "--pub-dir")
+        .map_err(rr3_use)?
+        .map(PathBuf::from);
+    if pubkey.is_some() == pub_dir.is_some() {
+        return Err(rr3_use(
+            "--pub 与 --pub-dir 必须二选一（单公钥文件，或按 key_id 查目录）".into(),
+        ));
+    }
     let image = rr3_opt_arg(args, "--image")
         .map_err(rr3_use)?
         .map(PathBuf::from);
@@ -167,11 +177,22 @@ fn rr3_verify_args(args: &[String]) -> Result<Rr3VerifyArgs, (String, ExitCode)>
         manifest,
         sig,
         pubkey,
+        pub_dir,
         image,
         platform,
         board,
         current,
         allow_downgrade,
+    })
+}
+
+/// 公钥路径：显式文件优先，否则按 manifest 的 key_id 在目录中查 `<key_id>.pub`。
+fn rr3_pub_path(a: &Rr3VerifyArgs, m: &sign::Rr3OtaManifest<'_>) -> PathBuf {
+    a.pubkey.clone().unwrap_or_else(|| {
+        a.pub_dir
+            .as_ref()
+            .map(|d| d.join(format!("{}.pub", sign::rr3_hex_encode(&m.key_id))))
+            .unwrap_or_default()
     })
 }
 
@@ -200,7 +221,10 @@ pub(crate) fn rr3_cmd_verify(args: &[String]) -> Result<String, (String, ExitCod
     let a = rr3_verify_args(args)?;
     let bytes = rr3_read_bytes(&a.manifest, "manifest")?;
     let sig = rr3_read_trimmed(&a.sig, "签名")?;
-    let pub_hex = rr3_read_trimmed(&a.pubkey, "公钥")?;
+    let pre = sign::rr3_manifest_parse(&bytes)
+        .map_err(|e| (format!("manifest 非法：{e}"), ExitCode::from(1)))?;
+    let pub_path = rr3_pub_path(&a, &pre);
+    let pub_hex = rr3_read_trimmed(&pub_path, "公钥")?;
     let m = sign::rr3_verify_signed(&bytes, &sig, &pub_hex)
         .map_err(|e| (format!("验签失败：{e}"), ExitCode::from(1)))?;
     sign::rr3_manifest_expect(&m, &rr3_expect(&a))
@@ -231,7 +255,10 @@ pub(crate) fn rr3_cmd_install(args: &[String]) -> Result<String, (String, ExitCo
     }
     let bytes = rr3_read_bytes(&a.manifest, "manifest")?;
     let sig = rr3_read_trimmed(&a.sig, "签名")?;
-    let pub_hex = rr3_read_trimmed(&a.pubkey, "公钥")?;
+    let pre = sign::rr3_manifest_parse(&bytes)
+        .map_err(|e| (format!("manifest 非法：{e}"), ExitCode::from(1)))?;
+    let pub_path = rr3_pub_path(&a, &pre);
+    let pub_hex = rr3_read_trimmed(&pub_path, "公钥")?;
     let m = sign::rr3_verify_signed(&bytes, &sig, &pub_hex)
         .map_err(|e| (format!("验签失败：{e}"), ExitCode::from(1)))?;
     sign::rr3_manifest_expect(&m, &rr3_expect(&a))

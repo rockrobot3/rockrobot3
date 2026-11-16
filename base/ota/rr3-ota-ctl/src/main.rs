@@ -347,6 +347,21 @@ mod tests {
             args
         }
 
+        fn verify_args_pub_dir(&self, dir: &Path) -> Vec<String> {
+            vec![
+                "--manifest".into(),
+                self.manifest.to_string_lossy().into_owned(),
+                "--sig".into(),
+                self.sig.to_string_lossy().into_owned(),
+                "--pub-dir".into(),
+                dir.to_string_lossy().into_owned(),
+                "--platform".into(),
+                "rk3566".into(),
+                "--board".into(),
+                "radxa-zero3".into(),
+            ]
+        }
+
         fn verify_args(&self) -> Vec<String> {
             vec![
                 "--manifest".into(),
@@ -462,6 +477,26 @@ mod tests {
         let (m, c) = rr3_cmd_verify(&wrong).unwrap_err();
         assert_eq!(c, ExitCode::from(1));
         assert!(m.contains("platform 不匹配"), "{m}");
+    }
+
+    /// --pub-dir 按 key_id 查公钥；缺键点名实际查找路径。
+    #[test]
+    fn pub_dir_resolves_key_id_and_names_missing_key() {
+        let f = OtaFixture::new("pub-dir");
+        f.prepare();
+        let keys = f.dir.join("keys");
+        std::fs::create_dir_all(&keys).unwrap();
+        let key_id = sign::rr3_hex_encode(&sign::rr3_key_id(&sign::rr3_pubkey(&SEED)));
+        std::fs::copy(&f.pubkey, keys.join(format!("{key_id}.pub"))).unwrap();
+        let mut args = f.verify_args_pub_dir(&keys);
+        args.extend(["--current-version".into(), "0.0.7".into()]);
+        rr3_cmd_verify(&args).expect("按 key_id 查公钥");
+
+        let empty = f.dir.join("empty-keys");
+        std::fs::create_dir_all(&empty).unwrap();
+        let e = rr3_cmd_verify(&f.verify_args_pub_dir(&empty)).unwrap_err();
+        assert_eq!(e.1, ExitCode::from(1));
+        assert!(e.0.contains(&format!("{key_id}.pub")), "{:?}", e.0);
     }
 
     /// install：验签通过才落 staging 文件；缺 confirm、目录目标、篡改镜像都拒。

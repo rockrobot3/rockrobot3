@@ -38,6 +38,7 @@
 - 签名覆盖 manifest 原始字节，镜像本体由 `bytes`/`sha256` 约束；
 - 私钥只在签名环境（离线/CI Secret），格式 = 32 字节种子十六进制，unix 0600；
 - 公钥按 `ota/keys/<key_id>.pub` 随安装树只读分发，`key_id` = 公钥 SHA-256 前 8 字节；
+  `verify/install` 用 `--pub-dir ota/keys` 按 manifest 的 `key_id` 查键，单文件场景用 `--pub`；
 - 本版 `kind` 只认 `rootfs`；模块级签名格式留扩展位。
 
 `install` 子命令已提供"验签后落普通文件 staging"的安装原语：先验签、再写临时件、
