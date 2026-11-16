@@ -33,7 +33,7 @@ fi
 case "$assert" in
 static | any) ;;
 *)
-  echo "ERROR: 第三参只认 static / any（实得 $assert）" >&2
+  echo "ERROR: 第三参只认 static / any（实得 ${assert}）" >&2
   exit 1
   ;;
 esac
@@ -67,7 +67,7 @@ for b in rrd rr3-ctl rr3-act rr3-connect rr3-interact rr3-sense rr3-power; do
   fi
   line="$(file "$rel/$b")"
   if ! printf '%s\n' "$line" | grep -q "ELF 64-bit.*$arch"; then
-    echo "FAIL  ELF 架构不符（期望 $arch）: $rel/$b" >&2
+    echo "FAIL  ELF 架构不符（期望 ${arch}）: $rel/$b" >&2
     printf '%s\n' "$line" >&2
     exit 1
   fi
