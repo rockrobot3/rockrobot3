@@ -97,8 +97,23 @@ restore() {
 		return 1
 	fi
 	if command -v rr3-ctl >/dev/null 2>&1; then
+		# 还原竞态（2026-11-16 首次实战）：systemctl active 早于 ctl socket
+		# 可连，直接查会打印"连接被拒（rrd 在跑吗？）"的误导行。这里等到
+		# 可连或 15s 上限，再打印模块态。
+		i=0
+		while [ "$i" -lt 30 ]; do
+			if rr3-ctl status >/dev/null 2>&1; then
+				break
+			fi
+			sleep 0.5
+			i=$((i + 1))
+		done
 		echo "[audio-rec] 还原后模块态：" >&2
-		rr3-ctl status 2>&1 | head -8 >&2 || true
+		if out=$(rr3-ctl status 2>&1); then
+			printf '%s\n' "$out" | head -8 >&2
+		else
+			echo "[audio-rec] rrd 已 active，但 ctl socket 暂不可连（稍后重试 rr3-ctl status）" >&2
+		fi
 	fi
 	return "$rc"
 }
