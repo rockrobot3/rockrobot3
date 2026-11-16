@@ -284,7 +284,7 @@ Pi 4B **既可独立运行，也可当宿主带板**；两种形态的装配单�
 | 形态 | profile | 说明 |
 |---|---|---|
 | Pi4 + classic 快速部署 | `pi4b-host-esp32-classic.toml` | classic 板只做末梢（麦/舵机/OLED/UART2），用于无完整底座依赖的快速验证 |
-| Pi4 独立 | **待立 `pi4b-host.toml`** | host-only（本地 MAX7219/USB 声卡）；当前无专门档，`pi4b-host-esp32-classic` 是带 classic 板的组合，不等同独立档 |
+| Pi4 独立 | `pi4b-host.toml` | host-only（本地 MAX7219/USB 声卡，三模块 connect/interact/brain）；N44 起为 Pi 装机默认档（`.bak-n44` 备份旧档） |
 | Pi4 + S3 | `pi4b-host-esp32s3.toml` | S3 独立平台组合；板侧线束 41/42、8/9、4/5、6/15/7、1 |
 | S3 单板 | `esp32s3-mini.toml` | 板侧独立固件 |
 | RK3566（未来） | `default.toml` / `distro.toml` | 两档 chip 均为 `rk3566`（现成），到货后按板卡 runbook 装配 |
@@ -317,6 +317,44 @@ SIGKILL 2s 兜底；systemctl kill 后 6s 六模块恢复
   —— exit=0 → 整机 17:48:49 重启 → 六模块全新 running / denied_publish = 0
   / boots 42→45（两次 restart +1 各一次、整机 reboot +1，逐次对账自洽）
 ```
+
+## 12 维护窗：板面音频收流（rr3-audio-rec，#16 第二问）
+
+`rr3-audio-rec` 与 `rr3-sense` 竞争同一条板面 UART（`flock` 单消费者），取证必须
+停 rrd，且收兵必须还原。唯一入口是 [`tools/deploy/audio-rec.sh`](../../../../tools/deploy/audio-rec.sh)：
+编排 stop → 等 flock 释放 → 收流 → 必还原 → 打印模块态，`trap` 保证 Ctrl-C/信号
+路径也还原；脚本不解析帧语义（机制全在 rr3-audio-rec）。
+
+### 12.1 产物供给（源码区零产物）
+
+优先用 CI 产出的 aarch64 二进制（随版本制品）。维护窗内若暂无 CI 产物，在板上
+从同步副本构建，**目标目录必须在源码树外**：
+
+```bash
+rsync -a --delete --exclude target/ ./ pi@<host>:~/rr3-src/
+ssh pi@<host> 'cd ~/rr3-src/tools/rr3-audio-rec && \
+  CARGO_TARGET_DIR=/tmp/rr3-target cargo build --release && \
+  sudo install -m 0755 /tmp/rr3-target/release/rr3-audio-rec /usr/local/bin/'
+```
+
+源码副本在 `~/rr3-src`、产物落 `/tmp`，仓内工作树零改动。
+
+### 12.2 执行
+
+```bash
+sudo tools/deploy/audio-rec.sh --secs 1800 --out /tmp/q2.wav
+```
+
+退出码：`0` 收流正常且还原成功 / `1` 前置或还原失败 / `2` 用法错误；其余为
+`rr3-audio-rec` 自身（`3` 看门狗停滞恢复 / `4` 重连失败）。
+
+### 12.3 读数与判据
+
+- 日志：`<out>.log` 里的 `gaps=` / `restarts=` / `分片` / `重连` 行；
+- wav：`/tmp/q2.wav` 采样率与时长自洽；
+- 判据（#16 第二问）：1800s 内 `gaps`/`restarts` 相对分片数可量化，并与板侧
+  `audio_sent`/`seq` 对账；
+- 收兵后 `rr3-ctl status` 五模块 running、`denied_publish = 0`。
 
 判据 13/14/15 **全过**；判据 12（真电池）仍随电池组采购（BOM 待采购件，不在
 §10 三项欠账内）。链④真件档显示件收口；链④其余真件（真麦 DoA / 真舵机）
