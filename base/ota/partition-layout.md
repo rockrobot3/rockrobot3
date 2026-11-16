@@ -42,8 +42,8 @@
 - 本版 `kind` 只认 `rootfs`；模块级签名格式留扩展位。
 
 `install` 子命令已提供"验签后落普通文件 staging"的安装原语：先验签、再写临时件、
-复核摘要、fsync、rename；目标不是普通文件（块设备/槽位）即拒。块设备探测与
-对侧槽写入仍归 M6 板上批。
+复核摘要、fsync 临时件、rename、**fsync 父目录**（目录项落盘）；目标不是普通
+文件（块设备/槽位）即拒。块设备探测与对侧槽写入仍归 M6 板上批。
 
 命令与文法见 [base/ota/README.md](README.md) 与
 [ADR-0026](../../docs/process/adr/ADR-0026-OTA镜像签名与验签链.md)。`verify` 只读，
