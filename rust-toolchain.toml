@@ -17,6 +17,9 @@ components = ["rustfmt", "clippy"]
 targets = [
     "aarch64-unknown-linux-gnu",   # 瑞芯微 / 树莓派（字节对拍与动态档）
     "aarch64-unknown-linux-musl",  # 瑞芯微 / 树莓派（静态部署档）
-    "riscv64gc-unknown-linux-musl", # 进迭时空 SpacemiT（RISC-V 静态部署档）
+    # 进迭时空 SpacemiT（RISC-V）：平台腿走 gnu（apt 交叉 gcc + qemu 执行）。
+    # musl 档无可用交叉 libc（rust-lld 找不到 -lc/-lgcc_s，cross 链路过宿主 cc
+    # 失败——2026-11-16 两轮实测），故不声明；要恢复静态档须先引入可用 musl 链。
+    "riscv64gc-unknown-linux-gnu",
 ]
 profile = "minimal"
