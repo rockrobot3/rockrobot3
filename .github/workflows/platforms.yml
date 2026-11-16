@@ -245,12 +245,13 @@ jobs:
             Tee-Object -FilePath "$env:RUNNER_TEMP\win-test.log"
           if ($LASTEXITCODE -ne 0) {
             $log = "$env:RUNNER_TEMP\win-test.log"
+            # 区分大小写：`0 failed` 是小写，不能用不敏感匹配（上一轮注解被它灌满）。
             $bad = Get-Content -Path $log -Encoding utf8 |
-              Select-String -Pattern 'error\[|FAILED|panicked' |
+              Select-String -CaseSensitive -Pattern 'error\[|^test .* FAILED|panicked at|test result: FAILED' |
               Select-Object -First 8 | ForEach-Object { $_.Line.Trim() }
             foreach ($b in $bad) { Write-Output "::error title=windows-test::$b" }
-            foreach ($t in (Get-Content -Path $log -Encoding utf8 -Tail 12)) {
-              Write-Output "::error title=windows-test-tail::$t"
+            foreach ($t in (Get-Content -Path $log -Encoding utf8 -Tail 20)) {
+              if ($t.Trim()) { Write-Output "::error title=windows-test-tail::$t" }
             }
             exit 1
           }
