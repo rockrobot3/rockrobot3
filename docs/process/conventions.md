@@ -3464,6 +3464,16 @@ tmp+rename 正是第二条。处置——`rr_ipc::persist` 把目录 fsync 提�
 `sign_cmd/tests.rs`，避免顶穿 `main.rs` 599 行）；度量重复率 0.64%、CC
 2.49/13、panic 73、长名 0；`check.sh` 全绿。
 
+**2026-11-17 文档对表（status.md 方法数与 OTA 行订正）**：事实——status.md
+是唯一实况快照，但三处与 HEAD 不一致：①RPC 行写"十二方法（模块四 + 控制八）"，
+[rpc.rs](../../base/runtime/rrd/src/rpc.rs) 实为 **13/9**（漏 `rr3.ctl.domain.set`）；
+②`rr3-ctl` 行写"rrd ctl 六方法 / rrctl 逐一同名对齐"，实际 ctl 9 方法、
+rrctl 仅覆盖其中 6 个；③A/B OTA 行写"CLI 三子命令 / 落盘 fsync 加固未做"，
+实际 9 子命令且 bootconf 已走 `rr_ipc::persist`（文件 + 父目录 fsync）。处置——
+逐行订正并注明判据来源；不重写快照锚点（锚点是"逐条读代码"的起点，增量按行
+维护）。验证——`check.sh` ⑤ 文档门通过；方法数以 `RR3_RPC_NAMES`（13 项）与
+`RR3_CTL_METHODS`（9 项）为唯一真值，行内计数与它逐项对齐。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
