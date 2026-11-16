@@ -3418,6 +3418,11 @@ keypub/manifest/sign/verify 端到端、错私钥 key_id、0600 权限、超大�
 源/目标同路径与目录目标拒，篡改镜像在落目标前拒。`rr3-ota-ctl` 测试
 11→12；度量重复率 0.62%、CC 2.49/13、panic 73、长名 0。
 
+**2026-11-17 A1e（公钥目录按 key_id 查键）**：`verify/install` 支持
+`--pub-dir`，按 manifest 的 `key_id` 查 `<key_id>.pub`；`--pub` 与 `--pub-dir`
+二选一，缺键点名实际路径。测试 12→13；度量重复率 0.64%、CC 2.49/13、
+panic 73、长名 0。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
