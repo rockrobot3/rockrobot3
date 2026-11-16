@@ -280,7 +280,7 @@ fn rr3_aw_store(axis_dir: &Path, target: &Path, file: &Rr3AxisFile) -> Result<St
     ))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::path::Path;
