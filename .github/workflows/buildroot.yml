@@ -193,8 +193,10 @@ jobs:
       - name: 预构建 U-Boot（快速定位）
         run: |
           set -o pipefail
+          # -j 必须带上：单线程跑 host-python/host-dtc/ATF/U-Boot 要小时级，
+          # 诊断拍的价值就在"快失败"。
           if ! make -C /tmp/buildroot O=/tmp/br-out BR2_DL_DIR=/tmp/buildroot/dl \
-              uboot > /tmp/br-uboot.log 2>&1; then
+              -j"$(nproc)" uboot > /tmp/br-uboot.log 2>&1; then
             errs=$(grep -nE "error:|Error [0-9]|fatal:|No rule|Stop\." /tmp/br-uboot.log | tail -12 | tr '\n' ' ')
             echo "::error title=br-uboot::U-Boot 构建失败｜${errs:0:1200}"
             echo "---- 末 80 行 ----"
