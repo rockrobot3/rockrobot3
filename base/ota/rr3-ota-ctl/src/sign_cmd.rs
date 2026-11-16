@@ -10,6 +10,17 @@ use rr_ota::sign;
 
 use crate::args::{rr3_flag, rr3_opt_arg, rr3_use, rr3_val_arg};
 
+/// 签名面子命令分派：keypub / manifest / sign / verify。
+pub(crate) fn rr3_dispatch(cmd: &str, args: &[String]) -> Result<String, (String, ExitCode)> {
+    match cmd {
+        "keypub" => rr3_cmd_keypub(args),
+        "manifest" => rr3_cmd_manifest(args),
+        "sign" => rr3_cmd_sign(args),
+        "verify" => rr3_cmd_verify(args),
+        other => Err(rr3_use(format!("未知签名子命令 {other:?}"))),
+    }
+}
+
 /// keypub：从种子派生公钥与 key_id（私钥不进任何输出）。
 pub(crate) fn rr3_cmd_keypub(args: &[String]) -> Result<String, (String, ExitCode)> {
     let key = PathBuf::from(
@@ -118,16 +129,29 @@ pub(crate) fn rr3_cmd_sign(args: &[String]) -> Result<String, (String, ExitCode)
     ))
 }
 
-/// verify：严格验签 + 目标兼容 + 可选镜像摘要核对；不写任何槽位。
-pub(crate) fn rr3_cmd_verify(args: &[String]) -> Result<String, (String, ExitCode)> {
-    let manifest_path = PathBuf::from(
+/// verify 的参数面（解析与校验分离，主流程只做验签与摘要核对）。
+struct Rr3VerifyArgs {
+    manifest: PathBuf,
+    sig: PathBuf,
+    pubkey: PathBuf,
+    image: Option<PathBuf>,
+    platform: Option<String>,
+    board: Option<String>,
+    current: Option<String>,
+    allow_downgrade: bool,
+}
+
+fn rr3_verify_args(args: &[String]) -> Result<Rr3VerifyArgs, (String, ExitCode)> {
+    let manifest = PathBuf::from(
         rr3_val_arg(args, "--manifest", "verify 必须显式传 --manifest").map_err(rr3_use)?,
     );
-    let sig_path =
+    let sig =
         PathBuf::from(rr3_val_arg(args, "--sig", "verify 必须显式传 --sig").map_err(rr3_use)?);
-    let pub_path =
+    let pubkey =
         PathBuf::from(rr3_val_arg(args, "--pub", "verify 必须显式传 --pub").map_err(rr3_use)?);
-    let image_arg = rr3_opt_arg(args, "--image").map_err(rr3_use)?;
+    let image = rr3_opt_arg(args, "--image")
+        .map_err(rr3_use)?
+        .map(PathBuf::from);
     let platform = rr3_opt_arg(args, "--platform").map_err(rr3_use)?;
     let board = rr3_opt_arg(args, "--board").map_err(rr3_use)?;
     let current = rr3_opt_arg(args, "--current-version").map_err(rr3_use)?;
@@ -137,23 +161,36 @@ pub(crate) fn rr3_cmd_verify(args: &[String]) -> Result<String, (String, ExitCod
             "--allow-downgrade 只在同时给 --current-version 时有效".into(),
         ));
     }
+    Ok(Rr3VerifyArgs {
+        manifest,
+        sig,
+        pubkey,
+        image,
+        platform,
+        board,
+        current,
+        allow_downgrade,
+    })
+}
 
-    let bytes = rr3_read_bytes(&manifest_path, "manifest")?;
-    let sig = rr3_read_trimmed(&sig_path, "签名")?;
-    let pub_hex = rr3_read_trimmed(&pub_path, "公钥")?;
+/// verify：严格验签 + 目标兼容 + 可选镜像摘要核对；不写任何槽位。
+pub(crate) fn rr3_cmd_verify(args: &[String]) -> Result<String, (String, ExitCode)> {
+    let a = rr3_verify_args(args)?;
+    let bytes = rr3_read_bytes(&a.manifest, "manifest")?;
+    let sig = rr3_read_trimmed(&a.sig, "签名")?;
+    let pub_hex = rr3_read_trimmed(&a.pubkey, "公钥")?;
     let m = sign::rr3_verify_signed(&bytes, &sig, &pub_hex)
         .map_err(|e| (format!("验签失败：{e}"), ExitCode::from(1)))?;
     let expect = sign::Rr3OtaExpect {
-        platform: platform.as_deref(),
-        board: board.as_deref(),
-        current_version: current.as_deref(),
-        allow_downgrade,
+        platform: a.platform.as_deref(),
+        board: a.board.as_deref(),
+        current_version: a.current.as_deref(),
+        allow_downgrade: a.allow_downgrade,
     };
     sign::rr3_manifest_expect(&m, &expect)
         .map_err(|e| (format!("目标/降级校验拒绝：{e}"), ExitCode::from(1)))?;
-
-    let image = image_arg.map(PathBuf::from).unwrap_or_else(|| {
-        manifest_path
+    let image = a.image.unwrap_or_else(|| {
+        a.manifest
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .join(m.image)
@@ -214,17 +251,35 @@ fn rr3_key_perm_check(_path: &Path) -> Result<(), (String, ExitCode)> {
     Ok(())
 }
 
+/// 文本小文件上界：种子 64 字节、公钥 64 字节、签名 128 字节，4096 足够且防 OOM。
+const RR3_TEXT_FILE_MAX: u64 = 4096;
+
 fn rr3_read_trimmed(path: &Path, what: &str) -> Result<String, (String, ExitCode)> {
-    let text = std::fs::read_to_string(path).map_err(|e| {
-        (
-            format!("读{what} {} 失败：{e}", path.display()),
-            ExitCode::from(1),
-        )
-    })?;
-    Ok(text.trim().to_string())
+    let bytes = rr3_read_capped(path, what, RR3_TEXT_FILE_MAX)?;
+    String::from_utf8(bytes)
+        .map(|s| s.trim().to_string())
+        .map_err(|e| (format!("{what} 不是 UTF-8：{e}"), ExitCode::from(1)))
 }
 
 fn rr3_read_bytes(path: &Path, what: &str) -> Result<Vec<u8>, (String, ExitCode)> {
+    rr3_read_capped(path, what, sign::RR3_OTA_MANIFEST_MAX as u64)
+}
+
+fn rr3_read_capped(path: &Path, what: &str, max: u64) -> Result<Vec<u8>, (String, ExitCode)> {
+    let len = std::fs::metadata(path)
+        .map_err(|e| {
+            (
+                format!("读{what} {} 失败：{e}", path.display()),
+                ExitCode::from(1),
+            )
+        })?
+        .len();
+    if len > max {
+        return Err((
+            format!("{what} {} 过大（{len} 字节 > 上限 {max}）", path.display()),
+            ExitCode::from(1),
+        ));
+    }
     std::fs::read(path).map_err(|e| {
         (
             format!("读{what} {} 失败：{e}", path.display()),

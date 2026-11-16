@@ -41,18 +41,33 @@ fn rr3_print_slots() {
 
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
-    let outcome = match argv.first().map(String::as_str) {
+    match rr3_dispatch(&argv) {
+        Ok(msg) => {
+            if !msg.is_empty() {
+                println!("{msg}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err((msg, code)) => {
+            eprintln!("{msg}");
+            code
+        }
+    }
+}
+
+/// 两级分派：槽位/引导面进 bootconf_cmd，制品签名面进 sign_cmd；未知子命令一次点名。
+fn rr3_dispatch(argv: &[String]) -> Result<String, (String, ExitCode)> {
+    match argv.first().map(String::as_str) {
         Some("slots") => {
             rr3_print_slots();
-            return ExitCode::SUCCESS;
+            Ok(String::new())
         }
-        Some("switch") => bootconf_cmd::rr3_cmd_switch_args(&argv[1..]),
-        Some("factory") => bootconf_cmd::rr3_cmd_factory_args(&argv[1..]),
-        Some("rollback") => bootconf_cmd::rr3_cmd_rollback(&argv[1..]),
-        Some("keypub") => sign_cmd::rr3_cmd_keypub(&argv[1..]),
-        Some("manifest") => sign_cmd::rr3_cmd_manifest(&argv[1..]),
-        Some("sign") => sign_cmd::rr3_cmd_sign(&argv[1..]),
-        Some("verify") => sign_cmd::rr3_cmd_verify(&argv[1..]),
+        Some(cmd @ ("switch" | "factory" | "rollback")) => {
+            bootconf_cmd::rr3_dispatch(cmd, &argv[1..])
+        }
+        Some(cmd @ ("keypub" | "manifest" | "sign" | "verify")) => {
+            sign_cmd::rr3_dispatch(cmd, &argv[1..])
+        }
         Some(other) => Err(args::rr3_use(format!(
             "未知子命令 {other:?}（在册：slots / switch / factory / rollback / keypub / manifest / sign / verify）"
         ))),
@@ -60,16 +75,6 @@ fn main() -> ExitCode {
             "缺子命令（在册：slots / switch / factory / rollback / keypub / manifest / sign / verify）"
                 .into(),
         )),
-    };
-    match outcome {
-        Ok(msg) => {
-            println!("{msg}");
-            ExitCode::SUCCESS
-        }
-        Err((msg, code)) => {
-            eprintln!("{msg}");
-            code
-        }
     }
 }
 
@@ -447,6 +452,40 @@ mod tests {
         let (m, c) = rr3_cmd_verify(&wrong).unwrap_err();
         assert_eq!(c, ExitCode::from(1));
         assert!(m.contains("platform 不匹配"), "{m}");
+    }
+
+    /// 文本输入有上界：超大私钥/manifest 在读取前拒，不把内存读穿。
+    #[test]
+    fn oversized_text_inputs_are_rejected() {
+        let dir = std::env::temp_dir().join(format!("rr3-ota-sign-{}-big", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let big_key = dir.join("big.key");
+        std::fs::write(&big_key, "a".repeat(8192)).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&big_key, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let e = rr3_cmd_keypub(&["--key-file".into(), big_key.to_string_lossy().into_owned()])
+            .unwrap_err();
+        assert_eq!(e.1, ExitCode::from(1));
+        assert!(e.0.contains("过大"), "{:?}", e.0);
+
+        let big_manifest = dir.join("big.manifest");
+        std::fs::write(&big_manifest, "a".repeat(8192)).unwrap();
+        let e = rr3_cmd_sign(&[
+            "--manifest".into(),
+            big_manifest.to_string_lossy().into_owned(),
+            "--key-file".into(),
+            big_key.to_string_lossy().into_owned(),
+            "--sig-out".into(),
+            dir.join("x.sig").to_string_lossy().into_owned(),
+        ])
+        .unwrap_err();
+        assert_eq!(e.1, ExitCode::from(1));
+        assert!(e.0.contains("过大"), "{:?}", e.0);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// manifest 元数据不合法时在生成面拒，不产生半成品。

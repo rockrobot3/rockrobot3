@@ -38,16 +38,16 @@ fn rr3_parse_switch(args: &[String]) -> Result<(Rr3Slot, PathBuf), (String, Exit
     Ok((target, path))
 }
 
-/// switch 子命令入口（main 只做分派）。
-pub(crate) fn rr3_cmd_switch_args(args: &[String]) -> Result<String, (String, ExitCode)> {
-    rr3_parse_switch(args).and_then(|(target, path)| rr3_cmd_switch(target, &path))
-}
-
-/// factory 子命令入口。
-pub(crate) fn rr3_cmd_factory_args(args: &[String]) -> Result<String, (String, ExitCode)> {
-    rr3_bootconf_arg(args)
-        .map_err(rr3_use)
-        .and_then(|path| rr3_cmd_factory(&path))
+/// 引导面子命令分派：switch / factory / rollback。
+pub(crate) fn rr3_dispatch(cmd: &str, args: &[String]) -> Result<String, (String, ExitCode)> {
+    match cmd {
+        "switch" => rr3_parse_switch(args).and_then(|(target, path)| rr3_cmd_switch(target, &path)),
+        "factory" => rr3_bootconf_arg(args)
+            .map_err(rr3_use)
+            .and_then(|path| rr3_cmd_factory(&path)),
+        "rollback" => rr3_cmd_rollback(args),
+        other => Err(rr3_use(format!("未知引导子命令 {other:?}"))),
+    }
 }
 
 /// switch：读 → 判定改写 → 原子写回。业务拒（同槽幂等拒 / rr_factory 目标 /
