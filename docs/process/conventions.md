@@ -589,7 +589,7 @@ stdout 接成了 `Stdio::null()`，实测 45 处留痕按设计不可达；**202
 （⑥/⑦ 两步随 0.0.5 批E 接入、⑧ 三门随 0.0.5 批K 接入，`check.sh` 由七步经九步扩十步；
 步序与 PASS 条数的逐批台账见本文件下方登记条目）：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
-①b 把 workspace 全部测试跑一遍（2026-11-12 实测 757 条 passed；旧记的 294 条是扩批前
+①b 把 workspace 全部测试跑一遍（2026-11-17 实测 767 条 passed；旧记的 294 条是扩批前
 的存量，数字只在本行维护，不抄第二处；Windows 面未实测、不作推算），②/③ 只是其中被
 点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
@@ -3385,6 +3385,22 @@ dispatch 1714→546（wake/turn/arms/tts + tests 四段）、rr3-pack 1513→158
 两件 DRIFT → 按仓内真值铺板 → 16/16 PASS。另修一处门自身的静默漏面：逐行清单经
 here-doc 喂给 `while read` 时，`ssh` 默认吃 stdin，实测"比对 16 件"变成"比对 2 件"
 ——统一 `ssh -n`。
+
+**2026-11-17 A1 首片（ADR-0026：OTA 制品签名/验签）**：`rr-ota::sign`
+新增 9 条（crate 26→35）：严格行式 manifest 渲染/解析、Ed25519 签名/严格验签、
+key_id 派生、镜像摘要与字节数核对、目标/降级策略；覆盖篡改 manifest/image、
+错公钥/错 key_id、坏十六进制、字段缺失/重复/未知/顺序/CRLF/非 ASCII、路径穿越、
+超大 manifest、版本文法与降级开关。`rr3-ota-ctl` 独立工程 6→11 条，新增
+keypub/manifest/sign/verify 端到端、错私钥 key_id、0600 权限、超大输入与
+降级/目标策略；`--allow-downgrade` 缺 `--current-version` 归用法错。
+①b 本轮实测 **767 passed**（macOS x86_64，2026-11-17；本行是唯一计数处）。
+度量：重复率 0.56%、CC 均值 2.49 / 最大 13、生产 panic 73、长名 0；
+`check.sh` 全绿。结构：`sign.rs` 432 + `sign/tests.rs` 262；CLI `args` 64 /
+`bootconf_cmd` 192 / `main` 518 / `sign_cmd` 305（均 <600）。依赖：
+`ed25519-dalek 2.2` + `sha2 0.10`（纯 Rust，锁文件同批；供应链门由 CI
+`supply-audit --strict` 执法）。首跑红一处：`rr3_manifest_parse` CC 27
+（提交 8484629），已按"字节形制 / 字段值域 / 数值摘要"三段拆分修复（a6254a7）；
+远端最新 run 回执以 CI 结论为准。
 
 ## 3 结构纪律
 
