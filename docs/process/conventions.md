@@ -3488,6 +3488,15 @@ rrctl 仅覆盖其中 6 个；③A/B OTA 行写"CLI 三子命令 / 落盘 fsync 
 验证——`rr3-ota-ctl` 14 tests、clippy/fmt 全绿；CC 峰值仍 13（仅 rr-hal），
 均值 2.49、重复率 0.64%、panic 73、长名 0；`check.sh` 全绿。
 
+**2026-11-17 流水线覆盖（rr-hal alsa 特性编译门）**：事实——`alsa` 是 rr-hal
+的**非默认特性**；`check.sh`（默认特性）、host-macos、cross-artifacts 三腿都
+不编译 `linux.rs` 与 backend 的 alsa 分支——这半边代码只在板上第一次过编译器，
+"编得过、跑不了"之前还有更早的一关没守。处置——[gate.yml](../../.github/workflows/gate.yml)
+增 `alsa` job：apt 装 `libasound2-dev` + `pkg-config`，
+`cargo check --all-targets -p rr-hal --features alsa`；**只编译不打开设备**
+（运行期行为归板上批），失败压成单行注解。验证——job 与 conventions/lint 并行，
+不改 check.sh 的本地口径；首跑回执以 CI 结论为准。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
