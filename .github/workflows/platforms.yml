@@ -238,9 +238,10 @@ jobs:
         run: |
           cargo test --workspace 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\win-test.log"
           if ($LASTEXITCODE -ne 0) {
-            # error 行本身不带路径，紧跟的 `--> file:line` 才是落点——两类都抓。
+            # error 行本身不带路径，紧跟的 `--> file:line` 才是落点（`-->` 不在行首，
+            # rustc 会在前面留两个空格——锚点不能写 ^）。
             $bad = Select-String -Path "$env:RUNNER_TEMP\win-test.log" `
-              -Pattern 'error\[|^--> |FAILED|panicked|test result: FAILED' |
+              -Pattern 'error\[|--> |FAILED|panicked|test result: FAILED' |
               Select-Object -Last 10 | ForEach-Object { $_.Line.Trim() }
             Write-Output "::error title=windows-test::$($bad -join ' || ')"
             exit 1
