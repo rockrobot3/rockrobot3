@@ -53,6 +53,16 @@ jobs:
       - name: 签名/验签演练（正例 + 四负例）
         run: bash tools/ci/ota-sign-smoke.sh /tmp/rr3-build/release/rr3-ota-ctl
 
+  # RK3566 到货前静态点验（A3）：装配单/平台表/接线档/轴档案/模块引用面。
+  # 不冒充真板证据；轴档案未标定只警告（--strict 才判红）。
+  rk3566-onboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: 静态点验（默认非 strict）
+        run: bash tools/ci/rk3566-onboard-check.sh
+
   # 保底轨装配冒烟（0.0.2 修复批）：post-build.sh 装机布局 / entry 绝对化 /
   # config 随装 / 坏模块警告不阻断。纯 bash + 系统工具，夹具侧模拟 Buildroot
   # 目标根（TARGET_DIR），不需要 Docker 或 Buildroot 全量构建。
