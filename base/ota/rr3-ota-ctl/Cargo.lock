@@ -206,6 +206,7 @@ dependencies = [
 name = "rr3-ota-ctl"
 version = "0.0.1"
 dependencies = [
+ "rr-ipc",
  "rr-ota",
 ]
 

@@ -321,7 +321,17 @@ fn rr3_install_file(
         .map_err(|e| cleanup(format!("fsync 临时件失败：{e}")))?;
     std::fs::rename(&tmp, target)
         .map_err(|e| cleanup(format!("安装落位 {} 失败：{e}", target.display())))?;
-    rr3_dir_sync(parent)
+    // 目录项落盘走 rr-ipc 的单一机制；这里选**严格策略**：staging 的用途就是
+    // 掉电后仍在，目录 fsync 失败就不能把"已安装"报成成功。
+    rr_ipc::persist::rr3_sync_dir(target).map_err(|e| {
+        (
+            format!(
+                "目录 fsync 失败（{}）：{e}——rename 已生效，但断电后目录项可能丢失",
+                parent.display()
+            ),
+            ExitCode::from(1),
+        )
+    })
 }
 
 /// 私钥文件：32 字节种子的 64 位十六进制，unix 上必须 0600。
@@ -408,48 +418,13 @@ fn rr3_read_capped(path: &Path, what: &str, max: u64) -> Result<Vec<u8>, (String
     Ok(buf)
 }
 
-/// 同目录临时文件 + rename；失败清临时件，不留半成品。
+/// 同目录临时件 + 原子换名（复用 rr-ipc 的单一写序：独占建 → fsync → rename
+/// → 父目录 fsync）。失败清临时件，不留半成品。
 fn rr3_write_atomic(path: &Path, bytes: &[u8]) -> Result<(), (String, ExitCode)> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("out");
     let tmp = parent.join(format!(".{name}.{}.rr3-tmp", std::process::id()));
-    let fail = |e: std::io::Error| {
-        let _ = std::fs::remove_file(&tmp);
-        (
-            format!("写 {} 失败：{e}", path.display()),
-            ExitCode::from(1),
-        )
-    };
-    std::fs::write(&tmp, bytes).map_err(fail)?;
-    std::fs::rename(&tmp, path).map_err(fail)?;
-    rr3_dir_sync(parent)
-}
-
-/// 目录项落盘：rename 只保证"此刻可见"，断电后目录项是否留下由父目录 fsync 决定。
-///
-/// 文件本体已在 rename 前 fsync 过；少了这一步，断电窗口里可能出现"内容已写、
-/// 名字没留"或反过来的半状态。非 unix 平台不提供目录 fsync，按 no-op 处理并在
-/// 文档写明（本工具的生产目标是 Linux 板）。
-fn rr3_dir_sync(dir: &Path) -> Result<(), (String, ExitCode)> {
-    #[cfg(unix)]
-    {
-        let f = std::fs::File::open(dir).map_err(|e| {
-            (
-                format!("打开目录 {} 失败（无法确认落盘）：{e}", dir.display()),
-                ExitCode::from(1),
-            )
-        })?;
-        f.sync_all().map_err(|e| {
-            (
-                format!(
-                    "目录 fsync 失败（{}）：{e}——rename 已生效，但断电后目录项可能丢失",
-                    dir.display()
-                ),
-                ExitCode::from(1),
-            )
-        })?;
-    }
-    Ok(())
+    rr_ipc::persist::rr3_atomic_store(path, &tmp, bytes).map_err(|e| (e, ExitCode::from(1)))
 }
 
 #[cfg(test)]
