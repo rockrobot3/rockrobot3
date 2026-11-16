@@ -20,29 +20,38 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
-  # 芯片平台环境矩阵（除 esp32 外的三条非 x86 面）：
-  #   瑞芯微 RK3566/RK3588 → aarch64-musl；进迭时空 SpacemiT K1/K3 → riscv64-musl；
-  #   x86_64（英特尔 / AMD）→ 原生 `conventions` 全量门，无需交叉。
-  # 每个平台做三件事：① 交叉构建七件静态产物；② `file` 断言目标 ISA + 全静态；
-  # ③ qemu-user 把产物在目标 ISA 上真跑一次（证明"环境能执行"，不只是能编译）。
-  # brain 的 ureq+ring 需目标 C 工具链，归板上原生构建（同 pack-bundle ③ 分工）。
+  # 五平台矩阵的三条非 xtensa 面（esp32 家族在 esp32-gates）：
+  #   英特尔 / AMD → x86_64 原生（同一 ISA/ABI，一腿覆盖两家，不用交叉）；
+  #   瑞芯微 RK3566/RK3588 → aarch64-musl（cargo + rust-lld 全静态）；
+  #   进迭时空 SpacemiT K1/K3 → riscv64-musl（cross 镜像提供 musl 交叉工具链）。
+  # 每条腿三件事同口径：① 七件产物构建 + ELF 断言；② 目标 ISA 真执行（native 直跑 /
+  # aarch64 docker binfmt / riscv64 qemu-user-static）并断言用法输出；③ 上传产物。
+  # brain 的 ureq+ring 需目标 C 工具链，归板上原生构建（pack-bundle ③ 同一分工）。
   cross-artifacts:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
+          - chip: 英特尔 / AMD（x86_64）
+            triple: x86_64-unknown-linux-gnu
+            arch: "x86-64"
+            mode: native
+            assert: any
+            platform: linux/amd64
           - chip: 瑞芯微（RK3566/RK3588）
             triple: aarch64-unknown-linux-musl
             arch: "ARM aarch64"
+            mode: musl
+            assert: static
             platform: linux/arm64
-            mode: build
           - chip: 进迭时空（SpacemiT K1/K3）
             triple: riscv64gc-unknown-linux-musl
             arch: "RISC-V"
+            mode: cross
+            assert: static
             platform: linux/riscv64
-            mode: check
     name: cross / ${{ matrix.chip }}
     steps:
       - uses: actions/checkout@v4
@@ -52,42 +61,57 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: base/runtime
-      # binfmt 走 setup-qemu（与 ipct003/matrix 同源，已在本仓长期验证）；
-      # 不再 apt 装 qemu-user-static——runner 的 apt 源不稳定时整条腿会因装包红，
-      # 而那与"芯片平台能不能跑"无关。
+      # cross 只在"目标缺 musl 交叉工具链"的腿上装（riscv64）；aarch64 走 rust-lld
+      # 零外部依赖，x86_64 原生不需要。
+      - name: 安装 cross（riscv64 musl 交叉工具链载体）
+        if: matrix.mode == 'cross'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+      # binfmt 走 setup-qemu（与 ipct003 同源，已在本仓长期验证）；riscv64 用
+      # qemu-user-static 直接执行静态产物，不经 docker。
       - uses: docker/setup-qemu-action@v3
-      # mode=build：能链接的目标 → 构建七件静态产物 + ELF 断言；
-      # mode=check：缺 musl 交叉工具链的目标（riscv64）→ 只验证编译面，
-      # 不冒充"可执行"（详见 tools/ci/host-check-target.sh 文件头）。
-      - name: 目标平台构建/编译面（失败把日志压成单行注解，便于远端归因）
+        if: matrix.mode == 'musl'
+      - name: 安装 qemu-user-static（riscv64 执行冒烟）
+        if: matrix.mode == 'cross'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-user-static
+      - name: 目标平台构建（七件产物 + ELF 断言；失败压成单行注解）
+        env:
+          RR3_USE_CROSS: ${{ matrix.mode == 'cross' && '1' || '0' }}
         run: |
           set -o pipefail
-          if [ "${{ matrix.mode }}" = "build" ]; then
-            cmd=(bash tools/ci/cross-artifacts.sh "${{ matrix.triple }}" "${{ matrix.arch }}")
-          else
-            cmd=(bash tools/ci/host-check-target.sh "${{ matrix.triple }}")
-          fi
-          if ! "${cmd[@]}" 2>&1 | tee /tmp/cross.log; then
-            errs=$(grep -iE "error(\[|:)|failed" /tmp/cross.log | tail -4 | tr '\n' ' ')
+          if ! bash tools/ci/cross-artifacts.sh "${{ matrix.triple }}" "${{ matrix.arch }}" "${{ matrix.assert }}" 2>&1 | tee /tmp/cross.log; then
+            errs=$(grep -iE "error(\[|:)|failed|FAIL" /tmp/cross.log | tail -4 | tr '\n' ' ')
             echo "::error title=platform-build::${errs:0:900}"
             exit 1
           fi
-      - name: 目标 ISA 执行冒烟（binfmt + docker，产物真能跑起来）
-        if: matrix.mode == 'build'
+      # 判据从"没报 exec format error"升到"真打印出预期用法"：前者对 native 腿近乎
+      # 恒真（跑得起来就有输出），后者要求二进制走到自己的 CLI 面。
+      - name: 目标 ISA 执行冒烟（真跑产物并断言用法输出）
         run: |
           rel="/tmp/rr3-build/${{ matrix.triple }}/release"
           for b in rrd rr3-ctl; do
-            out=$(docker run --rm --platform "${{ matrix.platform }}" \
-              -v "$rel:/b:ro" alpine:3.20 "/b/$b" --help 2>&1) && rc=0 || rc=$?
-            echo "$out" | head -3
-            if echo "$out" | grep -qiE "exec format error|could not open"; then
-              echo "FAIL  $b 在 ${{ matrix.platform }} 上无法执行" >&2
+            case "$b" in
+              rrd) want="用法: rrd" ;;
+              *) want="可用" ;;
+            esac
+            case "${{ matrix.mode }}" in
+              native) out=$("$rel/$b" --help 2>&1) || true ;;
+              musl) out=$(docker run --rm --platform "${{ matrix.platform }}" \
+                       -v "$rel:/b:ro" alpine:3.20 "/b/$b" --help 2>&1) || true ;;
+              cross) out=$(qemu-riscv64-static "$rel/$b" --help 2>&1) || true ;;
+            esac
+            printf '%s\n' "$out" | head -3
+            if ! printf '%s' "$out" | grep -q "$want"; then
+              brief=$(printf '%s' "$out" | head -3 | tr '\n' ' ')
+              echo "::error title=platform-run::${b} 在 ${{ matrix.chip }} 上未打印预期用法：${brief:0:600}"
               exit 1
             fi
-            echo "PASS  $b 可在 ${{ matrix.platform }} 执行（rc=$rc）"
+            echo "PASS  $b 可在 ${{ matrix.chip }} 执行"
           done
-      - name: 上传静态产物
-        if: matrix.mode == 'build'
+      - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: artifacts-${{ matrix.triple }}

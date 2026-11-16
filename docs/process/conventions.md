@@ -3258,13 +3258,15 @@ CI"往返，本地无法复跑。SKIP 纪律：仅 `RR3_SMOKE_ALLOW_SKIP=1` 时�
 
 | 芯片平台 | 目标/工具链 | CI 载体 | 环境判据 |
 |---|---|---|---|
-| ESP32 / ESP32-S3（乐鑫，xtensa） | `esp32` / `esp32s3`（espup v0.17.1 钉版 + ESP-IDF v5.2.2） | `esp32-gates` | 外设基座 debug+release、UART echo、espidf std、哨兵、act/sense espidf 五门全编译 |
-| 瑞芯微 RK3566 / RK3588（aarch64） | `aarch64-unknown-linux-musl`（+ `-gnu` 字节对拍归 `ipct003`） | `cross-artifacts` 矩阵一腿 | 七件全静态 aarch64 产物 + ELF 断言 + qemu-aarch64 执行冒烟 |
-| 进迭时空 SpacemiT K1/K3（RISC-V） | `riscv64gc-unknown-linux-musl` | `cross-artifacts` 矩阵另一腿（mode=check） | **编译面**：workspace + 五模块 + rr3-ctl 的 `cargo check`（runner 无 riscv64 musl 链接器，链接/执行面如实不做） |
-| 英特尔 / AMD（x86_64） | 原生 `x86_64-unknown-linux-gnu` | `conventions`（全量门）+ `distro-smoke`（deb 真装） | 编译 + 757 测试 + 门禁 ①–⑭ + 容器内真装起机 |
+| ESP32 / ESP32-S3（乐鑫，xtensa） | `esp32` / `esp32s3`（espup v0.17.1 钉版 + ESP-IDF v5.2.2） | `esp32-gates` | 外设基座 debug+release、UART echo、espidf std、哨兵、act/sense espidf 五门全编译（安装面单点 = `.github/actions/esp-toolchain`） |
+| 瑞芯微 RK3566 / RK3588（aarch64） | `aarch64-unknown-linux-musl`（+ `-gnu` 字节对拍归 `ipct003`） | `cross-artifacts` 矩阵一腿（mode=musl） | 七件全静态 aarch64 产物 + ELF 断言 + docker binfmt 执行冒烟（断言打印用法） |
+| 进迭时空 SpacemiT K1/K3（RISC-V） | `riscv64gc-unknown-linux-musl`（cross 镜像提供 musl 交叉工具链） | `cross-artifacts` 矩阵一腿（mode=cross） | 七件全静态 riscv64 产物 + ELF 断言 + `qemu-riscv64-static` 执行冒烟（断言打印用法）——**2026-11-16 从"仅编译面"升到"构建 + 真执行"** |
+| 英特尔 / AMD（x86_64） | 原生 `x86_64-unknown-linux-gnu` | `cross-artifacts` 原生腿 + `conventions`（全量门）+ `distro-smoke`（deb 真装） | 七件原生产物 + 原生执行冒烟 + 全量测试与门禁 ①–⑭ + 容器内真装起机（两家同 ISA/ABI，一腿覆盖，`assert=any` 因原生动态链接） |
 
 口径说明：以上是**构建/执行环境**验证（能在目标 ISA 上编译并跑起来）；真板上的
-器件读数、时序与断电证据仍属板上收口，不在本表冒领。
+器件读数、时序与断电证据仍属板上收口，不在本表冒领。五平台三腿的构建/断言/执行
+判据共用一个脚本 `tools/ci/cross-artifacts.sh`（差异只有三元组、架构串、静态断言
+开关与构建器），esp 家族共用 `.github/actions/esp-toolchain` 安装面。
 
 纪律：① **不在源码区做任何编译/集成/构建**（`.cargo/config.toml` 已把 target-dir
 指到 `/tmp`，CI 侧只跑远端）；② 新增需要"跑起来"的验证，先加进 `check.sh` 或本表
