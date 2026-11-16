@@ -25,7 +25,7 @@ jobs:
   #   瑞芯微 RK3566/RK3588 → aarch64-musl（cargo + rust-lld 全静态）；
   #   进迭时空 SpacemiT K1/K3 → riscv64-musl（cross 镜像提供 musl 交叉工具链）。
   # 每条腿三件事同口径：① 七件产物构建 + ELF 断言；② 目标 ISA 真执行（native 直跑 /
-  # 两条交叉腿在 alpine 目标 ISA 容器里跑）并断言用法输出；③ 上传产物。
+  # musl 进 alpine 容器 / riscv-gnu 经 qemu-user-static）并断言用法输出；③ 上传产物。
   # brain 的 ureq+ring 需目标 C 工具链，归板上原生构建（pack-bundle ③ 同一分工）。
   cross-artifacts:
     runs-on: ubuntu-latest
@@ -47,10 +47,10 @@ jobs:
             assert: static
             platform: linux/arm64
           - chip: 进迭时空（SpacemiT K1/K3）
-            triple: riscv64gc-unknown-linux-musl
+            triple: riscv64gc-unknown-linux-gnu
             arch: "RISC-V"
-            mode: cross
-            assert: static
+            mode: gnu
+            assert: any
             platform: linux/riscv64
     name: cross / ${{ matrix.chip }}
     steps:
@@ -61,26 +61,29 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: base/runtime
-      # cross 只在"目标缺 musl 交叉工具链"的腿上装（riscv64）；aarch64 走 rust-lld
-      # 零外部依赖，x86_64 原生不需要。
-      - name: 安装 cross（riscv64 musl 交叉工具链载体）
-        if: matrix.mode == 'cross'
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cross
-      # binfmt 走 setup-qemu（与 ipct003 同源，已在本仓长期验证）：两条交叉腿的
-      # 执行冒烟都在目标 ISA 容器里跑。riscv64 不用 apt 装 qemu-user-static——
-      # 2026-11-16 首跑实证：apt 装包在共享 runner 上不稳定，而 musl 静态产物
-      # 在 alpine(riscv64) 里可直接执行，判据同 aarch64 腿，少一条外部依赖。
+      # riscv64 缺 musl 交叉工具链（rust-lld 找不到 -lc/-lgcc_s），故该腿走 gnu：
+      # apt 交叉 gcc + qemu-user-static（执行用 -L 指向 riscv64 sysroot）。
+      # 2026-11-16 首跑实证：cross 镜像链路不可控（链接走宿主 cc 直接失败）。
+      - name: 安装 riscv64 交叉工具链与 qemu（gnu 目标）
+        if: matrix.mode == 'gnu'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-riscv64-linux-gnu libc6-dev-riscv64-cross qemu-user-static
+      # binfmt 走 setup-qemu（与 ipct003 同源，已在本仓长期验证）：musl 腿的执行
+      # 冒烟在目标 ISA 容器里跑。riscv-gnu 腿改用 apt 的 qemu-user-static（不经 docker）。
       - uses: docker/setup-qemu-action@v3
-        if: matrix.mode != 'native'
+        if: matrix.mode == 'musl'
       - name: 目标平台构建（七件产物 + ELF 断言；失败压成单行注解）
         env:
-          RR3_USE_CROSS: ${{ matrix.mode == 'cross' && '1' || '0' }}
+          # gnu 交叉腿的链接器：cargo 按目标三元组读该变量，其他腿目标名不同不读取。
+          # 原生腿与 musl 腿不受影响（musl 走 rust-lld，原生走系统 cc）。
+          CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
         run: |
           set -o pipefail
           if ! bash tools/ci/cross-artifacts.sh "${{ matrix.triple }}" "${{ matrix.arch }}" "${{ matrix.assert }}" 2>&1 | tee /tmp/cross.log; then
-            errs=$(grep -iE "error(\[|:)|failed|FAIL" /tmp/cross.log | tail -4 | tr '\n' ' ')
+            # 链接错误的关键行不在 "error"/"failed" 上（undefined reference / collect2 /
+            # cannot find），只抓前四行会丢掉真因——关键词按实测补全。
+            errs=$(grep -iE "error(\[|:)|failed|FAIL|undefined reference|cannot find|collect2|ld returned" /tmp/cross.log | tail -5 | tr '\n' ' ')
             echo "::error title=platform-build::${errs:0:900}"
             exit 1
           fi
@@ -96,8 +99,9 @@ jobs:
             esac
             case "${{ matrix.mode }}" in
               native) out=$("$rel/$b" --help 2>&1) || true ;;
-              musl | cross) out=$(docker run --rm --platform "${{ matrix.platform }}" \
+              musl) out=$(docker run --rm --platform "${{ matrix.platform }}" \
                        -v "$rel:/b:ro" alpine:3.20 "/b/$b" --help 2>&1) || true ;;
+              gnu) out=$(qemu-riscv64-static -L /usr/riscv64-linux-gnu "$rel/$b" --help 2>&1) || true ;;
             esac
             printf '%s\n' "$out" | head -3
             if ! printf '%s' "$out" | grep -q "$want"; then
