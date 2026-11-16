@@ -28,7 +28,8 @@ fn rr3_ctl_arms() -> Rr3CtlTable {
         }),
         // 运维计数读面（0.0.4 批B，Q1 裁定）：与 CtlHealth 分开——health 是心跳健康
         // 语义（watchdog 判活的输入），counters 是业务运维账（"机器慢先看数字"）。
-        // 键 = `模块名/键`（模块自报归并）或 `boots`（rrd 自有）；未持久化时只有内存账。
+        // 键 = `模块名/键`（模块自报归并）或 rrd 自有键（`boots` / `conn_refused`）；
+        // 未持久化时只有内存账。
         (Rr3RpcMethod::CtlCounters, |ctx, _| {
             let counters = rr3_lock(&ctx.shared).rr3_reg_counters();
             Ok(json!({ "counters": counters }))

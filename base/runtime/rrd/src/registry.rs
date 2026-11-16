@@ -86,7 +86,8 @@ pub struct RrdRegistry {
     /// conn 与 supervisor 两路共见的守护级状态，真值只许有一份。
     low_power: bool,
     /// 运维计数聚合表（0.0.4 批B，Q1/Q2 裁定）：键 = `模块名/键`（模块自报经心跳
-    /// `counters` 字段归并）或 `boots`（rrd 自有，启动自增不走心跳）。write-through
+    /// `counters` 字段归并）或 rrd 自有键（`boots` 启动自增 / `conn_refused` 满员
+    /// 拒连，均不走心跳）。write-through
     /// 持久化的内存真值，落盘点在 daemon 启动与本表心跳归并后的调用方（conn）。
     /// 与 `crash_streak`（崩溃重启账）分开：这里是业务运维账，"机器慢先看数字"。
     counters: BTreeMap<String, u64>,
