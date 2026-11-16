@@ -3540,7 +3540,12 @@ Buildroot 的 `FORMAT_ITB` 把它加进 `UBOOT_MAKE_TARGET` → 精确复现
 `FORMAT_ITB`，改 `FORMAT_CUSTOM_NAME="idbloader.img u-boot.itb"`（只加拷贝
 清单、不加 make 目标），补 `NEEDS_PYLIBFDT`/`NEEDS_PYELFTOOLS`；失败注解补
 dtc 版本（scripts_dtc 第一现场）。验证——YAML/`check.sh` 绿；全量回执由本次
-`[buildroot-full]` 触发。
+`[buildroot-full]` 触发。**同日第三拍回执**：`FORMAT_ITB` 错配已消除
+（`dtc=Version: DTC 1.7.0`，scripts_dtc 不再是失败点），新失败是
+`tools/mkeficapsule.c:21: gnutls/gnutls.h: No such file or directory`——defconfig
+打开了 `CONFIG_TOOLS_MKEFICAPSULE` 但宿主缺 gnutls。处置——补
+`BR2_TARGET_UBOOT_NEEDS_GNUTLS=y`（Buildroot 该选项正是为 MKEFICAPSULE 设）。
+Makeinfo 的 too old 警告只影响文档，不是失败点。
 
 **2026-11-17 status 里程碑对表（M1 Buildroot 行）**：事实——M1 行只写"全量
 make 构建缺"，未记 2026-11-17 两次 CI 尝试与失败阶段，读者会误以为从未试过。

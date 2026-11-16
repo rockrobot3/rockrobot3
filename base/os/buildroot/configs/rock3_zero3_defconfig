@@ -54,6 +54,9 @@ BR2_TARGET_UBOOT_NEEDS_DTC=y
 # binman 需要 pylibfdt（libfdt 的 Python 绑定）与 pyelftools（解析 ELF）。
 BR2_TARGET_UBOOT_NEEDS_PYLIBFDT=y
 BR2_TARGET_UBOOT_NEEDS_PYELFTOOLS=y
+# defconfig 打开了 CONFIG_TOOLS_MKEFICAPSULE，宿主需要 gnutls 开发头；
+# 缺它时 tools/mkeficapsule.c 报 fatal error: gnutls/gnutls.h（2026-11-17 实测）。
+BR2_TARGET_UBOOT_NEEDS_GNUTLS=y
 # RK3566 需要 idbloader.img（SPL+TPL 合体）与 u-boot.itb 两级产物，
 # 布局中的烧写偏移见 genimage.cfg（板上核对项）。
 #
