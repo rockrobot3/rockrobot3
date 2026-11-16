@@ -193,12 +193,16 @@ jobs:
           RR3_REPO_ROOT: ${{ github.workspace }}
         run: |
           set -o pipefail
-          if ! make -C /tmp/buildroot O=/tmp/br-out rock3_zero3_defconfig > /tmp/br-defconfig.log 2>&1; then
+          # BR2_DL_DIR 显式钉到预置缓存所在目录：O= 输出树下的默认 dl 路径
+          # 与预置点不一致时，Buildroot 仍会去 ftp.denx.de 重下（2026-11-16 实测）。
+          if ! make -C /tmp/buildroot O=/tmp/br-out BR2_DL_DIR=/tmp/buildroot/dl \
+              rock3_zero3_defconfig > /tmp/br-defconfig.log 2>&1; then
             echo "::error title=br-defconfig::rock3_zero3_defconfig 失败"
             tail -8 /tmp/br-defconfig.log
             exit 1
           fi
-          if ! make -C /tmp/buildroot O=/tmp/br-out -j"$(nproc)" > /tmp/br-build.log 2>&1; then
+          if ! make -C /tmp/buildroot O=/tmp/br-out BR2_DL_DIR=/tmp/buildroot/dl \
+              -j"$(nproc)" > /tmp/br-build.log 2>&1; then
             phase=$(grep -E "^>>>" /tmp/br-build.log | tail -3 | tr '\n' ' ')
             errs=$(grep -iE "error|Error [0-9]|failed|fatal|No rule|不存在" /tmp/br-build.log | tail -8 | tr '\n' ' ')
             echo "::error title=br-build::Buildroot 全量 make 失败｜阶段=${phase:0:300}｜错误=${errs:0:700}"
