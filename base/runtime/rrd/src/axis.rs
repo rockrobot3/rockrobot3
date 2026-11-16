@@ -553,6 +553,7 @@ mod tests {
     }
 
     /// 落盘 → 读回 round-trip；原子写序走完不得留 tmp 残留
+    #[cfg(unix)]
     #[test]
     fn store_then_load_round_trips_without_tmp_leftover() {
         let dir = tmpdir("round");

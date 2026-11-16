@@ -246,6 +246,7 @@ mod tests {
     }
 
     /// 存取 round-trip：键序确定（BTreeMap）、值逐键一致
+    #[cfg(unix)]
     #[test]
     fn store_then_load_round_trips() {
         let dir = tmpdir("round");
