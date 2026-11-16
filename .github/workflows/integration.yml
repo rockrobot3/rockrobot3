@@ -35,6 +35,24 @@ jobs:
       - name: deb 装机冒烟（rust:bookworm 容器）
         run: bash tools/ci/distro-smoke.sh
 
+  # OTA 签名演练（ADR-0026，A1c）：临时测试种子走 keypub→manifest→sign→verify，
+  # 正例一条 + 镜像篡改/清单篡改/错公钥/降级四条负例；真实私钥不进 CI。
+  ota-sign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 构建 rr3-ota-ctl
+        env:
+          CARGO_TARGET_DIR: /tmp/rr3-build
+        run: |
+          cargo build -q --locked --release \
+            --manifest-path base/ota/rr3-ota-ctl/Cargo.toml
+      - name: 签名/验签演练（正例 + 四负例）
+        run: bash tools/ci/ota-sign-smoke.sh /tmp/rr3-build/release/rr3-ota-ctl
+
   # 保底轨装配冒烟（0.0.2 修复批）：post-build.sh 装机布局 / entry 绝对化 /
   # config 随装 / 坏模块警告不阻断。纯 bash + 系统工具，夹具侧模拟 Buildroot
   # 目标根（TARGET_DIR），不需要 Docker 或 Buildroot 全量构建。
