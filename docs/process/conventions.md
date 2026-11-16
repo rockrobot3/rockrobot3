@@ -3497,7 +3497,9 @@ rrctl 仅覆盖其中 6 个；③A/B OTA 行写"CLI 三子命令 / 落盘 fsync 
 （运行期行为归板上批），失败压成单行注解。验证——job 与 conventions/lint 并行，
 不改 check.sh 的本地口径。**首跑红一处**：job 在仓根直接 `cargo check`，报
 `could not find Cargo.toml`——补 `--manifest-path base/runtime/Cargo.toml` 后
-复跑；根因是工作目录与 workspace 布局，不是特性代码。
+复跑；根因是工作目录与 workspace 布局，不是特性代码。**同日追加**：同 job 增
+`cargo test -p rr-hal --features alsa --lib`（选择器构造不触设备，CI 无设备可跑）
+——编译门升级为"编译 + 单测"门，alsa 分支不再只过编译器。
 
 **2026-11-17 复杂度峰值收口（`rr3_audio_source_cmd` 13 → 12）**：事实——全仓
 CC 峰值 13 只剩 rr-hal 的 `rr3_audio_source_cmd`（六个后端臂 + 两处重复的

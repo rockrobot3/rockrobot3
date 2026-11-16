@@ -172,13 +172,20 @@ jobs:
             echo "::error title=apt-alsa::${why:0:700}"
             exit 1
           fi
-      - name: rr-hal alsa 特性全目标编译
+      - name: rr-hal alsa 特性全目标编译 + 单测
         run: |
           set -o pipefail
           if ! cargo check --all-targets --manifest-path base/runtime/Cargo.toml \
                -p rr-hal --features alsa 2>&1 | tee /tmp/alsa.log; then
             errs=$(grep -E "error(\[|:)" /tmp/alsa.log | head -4 | tr '\n' ' ')
             echo "::error title=alsa::${errs:0:900}"
+            exit 1
+          fi
+          # 单测不打开音频设备（选择器只在 open 时真连 PCM），CI 无设备也可跑。
+          if ! cargo test -q --manifest-path base/runtime/Cargo.toml \
+               -p rr-hal --features alsa --lib 2>&1 | tee /tmp/alsa-test.log; then
+            errs=$(grep -E "error(\[|:)|FAILED|panicked at" /tmp/alsa-test.log | head -4 | tr '\n' ' ')
+            echo "::error title=alsa-test::${errs:0:900}"
             exit 1
           fi
 
