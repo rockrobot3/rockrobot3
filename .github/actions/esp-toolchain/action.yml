@@ -1,0 +1,77 @@
+# esp-toolchain —— espup 钉版工具链 + ldproxy + ESP-IDF 克隆（2026-11-16 流水线治理）。
+#
+# 此前 platforms.yml 的 esp32-gates 与 ipct003 各写一遍同一套安装（下载 espup、
+# 有界重试、ldproxy、克隆 IDF），差异只有 targets；两处一旦漂移就会出现
+# "一个 job 能装、另一个不能装"的假红。本 action 是安装面单点。
+name: esp-toolchain
+description: 安装 espup 钉版工具链（指定 targets）、ldproxy 与 ESP-IDF v5.2.2
+inputs:
+  targets:
+    description: esp target 列表（逗号分隔，如 esp32,esp32s3）
+    required: true
+runs:
+  using: composite
+  steps:
+    # 缓存面：espup 可执行、esp 工具链、ESP-IDF 与工具目录。键钉版本，
+    # 升 espup/IDF 必须同批改键，否则会吃旧工具链。
+    - name: 缓存 esp 工具链与 ESP-IDF
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.local/bin/espup
+          ~/.rustup/toolchains/esp
+          ~/.espressif
+          ~/.cargo/bin/ldproxy
+        key: esp-${{ runner.os }}-v0.17.1-idf5.2.2
+    - name: 安装 esp 工具链（espup 钉版）
+      shell: bash
+      env:
+        # espup 用 GitHub API 解析工具链版本；共享 runner 出口 IP 常撞匿名配额
+        # （2026-11-15 实测：连续 3 次全 403）。带 token 后按身份配额走——这才是
+        # 那次红的根因处置，重试只是兜底。
+        GITHUB_TOKEN: ${{ github.token }}
+        TARGETS: ${{ inputs.targets }}
+      run: |
+        set -o pipefail
+        mkdir -p "$HOME/.local/bin"
+        if [ ! -x "$HOME/.local/bin/espup" ]; then
+          for i in 1 2 3; do
+            if curl -fsSL --retry 3 --retry-delay 3 \
+                 https://github.com/esp-rs/espup/releases/download/v0.17.1/espup-x86_64-unknown-linux-gnu \
+                 -o "$HOME/.local/bin/espup"; then
+              break
+            fi
+            echo "::warning title=espup 下载::第 ${i} 次失败，5s 后重试"
+            sleep 5
+          done
+          chmod +x "$HOME/.local/bin/espup"
+        fi
+        for i in 1 2 3; do
+          if "$HOME/.local/bin/espup" install --targets "$TARGETS" 2>&1 | tee /tmp/espup.log; then
+            exit 0
+          fi
+          echo "::warning title=espup install::第 ${i} 次失败，$((i * 15))s 后重试"
+          sleep $((i * 15))
+        done
+        errs=$(tail -3 /tmp/espup.log | tr '\n' ' ')
+        echo "::error title=espup install::连续 3 次失败（网络/镜像/工具链源/API 配额）：${errs:0:700}"
+        exit 1
+    - name: 安装 ldproxy
+      shell: bash
+      run: command -v ldproxy >/dev/null || cargo install ldproxy --locked
+    - name: 克隆 ESP-IDF v5.2.2
+      shell: bash
+      env:
+        # esp32-gates 与 ipct003 此前用的是同一对 espup/IDF 版本；
+        # 单独 job 只需其中一部分 target，install.sh 按空格分隔接收。
+        TARGETS: ${{ inputs.targets }}
+      run: |
+        set -o pipefail
+        # 工具链与 IDF 版本钉死（tools/espidf-std-hello/README.md 登记表同源）。
+        idf="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
+        if [ ! -d "$idf/.git" ]; then
+          mkdir -p "$HOME/.espressif/frameworks"
+          git clone --depth 1 -b v5.2.2 --recursive \
+            https://github.com/espressif/esp-idf.git "$idf"
+        fi
+        "$idf/install.sh" ${TARGETS//,/ }
