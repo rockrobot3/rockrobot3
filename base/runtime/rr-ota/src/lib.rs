@@ -6,9 +6,12 @@
 //! 0.0.8 P1 审计件五补齐 U-Boot 环境变量写侧（[`bootenv`]）：raw env 的
 //! CRC32 校验/渲染、fw_env.config 解析、回滚链四变量的状态迁移（arm/ok）全部
 //! 主机可测；块设备读写在 linux 目标用 std::fs 实装，其余目标只编纯逻辑。
+//! A1 首片补 OTA 制品签名与验签（[`sign`]，ADR-0026）：严格行式 manifest、
+//! Ed25519 分离式签名、key_id 分发、镜像摘要核对；签名/验签是写入前的唯一门。
 
 pub mod bootconf;
 pub mod bootenv;
+pub mod sign;
 
 /// 整镜像 A/B 与出厂槽位
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
