@@ -3,8 +3,9 @@
 #
 # 用法：cross-artifacts.sh <target-triple> <ELF 架构匹配串> [static|any]
 #   cross-artifacts.sh aarch64-unknown-linux-musl 'ARM aarch64'
-#   RR3_USE_CROSS=1 cross-artifacts.sh riscv64gc-unknown-linux-musl 'RISC-V'
 #   cross-artifacts.sh x86_64-unknown-linux-gnu 'x86-64' any
+#   CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER=riscv64-linux-gnu-gcc \
+#     cross-artifacts.sh riscv64gc-unknown-linux-gnu 'RISC-V' any
 #
 # 机制与目标分离：构建集合（rrd + rr3-ctl + 五模块）、产物在树断言、ELF 架构断言
 # 都只有一份；各芯片平台的差异只是数据——目标三元组、`file` 的架构串、静态断言开关。
