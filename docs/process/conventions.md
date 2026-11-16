@@ -3499,6 +3499,16 @@ rrctl 仅覆盖其中 6 个；③A/B OTA 行写"CLI 三子命令 / 落盘 fsync 
 `could not find Cargo.toml`——补 `--manifest-path base/runtime/Cargo.toml` 后
 复跑；根因是工作目录与 workspace 布局，不是特性代码。
 
+**2026-11-17 复杂度峰值收口（`rr3_audio_source_cmd` 13 → 12）**：事实——全仓
+CC 峰值 13 只剩 rr-hal 的 `rr3_audio_source_cmd`（六个后端臂 + 两处重复的
+cfg 守卫挤在一个函数里）。处置——按后端拆成 `rr3_src_linux` / `rr3_src_mac` /
+`rr3_src_esp32` / `rr3_src_sim` / `rr3_src_na`，主函数只留一次 match；linux/mac
+的"特性/平台在不在"从双守卫臂收敛为 `Option` + 占位回退（行为等价：缺 alsa /
+缺生效绑定 / 非 macOS → `Unsupported` 占位）。验证——rr-hal lib **73 passed
+/ 1 ignored**；`alsa` job 在基线树首跑 green 证明该面可编，重构后同 job 再复核
+（本推送的 gate 运行）；CC 均值 2.49 / 峰值 **12**，基线 `cc_max_fn` 13→**12**
+（只降不升）；`check.sh` 全绿。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
