@@ -220,7 +220,7 @@ jobs:
   # 避免一次引入两类失败（编译缺件 vs 测试断言不适用于非 Unix）。
   host-windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -230,6 +230,20 @@ jobs:
       - name: workspace 编译面（Windows）
         working-directory: base/runtime
         run: cargo check --workspace
+      # ①b 同口径（workspace 全量测试）。Windows 的日志取不到（匿名 API 无 admin），
+      # 所以失败必须自带注解：把 FAILED/error/panicked 行压成一条 ::error。
+      - name: workspace 全量测试（Windows，①b 同口径）
+        working-directory: base/runtime
+        shell: pwsh
+        run: |
+          cargo test --workspace 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\win-test.log"
+          if ($LASTEXITCODE -ne 0) {
+            $bad = Select-String -Path "$env:RUNNER_TEMP\win-test.log" `
+              -Pattern 'FAILED|error\[|panicked|test result: FAILED' |
+              Select-Object -Last 5 | ForEach-Object { $_.Line.Trim() }
+            Write-Output "::error title=windows-test::$($bad -join ' || ')"
+            exit 1
+          }
 
   # 门禁之外的 lint 拆步：fmt 与 clippy 各自独立失败，一步红即整 job 红，
   # 失败归因不用翻混合日志。绿色基线 = 提交 fd0942c（rustfmt 全仓归一 + clippy 清零）。
