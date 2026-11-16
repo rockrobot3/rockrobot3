@@ -1,0 +1,93 @@
+# Buildroot 出厂轨构建门（M1 构建半边，2026-11-16 立）。
+#
+# 为什么单独一条流水线：全量 Buildroot 构建是小时级重活，不能塞进每次 push 的
+# 通用门禁；但"配置是否真能构建"又必须由 CI 给回执，不能靠本机 macOS 推断。
+# 本文件先交**板级 dts 回移的编译回执**（Linux 6.6 + v6.12 dts 回移补丁），
+# 通过后再接全量镜像 job（同一触发面，届时只加 job 不改判据）。
+#
+# 触发面：改动 buildroot 轨或本文件即跑；也可 workflow_dispatch 手动触发。
+name: buildroot
+
+on:
+  push:
+    branches: [main, "dev/**"]
+    paths:
+      - "base/os/buildroot/**"
+      - ".github/workflows/buildroot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: buildroot-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  LINUX_VER: "6.6"
+  PATCH: base/os/buildroot/board/radxa-zero3/patches/0001-arm64-dts-rockchip-add-radxa-zero-3.patch
+
+jobs:
+  dtb-backport:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装内核 dts 构建依赖
+        run: |
+          set -o pipefail
+          if ! sudo apt-get update -qq 2>&1 | tail -3; then
+            echo "::error title=apt-update::apt-get update 失败"
+            exit 1
+          fi
+          if ! sudo apt-get install -y -qq gcc-aarch64-linux-gnu bc bison flex libssl-dev 2>&1 | tail -5; then
+            echo "::error title=apt-install::内核 dts 依赖安装失败"
+            exit 1
+          fi
+          command -v aarch64-linux-gnu-gcc
+
+      - name: 取 Linux 6.6 源码并应用 Radxa ZERO 3 回移补丁
+        run: |
+          set -o pipefail
+          if ! curl -fL --retry 3 --retry-delay 2 -o /tmp/linux.tar.xz \
+              "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${LINUX_VER}.tar.xz"; then
+            echo "::error title=kernel-fetch::Linux ${LINUX_VER} 源码下载失败"
+            exit 1
+          fi
+          tar -xJf /tmp/linux.tar.xz -C /tmp
+          src="/tmp/linux-${LINUX_VER}"
+          if ! patch -p1 --forward -d "$src" < "$PATCH" > /tmp/patch.log 2>&1; then
+            echo "::error title=dts-patch::回移补丁未干净应用（见 /tmp/patch.log 摘要）"
+            tail -8 /tmp/patch.log
+            exit 1
+          fi
+          if grep -qE "fuzz|FAILED|Hunk .* FAILED" /tmp/patch.log; then
+            echo "::warning title=dts-patch::补丁应用带 fuzz/失败行（检查上下文）"
+            cat /tmp/patch.log
+          fi
+          grep -nE "radxa-zero-3[ew]" "$src/arch/arm64/boot/dts/rockchip/Makefile"
+
+      - name: 构建两个变体的 dtb（6.6 基线）
+        run: |
+          set -o pipefail
+          src="/tmp/linux-${LINUX_VER}"
+          make -C "$src" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig >/dev/null
+          if ! grep -q "^CONFIG_ARCH_ROCKCHIP=y" "$src/.config"; then
+            "$src/scripts/config" --file "$src/.config" --enable ARCH_ROCKCHIP
+          fi
+          make -C "$src" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig >/dev/null
+          if ! make -C "$src" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)" \
+              rockchip/rk3566-radxa-zero-3w.dtb rockchip/rk3566-radxa-zero-3e.dtb > /tmp/dtb.log 2>&1; then
+            echo "::error title=dtb-build::dtb 构建失败（见日志摘要）"
+            grep -iE "error|Error|fatal" /tmp/dtb.log | tail -8
+            exit 1
+          fi
+          for b in rk3566-radxa-zero-3w.dtb rk3566-radxa-zero-3e.dtb; do
+            f="$src/arch/arm64/boot/dts/rockchip/$b"
+            [ -s "$f" ] || { echo "::error title=dtb-missing::$b 未生成"; exit 1; }
+            printf 'PASS  %s %s bytes\n' "$b" "$(stat -c%s "$f")"
+            file "$f"
+          done
+          echo "PASS  Linux ${LINUX_VER} + v6.12 板级 dts 回移：两个变体 dtb 构建通过"

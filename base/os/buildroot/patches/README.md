@@ -6,22 +6,28 @@
 
 ## 核对清单（建镜像前逐条过）
 
-| # | 事项 | 核对方法 | 未命中的处置 |
+| # | 事项 | 核对方法 | 结论 / 未命中的处置 |
 |---|---|---|---|
-| 1 | `rk3566-radxa-zero-3.dts` 是否在 Linux 6.6 的 `arch/arm64/boot/dts/rockchip/` 里 | 在 Linux/容器侧 clone v6.6 tag 后 `ls`；或查 mainline 历史看该 dts 的引入版本 | 不在则从引入它的 mainline commit 回移（backport），补丁落本目录，**在补丁头注释里记来源 commit 与版本**；defconfig 的 `BR2_LINUX_KERNEL_INTREE_DTS_NAME` 保持不动 |
-| 2 | `radxa-zero-3-rk3566` 是否为 U-Boot `2024.10` 的有效 defconfig | `make O=… radxa-zero-3-rk3566_defconfig` 一次即知 | 改用 Radxa BSP/社区分支的 U-Boot，来源同样记入补丁头或本表 |
-| 3 | extlinux 的 `console=ttyS2,1500000` 与 fdt 文件名 | 板上串口实测 | 属板上收口，见 `board/radxa-zero3/extlinux.conf` 尾注 |
+| 1 | `rk3566-radxa-zero-3*.dts` 是否在 Linux 6.6 的 `arch/arm64/boot/dts/rockchip/` 里 | mainline 目录逐 tag 实查 | **2026-11-16 已核对：v6.6 没有该板 dts**；主线只有 `-3e`（v6.11 起）与 `-3w`（v6.12 起）。已从 v6.12 逐字回移三份文件并在本目录 `0001-…patch` 注册两个 dtb；defconfig 用 `BR2_LINUX_KERNEL_PATCH` 应用 |
+| 2 | `radxa-zero-3-rk3566` 是否为 U-Boot `2024.10` 的有效 defconfig | 源码树实查 + `make …_defconfig` | **2026-11-16 已核对存在**（`source.denx.de/u-boot/u-boot` v2024.10，`configs/radxa-zero-3-rk3566_defconfig` HTTP 200）；构建期一次 make 回执随全量构建 CI |
+| 3 | extlinux 的 `console=ttyS2,1500000` 与 fdt 文件名 | 板上串口实测 | 属板上收口；fdt 默认 `rk3566-radxa-zero-3w.dtb`（3E 实板改 `-3e.dtb`），见 `board/radxa-zero3/extlinux.conf` 尾注 |
+
+## 本目录现有补丁
+
+- `0001-arm64-dts-rockchip-add-radxa-zero-3.patch`：v6.12 的
+  `rk3566-radxa-zero-3.dtsi` / `-3e.dts` / `-3w.dts` 逐字回移到 6.6，
+  并在 `arch/arm64/boot/dts/rockchip/Makefile` 注册两个 dtb；补丁头记来源 tag。
 
 ## Buildroot 接法
 
-补丁落本目录后，在 `configs/rock3_zero3_defconfig` 加：
+`configs/rock3_zero3_defconfig` 已写：
 
 ```
-BR2_LINUX_KERNEL_PATCH="board/radxa-zero3/patches"        # 或 defconfig 内相对路径按 Buildroot 语义写
+BR2_LINUX_KERNEL_PATCH="board/radxa-zero3/patches"
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3566-radxa-zero-3w rockchip/rk3566-radxa-zero-3e"
 ```
 
-（Buildroot 对 `board/<vendor>/<board>/patches` 有默认搜索路径；以构建期实测为准，
-本条只登记意图，不预设语法细节。）
+路径按"把 `configs/` 与 `board/` 叠进 Buildroot 源码树"的既有用法解析。
 
 ## 产物注入（与补丁无关，但同属"Buildroot 外的输入"）
 

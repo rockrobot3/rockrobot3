@@ -5,10 +5,13 @@
 # base/runtime/rr-ota/src/lib.rs，由 cargo test -p rr-ota 的 include_str 守护钉死）。
 #
 # 档位说明（诚实边界）：本文件是"结构就绪"档——配置逻辑本机可评审，全量 make
-# 构建只能在 Linux/容器侧进行（本仓库开发机为 macOS）。dts 是否随 6.6 mainline
-# 提供、U-Boot defconfig 名是否命中，见 patches/README.md 的核对清单；未核对项
-# 不得当作已验证。rrd 与各模块产物**不在 Buildroot 里编译**（它们是本仓自己的
-# workspace），由 aarch64 交叉编译后经 post-build.sh 装入目标根文件系统。
+# 构建只能在 Linux/容器侧进行（本仓库开发机为 macOS）。**2026-11-16 核对**：
+# v6.6 主线没有 Radxa ZERO 3 的板级 dts（3E 自 v6.11、3W 自 v6.12 才进主线），
+# 故板级文件以 v6.12 为源回移到 6.6，补丁住 board/radxa-zero3/patches/，由下方
+# BR2_LINUX_KERNEL_PATCH 应用；两个变体的 dtb 都构建，extlinux 默认取 3W。
+# U-Boot 2024.10 的 `radxa-zero-3-rk3566_defconfig` 已核对存在（源码树实查）。
+# rrd 与各模块产物**不在 Buildroot 里编译**（它们是本仓自己的 workspace），由
+# aarch64 交叉编译后经 post-build.sh 装入目标根文件系统。
 
 # ---- 架构与工具链 -----------------------------------------------------------
 BR2_aarch64=y
@@ -24,17 +27,16 @@ BR2_ROOTFS_POST_BUILD_SCRIPT="board/radxa-zero3/post-build.sh"
 BR2_ROOTFS_POST_IMAGE_SCRIPT="board/radxa-zero3/post-image.sh support/scripts/genimage.sh"
 BR2_ROOTFS_POST_IMAGE_SCRIPT_ARGS="-c $(BUILD_DIR)/genimage-rock3.cfg"
 
-# ---- 内核：Linux 6.6 mainline -----------------------------------------------
+# ---- 内核：Linux 6.6 mainline + Radxa ZERO 3 板级 dts 回移 -------------------
 BR2_LINUX_KERNEL=y
 BR2_LINUX_KERNEL_CUSTOM_VERSION=y
 BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="6.6"
 BR2_LINUX_KERNEL_USE_ARCH_DEFAULT_CONFIG=y
 BR2_LINUX_KERNEL_IMAGE=y
 BR2_LINUX_KERNEL_DTS_SUPPORT=y
-# 注意：rk3566-radxa-zero-3 若不在 6.6 的 in-tree dts 名单里，此值会在
-# 内核编译期报错——届时按 patches/README.md 的回移（backport）流程补丁，
-# 不要在此处改成"看起来存在"的名字。
-BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3566-radxa-zero-3"
+# 板级 dts 回移（v6.6 无此板；3E/3W 两个变体都构建，extlinux 默认 3W）。
+BR2_LINUX_KERNEL_PATCH="board/radxa-zero3/patches"
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3566-radxa-zero-3w rockchip/rk3566-radxa-zero-3e"
 
 # ---- 引导链：U-Boot（extlinux 走 distro boot）-------------------------------
 BR2_TARGET_UBOOT=y
