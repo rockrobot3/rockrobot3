@@ -128,9 +128,14 @@ jobs:
       - name: 供应链审计（全部工程根，--strict）
         run: |
           # 失败压成单行注解：匿名日志接口 403，注解是唯一公开可读的归因通道。
+          # 顺序：诊断行 → FAIL 行 → 日志尾部，保证命令级错误（参数/配置）不被
+          # 逐工程的 FAIL 行挤出注解上限（首跑实证：只取 head 时错误行全被挤掉）。
           set -o pipefail
           if ! bash tools/ci/supply-audit.sh --strict 2>&1 | tee /tmp/supply.log; then
-            bad=$(grep -E '^(FAIL|error\[)' /tmp/supply.log | head -6 | tr '\n' ' ')
+            bad=$(grep -E '^error(\[|:)' /tmp/supply.log | head -4 | tr '\n' ' ')
+            if [ -z "${bad}" ]; then
+              bad=$(grep -E '^FAIL' /tmp/supply.log | head -4 | tr '\n' ' ')
+            fi
             if [ -z "${bad}" ]; then
               bad=$(tail -3 /tmp/supply.log | tr '\n' ' ')
             fi

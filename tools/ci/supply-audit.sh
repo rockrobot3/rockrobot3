@@ -43,12 +43,20 @@ while IFS= read -r m; do
   d="${m%/Cargo.toml}"
   count=$((count + 1))
   log="$(mktemp)"
-  # --locked：审计的就是锁文件解析出的那棵树；锁与 manifest 漂移即红（先同步锁）
-  if cargo deny --manifest-path "$m" check --locked > "$log" 2>&1; then
+  # --locked：审计的就是锁文件解析出的那棵树；锁与 manifest 漂移即红（先同步锁）。
+  # 公共选项（--manifest-path / --locked）必须放在子命令之前——放到 check 之后会被
+  # clap 当未知参数拒掉，表现为"全部工程根瞬时失败"（2026-11-16 首跑实证）。
+  if cargo deny --manifest-path "$m" --locked check > "$log" 2>&1; then
     echo "PASS  ${d}"
   else
     echo "FAIL  ${d}"
-    grep -E '^error(\[|:)' "$log" | head -5
+    # 优先回显诊断行；命令级错误（参数/配置）不带 error[...] 形态，退回日志首行，
+    # 否则失败只剩 FAIL 一行，根因不可见（首跑踩过）。
+    if grep -qE '^error(\[|:)' "$log"; then
+      grep -E '^error(\[|:)' "$log" | head -5
+    else
+      head -3 "$log"
+    fi
     fail=1
   fi
   rm -f "$log"
