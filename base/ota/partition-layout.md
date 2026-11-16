@@ -22,10 +22,27 @@
 
 ## 两条更新轨道（ADR-0007 决策二）
 
-1. **整镜像 A/B**：写对侧槽 → 校验 → 改引导标志 → 重启；启动失败回滚到原槽。
-   槽位对合律（`peer(peer(s)) == s`）由 rr-ota 测试钉住，是回滚判定的前提。
+1. **整镜像 A/B**：写对侧槽 → 校验（签名 + hash + manifest 契约）→ 改引导标志
+   → 重启；启动失败回滚到原槽。槽位对合律（`peer(peer(s)) == s`）由 rr-ota
+   测试钉住，是回滚判定的前提。
 2. **模块级更新**：只换 `rr_staging` 里的单个模块产物，经 manifest
    `min_from_semver` 兼容校验后原子替换，不动 A/B、不重启整机。
+
+## 镜像签名（ADR-0026，主机面已实装）
+
+整镜像写对侧槽之前必须先过签名门：`rr3-ota-ctl verify` 按 manifest 的
+`key_id` 取公钥，做 Ed25519 严格验签，再校验 `platform`/`board`、版本降级门、
+镜像 `bytes` 与 `sha256`。未签名、签名不符、目标不符、摘要不符一律拒写。
+
+- manifest 是严格行式文本（首行 `rr3-ota-manifest 1`，八个固定字段，LF 结尾）；
+- 签名覆盖 manifest 原始字节，镜像本体由 `bytes`/`sha256` 约束；
+- 私钥只在签名环境（离线/CI Secret），格式 = 32 字节种子十六进制，unix 0600；
+- 公钥按 `ota/keys/<key_id>.pub` 随安装树只读分发，`key_id` = 公钥 SHA-256 前 8 字节；
+- 本版 `kind` 只认 `rootfs`；模块级签名格式留扩展位。
+
+命令与文法见 [base/ota/README.md](README.md) 与
+[ADR-0026](../../docs/process/adr/ADR-0026-OTA镜像签名与验签链.md)。`verify` 只读，
+不写槽位；镜像下载、槽位写入、U-Boot 回滚链与 `rr3.ctl.ota` 接线归 M6 板上批。
 
 ## 断电安全约束（M6 实现时不得违反）
 
@@ -125,6 +142,10 @@ A/B 切换的断电安全不靠"翻标志不失败"，靠**失败可回**。U-Bo
 7. rr_factory 镜像内的恢复流程：进厂环境后由谁把 extlinux 标签切回
    （rr_a 或最近好槽），是否叠加 bootcount 兜底——`rr3-ota-ctl factory`
    只保证"进得去"，"回得来"的职责在 rr_factory 镜像自带逻辑。
+8. 公钥装机位：`ota/keys/<key_id>.pub` 随镜像只读落位，升级流程按 manifest
+   的 `key_id` 选键；密钥轮换 = 增发新 `key_id` 公钥，不改验签代码。
+9. 升级写入链必须"先 verify、后写"：任何绕过 `rr3-ota-ctl verify` 或自带第二份
+   验签的入口都不允许上线；未签名制品在写入前拒。
 
 ## 0.0.5 增补轮六 批N18 件二：ESP32 形态（rtos 档）升级语义定案
 

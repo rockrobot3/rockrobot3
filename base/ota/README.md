@@ -32,3 +32,31 @@ root=LABEL 标签（原子落盘）。槽位镜像写入（往 rr_b 落整镜像
 命令链具备"切过去"的能力，尚不具备"失败自动回得来"的保障。
 
 容量不在本目录冻结（本机无 Buildroot 与板子，凭想象写下的 size 是最贵的那种错误）。
+
+## OTA 制品签名（ADR-0026，主机面已实装）
+
+升级制品必须带签字清单；未签名、签名不符、目标平台/板型不符、镜像摘要不符
+一律在写入前拒。签名是分离式的：签名覆盖 manifest 原始字节，manifest 内的
+`bytes`/`sha256` 约束镜像本体。
+
+    # 1. 私钥只放离线/CI Secret：32 字节种子的 64 位十六进制，unix 权限必须 0600
+    rr3-ota-ctl keypub --key-file sign.key --out-pub ota/keys/<key_id>.pub
+
+    # 2. 生成 manifest（sha256/bytes/key_id 由工具计算）
+    rr3-ota-ctl manifest --image rr3-rootfs-rk3566-0.0.8.img \
+        --platform rk3566 --board radxa-zero3 --version 0.0.8 \
+        --key-file sign.key --out rr3-ota.manifest
+
+    # 3. 签名（manifest.key_id 必须与私钥派生值一致）
+    rr3-ota-ctl sign --manifest rr3-ota.manifest --key-file sign.key \
+        --sig-out rr3-ota.sig
+
+    # 4. 写入前验签：目标兼容 + 可选降级门 + 镜像摘要核对
+    rr3-ota-ctl verify --manifest rr3-ota.manifest --sig rr3-ota.sig \
+        --pub ota/keys/<key_id>.pub --image rr3-rootfs-rk3566-0.0.8.img \
+        --platform rk3566 --board radxa-zero3 --current-version 0.0.7
+
+边界：`verify` 只读，不写任何槽位；镜像下载、写对侧槽、U-Boot 回滚链与
+`rr3.ctl.ota` 在线入口仍归 M6 板上批。公钥按 `ota/keys/<key_id>.pub`
+随安装树只读分发，私钥永不进镜像、仓库与设备。文法与信任模型见
+[ADR-0026](../../docs/process/adr/ADR-0026-OTA镜像签名与验签链.md)。
