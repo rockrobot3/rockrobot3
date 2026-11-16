@@ -236,11 +236,12 @@ jobs:
         working-directory: base/runtime
         shell: pwsh
         run: |
-          # --keep-going：一个 crate 编译失败时继续编其余 crate，一轮暴露多份错误。
+          # --no-fail-fast：cargo **test** 的对应选项（`--keep-going` 只属于 cargo build，
+          # 2026-11-16 实测 cargo 1.100 上 `cargo test --keep-going` 直接参数错误退出）。
           # --message-format short：错误行自带 `file:line:col`。
           # Tee-Object 默认写 UTF-16，而 Select-String 按 UTF-8 读会零匹配（实测
           # "共 0 条"）——统一 -Encoding utf8，失败时再补日志尾部，避免只见 exit code。
-          cargo test --workspace --keep-going --message-format short 2>&1 |
+          cargo test --workspace --no-fail-fast --message-format short 2>&1 |
             Tee-Object -FilePath "$env:RUNNER_TEMP\win-test.log"
           if ($LASTEXITCODE -ne 0) {
             $log = "$env:RUNNER_TEMP\win-test.log"
