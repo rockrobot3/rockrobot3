@@ -7,6 +7,11 @@ on:
     branches: [main, "dev/**"]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # 周程（UTC 周日 18:30 = 北京周一 02:30）：供应链公告随时间变化，没有推送
+    # 也必须周期性复核（supply 的 RustSec 库是按时间漂移的判据）；与 platforms
+    # 的 18:00 错开，避免同一时刻抢 runner。
+    - cron: "30 18 * * 0"
 permissions:
   contents: read
 concurrency:

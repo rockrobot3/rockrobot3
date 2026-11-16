@@ -3207,8 +3207,8 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/gat
 | `host-macos` | macOS 宿主等价面：workspace 全量测试 + 独立工程测试（门禁 ④/⑥ 同口径，esp 工程除外） | push / PR / 周程 |
 | `scripts` | 全部追踪 `.sh` 的 `bash -n` 语法门（判据自身不许写坏） | push / PR / 周程 |
 | `lint` | fmt + clippy（workspace + 独立工程） | push / PR / 周程 |
-| `supply` | 供应链审计（cargo-deny）：许可证 / RustSec 公告 / 来源白名单 / 通配依赖；策略真值 = 仓根 `deny.toml`，全部工程根逐项执法（`tools/ci/supply-audit.sh --strict`） | push / PR / 手动 |
-| `ipct003` / `distro-smoke` / `buildroot-assembly` / `sim-assemble` / `sim-chain` / `matrix` | 跨架构对拍、真装、装配冒烟、装配演练、全链、点验矩阵 | push / PR / 周程 |
+| `supply` | 供应链审计（cargo-deny）：许可证 / RustSec 公告 / 来源白名单 / 通配依赖；策略真值 = 仓根 `deny.toml`，全部工程根逐项执法（`tools/ci/supply-audit.sh --strict`） | push / PR / 手动 / 周程 |
+| `ipct003` / `distro-smoke` / `buildroot-assembly` / `sim-assemble` / `sim-chain` / `matrix` | 跨架构对拍、真装、装配冒烟、装配演练、全链、点验矩阵 | push / PR / 手动（`ipct003` 随 platforms 另有周程） |
 | `cross-artifacts`（矩阵） | 非 x86 芯片平台静态产物：构建七件 + ELF 断言 + **qemu 目标 ISA 执行冒烟** + 产物上传 | push / PR / 周程 |
 | `esp32-gates` | xtensa/espidf 五门（ESP32 / S3 双档），工具链与 IDF 走缓存 | push / PR / 手动 / 周程 |
 | `publish`（`publish.yml`） | 运行镜像发布到 `ghcr.io/rockrobot3/rockrobot3`：amd64/arm64 原生构建 → 单架构镜像 → 多架构清单合并；镜像根 = rr3-pack stage 树 | 打 `v*` 标签 / main（edge）/ 手动 |
@@ -3318,7 +3318,9 @@ cargo-deny 的公共选项只认子命令之前（`cli/common.html`），22 个�
 已改为"诊断行优先 → FAIL 行 → 日志尾部"三级回退，脚本失败时也回显日志首行。**次跑红**：
 `wildcards=deny` 把私有件的 path 依赖（`rr-ipc = { path = … }`）判成通配——这是工具
 语义与仓面形态的差异，不是缺陷代码；按 `allow-wildcard-paths = true` 收口（私有件豁免、
-公开件继续执法，不加逐 crate skip 名单）。
+公开件继续执法，不加逐 crate skip 名单）。**同批时间维度**：`gate` 加周程（UTC 周日
+18:30 = 北京周一 02:30，与 platforms 的 18:00 错开）——RustSec 库随时间漂移，没有推送
+也必须复核；job 表的触发列同批订正为实际形态（integration 无周程，platforms 有）。
 
 
 **2026-11-13 源文件行数上限（⑭，新立）**：每个 `.rs` 源文件必须 **<600 行**
