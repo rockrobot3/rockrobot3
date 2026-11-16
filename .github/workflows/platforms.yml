@@ -237,16 +237,20 @@ jobs:
         shell: pwsh
         run: |
           # --keep-going：一个 crate 编译失败时继续编其余 crate，一轮暴露多份错误。
-          # --message-format short：错误行自带 `file:line:col`，不必再靠 --> 行配路径
-          # （上一版 pwsh 的 ::error 未被 GitHub 识别，注解只剩 exit code）。
+          # --message-format short：错误行自带 `file:line:col`。
+          # Tee-Object 默认写 UTF-16，而 Select-String 按 UTF-8 读会零匹配（实测
+          # "共 0 条"）——统一 -Encoding utf8，失败时再补日志尾部，避免只见 exit code。
           cargo test --workspace --keep-going --message-format short 2>&1 |
             Tee-Object -FilePath "$env:RUNNER_TEMP\win-test.log"
           if ($LASTEXITCODE -ne 0) {
-            $bad = Select-String -Path "$env:RUNNER_TEMP\win-test.log" `
-              -Pattern 'error\[|FAILED|panicked' |
+            $log = "$env:RUNNER_TEMP\win-test.log"
+            $bad = Get-Content -Path $log -Encoding utf8 |
+              Select-String -Pattern 'error\[|FAILED|panicked' |
               Select-Object -First 8 | ForEach-Object { $_.Line.Trim() }
             foreach ($b in $bad) { Write-Output "::error title=windows-test::$b" }
-            Write-Output "::error title=windows-test::共 $($bad.Count) 条（详见本次 step 日志）"
+            foreach ($t in (Get-Content -Path $log -Encoding utf8 -Tail 12)) {
+              Write-Output "::error title=windows-test-tail::$t"
+            }
             exit 1
           }
 
