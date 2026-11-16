@@ -178,8 +178,9 @@ jobs:
             exit 1
           fi
           if ! make -C /tmp/buildroot O=/tmp/br-out -j"$(nproc)" > /tmp/br-build.log 2>&1; then
-            echo "::error title=br-build::Buildroot 全量 make 失败"
-            grep -iE "error|Error [0-9]|failed|fatal" /tmp/br-build.log | tail -10
+            phase=$(grep -E "^>>>" /tmp/br-build.log | tail -3 | tr '\n' ' ')
+            errs=$(grep -iE "error|Error [0-9]|failed|fatal|No rule|不存在" /tmp/br-build.log | tail -8 | tr '\n' ' ')
+            echo "::error title=br-build::Buildroot 全量 make 失败｜阶段=${phase:0:300}｜错误=${errs:0:700}"
             exit 1
           fi
           tail -5 /tmp/br-build.log

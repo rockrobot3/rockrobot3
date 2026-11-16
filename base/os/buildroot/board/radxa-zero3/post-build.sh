@@ -32,7 +32,16 @@ install -d -m 0755 \
 	"$TARGET/usr/lib/rockrobot3/modules" \
 	"$TARGET/var/lib/rr3/staging" \
 	"$TARGET/data" \
-	"$TARGET/extlinux"
+	"$TARGET/extlinux" \
+	"$BINARIES_DIR/extlinux"
+
+# genimage 的 --inputpath 是 $BINARIES_DIR：boot.vfat 的 files 里
+# "extlinux/extlinux.conf" 必须在 BINARIES_DIR 下真实存在，否则全量 make
+# 在 post-image 才报"文件不存在"。extlinux.conf 是板级静态件，不从 TARGET
+# 搬（TARGET 里的同路径只作装机面留档）。
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+install -m 0644 "$SCRIPT_DIR/extlinux.conf" "$BINARIES_DIR/extlinux/extlinux.conf"
+install -m 0644 "$SCRIPT_DIR/extlinux.conf" "$TARGET/extlinux/extlinux.conf"
 
 # rrd 与模块二进制由 aarch64 交叉编译后放到 ${BINARIES_DIR}（交付方式见
 # patches/README.md 的"产物注入"一节）；缺席只警告不阻断——镜像结构
