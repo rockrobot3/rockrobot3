@@ -19,6 +19,10 @@ pub(crate) const RR3_USAGE: &str = "\
   rr3-ota-ctl verify --manifest <manifest> --sig <签名文件> --pub <公钥文件>
                       [--image <镜像>] [--platform <平台>] [--board <板型>]
                       [--current-version <版本>] [--allow-downgrade]
+  rr3-ota-ctl install --manifest <manifest> --sig <签名文件> --pub <公钥文件>
+                      --image <镜像> --target <普通文件> --confirm
+                      [--platform <平台>] [--board <板型>]
+                      [--current-version <版本>] [--allow-downgrade]
 
   slots         打印在册槽位与对合关系（读侧）
   switch        改写引导配置 root=LABEL，持久 A/B 切换
@@ -28,7 +32,8 @@ pub(crate) const RR3_USAGE: &str = "\
   keypub        从私钥种子派生公钥与 key_id（私钥不输出）
   manifest      生成严格行式 manifest（sha256/bytes/key_id 由工具计算）
   sign          对 manifest 原始字节做 Ed25519 签名
-  verify        严格验签 + 目标兼容 + 镜像摘要核对（不写槽位）";
+  verify        严格验签 + 目标兼容 + 镜像摘要核对（不写槽位）
+  install       验签通过后原子装到普通文件 staging 目标（块设备写入归 M6）";
 
 /// 用法错统一出口：文案后附用法全文（一次输出，不两次打印）。
 pub(crate) fn rr3_use(e: String) -> (String, ExitCode) {

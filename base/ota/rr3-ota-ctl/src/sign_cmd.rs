@@ -1,7 +1,7 @@
 //! OTA 制品签名/验签子命令（ADR-0026）。
 //!
 //! 机制全在 `rr-ota::sign`；本文件只做参数形制、文件读写与原子落盘。
-//! 四个子命令都不缺省碰任何路径：私钥、manifest、签名、镜像、公钥都必须显式给。
+//! 五个子命令都不缺省碰任何路径：私钥、manifest、签名、镜像、公钥、目标都必须显式给。
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -11,13 +11,14 @@ use rr_ota::sign;
 
 use crate::args::{rr3_flag, rr3_opt_arg, rr3_use, rr3_val_arg};
 
-/// 签名面子命令分派：keypub / manifest / sign / verify。
+/// 签名面子命令分派：keypub / manifest / sign / verify / install。
 pub(crate) fn rr3_dispatch(cmd: &str, args: &[String]) -> Result<String, (String, ExitCode)> {
     match cmd {
         "keypub" => rr3_cmd_keypub(args),
         "manifest" => rr3_cmd_manifest(args),
         "sign" => rr3_cmd_sign(args),
         "verify" => rr3_cmd_verify(args),
+        "install" => rr3_cmd_install(args),
         other => Err(rr3_use(format!("未知签名子命令 {other:?}"))),
     }
 }
@@ -174,6 +175,26 @@ fn rr3_verify_args(args: &[String]) -> Result<Rr3VerifyArgs, (String, ExitCode)>
     })
 }
 
+/// 验签策略视图（verify / install 共用）。
+fn rr3_expect(a: &Rr3VerifyArgs) -> sign::Rr3OtaExpect<'_> {
+    sign::Rr3OtaExpect {
+        platform: a.platform.as_deref(),
+        board: a.board.as_deref(),
+        current_version: a.current.as_deref(),
+        allow_downgrade: a.allow_downgrade,
+    }
+}
+
+/// 镜像路径：显式 `--image` 优先，否则按 manifest 同目录解析。
+fn rr3_image_path(a: &Rr3VerifyArgs, m: &sign::Rr3OtaManifest<'_>) -> PathBuf {
+    a.image.clone().unwrap_or_else(|| {
+        a.manifest
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(m.image)
+    })
+}
+
 /// verify：严格验签 + 目标兼容 + 可选镜像摘要核对；不写任何槽位。
 pub(crate) fn rr3_cmd_verify(args: &[String]) -> Result<String, (String, ExitCode)> {
     let a = rr3_verify_args(args)?;
@@ -182,20 +203,9 @@ pub(crate) fn rr3_cmd_verify(args: &[String]) -> Result<String, (String, ExitCod
     let pub_hex = rr3_read_trimmed(&a.pubkey, "公钥")?;
     let m = sign::rr3_verify_signed(&bytes, &sig, &pub_hex)
         .map_err(|e| (format!("验签失败：{e}"), ExitCode::from(1)))?;
-    let expect = sign::Rr3OtaExpect {
-        platform: a.platform.as_deref(),
-        board: a.board.as_deref(),
-        current_version: a.current.as_deref(),
-        allow_downgrade: a.allow_downgrade,
-    };
-    sign::rr3_manifest_expect(&m, &expect)
+    sign::rr3_manifest_expect(&m, &rr3_expect(&a))
         .map_err(|e| (format!("目标/降级校验拒绝：{e}"), ExitCode::from(1)))?;
-    let image = a.image.unwrap_or_else(|| {
-        a.manifest
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join(m.image)
-    });
+    let image = rr3_image_path(&a, &m);
     sign::rr3_image_check(&image, &m)
         .map_err(|e| (format!("镜像校验失败：{e}"), ExitCode::from(1)))?;
     Ok(format!(
@@ -208,6 +218,82 @@ pub(crate) fn rr3_cmd_verify(args: &[String]) -> Result<String, (String, ExitCod
         m.bytes,
         sign::rr3_hex_encode(&m.key_id)
     ))
+}
+
+/// install：验签通过后把镜像装到**普通文件** staging 目标；块设备写入归 M6。
+pub(crate) fn rr3_cmd_install(args: &[String]) -> Result<String, (String, ExitCode)> {
+    let a = rr3_verify_args(args)?;
+    let target = PathBuf::from(
+        rr3_val_arg(args, "--target", "install 必须显式传 --target").map_err(rr3_use)?,
+    );
+    if !rr3_flag(args, "--confirm") {
+        return Err(rr3_use("install 会写目标文件，必须显式传 --confirm".into()));
+    }
+    let bytes = rr3_read_bytes(&a.manifest, "manifest")?;
+    let sig = rr3_read_trimmed(&a.sig, "签名")?;
+    let pub_hex = rr3_read_trimmed(&a.pubkey, "公钥")?;
+    let m = sign::rr3_verify_signed(&bytes, &sig, &pub_hex)
+        .map_err(|e| (format!("验签失败：{e}"), ExitCode::from(1)))?;
+    sign::rr3_manifest_expect(&m, &rr3_expect(&a))
+        .map_err(|e| (format!("目标/降级校验拒绝：{e}"), ExitCode::from(1)))?;
+    let image = rr3_image_path(&a, &m);
+    sign::rr3_image_check(&image, &m)
+        .map_err(|e| (format!("镜像校验失败：{e}"), ExitCode::from(1)))?;
+    rr3_install_file(&image, &target, &m)?;
+    Ok(format!(
+        "安装完成：{} → {}（version={} bytes={} key_id={}；目标为 staging 文件，块设备写入归 M6）",
+        image.display(),
+        target.display(),
+        m.version,
+        m.bytes,
+        sign::rr3_hex_encode(&m.key_id)
+    ))
+}
+
+/// 普通文件目标的原子落位：临时件 → 摘要复核 → fsync → rename。
+fn rr3_install_file(
+    src: &Path,
+    target: &Path,
+    m: &sign::Rr3OtaManifest<'_>,
+) -> Result<(), (String, ExitCode)> {
+    if src == target {
+        return Err(("拒绝安装：源镜像与目标路径相同".into(), ExitCode::from(1)));
+    }
+    if let Ok(md) = target.metadata() {
+        if !md.file_type().is_file() {
+            return Err((
+                format!(
+                    "拒绝安装：目标 {} 不是普通文件（块设备/槽位写入归 M6）",
+                    target.display()
+                ),
+                ExitCode::from(1),
+            ));
+        }
+    }
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    if !parent.is_dir() {
+        return Err((
+            format!("拒绝安装：目标目录不存在 {}", parent.display()),
+            ExitCode::from(1),
+        ));
+    }
+    let name = target
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("target");
+    let tmp = parent.join(format!(".{name}.{}.rr3-install", std::process::id()));
+    let cleanup = |e: String| {
+        let _ = std::fs::remove_file(&tmp);
+        (e, ExitCode::from(1))
+    };
+    std::fs::copy(src, &tmp)
+        .map_err(|e| cleanup(format!("复制到临时件 {} 失败：{e}", tmp.display())))?;
+    sign::rr3_image_check(&tmp, m).map_err(|e| cleanup(format!("临时件摘要复核失败：{e}")))?;
+    std::fs::File::open(&tmp)
+        .and_then(|f| f.sync_all())
+        .map_err(|e| cleanup(format!("fsync 临时件失败：{e}")))?;
+    std::fs::rename(&tmp, target)
+        .map_err(|e| cleanup(format!("安装落位 {} 失败：{e}", target.display())))
 }
 
 /// 私钥文件：32 字节种子的 64 位十六进制，unix 上必须 0600。

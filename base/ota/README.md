@@ -56,7 +56,14 @@ root=LABEL 标签（原子落盘）。槽位镜像写入（往 rr_b 落整镜像
         --pub ota/keys/<key_id>.pub --image rr3-rootfs-rk3566-0.0.8.img \
         --platform rk3566 --board radxa-zero3 --current-version 0.0.7
 
-边界：`verify` 只读，不写任何槽位；镜像下载、写对侧槽、U-Boot 回滚链与
-`rr3.ctl.ota` 在线入口仍归 M6 板上批。公钥按 `ota/keys/<key_id>.pub`
+    # 5. 验签后装到普通文件 staging 目标（块设备/槽位写入归 M6）
+    rr3-ota-ctl install --manifest rr3-ota.manifest --sig rr3-ota.sig \
+        --pub ota/keys/<key_id>.pub --image rr3-rootfs-rk3566-0.0.8.img \
+        --target /var/lib/rr3/staging/rr3-rootfs.img --confirm \
+        --platform rk3566 --board radxa-zero3 --current-version 0.0.7
+
+边界：`verify` 只读，不写任何槽位；`install` 只接受**普通文件**目标，
+先验签、再临时件复核、fsync、rename；块设备/槽位写入、`rr3.ctl.ota`
+在线入口与 U-Boot 回滚链仍归 M6 板上批。公钥按 `ota/keys/<key_id>.pub`
 随安装树只读分发，私钥永不进镜像、仓库与设备。文法与信任模型见
 [ADR-0026](../../docs/process/adr/ADR-0026-OTA镜像签名与验签链.md)。
