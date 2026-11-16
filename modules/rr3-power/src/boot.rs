@@ -120,9 +120,26 @@ fn rr3_power_sect(v: &toml::Value, name: &str) -> Result<toml::Value, String> {
         .ok_or_else(|| format!("config 缺 [rr3-power.{name}] 段"))
 }
 
-/// battery 段取址 + 解析。
+/// battery 段取址 + 解析 + 阈值次序（ADR-0027 裁定 1）。
 fn rr3_power_battery(v: &toml::Value) -> Result<Rr3BatteryCfg, String> {
-    rr3_battery_of(&rr3_power_sect(v, "battery")?)
+    let cfg = rr3_battery_of(&rr3_power_sect(v, "battery")?)?;
+    rr3_battery_order(&cfg)?;
+    Ok(cfg)
+}
+
+/// 阈值次序：关断线必须严格低于禁动线（ADR-0027 裁定 1）。
+///
+/// 相等或倒挂时，关断请求可能在"尚未进入低电段"的状态下成立——相序前提
+/// （先禁动、后切轨）就不再有保证。这条是装载门判据：配置错就拒 boot，
+/// 不靠运行期"碰巧没触发"。
+fn rr3_battery_order(cfg: &Rr3BatteryCfg) -> Result<(), String> {
+    if cfg.cutoff_voltage_mv >= cfg.low_voltage_mv {
+        return Err(format!(
+            "config [rr3-power.battery] 阈值倒挂: cutoff={}mV 必须 < low={}mV（关断线不得高于禁动线，ADR-0027 裁定 1）",
+            cfg.cutoff_voltage_mv, cfg.low_voltage_mv
+        ));
+    }
+    Ok(())
 }
 
 /// charger 段取址 + 解析。
@@ -345,6 +362,24 @@ max_age_ms = 0
         assert!(e.contains("缺 up"), "rail 缺 up 键点名: {e}");
         let e = rr3_power_cfg_parse("garbage =\n").unwrap_err();
         assert!(e.contains("TOML"), "坏文本点名: {e}");
+    }
+
+    /// battery 两线次序（ADR-0027 裁定 1）：cutoff 必须严格 < low。
+    /// 相等与倒挂都红——关断线不低于禁动线时，"先禁动后切轨"的相序前提不成立。
+    #[test]
+    fn battery_cutoff_must_stay_below_low() {
+        let text = |low: u16, cutoff: u16| {
+            format!(
+                "[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = {low}\ncutoff_voltage_mv = {cutoff}\n[rr3-power.charger]\nstate_period_ms = 2000\n[rr3-power.rail]\nup = false\ndomain = \"rail5v\"\nsample_period_ms = 1000\nmild_mv = 4600\nsevere_mv = 4400\nmax_age_ms = 0\n"
+            )
+        };
+        let cfg = rr3_power_cfg_parse(&text(3300, 3150)).expect("cutoff < low 合法");
+        assert_eq!(cfg.battery.cutoff_voltage_mv, 3150);
+        for (low, cutoff) in [(3300u16, 3300u16), (3300, 3400)] {
+            let e = rr3_power_cfg_parse(&text(low, cutoff)).expect_err("相等/倒挂必须红");
+            assert!(e.contains("阈值倒挂"), "文案须点名阈值倒挂: {e}");
+            assert!(e.contains("ADR-0027"), "文案须指向裁定: {e}");
+        }
     }
 
     /// 阈值倒挂执法（批N2 件五）：severe >= mild 即红——相等也红（Mild 档不可达）。

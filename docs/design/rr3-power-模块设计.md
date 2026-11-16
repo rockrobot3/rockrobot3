@@ -42,7 +42,7 @@
 | battery | **现状**：`dyn Rr3Power` ← `RR3_HAL_BACKEND` 选档 + `[hardware].i2c_bus`、`ina219_addr`（描述符今天**没有** `[slots].present`，profiles 实有段只有 `[os] [bindings] [hardware] [enabled_slots]`）；**目标** `→` 由 `[slots].present:power.battery` 声明在位（随批J 七段落，见索引 D1/C2） | `low_voltage_mv: u16` | config | 3300 | 越界 → 拒 boot（fail-closed） |
 | battery | — | `sample_period_ms: u64` | config | 5000 | `0` → **已钳到 1**（`composite.rs` 的 `u64_of(..)?.max(1)`），缺的是"钳制留痕"一行日志（§10 P-2 收窄为只补留痕） |
 | charger | **现状：无独立句柄**，充电位由最近一次 battery 读数派生 | `state_period_ms: u64` | config | 2000 | 同上 |
-| 全体 | `cutoff_voltage_mv: u16` = 3150 **只解析回显、不动作**（关机归 M6） | — | config | — | — |
+| 全体 | `cutoff_voltage_mv: u16` = 3150 **只解析回显、不动作**（关机归 M6）；数值合法性由装载门执法 `cutoff < low`（[ADR-0027](../process/adr/ADR-0027-低电关断语义与断电轨权限.md) 裁定 1） | — | config | — | 相等/倒挂 → 拒 boot |
 
 ## §4 主循环与时序预算
 
@@ -179,5 +179,5 @@
 | P-2 钳制留痕 + 采样失败计数 | `src/composite.rs` 解析期 `eprintln` 打"键名/原值/钳后值" + 用例钉 0→1ms 收敛；`composite.rs:118` 的 `rr3_counter_bump("battery_read_fail", 1)` 把采样失败计入 counters | **结（整条）** |
 | P-2 后半（上一条已并入） | 上一版本册 §14 写"仍无 `rr3_counter_*`"系我 grep 漏了带下划线的键名，实况有 `battery_read_fail` | **收回，随 P-2 整条结**；"活着但不动"族仍欠的是 sense S-3 与 act A-6 两处 |
 | P-8 / A-5 / 批L L-8 三单 | 语义由索引 **R-15** 结案（触发源唯一 = rrd 的 `rr3-runtime/system/power` 广播；禁执行面不禁妆面；回阈 + 迟滞解禁；bare 档安全核段自判 `Rr3LowEdge` 出 `RR3G` 行） | **已结（批M MC-5 `071dcad`+`8b5b57e`，2026-10-13）**——原判"一个动作 → MC-5"已兑现；本册不再单独挂"本地兜底"账 |
-| `cutoff_voltage_mv` | 有解析、**机器读者 = 注入门**（ops 槽）+ 启动日志显式"声明未生效"；**本版不关断** | **结 → MC-8① 判 (c)（2026-10-13）**：键保留为策略数据、明写不关断（关断动作归 M6 关机链）；`println` 回显不再充当"已实现"，键的机器读者是注入门（⑧-c 门） |
+| `cutoff_voltage_mv` | 有解析、**机器读者 = 注入门**（ops 槽）+ 启动日志显式"声明未生效"；**本版不关断**；装载门已执法 `cutoff < low`（ADR-0027 裁定 1，2026-11-17） | **结 → MC-8① 判 (c)（2026-10-13）**：键保留为策略数据、明写不关断（关断动作归 M6 关机链）；`println` 回显不再充当"已实现"，键的机器读者是注入门（⑧-c 门）；执行面开启前置条件与相序见 ADR-0027 裁定 3/5 |
 | P-5 电压→容量曲线标定 | 需两点以上真读数 | 留 **0.0.6 真件档**（载体依赖，不进开发窗） |
