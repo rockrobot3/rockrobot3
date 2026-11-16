@@ -3529,6 +3529,13 @@ cfg 守卫挤在一个函数里）。处置——按后端拆成 `rr3_src_linux`
 验证——rr-ota **35**、rr3-ota-ctl **14** tests；重复率 **0.56%**、CC 均值 2.49 /
 峰值 **11**，基线 `cc_max_fn` 12→**11**（只降不升）；`check.sh` 全绿。
 
+**2026-11-17 CI 漂红审计（e2e_profile 回填用例偶发红）**：事实——
+platforms/host-macos 在 `d5acab7` 红一次（`rrd_reboot_recovers_previous_run_lines_from_disk`），
+本地重复 5/5 通过，且本次改动不涉 rrd。可疑点是环容量 64 与慢 runner 的挤占
+竞态（用例靠"回填行仍在环里"取证），加上 10s/20s 固定等待。处置——环容量
+64→**256**（断言一条不改）、两处等待 20/10s→**30s**；这是去竞态，不是放宽判据。
+验证——本地重复 3/3 通过；远端以 platforms/host-macos 复跑回执为准。
+
 **2026-11-17 实时性观测（sense 节拍抖动 `max_jitter_ms`）**：事实——"实时性"
 此前只有静态长睡门（字面量 sleep），没有运行期节拍指标；采集超时只能靠
 `pcm_frames` 零增长间接猜。处置——sense 每拍记"上一拍开始 → 本拍开始"的实际
