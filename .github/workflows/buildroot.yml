@@ -146,6 +146,23 @@ jobs:
           cp -a base/os/buildroot/board/. /tmp/buildroot/board/
           ls /tmp/buildroot/configs/rock3_zero3_defconfig /tmp/buildroot/board/radxa-zero3/patches/
 
+      # 2026-11-16 实测：runner 到 ftp.denx.de 连接超时，Buildroot 取不到
+      # U-Boot 2024.10 源码（随后报 No rule to make target 'u-boot.itb'）。
+      # 根因是上游镜像在 runner 不可达；按 Buildroot 的 dl 缓存语义预置源码，
+      # 不改 defconfig、不引第三方镜像。
+      - name: 预置 U-Boot 2024.10 源码（dl 缓存）
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/buildroot/dl/u-boot
+          curl -fL --retry 3 --retry-delay 2 -o /tmp/uboot.tar.gz \
+            "https://github.com/u-boot/u-boot/archive/refs/tags/v2024.10.tar.gz"
+          rm -rf /tmp/uboot-src && mkdir -p /tmp/uboot-src
+          tar -xzf /tmp/uboot.tar.gz -C /tmp/uboot-src
+          top=$(find /tmp/uboot-src -maxdepth 1 -mindepth 1 -type d | head -1)
+          tar -cjf /tmp/buildroot/dl/u-boot/u-boot-2024.10.tar.bz2 \
+            -C "$(dirname "$top")" "$(basename "$top")"
+          ls -l /tmp/buildroot/dl/u-boot/
+
       - name: 交叉构建注入产物（aarch64-musl 静态）
         run: |
           set -o pipefail
