@@ -266,6 +266,7 @@ mod tests {
     }
 
     /// 原子写序覆盖旧值：rename 之后读到的是新表，不存在半新半旧
+    #[cfg(unix)]
     #[test]
     fn store_overwrites_atomically() {
         let dir = tmpdir("over");
