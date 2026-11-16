@@ -214,6 +214,23 @@ jobs:
           prelude: ~/export-esp.sh
           command: bash tools/ci/ipct003.sh --strict
 
+  # Windows（登记平台 L1，敞口 #5）：本地无该环境，此前只有"推算条数"。
+  # GitHub 的 windows-latest 是现成载体——POSIX 段由 cfg 门控不参与编译，
+  # 这一腿给出"非 Unix 面可编"的远端回执。先落编译面，测试面随后单独一步加，
+  # 避免一次引入两类失败（编译缺件 vs 测试断言不适用于非 Unix）。
+  host-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      - name: workspace 编译面（Windows）
+        working-directory: base/runtime
+        run: cargo check --workspace
+
   # 门禁之外的 lint 拆步：fmt 与 clippy 各自独立失败，一步红即整 job 红，
   # 失败归因不用翻混合日志。绿色基线 = 提交 fd0942c（rustfmt 全仓归一 + clippy 清零）。
   # 宿主等价面（macOS）：本地开发环境与 CI 的编译器/链接器/系统库不同，
