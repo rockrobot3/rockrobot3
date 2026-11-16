@@ -41,8 +41,14 @@ BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3566-radxa-zero-3w rockchip/rk3566-
 # ---- 引导链：U-Boot（extlinux 走 distro boot）-------------------------------
 BR2_TARGET_UBOOT=y
 BR2_TARGET_UBOOT_BUILD_SYSTEM_KCONFIG=y
-BR2_TARGET_UBOOT_CUSTOM_VERSION=y
-BR2_TARGET_UBOOT_CUSTOM_VERSION_VALUE="2024.10"
+# U-Boot 源：官方 GitHub 仓的 tag（custom git），不用 ftp.denx.de tarball。
+# 根因（2026-11-16 实测）：GitHub runner 到 ftp.denx.de 的 443 连接超时，
+# Buildroot 取不到 u-boot-2024.10.tar.bz2，全量构建在 uboot 阶段失败；预塞
+# GitHub archive 又会撞 Buildroot 对官方 tarball 的 hash。tag 钉版本同样可复现，
+# 且不依赖 denx 的下载面（上游 GitHub 仓是 u-boot 的规范镜像）。
+BR2_TARGET_UBOOT_CUSTOM_GIT=y
+BR2_TARGET_UBOOT_CUSTOM_REPO_URL="https://github.com/u-boot/u-boot.git"
+BR2_TARGET_UBOOT_CUSTOM_REPO_VERSION="v2024.10"
 BR2_TARGET_UBOOT_BOARD_DEFCONFIG="radxa-zero-3-rk3566"
 BR2_TARGET_UBOOT_NEEDS_DTC=y
 # RK3566 需要 idbloader.img（SPL+TPL 合体）与 u-boot.itb 两级产物，
