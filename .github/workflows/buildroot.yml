@@ -97,7 +97,11 @@ jobs:
   image:
     needs: dtb-backport
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[buildroot-full]')
-    runs-on: ubuntu-latest
+    # 2026-11-16 实测：ubuntu-latest（GCC 14）构建 Buildroot 2024.02.11 的
+    # host-m4 1.4.19 时 gnulib gl_oset.h 编译失败（expected identifier before 'int'）。
+    # Buildroot 2024.02 的受支持宿主是 Ubuntu 22.04；钉 22.04 而不是给 host-m4
+    # 打补丁——宿主工具链错配是根因，补丁只是掩盖。
+    runs-on: ubuntu-22.04
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
