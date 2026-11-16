@@ -236,17 +236,17 @@ jobs:
         working-directory: base/runtime
         shell: pwsh
         run: |
-          # --keep-going：一个 crate 编译失败时继续编其余 crate，一轮暴露多份错误
-          # （Windows 面的未门控 Unix API 此前要一轮修一处，太慢）。
-          cargo test --workspace --keep-going 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\win-test.log"
+          # --keep-going：一个 crate 编译失败时继续编其余 crate，一轮暴露多份错误。
+          # --message-format short：错误行自带 `file:line:col`，不必再靠 --> 行配路径
+          # （上一版 pwsh 的 ::error 未被 GitHub 识别，注解只剩 exit code）。
+          cargo test --workspace --keep-going --message-format short 2>&1 |
+            Tee-Object -FilePath "$env:RUNNER_TEMP\win-test.log"
           if ($LASTEXITCODE -ne 0) {
-            # 只抓 error 段（error 行 + 紧随的 --> 落点/说明），避免被 warning 的
-            # --> 行挤掉；每条压成一段。
             $bad = Select-String -Path "$env:RUNNER_TEMP\win-test.log" `
-              -Pattern 'error\[E0' -Context 0,2 |
-              Select-Object -First 6 |
-              ForEach-Object { ($_.Line + ' ' + ($_.Context.PostContext -join ' ')).Trim() }
-            Write-Output "::error title=windows-test::$($bad -join ' || ')"
+              -Pattern 'error\[|FAILED|panicked' |
+              Select-Object -First 8 | ForEach-Object { $_.Line.Trim() }
+            foreach ($b in $bad) { Write-Output "::error title=windows-test::$b" }
+            Write-Output "::error title=windows-test::共 $($bad.Count) 条（详见本次 step 日志）"
             exit 1
           }
 
