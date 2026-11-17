@@ -27,10 +27,11 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
-      # 工具链按仓根 rust-toolchain.toml 钉版（rustup 目录覆盖优先于 default）；
+      # 工具链显式钉版 1.100.0（编译器基线，不依赖 runner 镜像预装版本）；
       # components 显式声明，不依赖 runner 镜像预装的 clippy/rustfmt。
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: "1.100.0"
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
@@ -69,6 +70,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: "1.100.0"
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
@@ -112,7 +114,7 @@ jobs:
         # espidf 档归专用门。
 
   # 供应链门（cargo-deny）：许可证 / RustSec 公告 / 来源白名单 / 通配依赖。
-  # 策略唯一真源 = 仓根 deny.toml，工程根枚举与汇总在 tools/ci/supply-audit.sh；
+  # 策略唯一真源 = .cargo/deny.toml，工程根枚举与汇总在 tools/ci/supply-audit.sh；
   # 本 job 只负责装工具（预编译，不占 runner 编译时间）与把失败压成注解。
   supply:
     runs-on: ubuntu-latest
@@ -120,6 +122,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
       - name: 安装 cargo-deny
         uses: taiki-e/install-action@v2
         with:
@@ -145,6 +149,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: base/runtime
@@ -186,6 +192,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: base/ota/rr3-ota-ctl

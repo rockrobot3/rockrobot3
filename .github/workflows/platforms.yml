@@ -57,6 +57,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: "1.100.0"
           targets: ${{ matrix.triple }}
       - uses: Swatinem/rust-cache@v2
         with:
@@ -189,6 +190,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
       - uses: ./.github/actions/esp-toolchain
         with:
           # 每腿只装自己芯片的工具链：S3 腿不再为 classic 工具链付时间，反之亦然。
@@ -239,7 +242,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-unknown-linux-gnu
+          toolchain: "1.100.0"
+          targets: |
+            aarch64-unknown-linux-gnu
+            riscv64gc-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: base/runtime
@@ -263,6 +269,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: base/runtime
@@ -307,6 +315,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: base/runtime

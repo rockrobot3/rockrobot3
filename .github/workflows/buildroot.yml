@@ -126,6 +126,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: "1.100.0"
           targets: aarch64-unknown-linux-musl
 
       - name: 取 Buildroot 2024.02.11 并叠 configs/board
@@ -400,6 +401,8 @@ jobs:
           cd /tmp/rr3-release
           sha256sum -c checksums.txt
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
       - name: 构建 rr3-ota-ctl（宿主机）
         run: |
           set -o pipefail
