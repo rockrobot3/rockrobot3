@@ -3756,6 +3756,25 @@ image job 的 `if` 纳入 tag 且对 `head_commit` 做空值兜底；新增 `rel
 机制由 gate `ota-bundle` job 覆盖（正例 + 三负例）；tag + Secret 的正回执是外部
 依赖，未取得前不冒领。
 
+**2026-11-17 rrd 冷启动观测与健康读面 append（续轮三）**：事实——注册行原先没有
+耗时可读，`ctl.health` 也没有注册延迟列，"卡在哪个模块"只能靠掐时间。处置——注册行
+追加 `boot_ms`（daemon 起点相对毫秒）；`Rr3HealthRow` append `boot_ms`（基准未定格
+为 `null`，不拿 0 冒充）；`rr3-sim --chain` 报告输出"启动基线"行（排除观察者
+rr3-obs，模块注册耗时全列可见），CI sim-chain job 每拍打印同一行。测试面净增
+**4** 条：`registry::tests` +1（health 的 boot_ms 偏移 / 未定格 / 倒退夹 0）、
+`tools/sim` 的 `chain::tests` +3（解析顺序、断供与坏值负例、跳过观察者）。
+验证——`cargo test -p rrd --lib` 309 条全绿、`e2e_ctl` 10 条全绿、`tools/sim` 30 条
+全绿；本机冷/热两档基线已入 status"运行流畅度基线"段，CI 数值待 sim-chain 回执补。
+
+**2026-11-17 失败日志归因单点与 action 运行时（续轮二）**：事实——buildroot 轨五处
+失败注解各写一份 grep、gate 轨九处各写一份，噪音口径不一（`pyerrors.h` 这类命中会
+把真因挤掉）；Node 20 档 action 已告弃用。处置——`tools/ci/log-digest.sh` 成单点
+（信号提取 → 噪音过滤 → 单行注解 → 末段回显，`--head` 用于"命令级错误在前"的日志），
+13 处调用收敛；`--self-test` 正例 + 四负例进 gate `scripts` job；
+checkout/upload/download 升 v7/v7/v8，setup-qemu 升 v4（只换 Node 24 运行时，
+输入面未变；login/buildx 留发布面正回执后升）。验证——`582b4c7` / `316920e` /
+`424c754` / `6ea24c3` 的 gate/integration/platforms 回执。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
