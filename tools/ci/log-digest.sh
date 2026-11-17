@@ -16,6 +16,7 @@
 #   --max N      注解消息上限（字符，缺省 900；GitHub 过长注解会被截断）
 #   --sig RE     覆盖信号正则（缺省见 SIG_DEFAULT）
 #   --extra RE   追加信号正则（与缺省取并集）
+#   --head       优先取最早的 12 条信号（缺省取最后 12 条）
 #   --phases     并入 Buildroot 的 `>>>` 阶段推进行（最多 3 条）
 #   --note TXT   追加固定上下文（如 dtc 版本），不参与日志解析
 #   --plain      只打印消息、不加 `::error` 前缀（自检用，避免假注解）
@@ -35,6 +36,7 @@ max=900
 sig=""
 extra=""
 phases=0
+head_first=0
 note=""
 plain=0
 
@@ -64,7 +66,11 @@ digest() {
 		elif [ -z "$sig" ]; then
 			sig=$SIG_DEFAULT${extra:+|$extra}
 		fi
-		hits=$(grep -aiE "$sig" "$log" | grep -aviE "$NOISE_DEFAULT" | tail -12 | oneline)
+		if [ "$head_first" -eq 1 ]; then
+			hits=$(grep -aiE "$sig" "$log" | grep -aviE "$NOISE_DEFAULT" | head -12 | oneline)
+		else
+			hits=$(grep -aiE "$sig" "$log" | grep -aviE "$NOISE_DEFAULT" | tail -12 | oneline)
+		fi
 		if [ -z "$hits" ]; then
 			hits="无信号匹配，末段：$(tail -3 "$log" 2>/dev/null | oneline)"
 		fi
@@ -136,7 +142,25 @@ EOF
 	*"末 1 行"*) ;;
 	*) echo "FAIL  自检: 末段回显缺失: $out"; fail=1 ;;
 	esac
-	[ "$fail" -eq 0 ] && echo "PASS  log-digest 自检（正例 + 三条负例）"
+	# 负例 4：--head 优先取最早信号（供给类日志：命令级错误在前、逐项 FAIL 在后；
+	# 条目多于 12 条时 tail 会把命令级错误挤出注解）
+	{
+		echo "error: unknown flag --strict"
+		for i in $(seq 1 14); do echo "FAIL  modules/m$i"; done
+	} >"$tmp/head.log"
+	out=$(bash "$0" --title t --log "$tmp/head.log" --sig '^error(\[|:)|^FAIL' \
+		--head --plain --tail 0)
+	case "$out" in
+	*"unknown flag"*) ;;
+	*) echo "FAIL  自检: --head 未取到首条信号: $out"; fail=1 ;;
+	esac
+	case "$out" in
+	*"m14"*)
+		echo "FAIL  自检: --head 取到了尾部信号: $out"
+		fail=1
+		;;
+	esac
+	[ "$fail" -eq 0 ] && echo "PASS  log-digest 自检（正例 + 四条负例）"
 	return "$fail"
 }
 
@@ -158,6 +182,7 @@ while [ $# -gt 0 ]; do
 		shift 2
 		;;
 	--phases) phases=1; shift ;;
+	--head) head_first=1; shift ;;
 	--plain) plain=1; shift ;;
 	-h | --help) usage ;;
 	*) die "未知参数 $1（用法见 --help）" ;;
