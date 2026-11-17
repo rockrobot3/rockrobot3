@@ -77,7 +77,7 @@ jobs:
           command -v riscv64-linux-gnu-gcc && command -v qemu-riscv64
       # binfmt 走 setup-qemu（与 ipct003 同源，已在本仓长期验证）：musl 腿的执行
       # 冒烟在目标 ISA 容器里跑。riscv-gnu 腿改用 apt 的 qemu-user-static（不经 docker）。
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
         if: matrix.mode == 'musl'
       - name: 确认 riscv64 std 已装（gnu 目标）
         if: matrix.mode == 'gnu'
