@@ -189,6 +189,67 @@ jobs:
             exit 1
           fi
 
+  # OTA 发布制品组包/签名/复验门（ADR-0028 机制半边）：判据住在
+  # tools/deploy/ota-bundle.sh，不能只在打标签那天第一次真跑。本 job 用 1MiB
+  # 随机件走完整链（规范名 → manifest → 签名 → 公钥复验 → 摘要），并断三条
+  # 负例（篡改镜像 / 非空输出目录 / 坏版本）；只有正例通过不算过。
+  ota-bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/ota/rr3-ota-ctl
+      - name: 构建 rr3-ota-ctl（宿主机）
+        run: |
+          set -o pipefail
+          if ! cargo build -q --locked --release \
+               --manifest-path base/ota/rr3-ota-ctl/Cargo.toml 2>&1 | tee /tmp/ota-build.log; then
+            errs=$(grep -E "error(\[|:)" /tmp/ota-build.log | head -4 | tr '\n' ' ')
+            echo "::error title=ota-build::${errs:0:900}"
+            exit 1
+          fi
+      - name: OTA bundle 正例 + 三条负例
+        run: |
+          set -euo pipefail
+          ctl=/tmp/rr3-build/release/rr3-ota-ctl
+          tmp=/tmp/rr3-ota-ci
+          rm -rf "$tmp"
+          mkdir -p "$tmp"
+          head -c 1048576 /dev/urandom > "$tmp/rr_a.ext4"
+          ( umask 077; od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$tmp/sign.key" )
+          RR3_OTA_CTL="$ctl" bash tools/deploy/ota-bundle.sh \
+            --image "$tmp/rr_a.ext4" --version 0.0.16 \
+            --key-file "$tmp/sign.key" --out "$tmp/bundle"
+          img="$tmp/bundle/rr3-rootfs-rk3566-0.0.16.img"
+          pub=$(find "$tmp/bundle/keys" -name '*.pub' -print -quit)
+          # 负例 1：篡改镜像必须被摘要门拒（追加一字节，摘要必变）
+          cp "$img" "$tmp/tampered.img"
+          printf 'x' >> "$tmp/tampered.img"
+          if "$ctl" verify --manifest "$img.manifest" --sig "$img.sig" \
+               --pub "$pub" --image "$tmp/tampered.img" \
+               --platform rk3566 --board radxa-zero3 >/dev/null 2>&1; then
+            echo "::error title=ota-tamper::篡改镜像未被拒（验签链失效）"
+            exit 1
+          fi
+          # 负例 2：非空输出目录必须拒（不覆盖既有制品）
+          if RR3_OTA_CTL="$ctl" bash tools/deploy/ota-bundle.sh \
+               --image "$tmp/rr_a.ext4" --version 0.0.16 \
+               --key-file "$tmp/sign.key" --out "$tmp/bundle" >/dev/null 2>&1; then
+            echo "::error title=ota-overwrite::非空输出目录未被拒"
+            exit 1
+          fi
+          # 负例 3：非 semver 版本必须拒
+          if RR3_OTA_CTL="$ctl" bash tools/deploy/ota-bundle.sh \
+               --image "$tmp/rr_a.ext4" --version v0.0.16 \
+               --key-file "$tmp/sign.key" --out "$tmp/b2" >/dev/null 2>&1; then
+            echo "::error title=ota-version::坏版本未被拒"
+            exit 1
+          fi
+          echo "PASS  OTA bundle 正例与三条负例"
+
   # 脚本语法门：CI 的全部判据最终都落在 tools/ci/*.sh 上——脚本自身写坏时，
   # 门禁会"看起来跑过了"。bash -n 不执行、零副作用，覆盖全部追踪脚本。
   scripts:
