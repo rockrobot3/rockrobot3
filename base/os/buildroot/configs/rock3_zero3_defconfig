@@ -98,3 +98,9 @@ BR2_TARGET_ROOTFS_EXT2_4=y
 # genimage 从同一 target 目录按各自 @XXX_SIZE@ 生成，不受此值约束。
 BR2_TARGET_ROOTFS_EXT2_SIZE="512M"
 BR2_PACKAGE_HOST_GENIMAGE=y
+# genimage 的 boot.vfat 分区要宿主 `mkfs.vfat`（dosfstools）与 `mcopy`（mtools）；
+# Buildroot 的 host-genimage 只依赖 libconfuse，不带这两个工具。缺任一时
+# post-image 阶段只报 `target-post-image Error 1`，不点名缺哪个（2026-11-17 实测）。
+# 根文件系统的 mke2fs 由 BR2_TARGET_ROOTFS_EXT2 自动 select host-e2fsprogs。
+BR2_PACKAGE_HOST_DOSFSTOOLS=y
+BR2_PACKAGE_HOST_MTOOLS=y

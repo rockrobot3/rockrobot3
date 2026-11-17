@@ -3669,6 +3669,18 @@ custom git（U-Boot/rkbin），是小时级耗时与网络抖动的主要来源�
 `restore-keys` 允许同版本配置变更后复用仍有效的包源码（Buildroot 自带包 hash/revision
 校验）。验证——下一拍全量构建的缓存 step：首拍 miss 属预期并在末尾保存，后续拍命中。
 
+**2026-11-17 Buildroot 全量 make 根因四（genimage 缺宿主 vfat 工具）**：证据——第 6 拍
+（run `43995585851`）全量 make 推进到 `post-image → genimage`，失败行
+`make: *** [Makefile:820: target-post-image] Error 1`；注解里 rootfs.ext2 已按 512M
+生成，说明上一处容量修复已生效，失败点在 genimage。根因——Buildroot 的
+host-genimage 只依赖 host-libconfuse，不带 `mkfs.vfat`（dosfstools）与 `mcopy`
+（mtools）；defconfig 未显式选这两个 host 包，genimage 在 boot.vfat 分区上失败且
+不点名缺哪个工具。处置——补 `BR2_PACKAGE_HOST_DOSFSTOOLS=y` 与
+`BR2_PACKAGE_HOST_MTOOLS=y`（e2fsprogs 已由 ext2 根文件系统自动 select）；同批把
+`br-build` 注解提取改为大小写不敏感、收 genimage/mkfs/mcopy/no space/not found，
+并把末 12 行塞进注解（`target-post-image` 的真因只在末几行）。验证——下一拍全量
+构建回执。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按

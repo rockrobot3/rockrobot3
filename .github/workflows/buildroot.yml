@@ -233,9 +233,12 @@ jobs:
             phase=$(grep -E "^>>>" /tmp/br-build.log | tail -3 | tr '\n' ' ')
             # 排除 `Error 1 (ignored)` 这类宿主工具噪音；把 Buildroot 自己给的
             # 容量提示（"Maybe you need to increase…"）也收进注解。
-            errs=$(grep -E "error:|Error [0-9]|fatal:|No rule|Stop\.|Maybe you need" /tmp/br-build.log \
-              | grep -v "(ignored)" | tail -8 | tr '\n' ' ')
-            echo "::error title=br-build::Buildroot 全量 make 失败｜阶段=${phase:0:300}｜错误=${errs:0:1000}"
+            errs=$(grep -iE "error|fatal|failed|no space|no such file|not found|genimage|mkfs|mcopy|cannot" /tmp/br-build.log \
+              | grep -viE "\(ignored\)|broken pipe|makeinfo" | tail -12 | tr '\n' ' ')
+            # genimage/post-image 的失败只报 target-post-image Error 1，真因常在
+            # 末几行（缺 mkfs.vfat/mcopy/输入文件）；把末 12 行也塞进注解。
+            tail12=$(tail -12 /tmp/br-build.log | tr '\n' ' ')
+            echo "::error title=br-build::Buildroot 全量 make 失败｜阶段=${phase:0:300}｜错误=${errs:0:2000}｜末12=${tail12:0:1500}"
             echo "---- 末 40 行 ----"
             tail -40 /tmp/br-build.log
             exit 1
