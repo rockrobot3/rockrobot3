@@ -3632,6 +3632,14 @@ BL31=`bin/rk35/rk3568_bl31_v1.43.elf`，文件名按 Buildroot 2024.02.11 钉住
 ATF 的第二条路（rkbin 已含 BL31，双来源会造第二个真值）。验证——下一拍全量构建的
 U-Boot 预构建步与 `.binman_stamp` 回执。
 
+**2026-11-17 出厂轨 fstab 补 sysfs/devtmpfs**：事实——post-build.sh 覆写的 `/etc/fstab`
+只有 proc/devpts/shm/tmp/var-run/var-log 与 data/staging，没有 sysfs 与 devtmpfs；
+本轨是 BusyBox init，唯一的伪文件系统挂载器是 inittab 的 `mount -a`（读本文件）——
+缺 sysfs 时 `/sys` 为空（模块拿不到设备树/class 节点），devtmpfs 若内核未自动挂载则
+`/dev` 连基础节点都没有。处置——补 `sysfs /sys` 与 `devtmpfs /dev mode=0755,nosuid`
+两行，与 Buildroot 默认骨架同口径。验证——`sh -n` 通过；镜像内 `/etc/fstab` 随下一拍
+全量构建回执复核（板上启动实录仍归 M1 硬件到位后）。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
