@@ -213,6 +213,8 @@ impl Drop for Rr3LinuxGpioOut {
         if let Some(fd) = fd {
             // close 句柄 fd 即释放 line（内核语义）；错误无从上报，忽略——
             // 真件档验收关注板上实况
+            // SAFETY：fd 由 Option::take 取得且只在此处关一次，所有权独占；
+            // close 后不再使用该描述符，双重关闭不会发生。
             unsafe {
                 libc::close(fd);
             }

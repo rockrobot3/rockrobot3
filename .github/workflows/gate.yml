@@ -255,4 +255,8 @@ jobs:
       # 时，构建失败会更难读；自检用 --plain 不产生假注解。
       - name: log-digest 自检（正例 + 四条负例）
         run: bash tools/ci/log-digest.sh --self-test
+      # unsafe/FFI 审计（基线只降不升）：Linux 目标面已全部带 SAFETY 前言；
+      # 剩余基线是 esp32 板侧与 macaudio 开发面，按批补注释后下调数字。
+      - name: unsafe 注释审计（基线只降不升）
+        run: python3 tools/ci/unsafe_audit.py
 

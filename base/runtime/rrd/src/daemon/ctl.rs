@@ -41,6 +41,9 @@ extern "C" fn rr3_term_pipe_wake(_sig: i32) {
     let fd = RR3_TERM_PIPE_FD.load(Ordering::Relaxed);
     if fd >= 0 {
         let one: u8 = 1;
+        // SAFETY：fd 是进程生命期的 self-pipe 写端（只有本处理器写），指向单字节
+        // 栈变量；write(2) 是 async-signal-safe，缓冲区在调用期间有效。返回值
+        // 刻意不查——唤醒失败只影响这一拍 flush，不改变关停处置。
         unsafe {
             write(fd, &one as *const u8 as *const std::ffi::c_void, 1);
         }
@@ -98,6 +101,8 @@ fn rr3_flush_arm() -> Option<std::os::unix::net::UnixStream> {
 
 /// SIGTERM/SIGINT 接唤醒处理器（信号投递后由读端退出关停 flush）。
 fn rr3_term_signals() {
+    // SAFETY：处理器是无捕获的 `extern "C" fn(i32)`，`signal(2)` 只登记指针；
+    // 处理器体内只碰 AtomicI32 与 write(2)，都是 async-signal-safe 操作。
     unsafe {
         signal(
             RR3_SIGTERM,
@@ -163,6 +168,8 @@ fn rr3_flush_store(shared: &Mutex<RrdRegistry>, path: Option<&std::path::Path>) 
 /// 恢复 SIGTERM/SIGINT 的默认处置（SIG_DFL = 0）：flush 线程若异常收场，
 /// 后续终止信号仍按内核默认语义杀进程，不被已安装的处理器永久吞掉。
 fn rr3_term_default() {
+    // SAFETY：SIG_DFL(0) 是这两个信号合法的默认处置；此处只恢复处置，
+    // 不安装任何函数指针，不存在悬垂处理器。
     unsafe {
         signal(RR3_SIGTERM, 0);
         signal(RR3_SIGINT, 0);
@@ -191,6 +198,7 @@ pub(super) fn rr3_socket_acl_grant(path: &std::path::Path) {
 
 /// 放行第 1 步：`chmod 0o660`（other 位清掉，属主组位落上）。false = chmod 失败。
 fn rr3_acl_chmod(cpath: &std::ffi::CString) -> bool {
+    // SAFETY：cpath 是活到调用结束的 NUL 结尾 CString，chmod 只读它，无别名写入。
     let rc = unsafe { libc::chmod(cpath.as_ptr(), 0o660) };
     if rc != 0 {
         let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
@@ -207,6 +215,9 @@ fn rr3_acl_group(cpath: &std::ffi::CString) {
     let Ok(cgroup) = std::ffi::CString::new(RR3_CTL_SOCKET_GROUP) else {
         return;
     };
+    // SAFETY：cgroup 是活到调用结束的 NUL 结尾 CString；getgrnam 的返回值指向
+    // 静态存储（不清除），本函数在 daemon 起工作线程之前的启动段调用，下面立刻
+    // 读取，期间没有并发的 getgrnam 调用会改写同一块存储。
     let gr = unsafe { libc::getgrnam(cgroup.as_ptr()) };
     if gr.is_null() {
         rr3_log(&format!(
@@ -214,13 +225,16 @@ fn rr3_acl_group(cpath: &std::ffi::CString) {
         ));
         return;
     }
+    // SAFETY：gr 已判非空，指向 getgrnam 的静态 `struct group`；只读一个字段。
     let gid = unsafe { (*gr).gr_gid };
     rr3_acl_chown(cpath, gid);
 }
 
 /// 放行第 2 步的落位：`chown` 到属主组（失败留痕不拒启）。
 fn rr3_acl_chown(cpath: &std::ffi::CString, gid: libc::gid_t) {
-    let uid = libc::uid_t::MAX; // chown 不改属主（uid_t 无符号，MAX 即 POSIX 的 (uid_t)-1）
+    // SAFETY：cpath 是活到调用结束的 NUL 结尾 CString；uid=MAX 按 POSIX 表示
+    // "不改属主"，gid 取自 getgrnam 的有效结果，chown 只读路径串。
+    let uid = libc::uid_t::MAX; // uid_t 无符号，MAX 即 POSIX 的 (uid_t)-1
     let rc = unsafe { libc::chown(cpath.as_ptr(), uid, gid) };
     if rc != 0 {
         let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);

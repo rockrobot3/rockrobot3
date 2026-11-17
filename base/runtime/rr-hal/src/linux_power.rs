@@ -287,6 +287,8 @@ impl Drop for Rr3LinuxIna219 {
             .unwrap_or_else(|p| p.into_inner())
             .take();
         if let Some(bus) = bus {
+            // SAFETY：fd 由 Option::take 取得且只在此处关一次，所有权独占；
+            // close 后不再触碰该描述符。
             unsafe {
                 libc::close(bus.fd);
             }
