@@ -303,6 +303,57 @@ fn rr3_chain_ext_cmds(ctx: &Rr3ChainCtx) -> [(&'static str, Command); 3] {
     ]
 }
 
+/// 从 rrd.log 抽注册行的 boot_ms（纯函数，tests 直测）。
+///
+/// 只认注册成功行（同时含 ` task=` 与 `boot_ms=`）：注册被拒行没有分配 task，
+/// 也不该计入启动基线。`skip` 非空时跳过该名字（演练观察者是夹具，不是产品
+/// 模块，混进基线会把"首模块"报小）。返回值保持日志顺序（= 注册先后）。
+pub(crate) fn rr3_boot_ms_parse(text: &str, skip: &str) -> Result<Vec<u64>, String> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        if !line.contains(" task=") || !line.contains("boot_ms=") {
+            continue;
+        }
+        if !skip.is_empty() && line.contains(&format!("注册 {skip} ")) {
+            continue;
+        }
+        let raw: String = line
+            .split_once("boot_ms=")
+            .map(|(_, rest)| rest.chars().take_while(|c| c.is_ascii_digit()).collect())
+            .unwrap_or_default();
+        let v = raw
+            .parse::<u64>()
+            .map_err(|e| format!("注册行 boot_ms 不可解析（{line}）: {e}"))?;
+        out.push(v);
+    }
+    if out.is_empty() {
+        return Err("rrd.log 没有带 boot_ms 的注册行（冷启动观测断供）".into());
+    }
+    Ok(out)
+}
+
+/// 冷启动基线：读 rrd.log 的注册行，把首/末/最大 boot_ms 写进演练报告。
+///
+/// 判据只要求字段在场且可解析——基线值本身是观测，不设单次演练的上界；
+/// 优化项由跨拍基线对比驱动（P2 观测项）。
+pub(crate) fn rr3_chain_baseline(ctx: &Rr3ChainCtx, report: &mut String) -> Result<(), String> {
+    let path = ctx.fix.workdir.join("rrd.log");
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("读 {path:?} 失败: {e}"))?;
+    let v = rr3_boot_ms_parse(&text, RR3_CHAIN_OBS)?;
+    let last = v.last().copied().unwrap_or(0);
+    let max = v.iter().copied().max().unwrap_or(0);
+    let all: Vec<String> = v.iter().map(u64::to_string).collect();
+    report.push_str(&format!(
+        "启动基线：注册 {} 个产品模块（不含观察者），boot_ms 首={} 末={} 最大={} 全列=[{}]\n",
+        v.len(),
+        v[0],
+        last,
+        max,
+        all.join(",")
+    ));
+    Ok(())
+}
+
 /// act 落角行（执行动作真落 servo/state 的留痕）。
 pub(crate) fn rr3_chain_act(ctx: &Rr3ChainCtx) -> Result<String, String> {
     let act_log = ctx.fix.workdir.join(format!("{RR3_SIM_MODULE_ACT}.log"));

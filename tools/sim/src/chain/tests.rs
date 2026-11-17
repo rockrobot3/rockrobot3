@@ -179,3 +179,40 @@ fn chain_identities_exist_in_the_real_contract() {
         assert!(text.contains(needle), "契约缺 {needle}");
     }
 }
+
+#[test]
+fn boot_ms_parse_keeps_registration_order() {
+    // 噪声行（无 task= 的拒绝行、与启动无关的输出）不得计入基线
+    let text = "\
+注册 rr3-sense task=2 hb=500ms wd=1500ms policy=always boot_ms=12
+一些无关输出 boot_ms=999
+注册被拒（dst=2）: 坏 manifest
+注册 rr3-act task=3 hb=500ms wd=1500ms policy=on-failure boot_ms=48
+";
+    assert_eq!(rr3_boot_ms_parse(text, "").unwrap(), vec![12, 48]);
+}
+
+#[test]
+fn boot_ms_parse_rejects_missing_or_bad_field() {
+    assert!(
+        rr3_boot_ms_parse("注册 rr3-sense task=2 hb=500ms wd=1500ms\n", "").is_err(),
+        "没有 boot_ms 的注册行必须报断供"
+    );
+    assert!(
+        rr3_boot_ms_parse("注册 rr3-act task=3 boot_ms=abc\n", "").is_err(),
+        "不可解析的 boot_ms 必须报错，不许静默当 0"
+    );
+}
+
+#[test]
+fn boot_ms_parse_can_skip_harness_observer() {
+    let text = "\
+注册 rr3-obs task=2 hb=500ms wd=1500ms policy=never boot_ms=25
+注册 rr3-sense task=3 hb=500ms wd=1500ms policy=always boot_ms=783
+";
+    assert_eq!(
+        rr3_boot_ms_parse(text, "rr3-obs").unwrap(),
+        vec![783],
+        "观察者是夹具，不得计入产品模块基线"
+    );
+}
