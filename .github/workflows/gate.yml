@@ -255,8 +255,10 @@ jobs:
       # 时，构建失败会更难读；自检用 --plain 不产生假注解。
       - name: log-digest 自检（正例 + 四条负例）
         run: bash tools/ci/log-digest.sh --self-test
-      # unsafe/FFI 审计（基线只降不升）：Linux 目标面已全部带 SAFETY 前言；
-      # 剩余基线是 esp32 板侧与 macaudio 开发面，按批补注释后下调数字。
+      # unsafe/FFI 审计（基线只降不升）：生产面 122 处已全部带前言，基线 0；
+      # 自检先钉扫描面（生产/测试/extern 三类），再执法——新增未注释项即红。
+      - name: unsafe 审计自检（夹具三条判定）
+        run: python3 tools/ci/unsafe_audit.py --self-test
       - name: unsafe 注释审计（基线只降不升）
         run: python3 tools/ci/unsafe_audit.py
 
