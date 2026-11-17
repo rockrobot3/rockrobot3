@@ -3706,6 +3706,16 @@ ext 生成默认走 `genext2fs`，而 Buildroot 的 host-genimage 不带它；`m
 `empty = true`；五个 ext4 段加 `use-mke2fs = true`（走已选中的 mke2fs，不引第二套
 文件系统生成器）。验证——下一拍全量构建。
 
+**2026-11-17 Buildroot 全量镜像绿回执（第 10 拍）**：证据——run `44018120685`
+（HEAD `2c733fd`）的 image job **全步骤 success**：释放磁盘、宿主依赖、取 Buildroot
+2024.02.11、DL 缓存、交叉产物注入、BINARIES_DIR 注入、defconfig、U-Boot 预构建、
+全量 make、镜像名解析（`rock3-zero3.img`）、六分区断言
+（`boot/rr_a/rr_b/rr_factory/rr_staging/data`）、摘要清单、artifact 上传
+（`rock3-zero3-image`，58,128,908 B）。这是 M1 构建半边的**首个全量绿回执**；
+串口出 shell 与 maskrom 实烧仍属板上收口。修复链（按拍）：rkbin TPL/BL31 →
+rootfs.ext2 512M → 宿主 mkfs.vfat/mcopy → `BR2_ROOTFS_POST_SCRIPT_ARGS` →
+genimage `label` 位置 → 空分区 `empty` / `use-mke2fs`。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按

@@ -14,6 +14,8 @@
 | 4 | RK3566 的 TPL/BL31 blob | rkbin 仓内实查 + binman 回执 | **2026-11-17 已核对**：`bin/rk35/rk3566_ddr_1056MHz_v1.18.bin` 与 `bin/rk35/rk3568_bl31_v1.43.elf` 在 Buildroot 2024.02.11 钉住的 rkbin 提交 `b4558da` 内；defconfig 已启用 `BR2_PACKAGE_ROCKCHIP_RKBIN` + `BR2_TARGET_UBOOT_NEEDS_ROCKCHIP_RKBIN`。缺任一时 binman 报 `.binman_stamp Error 103`（第 5 拍实证） |
 | 5 | genimage 的宿主 vfat 工具 | 全量构建回执 | **2026-11-17 已核对**：host-genimage 只依赖 libconfuse，不带 `mkfs.vfat`/`mcopy`；defconfig 已补 `BR2_PACKAGE_HOST_DOSFSTOOLS` / `BR2_PACKAGE_HOST_MTOOLS`。缺任一时只报 `target-post-image Error 1`（第 6 拍实证） |
 | 6 | post-image 参数符号 | Buildroot `system/Config.in` 实查 | **2026-11-17 已核对**：真符号是 `BR2_ROOTFS_POST_SCRIPT_ARGS`，不是 `BR2_ROOTFS_POST_IMAGE_SCRIPT_ARGS`；写错被 kconfig 静默忽略，`genimage.sh` 收不到 `-c`（第 7 拍实证） |
+| 7 | genimage `label` 位置 | genimage 源码 + 全量回执 | **2026-11-17 已核对**：`label` 属于 `vfat`/`ext` 文件系统子段，不是 `image` 公共段；放错报 `no such option 'label'`（第 8 拍实证） |
+| 8 | 空分区与 ext 生成器 | genimage 源码 + 全量回执 | **2026-11-17 已核对**：无 `mountpoint` 的 ext4 必须 `empty = true`（否则回落到根 rootpath）；ext4 段用 `use-mke2fs = true`（host-genimage 不带 genext2fs，mke2fs 由 host-e2fsprogs 提供） |
 
 ## 本目录现有补丁
 
