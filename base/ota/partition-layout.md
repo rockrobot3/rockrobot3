@@ -49,6 +49,24 @@
 [ADR-0026](../../docs/process/adr/ADR-0026-OTA镜像签名与验签链.md)。`verify` 只读，
 不写槽位；镜像下载、槽位写入、U-Boot 回滚链与 `rr3.ctl.ota` 接线归 M6 板上批。
 
+## 发布制品托管（ADR-0028，机制已落码）
+
+正式发布制品只从 `v*` 标签产出，托管在 ghcr.io，按版本号不可变：
+
+| OCI 制品 | 标签 | 内容 |
+|---|---|---|
+| `ghcr.io/<owner>/rockrobot3-ota` | `<major.minor.patch>`（标签去 `v`） | 规范名镜像 `rr3-rootfs-rk3566-<ver>.img`、manifest、分离签名、公钥、`checksums.txt`、`bundle.txt` |
+| `ghcr.io/<owner>/rockrobot3-buildroot` | 同上 | 整盘 `rock3-zero3.img`、两个变体 dtb、`checksums.txt` |
+
+- 组包/签名/自复验的唯一实现是
+  [`tools/deploy/ota-bundle.sh`](../../tools/deploy/ota-bundle.sh)：规范名 →
+  manifest → Ed25519 签名 → 用导出的公钥复跑完整验签链 → 摘要清单；
+- 私钥只以 Secret `RR3_OTA_SIGNING_KEY`（64 位十六进制种子）注入，落 0600 临时件，
+  `always` 步删除；Secret 缺席即红，无跳过开关（fail-closed）；
+- ghcr 推送前做不可变检查：目标标签已存在即拒；
+- 回执边界：CI 的 `ota-bundle` 门跑正例 + 三条负例；**tag + Secret 的首次正回执
+  仍待外部**（当前无 tag 推送凭据），取得前不把本段读成"已发布"。
+
 ## 断电安全约束（M6 实现时不得违反）
 
 - 引导标志的翻必须发生在**对侧校验通过之后**，否则断电即砖

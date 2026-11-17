@@ -1,8 +1,9 @@
 # base/os/buildroot/patches —— 内核 / U-Boot 回移补丁
 
 本目录承载 Buildroot 全量构建（Linux/容器侧）所需的内核与 U-Boot 补丁。
-**今天还没有任何补丁文件**——下面登记的是"落补丁前必须先核对"的清单，
-核对动作与补丁本体都属板上/Linux 侧收口，本机（macOS）无法声称。
+**现存一件**：`0001-arm64-dts-rockchip-add-radxa-zero-3.patch`（v6.12 → 6.6 板级
+dts 回移）。下方核对清单是"落补丁前必须先核对"的台账，逐条结论随实测回填；
+本机（macOS）不承担构建验证，构建回执归 CI `buildroot` 流水线。
 
 ## 核对清单（建镜像前逐条过）
 
@@ -38,6 +39,9 @@ BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3566-radxa-zero-3w rockchip/rk3566-
 ## 产物注入（与补丁无关，但同属"Buildroot 外的输入"）
 
 rrd / 模块二进制**不在 Buildroot 里编译**：用本仓 workspace 做
-`aarch64-unknown-linux-gnu` 交叉编译后，把产物放到 `$BINARIES_DIR/`
-（rrd、rr3-ctl）与 `$BINARIES_DIR/rr3-modules/<name>/{bin,manifest.toml}`，
-由 `post-build.sh` 装入目标根。缺席时 post-build 只警告不阻断。
+`aarch64-unknown-linux-musl` 静态交叉编译后，把产物放到 `$BINARIES_DIR/`
+（`rrd`、`rr3-ctl`、`rr3-ota-ctl`）与 `$BINARIES_DIR/rr3-modules/<name>/{bin,manifest.toml}`，
+由 `post-build.sh` 装入目标根（模块 manifest 归位 `module.toml`，entry 改写为
+装机绝对路径）。缺席时 post-build 只警告不阻断；产物注入的真值单点是
+[`tools/ci/cross-artifacts.sh`](../../../../tools/ci/cross-artifacts.sh) 与
+`buildroot.yml` 的注入步，两处不得各写一份清单。
