@@ -1,15 +1,17 @@
 # 仓根统一构建产物落点：target-dir 指向源码区外（/tmp/rr3-build），
-# 严禁在 rock3 源码区路径内残留任何编译/集成/构建产物（工程铁律）。
+# 严禁在源码区内残留任何编译/集成/构建产物。/tmp 是 POSIX 标准临时目录，
+# Windows 下按盘符根解析（如 D:\tmp\rr3-build）；整体覆盖可用
+# CARGO_TARGET_DIR 环境变量（env 优先级高于 config）。
 # cargo 自当前目录向上查找 .cargo/config.toml，故本配置对仓内所有
 # workspace/crate 生效；子 workspace 若另设 [build] target-dir 则以近者为准。
-# 开发者可通过 CARGO_TARGET_DIR 环境变量覆盖（env 优先级高于 config）。
 [build]
 target-dir = "/tmp/rr3-build"
 
 # esp-idf 构建缓存（.embuild）同样移出源码区。EMBUILD_ROOT 由 esp-idf-sys 读取，
 # 默认落在 crate 根；此处统一到 /tmp/rr3-embuild。force=false 尊重外部 env。
-# ESP_IDF_TOOLS_INSTALL_DIR=global：工具链用全局 ~/.espressif（已有），避免
-#   在 workspace 内重新下载（embuild 默认 workspace 模式会把工具放进 .embuild）。
+# ESP_IDF_TOOLS_INSTALL_DIR=global：esp-idf 工具链装到用户级全局目录
+#   ~/.espressif，不在 workspace 内重复下载（embuild 默认 workspace 模式会把
+#   工具放进 .embuild）。
 [env]
 EMBUILD_ROOT = "/tmp/rr3-embuild"
 ESP_IDF_TOOLS_INSTALL_DIR = "global"

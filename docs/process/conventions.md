@@ -13,8 +13,8 @@
 ### 1.1 仓库追踪策略（默认忽略所有＋白名单）
 
 - `.gitignore` 以 `*` 默认忽略一切，只白名单放行 `.gitignore`/`README*`/`LICENSE`/
-  `.dockerignore`/`.cargo/`/`.github/`/`rust-toolchain.toml`/`docs/`/`base/`/`modules/`/
-  `contracts/`/`profiles/`/`hardware/`/`tools/`——**新增顶层路径必须先来 `.gitignore`
+  `.gitattributes`/`.cargo/`/`.github/`/`docs/`/`base/`/`modules/`/`contracts/`/
+  `profiles/`/`hardware/`/`tools/`——**新增顶层路径必须先来 `.gitignore`
   挂白名单**，否则文件根本不会出现在 `git status`，静默丢件
 - **产物面一律不追踪**（白名单目录内的再排除）：`target/`/`build/`/`__pycache__/`/
   `*.wav`/`*.log`/`*.tmp`/`*.bak`/`*.swp`/`.DS_Store`/`.trae/`——源码区严禁任何
@@ -1132,7 +1132,7 @@ T4a/b/c 三模块实装、T4b 低电兜底、T5 deb 打包链、保底轨修复�
 不设解除口〔解除口 `rr3_reg_lp_lower` 批N5 件二笔3 补，见 2026-10-20 件二条目〕、
 spawn 漏斗唯一消费者）；[rrd-rpc.md](../reference/rrd-rpc.md) §7 发布处理序
 补低电兜底钩子段（挂转发点之后、兜底是额外动作不截断事件流、两段日志逐字）。
-同批订正 [.github/README.md](../../.github/README.md) 的实况漂移（四 job → 七 job 清单、
+同批订正 [ci-workflows.md](ci-workflows.md) 的实况漂移（四 job → 七 job 清单、
 "主远端已迁 gitcode" → 双远端口径）——T5/保底轨/D9 三批挂 job 时该文件漏同步，此处结清。
 2026-10-05 0.0.3 批A（0.0.3 收口方案落档 + legacy 处置裁定入规约，Q1–Q4 裁定记录随
 方案 §2 落档）**零代码改动，纯文档批**：新增
@@ -3207,7 +3207,7 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/gat
 | `host-macos` | macOS 宿主等价面：workspace 全量测试 + 独立工程测试（门禁 ④/⑥ 同口径，esp 工程除外） | push / PR / 周程 |
 | `scripts` | 全部追踪 `.sh` 的 `bash -n` 语法门（判据自身不许写坏） | push / PR / 周程 |
 | `lint` | fmt + clippy（workspace + 独立工程） | push / PR / 周程 |
-| `supply` | 供应链审计（cargo-deny）：许可证 / RustSec 公告 / 来源白名单 / 通配依赖；策略真值 = 仓根 `deny.toml`，全部工程根逐项执法（`tools/ci/supply-audit.sh --strict`） | push / PR / 手动 / 周程 |
+| `supply` | 供应链审计（cargo-deny）：许可证 / RustSec 公告 / 来源白名单 / 通配依赖；策略真值 = `.cargo/deny.toml`，全部工程根逐项执法（`tools/ci/supply-audit.sh --strict`） | push / PR / 手动 / 周程 |
 | `ipct003` / `distro-smoke` / `buildroot-assembly` / `sim-assemble` / `sim-chain` / `matrix` | 跨架构对拍、真装、装配冒烟、装配演练、全链、点验矩阵 | push / PR / 手动（`ipct003` 随 platforms 另有周程） |
 | `cross-artifacts`（矩阵） | 非 x86 芯片平台静态产物：构建七件 + ELF 断言 + **qemu 目标 ISA 执行冒烟** + 产物上传 | push / PR / 周程 |
 | `esp32-gates`（矩阵两腿） | xtensa/espidf 五门按芯片分腿：ESP32 腿 5 门（外设底座 / UART echo / espidf std / 哨兵 / act·sense classic 面）、ESP32-S3 腿 2 门（S3 外设底座 / act·sense S3 面）；每腿独立装本芯片工具链 | push / PR / 手动 / 周程 |
@@ -3303,16 +3303,16 @@ Windows 半边结项。首跑 4 处红全部是**跨平台假设**而非产品�
 防止"只在 push 绿、esp 档长期没人碰"的漂移。WSL2（Linux L2 兼容面）仍无 runner
 载体，敞口第 5 条的该半边维持（不在本表冒领）。
 
-**2026-11-16 供应链门建成（`supply`）**：`gate.yml` 新增 `supply` job，仓根
-[`deny.toml`](../../deny.toml) 是策略唯一真源，[`tools/ci/supply-audit.sh`](../../tools/ci/supply-audit.sh)
+**2026-11-16 供应链门建成（`supply`）**：`gate.yml` 新增 `supply` job，
+[`.cargo/deny.toml`](../../.cargo/deny.toml) 是策略唯一真源，[`tools/ci/supply-audit.sh`](../../tools/ci/supply-audit.sh)
 枚举 **22** 个工程根（`base/runtime` 工作区 + `modules/`/`tools/`/`base/ota/` 独立工程）
 逐个 `cargo deny --locked check`。四类判据：①许可证**显式白名单**（2026-11-16 全根
 实测只有 MIT / Apache-2.0 / ISC / Unicode-3.0 / BSD-3-Clause / Unlicense /
 CDLA-Permissive-2.0 七类，无 copyleft；私有件 `publish = false` 显式忽略）；②RustSec
 公告（未维护项只对直接依赖执法，避免上游陈账把每次推送染红）；③来源白名单（仅
 crates.io + 仓内 path）；④通配版本依赖拒绝。本地无 cargo-deny 时 SKIP 明说，CI
-`--strict` 工具缺位即红。`deny.toml` 已进 `.gitignore` 白名单（默认忽略所有策略下
-必须显式登记）。**首跑红与根因**（如实留痕）：`--locked` 写在子命令 `check` 之后，
+`--strict` 工具缺位即红。`.cargo/deny.toml` 由 `.gitignore` 的 `.cargo/**` 白名单
+覆盖（默认忽略所有策略下必须显式登记）。**首跑红与根因**（如实留痕）：`--locked` 写在子命令 `check` 之后，
 cargo-deny 的公共选项只认子命令之前（`cli/common.html`），22 个工程根全部瞬时失败；
 注解侧同时暴露第二处缺陷——只取 head 时逐工程 FAIL 行把唯一的命令级错误挤出上限，
 已改为"诊断行优先 → FAIL 行 → 日志尾部"三级回退，脚本失败时也回显日志首行。**次跑红**：
