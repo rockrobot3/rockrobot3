@@ -70,14 +70,24 @@ sudo reboot                             # 判据 6：重启自恢复（systemd e
 
 ## 5. 已知边界（不装不知道）
 
-- **probe 仍 sim 后端**：`rr3_probe_default` 未接线 linux 探测（0.0.2 D2 预留），
-  缺格判定只由装配单缺 binding 表达——本板 boot 全绿**不构成**"真探测通过"证据。
-- **`RR3_HAL_BACKEND` 板上不设**：走平台默认 sim（musl 交叉产物不带 alsa
-  feature）；显式设 `linux` 得 `Unsupported` 显式回错、模块探活退出属诚实行为
-  不是缺陷。
+> **时点口径（2026-11-17 订正）**：本节逐条是 0.0.2 批D（2026-10-05）的边界快照；
+> 0.0.6 批F5a 起 linux 归 HAL 后端已实装并在板上跑过，链④真件档也已在 §11 收口。
+> 下文"仍 sim / 未接线"只作历史对照，现状以 §8/§10/§11 与
+> [`backend.rs`](../../../../base/runtime/rr-hal/src/backend.rs) 为准。
+
+- **probe 已接 linux（MC-4 起）**：`rr3_probe_default` 在 linux 目标默认
+  [`Rr3LinuxProbe`](../../../../base/runtime/rrd/src/probe.rs) 五面在位探测，
+  `RR3_PROBE=sim` 才是显式开发档；**批D 时点**确为 sim 预留（本节原文）。
+  缺格判定仍可由装配单缺 binding 表达——两者并行，互不替代。
+- **`RR3_HAL_BACKEND` 板上可不设**：批F5a 起 linux 目标的平台默认是 linux 后端
+  （舵机/GPIO/电源/链路/显示单门 `target_os = "linux"`）；**音频面另需编译
+  `alsa` feature 且描述符给 `alsa_device`**，缺键 fail-closed 显式回错，不回落 sim。
+  批D 时点的 musl 产物不带 alsa feature，故当时各面为 sim——历史口径，不是现状。
 - **真硬件批次归属**：ALSA 采集 / NetworkManager / 电池计的板上实装是独立批次
-  （M5 板上段）；本板运行时各模块均为 sim 后端，观测到的音频/电池/链路数据是
-  模拟源，不是真传感器。
+  （M5 板上段）；**批D 当时**各模块均为 sim 后端，观测到的音频/电池/链路数据是
+  模拟源。**2026-11-17 订正**：批F5a 的 linux 后端已在板上跑过（舵机/链路/音频），
+  2026-11-16 真板会话另有 USB 声卡回放与舵机实录（status.md 敞口表 #7）；电池计
+  （INA219）仍无器件，读数面维持 sim 或缺失登记。
 - **`rr3-brain` 批D 时不在包内**：0.0.2 快路 payload 边界的诚实表达（boot 日志
   缺格点名同批是断言点，不是故障）；**批F1 起随 deb 装机、cognition 四格绑定进
   boot**（六模块全 running 实测见 §8）。
