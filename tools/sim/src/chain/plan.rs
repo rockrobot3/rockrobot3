@@ -2,8 +2,9 @@
 
 use std::os::unix::net::UnixStream;
 use std::process::Child;
+use std::time::{Duration, Instant};
 
-use crate::assemble::rr3_ctl_status_rows as rr3_ctl_rows;
+use crate::assemble::{rr3_ctl_out, rr3_ctl_status_rows as rr3_ctl_rows};
 use crate::brain::wait_socket_exists;
 use crate::drill::{
     rr3_section, rr3_wait_modules, Rr3SimArgs, RR3_SIM_MODULE_A, RR3_SIM_MODULE_B,
@@ -14,12 +15,18 @@ use super::{
     rr3_chain_act, rr3_chain_baseline, rr3_chain_bins, rr3_chain_finish, rr3_chain_fix,
     rr3_chain_judge, rr3_chain_manifests, rr3_chain_obs_up, rr3_chain_status, rr3_chain_tts,
     rr3_chain_turn, rr3_chain_up_ext, rr3_chain_up_rrd, rr3_obs_collect, Rr3ChainBins, Rr3ChainFix,
-    RR3_CHAIN_READY_DEADLINE, RR3_SIM_MODULE_ACT,
+    Rr3SteadyAgg, RR3_CHAIN_READY_DEADLINE, RR3_SIM_MODULE_ACT,
 };
+
+/// 稳态段采样间隔（hold 期间逐拍读 health；500ms 对 200ms 心跳足够密）。
+const RR3_STEADY_STEP: Duration = Duration::from_millis(500);
+
 /// 演练上下文（一次演练内的不变量；只读借用，便于按阶段拆函数）。
 pub(crate) struct Rr3ChainCtx<'a> {
     pub(crate) bins: &'a Rr3ChainBins,
     pub(crate) fix: &'a Rr3ChainFix,
+    /// 取证后的稳态保持时长（None = 不保持）。
+    pub(crate) hold_ms: Option<u64>,
 }
 
 pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
@@ -28,6 +35,7 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     let ctx = Rr3ChainCtx {
         bins: &bins,
         fix: &fix,
+        hold_ms: a.hold_ms,
     };
     let mut children: Vec<(String, Child)> = Vec::new();
     let mut report = String::new();
@@ -44,7 +52,28 @@ fn rr3_chain_run(
     let mut obs_stream = rr3_chain_boot(ctx, children, report)?;
     rr3_chain_up_exts(ctx, children, report)?;
     rr3_chain_evidence(ctx, &mut obs_stream, report)?;
+    rr3_chain_steady(ctx, report)?;
     rr3_chain_status(ctx, report)
+}
+
+/// 稳态段（`--hold-ms`）：逐拍 health → 聚合 → 判据 → 报告。
+fn rr3_chain_steady(ctx: &Rr3ChainCtx, report: &mut String) -> Result<(), String> {
+    let Some(hold_ms) = ctx.hold_ms else {
+        return Ok(());
+    };
+    let hold = Duration::from_millis(hold_ms);
+    let start = Instant::now();
+    let mut agg = Rr3SteadyAgg::default();
+    while start.elapsed() < hold {
+        let health = rr3_ctl_out(&ctx.bins.rrctl, &ctx.fix.socket, "health")?;
+        agg.rr3_steady_feed(&health)?;
+        let left = hold.saturating_sub(start.elapsed());
+        std::thread::sleep(RR3_STEADY_STEP.min(left));
+    }
+    agg.rr3_steady_check()?;
+    report.push_str(rr3_section(format!("稳态段（hold {hold_ms}ms）").as_str()).as_str());
+    report.push_str(&agg.rr3_steady_text(hold_ms));
+    Ok(())
 }
 
 /// 起跑段：写 manifest → 起 rrd → 等 bind → 观察者注册（先于外部模块）。

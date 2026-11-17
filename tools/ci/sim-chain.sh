@@ -20,6 +20,13 @@ for m in rr3-act rr3-sense rr3-interact rr3-brain; do
 done
 
 echo "== rr3-sim --chain（采集→意图→判向→转向→表情，六真进程 mock 闭环）=="
+# 取证后稳态段：缺省 hold 60s，逐拍采 health 判"四模块末拍 running 且心跳峰值
+# 不触看门狗"（实时性基线；RR3_SIM_HOLD_MS=0 关闭，其它值按毫秒覆写）。
+hold_ms="${RR3_SIM_HOLD_MS:-60000}"
+args=(--chain)
+if [ "$hold_ms" != "0" ]; then
+        args+=(--hold-ms "$hold_ms")
+fi
 # 产物落点随仓根 target-dir（源码区外）：cargo run 复用同一 target-dir，
 # 不写死 `<crate>/target`（写死会因产物不在源码区而误报缺件）。
-exec cargo run -q --manifest-path tools/sim/Cargo.toml -- --chain
+exec cargo run -q --manifest-path tools/sim/Cargo.toml -- "${args[@]}"

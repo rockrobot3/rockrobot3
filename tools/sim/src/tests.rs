@@ -106,6 +106,18 @@ fn sink_backend_flag_fails_closed() {
 }
 
 #[test]
+fn hold_ms_is_chain_only_and_bounded() {
+    let a = rr3_sim_args_parse(&v(&["--chain", "--hold-ms", "60000"])).unwrap();
+    assert_eq!(a.hold_ms, Some(60_000));
+    let e = rr3_sim_args_parse(&v(&["--hold-ms", "60000"])).unwrap_err();
+    assert!(e.contains("仅 --chain"), "{e}");
+    let e = rr3_sim_args_parse(&v(&["--chain", "--hold-ms", "10"])).unwrap_err();
+    assert!(e.contains("1000..600000"), "{e}");
+    let e = rr3_sim_args_parse(&v(&["--chain", "--hold-ms", "abc"])).unwrap_err();
+    assert!(e.contains("非负整数"), "{e}");
+}
+
+#[test]
 fn repo_root_found_upward_by_contract_marker() {
     let base = std::env::temp_dir().join(format!("rr3-sim-root-{}", std::process::id()));
     let deep = base.join("a/b/c");

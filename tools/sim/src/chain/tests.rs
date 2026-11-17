@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
-use crate::drill::rr3_sim_args_parse;
+use crate::drill::{rr3_sim_args_parse, RR3_SIM_MODULE_A};
 
 #[test]
 fn chain_manifests_have_absolute_entries_and_contract_shapes() {
@@ -214,5 +214,66 @@ fn boot_ms_parse_can_skip_harness_observer() {
         rr3_boot_ms_parse(text, "rr3-obs").unwrap(),
         vec![783],
         "观察者是夹具，不得计入产品模块基线"
+    );
+}
+
+/// 稳态段四模块齐备的一拍（相位/数值可被测试覆写）。
+fn steady_row(name: &str, phase: &str, hb: u64, wd: u64, since: u64) -> String {
+    format!("{name}  2  {phase}  {hb}  {wd}  {since}\n")
+}
+
+#[test]
+fn steady_feed_takes_peak_and_skips_observer() {
+    let mut agg = Rr3SteadyAgg::default();
+    agg.rr3_steady_feed(&format!(
+        "NAME  TASK  PHASE  HB_MS  WD_MS  SINCE_BEAT_MS\n{}{}",
+        steady_row("rr3-sense", "running", 200, 1000, 120),
+        steady_row("rr3-obs", "running", 500, 1500, 900),
+    ))
+    .unwrap();
+    agg.rr3_steady_feed(&steady_row("rr3-sense", "running", 200, 1000, 340))
+        .unwrap();
+    let e = agg.mods.get("rr3-sense").unwrap();
+    assert_eq!(e.max_since_ms, 340, "峰值取两拍最大");
+    assert_eq!(agg.samples, 2);
+    assert!(!agg.mods.contains_key("rr3-obs"), "观察者不计入稳态判据");
+}
+
+#[test]
+fn steady_check_rejects_missing_nonrunning_and_watchdog() {
+    let mut four = String::new();
+    for m in RR3_STEADY_MODS {
+        four.push_str(&steady_row(m, "running", 200, 1000, 80));
+    }
+    let mut ok = Rr3SteadyAgg::default();
+    ok.rr3_steady_feed(&four).unwrap();
+    ok.rr3_steady_check().unwrap();
+
+    let mut short = Rr3SteadyAgg::default();
+    short
+        .rr3_steady_feed(&steady_row(RR3_SIM_MODULE_A, "running", 200, 1000, 80))
+        .unwrap();
+    assert!(short.rr3_steady_check().unwrap_err().contains("缺模块"));
+
+    let mut down = Rr3SteadyAgg::default();
+    down.rr3_steady_feed(&four.replace("running", "starting"))
+        .unwrap();
+    assert!(down.rr3_steady_check().unwrap_err().contains("running"));
+
+    let mut slow = Rr3SteadyAgg::default();
+    slow.rr3_steady_feed(&four.replace("  80\n", "  1200\n"))
+        .unwrap();
+    assert!(slow.rr3_steady_check().unwrap_err().contains("看门狗"));
+}
+
+#[test]
+fn steady_feed_rejects_bad_columns_and_non_numeric() {
+    let mut agg = Rr3SteadyAgg::default();
+    assert!(agg.rr3_steady_feed("NAME  TASK\n").is_err(), "打空必须报错");
+    assert!(
+        agg.rr3_steady_feed("rr3-sense  2  running  200  1000  ?\n")
+            .unwrap_err()
+            .contains("非数字"),
+        "缺失数字不得静默当 0"
     );
 }
