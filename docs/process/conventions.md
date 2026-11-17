@@ -3736,6 +3736,15 @@ sysfs/devtmpfs/rr_data/rr_staging、`fdtdump` 断言 `atf-bl31`、idbloader 体�
 `/usr/bin/rrd` 与 `/etc/init.d/S99rrd` 存在性（`debugfs stat`）与 debugfs 工具在位检查。
 验证——下一拍内容断言全绿。
 
+**2026-11-17 Buildroot 内容回执（第 12 拍）**：证据——run `44035094772`
+（HEAD `4c7ff39`）的 image job 全步骤 success；内容断言全过：五个 ext4 `e2fsck`、
+`dumpe2fs` 标签逐槽（`data`→`rr_data`）、`/usr/bin/rrd` 与 `/etc/init.d/S99rrd`
+在册、`/etc/fstab` 四键（sysfs/devtmpfs/`LABEL=rr_data`/`LABEL=rr_staging`）、
+`u-boot.itb` 含 `atf-bl31`、idbloader 体量下限；artifact `rock3-zero3-image`
+265,842,537 B。第 10 拍的 58,128,908 B 实为**空 rootfs**（e2fsck 与标签能过、内容
+为空），第 11 拍内容断言将其拦下——这是"绿但不对"的实证；内容断言自此是 M1
+构建半边的必过项，不再以"genimage 成功 + 分区名在 GPT"作为收口证据。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按

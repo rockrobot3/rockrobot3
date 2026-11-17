@@ -16,6 +16,7 @@
 | 6 | post-image 参数符号 | Buildroot `system/Config.in` 实查 | **2026-11-17 已核对**：真符号是 `BR2_ROOTFS_POST_SCRIPT_ARGS`，不是 `BR2_ROOTFS_POST_IMAGE_SCRIPT_ARGS`；写错被 kconfig 静默忽略，`genimage.sh` 收不到 `-c`（第 7 拍实证） |
 | 7 | genimage `label` 位置 | genimage 源码 + 全量回执 | **2026-11-17 已核对**：`label` 属于 `vfat`/`ext` 文件系统子段，不是 `image` 公共段；放错报 `no such option 'label'`（第 8 拍实证） |
 | 8 | 空分区与 ext 生成器 | genimage 源码 + 全量回执 | **2026-11-17 已核对**：无 `mountpoint` 的 ext4 必须 `empty = true`（否则回落到根 rootpath）；ext4 段用 `use-mke2fs = true`（host-genimage 不带 genext2fs，mke2fs 由 host-e2fsprogs 提供） |
+| 9 | ext4 内容源 `srcpath` | 全量回执 | **2026-11-17 已核对**：`genimage.sh` 的 `--rootpath` 是空临时目录，ext4 段必须 `srcpath = "@TARGET_DIR@"`（`post-image.sh` 注入真实 target）；否则生成空 rootfs（e2fsck/标签全过、内容为空，第 11 拍实证） |
 
 ## 本目录现有补丁
 
