@@ -2,20 +2,20 @@
   <img src=".github/logo/logo.png" width="100%" alt="Rockrobot 3 · 洛克三号 Logo">
 </p>
 
-<h1 align="center">Rockrobot-3（洛克三号）</h1>
+<h1 align="center">Rockrobot 3（洛克三号）</h1>
 
 <p align="center">
   <a href="https://atomgit.com/rockrobot/rockrobot3"><img src="https://atomgit.com/rockrobot/rockrobot3/star/badge.svg" alt="AtomGit"></a>
   <a href="https://github.com/rockrobot3/rockrobot3"><img src="https://img.shields.io/github/stars/rockrobot3/rockrobot3?style=flat&logo=github&label=stars" alt="GitHub stars"></a>
   <a href="https://github.com/rockrobot3/rockrobot3/releases/latest"><img src="https://img.shields.io/github/v/release/rockrobot3/rockrobot3?label=version&color=5a6b7e" alt="version"></a>
   <img src="https://img.shields.io/badge/Rust-1.100.0-DEA584?logo=rust&logoColor=white" alt="Rust 1.100.0">
-  <a href="https://atomgit.com/openairymax"><img src="https://img.shields.io/badge/OpenAirymax-DA203E" alt="AirymaxOS"></a>
+  <a href="https://atomgit.com/openairymax"><img src="https://img.shields.io/badge/OpenAirymax-DA203E" alt="OpenAirymax"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-4a90d9?logo=apache&logoColor=white" alt="license Apache-2.0"></a>
 </p>
 
 ## 简介
 
-Rockrobot-3（洛克三号）是一个机器人系统底座。  
+Rockrobot 3（洛克三号）是一个机器人系统底座。  
 
 同一个机器本体换芯片，**3天**即可快速跨芯片平台部署，无需修改代码。  
 
@@ -77,6 +77,8 @@ bash tools/ci/check.sh
 ## 参与
 
 欢迎通过 Issue 参与讨论与贡献。
+
+English edition: [README.md](README.md).
 
 ## 许可
 

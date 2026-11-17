@@ -8,7 +8,7 @@
     │                    字段字典：base/runtime/rr-registry/src/module.schema.toml
     ├── config.toml   ← 运行参数（改参数不碰源码，环境变量 RR3_ 前缀）
     ├── Cargo.toml    ← 独立 crate（接总线时 path 依赖 rr-ipc / rr-bus）
-    ├── src/main.rs   ← 入口骨架（Rust crate 或 Python 包）
+    ├── src/main.rs   ← 入口骨架（Rust crate）
     └── README.md     ← 能力表 + 事件表 + 配置说明
 
 **`entry` 字段：在仓相对，装机绝对**。六份 `module.toml` 的 `entry` 写的是**相对**值
@@ -23,15 +23,15 @@
 由装机环节写入——磁盘装载与打包时的路径改写今天做到哪一步属实况，见
 [`docs/status.md`](../docs/status.md)。
 
-**目录里有什么**：六个模块位都已建好 —— rr3-sense / rr3-act / rr3-interact /
-rr3-power / rr3-connect（Rust）+ rr3-brain（Python 包，`rr3_brain/`，
-故无 `Cargo.toml`，其"源码半边"是 `pyproject.toml`）。0.0.5 原子重铺（批B/C）后，
-五个 Rust 模块在五件基础之上另带 `atoms/<名>/`（原子件五件套：`atom.toml` + 入口 +
-`mech.rs` + `assemble.toml` + `private.rs`）与 `composite.toml`（⊗ 装配清单），
+**目录里有什么**：六个模块位都已建好，六模块全 Rust 同形——rr3-sense / rr3-act /
+rr3-interact / rr3-power / rr3-connect / rr3-brain（批N32 件四起 rr3-brain 亦 Rust 化，
+与其余模块同形）。各模块在五件基础之上另带 `atoms/<名>/`（原子件五件套：`atom.toml` +
+入口 + `mech.rs` + `assemble.toml` + `private.rs`）与 `composite.toml`（⊗ 装配清单），
 组合件入口瘦身只装配与启动——每个模块的内构目录见各自
 README 与 [`architecture.md`](../docs/architecture/architecture.md) §3。
 
-机器把关：② 步校验六份 `module.toml` 并钉住模块集合，④ 步编译五个 Rust crate。
+机器把关：② 步校验六份 `module.toml` 并钉住模块集合，④ 步编译六模块 crate
+（modules/ 下独立工程全量，连同 tools/、base/ota 同口径）。
 **这些入口今天做到哪一步**（只有自述、还是已接总线）属实况，唯一落点
 [`docs/status.md`](../docs/status.md)；测试条数只登记在
 [`docs/process/conventions.md`](../docs/process/conventions.md) §2，本文件都不抄。

@@ -109,7 +109,7 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | [`../modules/rr3-interact/README.md`](../modules/rr3-interact/README.md) | 交互：表情屏、TTS 播放、Web 面板 |
 | [`../modules/rr3-power/README.md`](../modules/rr3-power/README.md) | 电源：电池、充电、低压关断兜底 |
 | [`../modules/rr3-connect/README.md`](../modules/rr3-connect/README.md) | 连接：WiFi 链路、云端会话、蓝牙配网 |
-| [`../modules/rr3-brain/README.md`](../modules/rr3-brain/README.md) | 认知（Python）：ASR/LLM/TTS 编排与对话策略 |
+| [`../modules/rr3-brain/README.md`](../modules/rr3-brain/README.md) | 认知（Rust）：ASR/LLM/TTS 编排与对话策略 |
 | [`../tools/README.md`](../tools/README.md) | 主机侧工具名册：目录 × bin × 用途 |
 | [`../tools/ci/README.md`](../tools/ci/README.md) | `check.sh` 每步跑什么、为什么这么跑 |
 | [`../tools/mkmodule/README.md`](../tools/mkmodule/README.md) | 用 `rr3-mkmod` 生成模块骨架时 |
