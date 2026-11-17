@@ -161,15 +161,14 @@ jobs:
           restore-keys: |
             br-dl-2024.02.11-
 
-      # U-Boot 源已改 custom git（defconfig 内钉 tag）：不再依赖 ftp.denx.de 的
-      # tarball 下载面（runner 到该站的 443 连接超时，2026-11-16 实测）。
+      # 交叉构建失败极少是环境问题，多是本仓代码/特性组合问题：日志归因交给
+      # tools/ci/log-digest.sh 的单点口径（与 br-* 各步同一套噪音过滤）。
       - name: 交叉构建注入产物（aarch64-musl 静态）
         run: |
           set -o pipefail
           if ! bash tools/ci/cross-artifacts.sh aarch64-unknown-linux-musl \
               'ARM aarch64' static > /tmp/stage-build.log 2>&1; then
-            echo "::error title=stage-build::板侧产物交叉构建失败"
-            tail -8 /tmp/stage-build.log
+            bash tools/ci/log-digest.sh --title stage-build --log /tmp/stage-build.log --tail 8
             exit 1
           fi
 
@@ -196,15 +195,13 @@ jobs:
           # 不一致时，Buildroot 会重下（2026-11-16 实测）。
           if ! make -C /tmp/buildroot O=/tmp/br-out BR2_DL_DIR=/tmp/buildroot/dl \
               rock3_zero3_defconfig > /tmp/br-defconfig.log 2>&1; then
-            echo "::error title=br-defconfig::rock3_zero3_defconfig 失败"
-            tail -8 /tmp/br-defconfig.log
+            bash tools/ci/log-digest.sh --title br-defconfig --log /tmp/br-defconfig.log --tail 8
             exit 1
           fi
 
       # U-Boot 单包先跑：2026-11-17 全量构建在 uboot 阶段失败，而失败注解被
       # "pyerrors.h" 这类含 error 的路径污染，根因读不出来。这一拍把失败面
-      # 锁到 U-Boot，失败时打印干净的末段并留日志 artifact（下一拍全量可以
-      # 直接跳过已构建的包）。
+      # 锁到 U-Boot，失败时交给 log-digest 归因（噪音过滤口径单点）。
       - name: 预构建 U-Boot（快速定位）
         run: |
           set -o pipefail
@@ -212,16 +209,10 @@ jobs:
           # 诊断拍的价值就在"快失败"。
           if ! make -C /tmp/buildroot O=/tmp/br-out BR2_DL_DIR=/tmp/buildroot/dl \
               -j"$(nproc)" uboot > /tmp/br-uboot.log 2>&1; then
-            # 过滤宿主工具噪音：`Error 1 (ignored)` 与 makeinfo 版本提示不是失败点，
-            # 留在注解里会把真正的 binman/编译错误挤掉（2026-11-17 实测）。
-            errs=$(grep -nE "error:|Error [0-9]|fatal:|No rule|Stop\.|Failed|too old|binman:" /tmp/br-uboot.log \
-              | grep -v "(ignored)" | grep -v "Makeinfo is too old" | grep -v "Makeinfo is missing" \
-              | tail -12 | tr '\n' ' ')
             # dtc 版本是 scripts_dtc 失败的第一现场：缺文件/版本过旧都在这里现形。
             dtc_v=$([ -x /tmp/br-out/host/bin/dtc ] && /tmp/br-out/host/bin/dtc -v 2>&1 | head -1 || echo MISSING)
-            echo "::error title=br-uboot::U-Boot 构建失败｜dtc=${dtc_v}｜${errs:0:1000}"
-            echo "---- 末 80 行 ----"
-            tail -80 /tmp/br-uboot.log
+            bash tools/ci/log-digest.sh --title br-uboot --log /tmp/br-uboot.log \
+              --tail 80 --note "dtc=${dtc_v}"
             exit 1
           fi
           tail -3 /tmp/br-uboot.log
@@ -233,17 +224,10 @@ jobs:
           set -o pipefail
           if ! make -C /tmp/buildroot O=/tmp/br-out BR2_DL_DIR=/tmp/buildroot/dl \
               -j"$(nproc)" > /tmp/br-build.log 2>&1; then
-            phase=$(grep -E "^>>>" /tmp/br-build.log | tail -3 | tr '\n' ' ')
-            # 排除 `Error 1 (ignored)` 这类宿主工具噪音；把 Buildroot 自己给的
-            # 容量提示（"Maybe you need to increase…"）也收进注解。
-            errs=$(grep -iE "error|fatal|failed|no space|no such file|not found|genimage|mkfs|mcopy|cannot" /tmp/br-build.log \
-              | grep -viE "\(ignored\)|broken pipe|makeinfo" | tail -12 | tr '\n' ' ')
-            # genimage/post-image 的失败只报 target-post-image Error 1，真因常在
-            # 末几行（缺 mkfs.vfat/mcopy/输入文件）；把末 12 行也塞进注解。
-            tail12=$(tail -12 /tmp/br-build.log | tr '\n' ' ')
-            echo "::error title=br-build::Buildroot 全量 make 失败｜阶段=${phase:0:300}｜错误=${errs:0:2000}｜末12=${tail12:0:1500}"
-            echo "---- 末 40 行 ----"
-            tail -40 /tmp/br-build.log
+            # 阶段推进（末 3 条 `>>>`）与信号行一起进注解；genimage/post-image
+            # 的失败只报 target-post-image Error 1，真因在末段，故回显 40 行。
+            bash tools/ci/log-digest.sh --title br-build --log /tmp/br-build.log \
+              --phases --tail 40
             exit 1
           fi
           tail -5 /tmp/br-build.log
@@ -421,8 +405,7 @@ jobs:
           set -o pipefail
           if ! cargo build -q --locked --release \
                --manifest-path base/ota/rr3-ota-ctl/Cargo.toml 2>&1 | tee /tmp/ota-build.log; then
-            errs=$(grep -E "error(\[|:)" /tmp/ota-build.log | head -4 | tr '\n' ' ')
-            echo "::error title=ota-build::${errs:0:900}"
+            bash tools/ci/log-digest.sh --title ota-build --log /tmp/ota-build.log --tail 12
             exit 1
           fi
       - name: 版本与密钥前置（fail-closed）
