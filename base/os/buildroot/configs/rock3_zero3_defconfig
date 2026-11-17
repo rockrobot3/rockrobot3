@@ -71,6 +71,15 @@ BR2_TARGET_UBOOT_NEEDS_GNUTLS=y
 # 不加 make 目标，`make all` 由 binman 产出后原样拷到 BINARIES_DIR。
 BR2_TARGET_UBOOT_FORMAT_CUSTOM=y
 BR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME="idbloader.img u-boot.itb"
+# RK3566 的 DDR 初始化（TPL）与 BL31 不在 U-Boot 源码里，来自 Rockchip rkbin：
+# binman 组 idbloader.img 要 TPL、组 u-boot.itb 要 BL31，缺任一即
+# `.binman_stamp Error 103`（2026-11-17 全量构建实测，注解里只有这行错误码）。
+# 文件名是 rkbin 仓内路径，版本随 Buildroot 2024.02.11 钉住的 rkbin 提交；
+# 升级 rkbin 时必须同批复核这两个文件名，不存在"缺省自动选最新"。
+BR2_PACKAGE_ROCKCHIP_RKBIN=y
+BR2_PACKAGE_ROCKCHIP_RKBIN_TPL_FILENAME="bin/rk35/rk3566_ddr_1056MHz_v1.18.bin"
+BR2_PACKAGE_ROCKCHIP_RKBIN_BL31_FILENAME="bin/rk35/rk3568_bl31_v1.43.elf"
+BR2_TARGET_UBOOT_NEEDS_ROCKCHIP_RKBIN=y
 
 # ---- 用户态包（M3 音频链路的板上依赖）---------------------------------------
 BR2_PACKAGE_ALSA_LIB=y
