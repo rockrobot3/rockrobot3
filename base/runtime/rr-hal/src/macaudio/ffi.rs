@@ -47,6 +47,11 @@ pub(super) type OsStatus = i32;
 
 /// AudioQueueInputCallback（AudioQueue.h）：时间戳/包描述两参只透传不解析，用
 /// `*const c_void` 承载（指针宽度恒同，ABI 安全且免整套 AudioTimeStamp 定义）。
+///
+/// # Safety
+///
+/// 实现方必须按 AudioQueue.h 契约处理裸指针：`user_data` 是注册时的上下文指针，
+/// `buffer` 与包描述指针只在回调期间有效，回调返回后不得留存。
 pub(super) type InputCallback = unsafe extern "C" fn(
     user_data: *mut core::ffi::c_void,
     aq: AudioQueueRef,
@@ -56,6 +61,11 @@ pub(super) type InputCallback = unsafe extern "C" fn(
     packet_descs: *const core::ffi::c_void,
 );
 /// AudioQueueOutputCallback（AudioQueue.h）
+///
+/// # Safety
+///
+/// 实现方必须按 AudioQueue.h 契约处理裸指针：`user_data` 是注册时的上下文指针，
+/// `buffer` 只在回调期间有效，回调内重入队后不得再持有。
 pub(super) type OutputCallback = unsafe extern "C" fn(
     user_data: *mut core::ffi::c_void,
     aq: AudioQueueRef,

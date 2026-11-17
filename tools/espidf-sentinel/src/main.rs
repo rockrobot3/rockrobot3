@@ -255,6 +255,8 @@ impl Shared {
         self.guard_line(Rr3GuardEvent::Boot(rr_core::runtime::Rr3LinkState::Down));
         self.stop.store(true, Ordering::Relaxed);
         thread::sleep(RESTART_DELAY);
+        // SAFETY：esp_restart 不返回；调用前已把链路置 Down、置 stop 并留出日志
+        // 窗口，重启是看门狗的终局动作，之后没有任何代码依赖本栈状态。
         unsafe { esp_idf_sys::esp_restart() }
     }
 }
@@ -262,6 +264,7 @@ impl Shared {
 /// 三点堆采样（§9.3 ③：free + min_free 双面——min_free 即运行峰值剩余堆水位，
 /// D1→D2 触发判据按它对 20% 总堆口径）。
 fn ram_point(point: &str) {
+    // SAFETY：两个堆查询都是无参只读的 IDF 系统调用，不触碰 Rust 内存状态。
     let free = unsafe { esp_get_free_heap_size() };
     let min_free = unsafe { esp_get_minimum_free_heap_size() };
     println!("[D1-RAM] point={point} free={free}B min_free={min_free}B");
@@ -379,10 +382,11 @@ fn main() {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .rr3_link_online();
+        // SAFETY：无参只读的 IDF 堆查询，不触碰 Rust 内存状态。
+        let free = unsafe { esp_get_free_heap_size() };
         println!(
-            "[sentinel] status online={online} round_trips={} free={}B",
-            shared.round_trips.load(Ordering::Relaxed),
-            unsafe { esp_get_free_heap_size() }
+            "[sentinel] status online={online} round_trips={} free={free}B",
+            shared.round_trips.load(Ordering::Relaxed)
         );
     }
 }

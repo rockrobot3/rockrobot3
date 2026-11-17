@@ -19,11 +19,14 @@ use rr_periph_proto::ports::Rr3UartPort;
 
 /// esp_timer 毫秒（单调时基，微动作时钟源；u64 毫秒 58 万年不回绕）。
 pub(crate) fn now_ms() -> u64 {
+    // SAFETY：esp_timer_get_time 是无参只读的 IDF 时钟读取，任意上下文可调用，
+    // 不涉及裸指针或所有权。
     (unsafe { esp_timer_get_time() }).unsigned_abs() / 1000
 }
 
 /// 硬件 RNG（WIFI/蓝牙未启也能用——ESP32 硬件熵源独立于无线栈）。
 pub(crate) fn esp_random_u32() -> u32 {
+    // SAFETY：esp_random 是无参只读的硬件熵源读取，任意上下文可调用。
     unsafe { esp_random() }
 }
 

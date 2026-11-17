@@ -123,6 +123,7 @@ use crate::state::{lock_bus, push_job, Bus, Job, PeriphState};
 
 /// 三点堆采样观测行（批D 三点 RAM 复测沿用本法，批B 先落观测面）。
 fn ram_point(point: &str) {
+    // SAFETY：两个堆查询都是无参只读的 IDF 系统调用，不触碰 Rust 内存状态。
     let free = unsafe { esp_get_free_heap_size() };
     let min_free = unsafe { esp_get_minimum_free_heap_size() };
     println!("[periph] RAM point={point} free={free}B min_free={min_free}B");
@@ -149,6 +150,8 @@ fn boot_banner() {
 /// 帧头部长零串与 payload 头 212B）；CAP_3（≈40mA）下 27 完整帧位级全对。失败
 /// 点名后继续跑，不阻断装配。
 fn uart_tx_drive() {
+    // SAFETY：只按编译期常量引脚号调用 IDF GPIO API，不涉及裸指针/所有权；
+    // 失败由返回值判定，不改变任何 Rust 侧状态。
     let res = unsafe {
         esp_idf_sys::gpio_set_drive_capability(
             RR3_BIND_UART2_TX as esp_idf_sys::gpio_num_t,
@@ -349,6 +352,8 @@ fn main() {
     // 欠压复位后 SSD1306 常抱死 SDA→总线全黑；装驱动前先解卡（见 i2c_bus_unstick）。
     // 批N41：注入优先、缺席回编译期装配锚（独立部署下 boot 期桥必未连，不能因此
     // 永久拒解）；false 只代表 9 时钟后 SDA 仍低（模块未上电/硬短/线松），不阻断 boot。
+    // SAFETY：启动期在 I2C 驱动安装之前、单线程上下文调用；函数只按注入/装配锚
+    // 的引脚号操作 GPIO，不同时存在 I2C 事务（见 `i2c_bus_unstick` 的契约）。
     if unsafe { i2c_bus_unstick() } {
         println!("[periph] I2C boot 解卡 ✓（SDA 本已高或已释放）");
     } else {
@@ -450,10 +455,9 @@ fn main() {
     // main 循环：周期状态行（观测面）
     loop {
         thread::sleep(Duration::from_secs(30));
-        println!(
-            "[periph] status free={}B min_free={}B",
-            unsafe { esp_get_free_heap_size() },
-            unsafe { esp_get_minimum_free_heap_size() }
-        );
+        // SAFETY：两个堆查询都是无参只读的 IDF 系统调用，不触碰 Rust 内存状态。
+        let (free, min_free) =
+            unsafe { (esp_get_free_heap_size(), esp_get_minimum_free_heap_size()) };
+        println!("[periph] status free={free}B min_free={min_free}B");
     }
 }

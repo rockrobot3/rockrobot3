@@ -233,5 +233,6 @@ fn rr3_uart_read(uart: &mut UartDriver, buf: &mut [u8]) -> usize {
 /// 帧头 timestamp（esp_timer 单调时基 µs→ns；epoch 无关——时间戳只作诊断参考
 /// 不参与校验，板侧取不到 epoch 墙钟，与宿主 rr3_now_ns 各自独立合法）。
 pub(crate) fn rr3_frame_now_ns() -> u64 {
+    // SAFETY：esp_timer_get_time 是无参只读的 IDF 时钟读取，任意上下文可调用。
     (unsafe { esp_timer_get_time() }).unsigned_abs() * 1000
 }

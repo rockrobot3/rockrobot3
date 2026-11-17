@@ -30,6 +30,11 @@ fn rr3_mac_in_deque_cap(cfg: Rr3AudioCfg) -> usize {
 
 /// 拾音回调：整块拷入 deque 尾（超上限丢最旧），唤醒等待者，buffer 按容量重入队
 /// 继续收。锁内无分配、无 panic 面（毒锁恢复 + 尺寸钳制）。
+///
+/// # Safety
+///
+/// CoreAudio 在队列自己的线程调用：`user_data` 是本流持有的 `SourceShared` 裸指针，
+/// 生命周期覆盖到 `AudioQueueDispose`；`buffer` 在回调期间由队列保证有效。
 unsafe extern "C" fn rr3_mac_input_cb(
     user_data: *mut core::ffi::c_void,
     aq: AudioQueueRef,
@@ -70,12 +75,16 @@ struct SourceStream {
 }
 
 // AudioQueue 句柄是线程安全的 C 对象；Shared 全程 Mutex 护栏——跨线程移交安全。
+// SAFETY：SourceStream 只持有队列句柄与一份独占堆指针；Rust 侧访问都在
+// Mutex/Option 之后，回调由 AudioQueue 串行调用，移动线程不产生别名写。
 unsafe impl Send for SourceStream {}
 
 impl Drop for SourceStream {
     fn drop(&mut self) {
         // 时序铁律：先 Stop(true)（同步等在途回调收尾）→ Dispose(true)（拆队列），
         // 之后 C 侧再无引用，才回收 Shared——回调-after-free 防线。
+        // SAFETY：aq/shared 由本流独占；Stop/Dispose 同步等待，之后 Box::from_raw
+        // 恰好回收一次，无回调仍持有 shared。
         unsafe {
             let _ = AudioQueueStop(self.aq, 1);
             let _ = AudioQueueDispose(self.aq, 1);
@@ -159,6 +168,8 @@ fn rr3_mac_new_input(
         )
     };
     if status != 0 {
+        // SAFETY：队列创建失败，回调从未注册；shared 由 Box::into_raw 产出且
+        // 此前无其它持有者，此处回收一次。
         unsafe { drop(Box::from_raw(shared)) };
         return Err(rr3_mac_status_err("AudioQueueNewInput", status));
     }
@@ -177,6 +188,8 @@ impl Rr3AudioSource for Rr3MacAudioSource {
         let asbd = rr3_mac_asbd(cfg);
         let aq = rr3_mac_new_input(&asbd, shared)?;
         if let Err(e) = Self::prime_and_start(aq) {
+            // SAFETY：aq 已创建但未交给流；同步 Stop+Dispose 后不再有回调，
+            // shared 仍由本次 open 独占，回收一次后即返回错误。
             unsafe {
                 let _ = AudioQueueStop(aq, 1);
                 let _ = AudioQueueDispose(aq, 1);
@@ -195,6 +208,8 @@ impl Rr3AudioSource for Rr3MacAudioSource {
                 "mac 源 read 前必须 open",
             )));
         };
+        // SAFETY：st.shared 是本流独占的 Box 指针，流在 self.inner 锁内且 read
+        // 持 &mut self——引用只在本次调用内使用，不会与 Drop 并发。
         let shared = unsafe { &*st.shared };
         let state = rr3_mac_lock(&shared.state);
         let (mut state, ready) = rr3_mac_wait(
@@ -231,6 +246,8 @@ impl Rr3MacAudioSource {
         for _ in 0..MAC_IN_BUF_COUNT {
             rr3_mac_prime_in_buf(aq)?;
         }
+        // SAFETY：aq 是 NewInput 出参的合法句柄；runloop 参数为 null 表示由
+        // AudioQueue 自建内部线程，符合 CoreAudio 文档契约。
         let status = unsafe { AudioQueueStart(aq, ptr::null()) };
         if status != 0 {
             return Err(rr3_mac_status_err("AudioQueueStart", status));
@@ -247,6 +264,8 @@ fn rr3_mac_prime_in_buf(aq: AudioQueueRef) -> Result<(), Rr3HalError> {
     if status != 0 {
         return Err(rr3_mac_status_err("AudioQueueAllocateBuffer", status));
     }
+    // SAFETY：buf 由 AudioQueueAllocateBuffer 分配，容量恰为 MAC_IN_BUF_BYTES；
+    // 只写 byte_size 字段，不越过分配区间。
     unsafe {
         (*buf).m_audio_data_byte_size = MAC_IN_BUF_BYTES;
     }

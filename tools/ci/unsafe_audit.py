@@ -41,13 +41,18 @@ def undocumented(path, lines):
 
 
 def has_safety(lines, i):
-    """同一行或紧邻上方（到空行为止，最多 12 行）是否有 SAFETY。"""
-    if "SAFETY" in lines[i]:
+    """同一行或紧邻上方（到空行为止，最多 12 行）是否有 SAFETY/# Safety。"""
+    def mark(s):
+        # `// SAFETY:` 与 `/// # Safety` 都是合法前言（后者是 unsafe fn 的调用方契约）
+        low = s.lower()
+        return "safety" in low
+
+    if mark(lines[i]):
         return True
     j = i - 1
     seen = 0
     while j >= 0 and seen < 12:
-        if "SAFETY" in lines[j]:
+        if mark(lines[j]):
             return True
         if not lines[j].strip():
             return False

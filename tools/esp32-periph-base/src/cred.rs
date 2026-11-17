@@ -94,12 +94,16 @@ pub(crate) fn rr3_cred_read() -> Option<Rr3Cred> {
     // 命名空间不存在＝没配过（常态，非错误——静默回 None，boot 走编译期回落）。
     // 其余打开失败（无空闲页/分区版本不符/参数坏）= 存储面故障，必须点名：静默按
     // "没配过"处理会让固化凭据悄悄回落到编译期注入（设备连到另一张网），排障零线索。
+    // SAFETY：h 是本地零初始化的句柄槽；ns 等 CString 活到调用结束；nvs_open
+    // 只写 h，成功与否由返回值判定，失败路径不再使用 h。
     let open = unsafe { nvs_open(ns.as_ptr(), nvs_open_mode_t_NVS_READONLY, &mut h) };
     if open != ESP_OK {
         rr3_cred_open_fault(open);
         return None;
     }
+    // SAFETY：h 来自刚成功的 nvs_open，仍在有效期内；两个键 CString 活到调用结束。
     let r = unsafe { rr3_cred_pairs(h, &k_ssid, &k_pass) };
+    // SAFETY：h 的唯一持有者在此关闭，之后不再使用（读路径无并发共享句柄）。
     unsafe { nvs_close(h) };
     r
 }
@@ -114,6 +118,11 @@ fn rr3_cred_open_fault(open: i32) {
 }
 
 /// 两键读取与同门复验（读口一次现取，不缓存）。
+///
+/// # Safety
+///
+/// `h` 必须是成功 `nvs_open` 返回且仍打开的有效句柄；`k_ssid`/`k_pass` 必须是
+/// 活到调用结束的 NUL 结尾 C 串。
 unsafe fn rr3_cred_pairs(h: nvs_handle_t, k_ssid: &CString, k_pass: &CString) -> Option<Rr3Cred> {
     let ssid = nvs_get_str_boxed(h, k_ssid, RR3_CRED_SSID_MAX)?;
     let pass = nvs_get_str_boxed(h, k_pass, RR3_CRED_PASS_MAX)?;
@@ -130,6 +139,11 @@ unsafe fn rr3_cred_pairs(h: nvs_handle_t, k_ssid: &CString, k_pass: &CString) ->
 
 /// 单键读出（定长缓冲一次取——形制上限已知，两段式探测无必要；超形/坏 UTF-8＝
 /// 不认，点名后按缺席处理——fail-honest 不静默造值）。
+///
+/// # Safety
+///
+/// `h` 必须是成功 `nvs_open` 返回且仍打开的有效句柄；`key` 必须是活到调用结束的
+/// NUL 结尾 C 串；`len` 初值必须是缓冲区可写字节数（本函数按 `buf.len()` 注入）。
 unsafe fn nvs_get_str_boxed(h: nvs_handle_t, key: &CString, max: usize) -> Option<String> {
     // +1 NUL；缓冲按**密码上限** 64 取（两键中最宽者），逐键上限由 take 判
     let mut buf = [0u8; RR3_CRED_PASS_MAX + 1];
@@ -163,6 +177,8 @@ pub(crate) fn rr3_cred_write(ssid: &str, pass: &str) -> Result<(), i32> {
     rr3_cred_form_check(ssid, pass).map_err(|_| -1)?; // -1：形制域内错误（非 esp_err 码空间）
     let keys = rr3_cred_keys()?;
     let mut h: nvs_handle_t = 0;
+    // SAFETY：h 是本地零初始化句柄槽；键 CString 活到调用结束；open 成功才写口，
+    // close 与 open 在本块内成对（open 失败即 return，不触碰 h）。
     unsafe {
         if nvs_open(keys.ns.as_ptr(), nvs_open_mode_t_NVS_READWRITE, &mut h) != ESP_OK {
             return Err(-3);
@@ -190,6 +206,11 @@ fn rr3_cred_keys() -> Result<Rr3CredKeys, i32> {
 }
 
 /// 两键写入 + commit（-2 写失败 / -1 值含 NUL / -4 commit 失败）。
+///
+/// # Safety
+///
+/// `h` 必须是成功 `nvs_open`（READWRITE）返回且仍打开的有效句柄；`k` 内的
+/// CString 必须活到调用结束。
 unsafe fn rr3_cred_put(
     h: nvs_handle_t,
     k: &Rr3CredKeys,
@@ -204,6 +225,12 @@ unsafe fn rr3_cred_put(
     Ok(())
 }
 
+/// 单键写入（值含 NUL 即 -1，不进入 NVS）。
+///
+/// # Safety
+///
+/// `h` 必须是有效且已打开的 READWRITE 句柄；`key` 必须是活到调用结束的
+/// NUL 结尾 C 串。
 unsafe fn rr3_cred_raw(h: nvs_handle_t, key: &CString, v: &str) -> Result<(), i32> {
     let cv = CString::new(v).map_err(|_| -1)?;
     if nvs_set_str(h, key.as_ptr(), cv.as_ptr()) != ESP_OK {
@@ -218,6 +245,8 @@ unsafe fn rr3_cred_raw(h: nvs_handle_t, key: &CString, v: &str) -> Result<(), i3
 pub(crate) fn rr3_cred_erase() -> Result<(), i32> {
     let keys = rr3_cred_keys()?;
     let mut h: nvs_handle_t = 0;
+    // SAFETY：h 是本地零初始化句柄槽；键 CString 活到调用结束；open 成功才擦除，
+    // close 与 open 在本块内成对（open 失败即 return，不触碰 h）。
     unsafe {
         if nvs_open(keys.ns.as_ptr(), nvs_open_mode_t_NVS_READWRITE, &mut h) != ESP_OK {
             return Err(-3);
