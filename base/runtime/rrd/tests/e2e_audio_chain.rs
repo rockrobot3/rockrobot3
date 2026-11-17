@@ -112,6 +112,10 @@ fn audio_chain_sense_to_interact_end_to_end() {
     let sense_task = rr3_field_from_log(&sense_line, "task=");
     let inter_task = rr3_field_from_log(&inter_line, "task=");
     assert_ne!(sense_task, inter_task, "两个真模块各得一个 task 号");
+    // 冷启动观测（P2 基线）：注册行必须带 boot_ms 数字，缺了就采不到分布。
+    // 判据只要求"可解析"，不设上界——上界是采集出基线之后才谈的优化项。
+    let _ = rr3_field_from_log(&sense_line, "boot_ms=");
+    let _ = rr3_field_from_log(&inter_line, "boot_ms=");
 
     // ---------- ② vad_start 上总线：Event + edge=onset + src_task 是 sense 的分配值
     let vad = rr3_read_where(&mut obs, " vad_start 事件", |f| {
