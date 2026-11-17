@@ -276,11 +276,20 @@ fn format_health(envelope: &Value) -> Result<String, String> {
                 cell(m, "heartbeat_ms"),
                 cell(m, "watchdog_ms"),
                 cell(m, "since_beat_ms"),
+                cell(m, "boot_ms"),
             ]
         })
         .collect();
     Ok(render_table(
-        &["NAME", "TASK", "PHASE", "HB_MS", "WD_MS", "SINCE_BEAT_MS"],
+        &[
+            "NAME",
+            "TASK",
+            "PHASE",
+            "HB_MS",
+            "WD_MS",
+            "SINCE_BEAT_MS",
+            "BOOT_MS",
+        ],
         &rows,
     ))
 }
