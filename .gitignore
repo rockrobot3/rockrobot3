@@ -36,6 +36,8 @@
 !docs/
 !docs/README.md
 !docs/status.md
+# 在制品历史台账（status.md 结构化拆分，2026-11-17）
+!docs/status-history.md
 !docs/openitems.toml
 !docs/architecture/
 !docs/architecture/**
