@@ -3716,6 +3716,14 @@ ext 生成默认走 `genext2fs`，而 Buildroot 的 host-genimage 不带它；`m
 rootfs.ext2 512M → 宿主 mkfs.vfat/mcopy → `BR2_ROOTFS_POST_SCRIPT_ARGS` →
 genimage `label` 位置 → 空分区 `empty` / `use-mke2fs`。
 
+**2026-11-17 镜像内容只读断言（M1 构建半边补真值）**：事实——第 10 拍绿回执只证明
+"genimage 跑通 + 六分区名在 GPT"，不证明分区内容：ext4 可能坏、标签可能错槽、
+`/etc/fstab` 可能缺 sysfs/devtmpfs、`u-boot.itb` 可能没有 BL31（能烧不能启）。
+处置——image job 新增只读断言步：五个 ext4 `e2fsck -fn`、`dumpe2fs` 标签逐槽对表
+（`data` 期望 `rr_data`）、`debugfs` 读 `rr_a.ext4` 的 `/etc/fstab` 断言
+sysfs/devtmpfs/rr_data/rr_staging、`fdtdump` 断言 `atf-bl31`、idbloader 体量下限。
+验证——下一次全量构建回执；失败即红，不以"genimage 成功"代替内容真值。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按

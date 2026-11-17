@@ -306,6 +306,55 @@ jobs:
           done
           echo "PASS  Buildroot 2024.02.11 全量构建：${{ steps.img.outputs.name }} 产出"
 
+      # 只读内容断言：genimage 成功不等于分区内容对。e2fsck 抓坏 fs；
+      # dumpe2fs 抓标签错槽；debugfs 抓 /etc/fstab 缺伪文件系统；
+      # fdtdump 抓 u-boot.itb 缺 BL31（binman 成功但 FIT 里没有 bl31 是"能烧不能启"）。
+      - name: 镜像内容只读断言（ext4 / fstab / FIT）
+        run: |
+          set -euo pipefail
+          d=/tmp/br-out/images
+          host=/tmp/br-out/host
+          for spec in rr_a:rr_a rr_b:rr_b rr_factory:rr_factory rr_staging:rr_staging data:rr_data; do
+            f=${spec%%:*}
+            want=${spec##*:}
+            img="$d/$f.ext4"
+            if [ ! -s "$img" ]; then
+              echo "::error title=br-fs::$f.ext4 缺失"
+              exit 1
+            fi
+            if ! "$host/sbin/e2fsck" -fn "$img" >"/tmp/fsck-$f.log" 2>&1; then
+              echo "::error title=br-fsck::$f.ext4 未过 e2fsck -fn"
+              tail -8 "/tmp/fsck-$f.log"
+              exit 1
+            fi
+            got=$("$host/sbin/dumpe2fs" -h "$img" 2>/dev/null | sed -n 's/^Filesystem volume name:[[:space:]]*//p')
+            if [ "$got" != "$want" ]; then
+              echo "::error title=br-label::$f.ext4 标签 '$got' != '$want'（槽位标签漂移）"
+              exit 1
+            fi
+            echo "PASS  $f.ext4 e2fsck + label=$got"
+          done
+          fstab=$("$host/sbin/debugfs" -R "cat /etc/fstab" "$d/rr_a.ext4" 2>/dev/null || true)
+          for k in sysfs devtmpfs "LABEL=rr_data" "LABEL=rr_staging"; do
+            if ! printf '%s\n' "$fstab" | grep -q "$k"; then
+              echo "::error title=br-fstab::rr_a.ext4 的 /etc/fstab 缺 '$k'"
+              printf '%s\n' "$fstab"
+              exit 1
+            fi
+          done
+          echo "PASS  rr_a.ext4 /etc/fstab 含 sysfs/devtmpfs/rr_data/rr_staging"
+          if ! "$host/bin/fdtdump" "$d/u-boot.itb" 2>/dev/null | grep -q 'atf-bl31'; then
+            echo "::error title=br-fit::u-boot.itb 缺 atf-bl31（BL31 未进 FIT）"
+            exit 1
+          fi
+          echo "PASS  u-boot.itb 含 atf-bl31"
+          sz=$(stat -c%s "$d/idbloader.img")
+          if [ "$sz" -lt 100000 ]; then
+            echo "::error title=br-tpl::idbloader.img 仅 $sz B，疑似缺 TPL"
+            exit 1
+          fi
+          echo "PASS  idbloader.img $sz B（含 TPL/SPL）"
+
       - name: 生成摘要清单
         run: |
           set -euo pipefail
