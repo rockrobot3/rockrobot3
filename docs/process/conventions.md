@@ -3800,6 +3800,16 @@ macaudio 18 处补齐 `// SAFETY:` / `/// # Safety`（unsafe fn 用调用方契�
 job 超时 / `ACTION_MATRIX` 版本矩阵；升级走显式提交改表），ipct003 的 qemu 升 v4；
 gate `scripts` job 先 `--self-test`（好例 + 缺并发/缺超时/版本漂移三负例）后执法。
 
+**2026-11-17 sim 稳态段与日志判据修正（续轮七）**：事实——① `--chain` 取证后立即收尾，
+"实时性"只有 sense 自报的 `max_jitter_ms`，没有宿主侧、跨模块的操作口径；② 本机首跑
+暴露演练假红：brain 分次写「对话轮完成」行，`wait_log_contains` 在 `tts_pcm_ms=` 处
+命中半行，`actions=1` 尚未落盘 → 误判"动作数不是 1"。处置——`--chain` 增 `--hold-ms`
+（仅该模式，1000–600000）：取证后每 500ms 采 `rr3-ctl health`，`steady.rs` 纯逻辑聚合
+各产品模块 `since_beat_ms` 峰值与末拍相位，判据＝四模块末拍 `running` 且峰值不触各自
+看门狗（观察者不计）；CI `sim-chain` 缺省 hold 60s（`RR3_SIM_HOLD_MS` 覆写）。日志判据
+改为**只认以换行收尾的完整行**（`rr3_log_find`），半行不再提前返回。本机回执：60s /
+117 拍，峰值 201–206ms（看门狗 1000ms）；`tools/sim` 35 测试全绿。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按

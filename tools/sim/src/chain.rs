@@ -27,11 +27,13 @@
 mod mount;
 mod plan;
 mod report;
+mod steady;
 mod step;
 
 pub(crate) use mount::*;
 pub(crate) use plan::*;
 pub(crate) use report::*;
+pub(crate) use steady::*;
 pub(crate) use step::*;
 
 #[cfg(test)]

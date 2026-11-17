@@ -102,6 +102,20 @@
 结论：冷启动耗时主项在模块二进制首次执行，不在 rrd 主循环（热态注册全列 ≤82ms）；
 CI（Linux runner）的数值待 sim-chain job 回执后补一行，不用本机值替代。
 
+**实时性基线（sim 档，2026-11-17 首立）**
+
+判据载体：`rr3-sim --chain --hold-ms`（取证后保持稳态，每 500ms 采 `rr3-ctl health`，
+聚合各产品模块 `since_beat_ms` 峰值；观察者 `rr3-obs` 不计）。判据＝四产品模块
+末拍 `running` 且峰值不触各自 `watchdog_ms`（sim 档心跳 200ms / 看门狗 1000ms）。
+CI `sim-chain` 缺省 hold 60s（`RR3_SIM_HOLD_MS` 可覆写，0 关闭）。
+
+| 环境 | 保持时长 / 采样 | since_beat 峰值（act / brain / interact / sense） | 读法 |
+|---|---|---|---|
+| macOS x86_64 本机（debug） | 60s / 117 拍 | 201 / 206 / 206 / 206ms | 峰值≈一拍心跳；距看门狗 1000ms 约 5× 余量 |
+| 同机快速回归 | 2s / 4 拍 | 203 / 122 / 142 / 119ms | 闭环冒烟用，不作基线 |
+
+结论：sim 档 60s 稳态无掉拍、无模块退场；跨环境（Linux runner）数值待 CI 回执后补行。
+
 ---
 
 ## 本机无法收口的项

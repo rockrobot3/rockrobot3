@@ -29,12 +29,17 @@ F4 起本入口是**脚本化全链路演练**：全部真进程、真套接字�
 缺省值取 `rr3-sim` 自身所在 target-dir（仓根配置已把产物移出源码区，不得按
 `<crate>/target/debug` 推）；二进制缺失时报错点名对应的 `cargo build` 命令。
 
-另有两个与两面演练互斥的模式（同给即拒）：
+另有三个与两面演练互斥的模式（同给即拒）：
 
 - **`--brain`**（M4，ADR-0014 裁定 4）：rrd + rr3-sense(sim) + rr3-brain + rr3-interact
   四真进程全语音对话闭环——云端走 mock（`RR3_BRAIN_CLOUD=mock`），闭环里只有云端
   socket 一跳是假的。判据：brain 日志出现「对话轮完成」+ interact 播放应答 +
   `denied_publish = 0`。
+- **`--chain`**（0.0.6 批F4）：采集→判向→意图→转向→表情六真进程 mock 闭环，总线
+  观察者取证；`--hold-ms <毫秒>`（仅 `--chain`，1000–600000）在取证后保持稳态，每 500ms
+  采 `rr3-ctl health`，聚合各模块 `since_beat_ms` 峰值与末拍相位——判据＝四产品模块
+  末拍 running 且峰值不触各自看门狗（实时性基线口径；观察者不计）。CI 入口
+  `tools/ci/sim-chain.sh` 缺省 hold 60s（`RR3_SIM_HOLD_MS` 可覆写，0 关闭）。
 - **`--profile <装配单>`**（D9 装配演练，`assemble.rs`）：装配单驱动 rrd 装配链正门
   （`--profile` + `--contracts`，与 rrd.service 的 ExecStart 同形）boot 全部 face 模块。
   演练 modules-root 是**装机布局**：仓源 manifest 原文只把 entry 改写为产物绝对路径

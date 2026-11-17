@@ -43,6 +43,9 @@ pub struct Rr3SimArgs {
     /// 走全链演练（0.0.6 批F4 sim 档，判据 10）：采集→意图→判向→转向→表情
     /// 六真进程 mock 闭环。与 --brain/--profile 互斥（各证一面，不合并）。
     pub chain: bool,
+    /// --chain 专用：取证后稳态保持时长（毫秒；None = 不保持）。保持期间按拍采
+    /// `rr3-ctl health`，聚合 since_beat 峰值与末拍相位——实时性基线的操作口径。
+    pub hold_ms: Option<u64>,
     /// 各二进制的显式覆盖（缺省按仓内 target/debug 布局推）
     pub rrd: Option<PathBuf>,
     pub sim_peer: Option<PathBuf>,
@@ -90,6 +93,7 @@ fn rr3_sim_args_default() -> Rr3SimArgs {
         brain: false,
         profile: None,
         chain: false,
+        hold_ms: None,
         rrd: None,
         sim_peer: None,
         rrctl: None,
@@ -113,7 +117,7 @@ fn rr3_sim_arg_step(a: &mut Rr3SimArgs, args: &[String], i: usize) -> Result<usi
     if !rr3_sim_arg_takes(flag) {
         return Err(rr3_sim_unknown(flag));
     }
-    rr3_sim_arg_set(a, flag, rr3_sim_arg_value(args, i, flag)?);
+    rr3_sim_arg_set(a, flag, rr3_sim_arg_value(args, i, flag)?)?;
     Ok(i + 2)
 }
 
@@ -133,6 +137,15 @@ fn rr3_sim_arg_takes(flag: &str) -> bool {
     flag == "--rrctl" || RR3_SIM_ARG_SETS.iter().any(|(f, _)| *f == flag)
 }
 
+/// `--hold-ms` 取值：非负整数毫秒（范围裁决归 `rr3_args_hold`）。
+fn rr3_sim_hold_into(a: &mut Rr3SimArgs, v: String) -> Result<(), String> {
+    let ms: u64 = v
+        .parse()
+        .map_err(|_| format!("--hold-ms 须为非负整数毫秒: {v}"))?;
+    a.hold_ms = Some(ms);
+    Ok(())
+}
+
 /// 取值旗标的下一项：缺项/疑似开关即点名（脚本工具的第一错法是静默吃掉下一旗标）。
 fn rr3_sim_arg_value(args: &[String], i: usize, flag: &str) -> Result<String, String> {
     let v = args
@@ -145,31 +158,53 @@ fn rr3_sim_arg_value(args: &[String], i: usize, flag: &str) -> Result<String, St
     Ok(v)
 }
 
-/// 取值旗标落位（路径九件与后端词四件；`--rrctl` 无专名分支，与旧实现同义）。
-fn rr3_sim_arg_set(a: &mut Rr3SimArgs, flag: &str, v: String) {
+/// 取值旗标落位（路径九件、后端词四件与 `--hold-ms`；`--rrctl` 无专名分支）。
+fn rr3_sim_arg_set(a: &mut Rr3SimArgs, flag: &str, v: String) -> Result<(), String> {
     match RR3_SIM_ARG_SETS.iter().find(|(f, _)| *f == flag) {
         Some((_, set)) => set(a, v),
-        None => a.rrctl = Some(PathBuf::from(v)),
+        None => {
+            a.rrctl = Some(PathBuf::from(v));
+            Ok(())
+        }
     }
 }
 
 /// 旗标 → 落位函数表（`--rrctl` 不在表内：兜底语义归 `rr3_sim_arg_set`）。
-type Rr3SimSet = fn(&mut Rr3SimArgs, String);
-const RR3_SIM_ARG_SETS: [(&str, Rr3SimSet); 13] = [
-    ("--socket", |a, v| a.socket = Some(PathBuf::from(v))),
-    ("--repo", |a, v| a.repo = Some(PathBuf::from(v))),
-    ("--rrd", |a, v| a.rrd = Some(PathBuf::from(v))),
-    ("--sim-peer", |a, v| a.sim_peer = Some(PathBuf::from(v))),
-    ("--sense", |a, v| a.sense = Some(PathBuf::from(v))),
-    ("--interact", |a, v| a.interact = Some(PathBuf::from(v))),
-    ("--act", |a, v| a.act = Some(PathBuf::from(v))),
-    ("--brain-bin", |a, v| a.brain_bin = Some(PathBuf::from(v))),
-    ("--profile", |a, v| a.profile = Some(PathBuf::from(v))),
-    ("--audio-backend", |a, v| a.audio_backend = Some(v)),
-    ("--sink-backend", |a, v| a.sink_backend = Some(v)),
-    ("--brain-cloud", |a, v| a.brain_cloud = Some(v)),
-    ("--brain-base-url", |a, v| a.brain_base_url = Some(v)),
+type Rr3SimSet = fn(&mut Rr3SimArgs, String) -> Result<(), String>;
+const RR3_SIM_ARG_SETS: [(&str, Rr3SimSet); 14] = [
+    ("--socket", |a, v| rr3_sim_path_into(&mut a.socket, v)),
+    ("--repo", |a, v| rr3_sim_path_into(&mut a.repo, v)),
+    ("--rrd", |a, v| rr3_sim_path_into(&mut a.rrd, v)),
+    ("--sim-peer", |a, v| rr3_sim_path_into(&mut a.sim_peer, v)),
+    ("--sense", |a, v| rr3_sim_path_into(&mut a.sense, v)),
+    ("--interact", |a, v| rr3_sim_path_into(&mut a.interact, v)),
+    ("--act", |a, v| rr3_sim_path_into(&mut a.act, v)),
+    ("--brain-bin", |a, v| rr3_sim_path_into(&mut a.brain_bin, v)),
+    ("--profile", |a, v| rr3_sim_path_into(&mut a.profile, v)),
+    ("--hold-ms", rr3_sim_hold_into),
+    ("--audio-backend", |a, v| {
+        a.audio_backend = Some(v);
+        Ok(())
+    }),
+    ("--sink-backend", |a, v| {
+        a.sink_backend = Some(v);
+        Ok(())
+    }),
+    ("--brain-cloud", |a, v| {
+        a.brain_cloud = Some(v);
+        Ok(())
+    }),
+    ("--brain-base-url", |a, v| {
+        a.brain_base_url = Some(v);
+        Ok(())
+    }),
 ];
+
+/// 路径取值落位（九件同形，避免九份重复闭包）。
+fn rr3_sim_path_into(slot: &mut Option<PathBuf>, v: String) -> Result<(), String> {
+    *slot = Some(PathBuf::from(v));
+    Ok(())
+}
 
 /// 无值开关（布尔旗标）落位表。
 type Rr3SimFlag = fn(&mut Rr3SimArgs);
@@ -181,15 +216,32 @@ const RR3_SIM_BOOLS: [(&str, Rr3SimFlag); 3] = [
 
 fn rr3_sim_unknown(other: &str) -> String {
     format!(
-        "未知参数 {other}（可用：--socket --repo --keep --brain --chain --profile --rrd --sim-peer --rrctl --sense --interact --act --brain-bin --audio-backend --sink-backend --brain-cloud --brain-base-url）"
+        "未知参数 {other}（可用：--socket --repo --keep --brain --chain --hold-ms --profile --rrd --sim-peer --rrctl --sense --interact --act --brain-bin --audio-backend --sink-backend --brain-cloud --brain-base-url）"
     )
 }
 
 /// 旗标组合与取值域裁决（互斥/归属/白名单/fail-closed ① ②），parse 只编排。
 fn rr3_sim_args_check(a: &Rr3SimArgs) -> Result<(), String> {
     rr3_args_modes(a)?;
+    rr3_args_hold(a)?;
     rr3_args_audio(a)?;
     rr3_args_cloud(a)
+}
+
+/// `--hold-ms`：仅 --chain 适用；1s 起、10min 封顶（短于此无稳态判据意义）。
+fn rr3_args_hold(a: &Rr3SimArgs) -> Result<(), String> {
+    let Some(ms) = a.hold_ms else {
+        return Ok(());
+    };
+    if !a.chain {
+        return Err("--hold-ms 仅 --chain 演练适用".to_string());
+    }
+    if !(1000..=600_000).contains(&ms) {
+        return Err(format!(
+            "--hold-ms 须在 1000..600000 之间（当前 {ms}）：稳态段少于 1s 无判据意义"
+        ));
+    }
+    Ok(())
 }
 
 /// 三种演练模式互斥（各证一面，不合并）。
