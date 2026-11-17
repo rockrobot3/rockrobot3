@@ -11,6 +11,9 @@
 | 1 | `rk3566-radxa-zero-3*.dts` 是否在 Linux 6.6 的 `arch/arm64/boot/dts/rockchip/` 里 | mainline 目录逐 tag 实查 | **2026-11-16 已核对：v6.6 没有该板 dts**；主线只有 `-3e`（v6.11 起）与 `-3w`（v6.12 起）。已从 v6.12 逐字回移三份文件并在本目录 `0001-…patch` 注册两个 dtb；defconfig 用 `BR2_LINUX_KERNEL_PATCH` 应用 |
 | 2 | `radxa-zero-3-rk3566` 是否为 U-Boot `2024.10` 的有效 defconfig | 源码树实查 + `make …_defconfig` | **2026-11-16 已核对存在**（`source.denx.de/u-boot/u-boot` v2024.10，`configs/radxa-zero-3-rk3566_defconfig` HTTP 200）；构建期一次 make 回执随全量构建 CI |
 | 3 | extlinux 的 `console=ttyS2,1500000` 与 fdt 文件名 | 板上串口实测 | 属板上收口；fdt 默认 `rk3566-radxa-zero-3w.dtb`（3E 实板改 `-3e.dtb`），见 `board/radxa-zero3/extlinux.conf` 尾注 |
+| 4 | RK3566 的 TPL/BL31 blob | rkbin 仓内实查 + binman 回执 | **2026-11-17 已核对**：`bin/rk35/rk3566_ddr_1056MHz_v1.18.bin` 与 `bin/rk35/rk3568_bl31_v1.43.elf` 在 Buildroot 2024.02.11 钉住的 rkbin 提交 `b4558da` 内；defconfig 已启用 `BR2_PACKAGE_ROCKCHIP_RKBIN` + `BR2_TARGET_UBOOT_NEEDS_ROCKCHIP_RKBIN`。缺任一时 binman 报 `.binman_stamp Error 103`（第 5 拍实证） |
+| 5 | genimage 的宿主 vfat 工具 | 全量构建回执 | **2026-11-17 已核对**：host-genimage 只依赖 libconfuse，不带 `mkfs.vfat`/`mcopy`；defconfig 已补 `BR2_PACKAGE_HOST_DOSFSTOOLS` / `BR2_PACKAGE_HOST_MTOOLS`。缺任一时只报 `target-post-image Error 1`（第 6 拍实证） |
+| 6 | post-image 参数符号 | Buildroot `system/Config.in` 实查 | **2026-11-17 已核对**：真符号是 `BR2_ROOTFS_POST_SCRIPT_ARGS`，不是 `BR2_ROOTFS_POST_IMAGE_SCRIPT_ARGS`；写错被 kconfig 静默忽略，`genimage.sh` 收不到 `-c`（第 7 拍实证） |
 
 ## 本目录现有补丁
 
