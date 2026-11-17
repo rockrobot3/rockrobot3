@@ -3681,6 +3681,15 @@ host-genimage 只依赖 host-libconfuse，不带 `mkfs.vfat`（dosfstools）与 
 并把末 12 行塞进注解（`target-post-image` 的真因只在末几行）。验证——下一拍全量
 构建回执。
 
+**2026-11-17 Buildroot 全量 make 根因五（post-image 参数符号名）**：证据——第 7 拍
+（run `44001671811`）post-image 阶段 `genimage.sh` 报 `Error: Missing argument` 并打印
+usage；失败注解的末 12 行点明了 `post-image.sh` 已注入配置、`genimage.sh` 却没收到 `-c`。
+根因——defconfig 写的是 `BR2_ROOTFS_POST_IMAGE_SCRIPT_ARGS`，但 Buildroot 2024.02.11 的
+`system/Config.in` 只定义 `BR2_ROOTFS_POST_SCRIPT_ARGS`，`Makefile` 的
+`target-post-image` 规则也只读后者；**kconfig 对未知符号静默忽略**，拼错的符号不会
+红，只会让参数凭空消失。处置——改用真符号 `BR2_ROOTFS_POST_SCRIPT_ARGS`，并在
+defconfig 就地注明"改名先 grep Buildroot 的 system/Config.in"。验证——下一拍全量构建。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
