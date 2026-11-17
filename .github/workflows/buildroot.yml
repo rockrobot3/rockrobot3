@@ -11,6 +11,9 @@ name: buildroot
 on:
   push:
     branches: [main, "dev/**"]
+    # 发布面（ADR-0028）：v* 标签走全量构建 + release job 签名/推送 ghcr。
+    # 标签推送不做路径过滤（GitHub 对 tag push 不评估 paths）。
+    tags: ["v*"]
     paths:
       - "base/os/buildroot/**"
       - ".github/workflows/buildroot.yml"
@@ -96,7 +99,7 @@ jobs:
   # workflow_dispatch 时跑；日常 buildroot 改动只跑上面的 dtb 门。
   image:
     needs: dtb-backport
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[buildroot-full]')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message || '', '[buildroot-full]')
     # 2026-11-16 实测：ubuntu-latest（GCC 14）构建 Buildroot 2024.02.11 的
     # host-m4 1.4.19 时 gnulib gl_oset.h 编译失败（expected identifier before 'int'）。
     # Buildroot 2024.02 的受支持宿主是 Ubuntu 22.04；钉 22.04 而不是给 host-m4
@@ -388,3 +391,128 @@ jobs:
             /tmp/br-out/images/checksums.txt
           if-no-files-found: error
           retention-days: 14
+
+  # 发布面（ADR-0028）：只在 v* 标签上签名并推送 ghcr。
+  # 机制在 tools/deploy/ota-bundle.sh（规范名 → manifest → 签名 → 公钥复验 →
+  # 摘要），本 job 只做触发/密钥/不可变策略；私钥只落 0600 临时文件并在
+  # always 步删除，不打印、不进 artifact。无 Secret 即失败，无跳过开关。
+  release:
+    needs: image
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: rock3-zero3-image
+          path: /tmp/rr3-release
+      - name: 复核 artifact 摘要
+        run: |
+          set -euo pipefail
+          cd /tmp/rr3-release
+          sha256sum -c checksums.txt
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 构建 rr3-ota-ctl（宿主机）
+        run: |
+          set -o pipefail
+          if ! cargo build -q --locked --release \
+               --manifest-path base/ota/rr3-ota-ctl/Cargo.toml 2>&1 | tee /tmp/ota-build.log; then
+            errs=$(grep -E "error(\[|:)" /tmp/ota-build.log | head -4 | tr '\n' ' ')
+            echo "::error title=ota-build::${errs:0:900}"
+            exit 1
+          fi
+      - name: 版本与密钥前置（fail-closed）
+        env:
+          KEY_HEX: ${{ secrets.RR3_OTA_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          ver="${tag#v}"
+          if ! printf '%s' "$ver" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error title=ota-version::标签 $tag 不是 v<major.minor.patch>"
+            exit 1
+          fi
+          if [ -z "${KEY_HEX:-}" ]; then
+            echo "::error title=ota-key::Secret RR3_OTA_SIGNING_KEY 未配置（tag 发布必须签名，无回退）"
+            exit 1
+          fi
+          if ! printf '%s' "$KEY_HEX" | grep -Eq '^[0-9a-fA-F]{64}$'; then
+            echo "::error title=ota-key::Secret 不是 64 位十六进制种子"
+            exit 1
+          fi
+          echo "VER=$ver" >> "$GITHUB_ENV"
+          umask 077
+          printf '%s\n' "$KEY_HEX" >"$RUNNER_TEMP/rr3-ota.key"
+          chmod 600 "$RUNNER_TEMP/rr3-ota.key"
+      - name: 组包 / 签名 / 自复验
+        run: |
+          set -euo pipefail
+          RR3_OTA_CTL=/tmp/rr3-build/release/rr3-ota-ctl \
+            bash tools/deploy/ota-bundle.sh \
+              --image /tmp/rr3-release/rr_a.ext4 \
+              --version "$VER" \
+              --key-file "$RUNNER_TEMP/rr3-ota.key" \
+              --out /tmp/rr3-ota-bundle
+      - name: 清理私钥
+        if: always()
+        run: rm -f "$RUNNER_TEMP/rr3-ota.key"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: oras-project/setup-oras@v2
+      - name: 不可变标签检查 + 推送 ghcr
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER}"
+          ota="ghcr.io/${owner}/rockrobot3-ota:${VER}"
+          build="ghcr.io/${owner}/rockrobot3-buildroot:${VER}"
+          for ref in "$ota" "$build"; do
+            if out=$(oras manifest fetch "$ref" 2>&1); then
+              echo "::error title=ota-immutable::已存在：$ref（拒绝覆盖）"
+              exit 1
+            fi
+            if ! printf '%s' "$out" | grep -qiE 'not found|404|manifest unknown'; then
+              echo "::error title=ota-immutable::读 $ref 失败且非 404：${out:0:400}"
+              exit 1
+            fi
+          done
+          cd /tmp/rr3-ota-bundle
+          img="rr3-rootfs-rk3566-${VER}.img"
+          pub=$(sed -n 's/^pub=//p' bundle.txt)
+          oras push "$ota" \
+            --artifact-type application/vnd.rr3.ota.bundle.v1+json \
+            "${img}:application/octet-stream" \
+            "${img}.manifest:application/octet-stream" \
+            "${img}.sig:application/octet-stream" \
+            "${pub}:application/octet-stream" \
+            "checksums.txt:text/plain" \
+            "bundle.txt:text/plain"
+          echo "PASS  已推送 $ota"
+          cd /tmp/rr3-release
+          oras push "$build" \
+            --artifact-type application/vnd.rr3.buildroot.image.v1+json \
+            "rock3-zero3.img:application/octet-stream" \
+            "rk3566-radxa-zero-3w.dtb:application/vnd.device-tree+octet-stream" \
+            "rk3566-radxa-zero-3e.dtb:application/vnd.device-tree+octet-stream" \
+            "checksums.txt:text/plain"
+          echo "PASS  已推送 $build"
+          oras manifest fetch "$ota" >/dev/null
+          oras manifest fetch "$build" >/dev/null
+          echo "PASS  ghcr 两个制品可读"
+      - name: job summary
+        if: always()
+        run: |
+          {
+            echo "## OTA release"
+            echo "- tag: ${GITHUB_REF_NAME}"
+            echo "- version: ${VER:-?}"
+            echo "- key_id: $(sed -n 's/^key_id=//p' /tmp/rr3-ota-bundle/bundle.txt 2>/dev/null || echo '缺')"
+            echo "- OTA: ghcr.io/${GITHUB_REPOSITORY_OWNER}/rockrobot3-ota:${VER:-?}"
+            echo "- buildroot: ghcr.io/${GITHUB_REPOSITORY_OWNER}/rockrobot3-buildroot:${VER:-?}"
+          } >>"$GITHUB_STEP_SUMMARY"
