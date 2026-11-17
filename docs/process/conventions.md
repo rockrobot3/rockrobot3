@@ -3697,6 +3697,15 @@ defconfig 就地注明"改名先 grep Buildroot 的 system/Config.in"。验证�
 `vfat {}` 块外。处置——把 label 移入 `vfat {}`；四个 ext4 段的 label 本就在
 `ext4 {}` 内，不动。验证——下一拍全量构建。
 
+**2026-11-17 genimage 空分区与 mke2fs 审计（第 8 拍连带）**：事实——`rr_staging` /
+`data` 两个 ext4 只给了 `label` 与 `size`，没有 `mountpoint` 也没有 `empty`；
+genimage 的 `mountpath()` 在无 mountpoint 且未置 empty 时回落到根挂载点，会把整个
+rootpath 灌进 256M 暂存区（必失败）与 1G 数据区（内容语义错误）。另，genimage 的
+ext 生成默认走 `genext2fs`，而 Buildroot 的 host-genimage 不带它；`mke2fs` 由
+`BR2_TARGET_ROOTFS_EXT2` 自动 select 的 host-e2fsprogs 提供。处置——两区加
+`empty = true`；五个 ext4 段加 `use-mke2fs = true`（走已选中的 mke2fs，不引第二套
+文件系统生成器）。验证——下一拍全量构建。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
