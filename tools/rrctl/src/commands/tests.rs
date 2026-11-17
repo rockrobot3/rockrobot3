@@ -70,13 +70,23 @@ fn status_table_says_empty_when_no_module_is_registered() {
 fn health_table_carries_the_three_heartbeat_numbers() {
     let env = json!({"result": {"modules": [
         {"name": "rr3-sima", "task": 2, "phase": "running",
-         "heartbeat_ms": 200, "watchdog_ms": 1000, "since_beat_ms": 501}
+         "heartbeat_ms": 200, "watchdog_ms": 1000, "since_beat_ms": 501,
+         "boot_ms": 811}
     ]}});
     let out = format_health(&env).unwrap();
     let line = out.lines().nth(1).unwrap();
-    for needle in ["rr3-sima", "running", "200", "1000", "501"] {
+    for needle in ["rr3-sima", "running", "200", "1000", "501", "811"] {
         assert!(line.contains(needle), "健康行缺 {needle}: {line}");
     }
+    assert!(out.contains("BOOT_MS"), "健康表头缺 BOOT_MS: {out}");
+}
+
+#[test]
+fn health_boot_ms_null_renders_question_mark() {
+    let env = json!({"result": {"modules": [{"name": "rr3-x", "boot_ms": null}]}});
+    let out = format_health(&env).unwrap();
+    let line = out.lines().nth(1).unwrap();
+    assert!(line.ends_with('?'), "未定格的 boot_ms 应渲染 ?：{line}");
 }
 
 #[test]
