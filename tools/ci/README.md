@@ -79,12 +79,14 @@ macaudio `ffi.rs`）已逐块核对：调用点 SAFETY 全覆盖（生产面审�
 ## 流水线结构审计入口：`workflows_audit.py`
 
 [workflows_audit.py](workflows_audit.py) 把 CI 自身的结构面纳入门禁（2026-11-17 立）：
-每个 workflow 必须有顶层 `concurrency:`、每个 job 必须有 `timeout-minutes:`、
+每个 workflow 必须有顶层 `on:` 与 `concurrency:`、每个 job 必须有 `timeout-minutes:`、
 第三方 `uses:` 必须命中 `ACTION_MATRIX`（`checkout@v7`、`upload-artifact@v7`、
 `download-artifact@v8`、`cache@v4`、`setup-qemu@v4` 等）；本地 action（`./`）不查。
 **版本升级 = 显式改矩阵**，同一工作流两版 action 并存即红（首查抓到 ipct003 的
-qemu v3 残留并修复）。`--self-test` 给好例 + 缺并发/缺超时/版本漂移三条负例，
-gate 的 `scripts` job 先自检后执法。
+qemu v3 残留并修复）。**触发与依赖图**：`push:` 必须收窄到 `branches`/`tags`
+（全分支推送会白烧 CI），`publish.yml` 必须由 tag 触发；job `needs` 不得指向
+不存在的 job、不得成环。`--self-test` 给好例 + 缺并发/缺超时/版本漂移/needs 悬空/
+needs 成环/push 无范围六条负例，gate 的 `scripts` job 先自检后执法。
 
 ## 点验矩阵出数入口：`matrix.sh`
 

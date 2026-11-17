@@ -3800,6 +3800,11 @@ macaudio 18 处补齐 `// SAFETY:` / `/// # Safety`（unsafe fn 用调用方契�
 job 超时 / `ACTION_MATRIX` 版本矩阵；升级走显式提交改表），ipct003 的 qemu 升 v4；
 gate `scripts` job 先 `--self-test`（好例 + 缺并发/缺超时/版本漂移三负例）后执法。
 
+**2026-11-17 流水线审计扩面（续轮七）**：判据扩到**触发面与依赖图**——`push:` 必须带
+`branches`/`tags`（全分支推送会白烧 CI）、`publish.yml` 必须由 tag 触发；job `needs`
+引用必须存在且无环。自检负例由三条扩到六条（新增 needs 悬空 / needs 成环 / push
+无范围），全仓五条 workflow 通过。
+
 **2026-11-17 sim 稳态段与日志判据修正（续轮七）**：事实——① `--chain` 取证后立即收尾，
 "实时性"只有 sense 自报的 `max_jitter_ms`，没有宿主侧、跨模块的操作口径；② 本机首跑
 暴露演练假红：brain 分次写「对话轮完成」行，`wait_log_contains` 在 `tts_pcm_ms=` 处
