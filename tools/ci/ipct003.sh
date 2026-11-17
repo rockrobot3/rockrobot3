@@ -91,7 +91,7 @@ if rustup target list --installed 2>/dev/null | grep -q '^riscv64gc-unknown-linu
     fail=1
   fi
 else
-  echo "SKIP  未安装 riscv64gc-unknown-linux-gnu 目标（rust-toolchain.toml 已声明，rustup target add 即可）"
+  echo "SKIP  未安装 riscv64gc-unknown-linux-gnu 目标（rustup target add riscv64gc-unknown-linux-gnu 即可）"
   skip=1
 fi
 

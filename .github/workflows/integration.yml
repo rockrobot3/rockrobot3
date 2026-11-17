@@ -27,8 +27,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # 与其余 job 同源：runner 预装 rustc 版本不受控，① 现在编 brain（ureq/rustls
-      # /ring MSRV 面），工具链必须钉 stable 而非吃镜像预装版
+      # /ring MSRV 面），工具链必须钉 1.100.0 而非吃镜像预装版
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: base/runtime
@@ -43,6 +45,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
       - uses: Swatinem/rust-cache@v2
       - name: 构建 rr3-ota-ctl
         env:
@@ -82,6 +86,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
       - uses: Swatinem/rust-cache@v2
       - name: 装配演练（构建 + rr3-sim --profile）
         run: bash tools/ci/sim-assemble.sh
@@ -94,6 +100,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
       - uses: Swatinem/rust-cache@v2
       - name: 全链闭环演练（构建 + rr3-sim --chain）
         run: bash tools/ci/sim-chain.sh
@@ -110,6 +118,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+          targets: |
+            aarch64-unknown-linux-gnu
+            riscv64gc-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: base/runtime

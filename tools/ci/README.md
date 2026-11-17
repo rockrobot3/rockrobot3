@@ -44,8 +44,8 @@ CI 单一事实源在 [`.github/workflows/`](../../.github/workflows)（gate / p
 
 [supply-audit.sh](supply-audit.sh) 不发散策略，只枚举工程根并逐项调用
 `cargo deny check --locked`：工程根 = `base/runtime` 工作区 + `modules/`、`tools/`、
-`base/ota/` 下各自带锁文件的独立工程（工作区成员不重复执法）。判据唯一真源是仓根
-[`deny.toml`](../../deny.toml)——许可证显式白名单、RustSec 公告、来源白名单、通配依赖。
+`base/ota/` 下各自带锁文件的独立工程（工作区成员不重复执法）。判据唯一真源是
+[`.cargo/deny.toml`](../../.cargo/deny.toml)——许可证显式白名单、RustSec 公告、来源白名单、通配依赖。
 本机未装 cargo-deny 时 SKIP 并明说；CI 以 `--strict` 执法，工具缺位即红（不由 SKIP
 冒充通过）。
 

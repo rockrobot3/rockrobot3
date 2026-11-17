@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 供应链审计门（2026-11-16 建）：依赖许可证、RustSec 安全公告、来源白名单与
-# 通配依赖。判据唯一真源是仓根 `deny.toml`；本脚本只做两件事——枚举工程根、
+# 通配依赖。判据唯一真源是 `.cargo/deny.toml`；本脚本只做两件事——枚举工程根、
 # 逐项调用 cargo-deny 并汇总，不发散任何策略。
 #
 # 工程根 = `base/runtime`（工作区）+ `modules/`、`tools/`、`base/ota/` 下各自
@@ -22,9 +22,9 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 }
 cd "$root" || exit 1
 
-# 判据配置必须在场：缺 deny.toml 时 cargo-deny 退回默认策略（宽松），等于静默放行
-if [ ! -f deny.toml ]; then
-  echo "ERROR: 仓根缺 deny.toml——供应链判据不在场，拒绝放行。" >&2
+# 判据配置必须在场：缺 .cargo/deny.toml 时 cargo-deny 退回默认策略（宽松），等于静默放行
+if [ ! -f .cargo/deny.toml ]; then
+  echo "ERROR: 缺 .cargo/deny.toml——供应链判据不在场，拒绝放行。" >&2
   exit 1
 fi
 
@@ -44,9 +44,10 @@ while IFS= read -r m; do
   count=$((count + 1))
   log="$(mktemp)"
   # --locked：审计的就是锁文件解析出的那棵树；锁与 manifest 漂移即红（先同步锁）。
-  # 公共选项（--manifest-path / --locked）必须放在子命令之前——放到 check 之后会被
-  # clap 当未知参数拒掉，表现为"全部工程根瞬时失败"（2026-11-16 首跑实证）。
-  if cargo deny --manifest-path "$m" --locked check > "$log" 2>&1; then
+  # 公共选项（--manifest-path / --locked / --config）必须放在子命令之前——放到
+  # check 之后会被 clap 当未知参数拒掉，表现为"全部工程根瞬时失败"（首跑实证）。
+  if cargo deny --manifest-path "$m" --locked --config "$root/.cargo/deny.toml" \
+      check > "$log" 2>&1; then
     echo "PASS  ${d}"
   else
     echo "FAIL  ${d}"
@@ -64,7 +65,7 @@ done < <(find base modules tools -name Cargo.toml \
            -not -path "*/target/*" -not -path "base/runtime/*/Cargo.toml" | sort)
 
 if [ "$fail" -ne 0 ]; then
-  echo "供应链审计存在失败项（策略见 deny.toml：许可证入册改 allow，公告无例外）"
+  echo "供应链审计存在失败项（策略见 .cargo/deny.toml：许可证入册改 allow，公告无例外）"
   exit 1
 fi
-echo "供应链审计通过：${count} 个工程根（策略 deny.toml）"
+echo "供应链审计通过：${count} 个工程根（策略 .cargo/deny.toml）"
