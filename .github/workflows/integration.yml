@@ -5,7 +5,11 @@ name: integration
 on:
   push:
     branches: [main, "dev/**"]
+    # 纯文档改动跳过集成面：文档门 ⑤ 在 gate；sim/distro/matrix 对 docs/** 与
+    # *.md 零敏感，全量跑是白烧（2026-11-17 结构治理）。
+    paths-ignore: ["docs/**", "**.md"]
   pull_request:
+    paths-ignore: ["docs/**", "**.md"]
   workflow_dispatch:
 permissions:
   contents: read
@@ -26,14 +30,9 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
-      # 与其余 job 同源：runner 预装 rustc 版本不受控，① 现在编 brain（ureq/rustls
-      # /ring MSRV 面），工具链必须钉 1.100.0 而非吃镜像预装版
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.100.0"
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: base/runtime
+      # 构建全程在 rust:bookworm 容器内（distro-smoke.sh 用镜像自带 rustc + 容器内
+      # /tmp/rr3-target），宿主侧不编一行 Rust——不装宿主工具链、不挂 rust-cache
+      #（2026-11-17 治理：宿主钉版与缓存对容器内构建零命中，纯烧起步时间）。
       - name: deb 装机冒烟（rust:bookworm 容器）
         run: bash tools/ci/distro-smoke.sh
 
@@ -48,6 +47,9 @@ jobs:
         with:
           toolchain: "1.100.0"
       - uses: Swatinem/rust-cache@v2
+        with:
+          # 缺 workspaces 会扫仓库根（本仓根无 Cargo.toml）→ 缓存空转；锚到唯一清单。
+          workspaces: base/ota/rr3-ota-ctl
       - name: 构建 rr3-ota-ctl
         env:
           CARGO_TARGET_DIR: /tmp/rr3-build
@@ -89,6 +91,13 @@ jobs:
         with:
           toolchain: "1.100.0"
       - uses: Swatinem/rust-cache@v2
+        with:
+          # 九个清单（runtime + rrctl + sim + 六模块）共写仓根 target-dir
+          # （/tmp/rr3-build，见 .cargo/config.toml）：锚 base/runtime 定 key，
+          # cache-all-crates 把共享 target 里的全部包一并缓存——缺参扫仓库根
+          # 即空转，模块依赖反复冷编（2026-11-17 治理）。
+          workspaces: base/runtime
+          cache-all-crates: "true"
       - name: 装配演练（构建 + rr3-sim --profile）
         run: bash tools/ci/sim-assemble.sh
 
@@ -103,6 +112,10 @@ jobs:
         with:
           toolchain: "1.100.0"
       - uses: Swatinem/rust-cache@v2
+        with:
+          # 与 sim-assemble 同口径：九清单共写 /tmp/rr3-build，全量缓存共享依赖。
+          workspaces: base/runtime
+          cache-all-crates: "true"
       - name: 全链闭环演练（构建 + rr3-sim --chain）
         run: bash tools/ci/sim-chain.sh
 
@@ -125,7 +138,9 @@ jobs:
             riscv64gc-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
         with:
+          # 交叉目标依赖落 /tmp/rr3-build/<triple>/，同口径全量缓存。
           workspaces: base/runtime
+          cache-all-crates: "true"
       # ① 的 ipct003.sh 第③路 arm64 容器真跑（docker run --platform linux/arm64）
       # 需要 binfmt——runner 缺省没有，缺它容器真跑失败（非 SKIP），① 被误判
       # "对拍破裂"致 job 红。ipct003 job 有同一步，此处与之同源。

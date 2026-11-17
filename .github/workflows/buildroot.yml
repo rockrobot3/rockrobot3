@@ -51,13 +51,24 @@ jobs:
           fi
           command -v aarch64-linux-gnu-gcc
 
+      # 内核 tarball（~140MB）按版本钉 key 缓存：dtb 门每次跑都要源码，重复
+      # 下载是本 job 主要网络耗时（2026-11-17 治理）；解包+补丁每拍重做——
+      # 秒级、确定性，补丁只打在解包后的新树上，缓存永远是无补丁的原包。
+      - name: 恢复内核源码包缓存
+        id: linux-src
+        uses: actions/cache@v4
+        with:
+          path: /tmp/linux.tar.xz
+          key: linux-${{ env.LINUX_VER }}-source-v1
       - name: 取 Linux 6.6 源码并应用 Radxa ZERO 3 回移补丁
         run: |
           set -o pipefail
-          if ! curl -fL --retry 3 --retry-delay 2 -o /tmp/linux.tar.xz \
-              "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${LINUX_VER}.tar.xz"; then
-            echo "::error title=kernel-fetch::Linux ${LINUX_VER} 源码下载失败"
-            exit 1
+          if [ ! -s /tmp/linux.tar.xz ]; then
+            if ! curl -fL --retry 3 --retry-delay 2 -o /tmp/linux.tar.xz \
+                "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${LINUX_VER}.tar.xz"; then
+              echo "::error title=kernel-fetch::Linux ${LINUX_VER} 源码下载失败"
+              exit 1
+            fi
           fi
           tar -xJf /tmp/linux.tar.xz -C /tmp
           src="/tmp/linux-${LINUX_VER}"

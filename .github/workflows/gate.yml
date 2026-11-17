@@ -35,7 +35,10 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
+          # check.sh ④/⑥ 编全部独立工程进共享 target-dir（/tmp/rr3-build）：
+          # cache-all-crates 把共享依赖一并缓存，否则模块依赖每拍冷编。
           workspaces: base/runtime
+          cache-all-crates: "true"
       # ⑨-y 跨平台可编面的前件（批N8 件六）：门内不设 SKIP，target 缺位即红
       - name: 安装 Windows target（⑨-y 门前置）
         run: |
@@ -74,7 +77,9 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
+          # 与 conventions 同口径：clippy 面覆盖全部独立工程（共享 /tmp/rr3-build）。
           workspaces: base/runtime
+          cache-all-crates: "true"
       - name: rustfmt --check（base/runtime + 全部独立工程）
         run: |
           cargo fmt --manifest-path base/runtime/Cargo.toml --all -- --check
