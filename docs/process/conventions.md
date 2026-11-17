@@ -3662,6 +3662,13 @@ glibc + Python3 + ALSA utils，60M 放不下。处置——defconfig 显式
 注解过滤 `Error 1 (ignored)` 与 makeinfo 噪音，全量 make 注解收
 "Maybe you need to increase…"，失败时打印末 40 行。验证——下一拍全量构建回执。
 
+**2026-11-17 Buildroot 下载缓存（DL_DIR）**：事实——全量构建每拍都从零下载包源码与
+custom git（U-Boot/rkbin），是小时级耗时与网络抖动的主要来源；缓存 `O=` 输出树则会把
+上一拍失败的残骸带进下一拍（假绿来源）。处置——`buildroot.yml` 增 `actions/cache@v4`，
+**只缓存 `/tmp/buildroot/dl`**，key = Buildroot 版本 + defconfig 哈希，
+`restore-keys` 允许同版本配置变更后复用仍有效的包源码（Buildroot 自带包 hash/revision
+校验）。验证——下一拍全量构建的缓存 step：首拍 miss 属预期并在末尾保存，后续拍命中。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
