@@ -11,12 +11,11 @@ use crate::drill::{
 };
 
 use super::{
-    rr3_chain_act, rr3_chain_bins, rr3_chain_finish, rr3_chain_fix, rr3_chain_judge,
-    rr3_chain_manifests, rr3_chain_obs_up, rr3_chain_status, rr3_chain_tts, rr3_chain_turn,
-    rr3_chain_up_ext, rr3_chain_up_rrd, rr3_obs_collect, Rr3ChainBins, Rr3ChainFix,
+    rr3_chain_act, rr3_chain_baseline, rr3_chain_bins, rr3_chain_finish, rr3_chain_fix,
+    rr3_chain_judge, rr3_chain_manifests, rr3_chain_obs_up, rr3_chain_status, rr3_chain_tts,
+    rr3_chain_turn, rr3_chain_up_ext, rr3_chain_up_rrd, rr3_obs_collect, Rr3ChainBins, Rr3ChainFix,
     RR3_CHAIN_READY_DEADLINE, RR3_SIM_MODULE_ACT,
 };
-
 /// 演练上下文（一次演练内的不变量；只读借用，便于按阶段拆函数）。
 pub(crate) struct Rr3ChainCtx<'a> {
     pub(crate) bins: &'a Rr3ChainBins,
@@ -100,6 +99,7 @@ fn rr3_chain_mods_up(ctx: &Rr3ChainCtx, report: &mut String) -> Result<(), Strin
         RR3_CHAIN_READY_DEADLINE,
     )?;
     report.push_str(rr3_section("四模块 running（sense/interact/brain/act）").as_str());
+    rr3_chain_baseline(ctx, report)?;
     Ok(())
 }
 
