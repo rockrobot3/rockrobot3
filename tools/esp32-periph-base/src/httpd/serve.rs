@@ -23,6 +23,7 @@ static STA_NETIF: OnceLock<usize> = OnceLock::new();
 /// 宏不进绑定，裸 sys 必须手抄；字段真值逐项对表**本项目生成 sdkconfig**
 /// （target …/esp-idf-sys out/sdkconfig，版本组合已钉 v5.2.2）＋ esp_wifi.h
 /// `:252` 宏体，升级 IDF 版本须同批重抄（版本钉死登记表口径）。
+/// # Safety: 返回的配置含 IDF 静态全局裸指针，只作只读输入交 esp_wifi_init。
 unsafe fn wifi_default_config() -> wifi_init_config_t {
     wifi_init_config_t {
         // &g_wifi_osi_funcs（esp_wifi.h :253）
@@ -55,11 +56,15 @@ unsafe fn wifi_default_config() -> wifi_init_config_t {
 }
 
 /// 统一错误应答（`msg` 须含 NUL 结尾；文案由调用点给，逐字保留语义）。
+///
+/// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
 unsafe fn resp_err(req: *mut httpd_req_t, code: httpd_err_code_t, msg: &'static [u8]) -> i32 {
     httpd_resp_send_err(req, code, msg.as_ptr() as *const _)
 }
 
 /// JSON 应答（`application/json`；body 由调用点组好，出锁纪律在调用点）。
+///
+/// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
 unsafe fn resp_json(req: *mut httpd_req_t, body: &str) -> i32 {
     httpd_resp_set_type(req, c"application/json".as_ptr());
     httpd_resp_send(req, body.as_ptr() as *const _, body.len() as _)
@@ -77,6 +82,7 @@ enum BodyErr {
 /// 本轮审计：`httpd_req_recv` 单次返回可短于请求长度（TCP 分段/IDF 收包窗），
 /// 原"单次读 + 满长判据"会把弱信号下的分段到达误判成坏包（配置写入随机 400）；
 /// 循环读满或 IDF 收包超时（n ≤ 0）才回 Recv。
+/// # Safety: req 为有效请求指针；content_len 由 IDF 填，函数按上界收包。
 unsafe fn req_body_read(req: *mut httpd_req_t) -> Result<Vec<u8>, BodyErr> {
     let clen = (*req).content_len;
     if clen == 0 || clen > RR3_WIFI_BODY_MAX {
@@ -95,6 +101,8 @@ unsafe fn req_body_read(req: *mut httpd_req_t) -> Result<Vec<u8>, BodyErr> {
 }
 
 /// 请求 URI（失败模式不 panic：to_string_lossy 兜非 UTF-8）。
+///
+/// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
 unsafe fn req_uri(req: *mut httpd_req_t) -> String {
     std::ffi::CStr::from_ptr((*req).uri.as_ptr())
         .to_string_lossy()
@@ -104,6 +112,7 @@ unsafe fn req_uri(req: *mut httpd_req_t) -> String {
 /// 请求 method 归一（批N14 件二：注册面挂 GET/POST 两行——注册面未挂的 method
 /// 判 "?"，路由纯函数必 None fail-closed 404；req.method 是 c_int，绑定常量是
 /// http_method=u32——比较处 as i32 对齐）。
+/// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
 unsafe fn req_method(req: *mut httpd_req_t) -> &'static str {
     match (*req).method {
         m if m == http_method_HTTP_GET as i32 => "GET",
@@ -113,6 +122,8 @@ unsafe fn req_method(req: *mut httpd_req_t) -> &'static str {
 }
 
 /// GET /——板端配网页。
+///
+/// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
 unsafe fn handle_index(req: *mut httpd_req_t) -> i32 {
     httpd_resp_set_type(req, c"text/html; charset=utf-8".as_ptr());
     httpd_resp_send(
@@ -123,11 +134,15 @@ unsafe fn handle_index(req: *mut httpd_req_t) -> i32 {
 }
 
 /// GET /api/board/state——出锁组 JSON（快照取窗内不组串，模块文档纪律）。
+///
+/// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
 unsafe fn handle_state(req: *mut httpd_req_t, bus: &Arc<Mutex<Bus>>) -> i32 {
     resp_json(req, &rr3_state_json(&rr3_state_snapshot(bus)))
 }
 
 /// GET /api/board/bindings——注入绑定读数。
+///
+/// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
 unsafe fn handle_bindings(req: *mut httpd_req_t) -> i32 {
     let snap = rr3_bindings_snap();
     resp_json(req, &rr3_bindings_json(snap.as_ref()))
@@ -136,6 +151,8 @@ unsafe fn handle_bindings(req: *mut httpd_req_t) -> i32 {
 /// POST /api/board/wifi——事务性配网写口（批N14 件二）：body 有界收（fail-closed）
 /// → 鉴权 → 解析 → 形制 → 事务；HTTP 层失败 400/401 拒收，业务层失败一律 200
 /// JSON 如实应答。
+///
+/// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
 unsafe fn handle_wifi_write(req: *mut httpd_req_t) -> i32 {
     let body = match req_body_read(req) {
         Ok(b) => b,
@@ -176,6 +193,8 @@ unsafe fn handle_wifi_write(req: *mut httpd_req_t) -> i32 {
 
 /// POST /api/board/reboot——动作面：应答先行落链再重启（`esp_restart` 不返回；
 /// 重启即断链，故先 send 后 restart）。鉴权失败一律 401。
+///
+/// # Safety: req 为有效请求指针；esp_restart 不返回，调用后不再依赖本次请求。
 unsafe fn handle_reboot(req: *mut httpd_req_t) -> i32 {
     let authed = req_body_read(req)
         .map(|b| rr3_token_check(&b))
@@ -194,6 +213,8 @@ unsafe fn handle_reboot(req: *mut httpd_req_t) -> i32 {
 }
 
 /// 白名单统一 handler：req→路由纯函数→分派到各端点处理臂。表外 404 fail-closed。
+///
+/// # Safety: IDF 回调契约——req 有效且仅回调期间；不保存、不跨线程传递。
 unsafe extern "C" fn rr3_httpd_dispatch(req: *mut httpd_req_t) -> i32 {
     let Some(bus) = HTTPD_BUS.get() else {
         // 未装配即被请求到（时序防御）：OnceLock 在 httpd_start 前写入，常态不可达
@@ -229,6 +250,11 @@ unsafe extern "C" fn rr3_httpd_dispatch(req: *mut httpd_req_t) -> i32 {
 /// `RR3_BOARD_AP_SSID`/`RR3_BOARD_AP_PASS` 回落缺省（"RR3-BOARD"/"rock3robot"，
 /// 非秘密、仓内公开——目的只是局域网配网入口，不承载业务凭据）。
 /// 返回 AP 实际 SSID 便于 boot 横幅点名；`Err(i32)` = 某步 ESP-IDF 拒。
+///
+/// # Safety
+///
+/// 只能在配置腿起栈线程、`esp_wifi_start` 之前调用；函数直接改写 IDF 全局
+/// WiFi 配置，不得与其它 WiFi 配置操作并发。
 unsafe fn wifi_ap_configure() -> Result<&'static str, i32> {
     let ssid = option_env!("RR3_BOARD_AP_SSID").unwrap_or("RR3-BOARD");
     let pass = option_env!("RR3_BOARD_AP_PASS").unwrap_or("rock3robot");
@@ -255,6 +281,10 @@ unsafe fn wifi_ap_configure() -> Result<&'static str, i32> {
     Ok(ssid)
 }
 
+/// # Safety
+///
+/// 只能在配置腿线程/写口事务内调用；函数先自守 32/64 字节上限再定长复制，
+/// 调用方仍须保证不与并发的 WiFi 配置操作交叉。
 unsafe fn wifi_sta_set_cred(ssid: &[u8], pass: &[u8]) -> i32 {
     // FFI 边界自守（静态审计 B16）：定长数组越界复制＝panic＝整板 abort，这里把
     // "上层忘了校形"折成错误码走事务回退，永不 panic（读窄缝已同域校验，本关是
@@ -270,6 +300,10 @@ unsafe fn wifi_sta_set_cred(ssid: &[u8], pass: &[u8]) -> i32 {
 
 /// 有界等连（连上＝**DHCP 得 IP**，判据见函数内注记）：[`WIFI_CONNECT_WAIT_MS`]
 /// 上限、[`WIFI_POLL_MS`] 步进；超窗即 false（调用方如实应答——不猜不造）。
+/// # Safety
+///
+/// 必须在 `wifi_bringup` 建好 STA netif 之后调用；`STA_NETIF` 是启动期写一次的
+/// 进程级单例，未写入时函数直接返回 false（时序防御），不 deref 空指针。
 unsafe fn wifi_sta_wait_conn() -> bool {
     // 判据＝**DHCP 得 IP**（`esp_netif_get_ip_info` 的 ip.addr 非 0），批N15 件二
     // 真板取证实锤的缺陷修复：原判据 `esp_wifi_sta_get_ap_info` 在关联瞬态
@@ -296,6 +330,11 @@ unsafe fn wifi_sta_wait_conn() -> bool {
 /// （不碰 [`crate::state::PeriphState`]）；httpd 服务任务串行处理请求＝两写口
 /// 天然互斥。回退写败＝砖路径残余（新凭据在 NVS 但未连——重启后读链装配新凭据
 /// 重试，AP 不可达则掉网）：NVS 写败罕见链，如实点名 stage 不冒领。
+///
+/// # Safety
+///
+/// 只能由 httpd 任务串行调用（两写口天然互斥），不得与 `wifi_bringup` 并发；
+/// 事务期间不持 bus 锁，不跨线程共享 Rust 引用。
 unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWriteResult {
     let old = crate::cred::rr3_cred_read(); // None＝原空态（回退目标＝erase）
                                             // 写 NVS（cred 模块内复验形制——毒不双入；败＝NVS 未动无需回退）
@@ -361,6 +400,8 @@ unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWriteResult {
 pub(crate) fn rr3_httpd_spawn(bus: &Arc<Mutex<Bus>>) {
     let bus = Arc::clone(bus);
     // ① NVS init 前移（批N14 件一）：凭据读链前件，兼 WiFi 校准数据存储
+    // SAFETY：nvs_flash_init 是 IDF 的一次性初始化，配置腿线程起栈前调用；
+    // 失败即返回，不重复调用、不 erase 既有分区。
     if unsafe { nvs_flash_init() } != ESP_OK {
         println!("[periph] 配置腿未装配（nvs_flash_init 失败）——N-13 服务面缺席，板其余功能照常");
         return;
@@ -416,6 +457,8 @@ fn thread_spawn(bus: Arc<Mutex<Bus>>, cred_source: &'static str, ssid: Vec<u8>, 
     std::thread::Builder::new()
         .name("periph-httpd".into())
         .stack_size(crate::board::THREAD_STACK)
+        // SAFETY：闭包体整段是 unsafe 壳层调用（start_httpd），线程独占起栈链；
+        // 捕获的 Arc/Vec 均 Send，无裸指针跨线程传递。
         .spawn(move || unsafe {
             if let Err(e) = start_httpd(&bus, cred_source, &ssid, &pass) {
                 println!("[periph] 配置腿启动失败 esp_err={e}（缺席照常；负值＝IDF 错误码）");
@@ -435,6 +478,11 @@ fn esp_ok(r: i32) -> Result<(), i32> {
 
 /// WiFi 起栈链（netif/事件循环/宏配置/APSTA/AP/STA/start/connect），返回 AP 实际
 /// SSID 供 boot 横幅点名；逐步 fail-honest（错误码由调用方点名）。
+///
+/// # Safety
+///
+/// 每 boot 只调用一次，且只在配置腿线程；函数按序初始化 IDF netif/事件循环/
+/// WiFi 驱动，重复或并发调用会与 IDF 全局状态冲突。
 unsafe fn wifi_bringup(ssid: &[u8], pass: &[u8]) -> Result<&'static str, i32> {
     // ① netif + 事件循环 + STA 缺省 netif（句柄留存——等连判据查 IP 用）
     esp_ok(esp_netif_init())?;
@@ -470,6 +518,11 @@ unsafe fn wifi_bringup(ssid: &[u8], pass: &[u8]) -> Result<&'static str, i32> {
 /// false/null/0 的字段由全零起底等价覆盖，差异字段逐项对表 esp_http_server.h :53；
 /// OnceLock 先写——handler 可达即 bus 在位；method 映射随表行 GET/POST，表内词表
 /// 由 covers_wordform_shape 单测钉死，词表外 panic 不可达）。
+///
+/// # Safety
+///
+/// 只能在 `wifi_bringup` 成功后调用一次；`HTTPD_BUS` 先写后注册 handler，
+/// 保证回调可达时 bus 必在位；注册表路径 CString 活到函数返回。
 unsafe fn httpd_register(bus: &Arc<Mutex<Bus>>) -> Result<(), i32> {
     let mut h: httpd_handle_t = std::ptr::null_mut();
     let conf = httpd_config_t {
@@ -508,6 +561,11 @@ unsafe fn httpd_register(bus: &Arc<Mutex<Bus>>) -> Result<(), i32> {
 
 /// WiFi 起栈 + httpd 起与注册（unsafe 集中段；NVS init 已前移到
 /// [`rr3_httpd_spawn`]——本段只做起栈链与服务工作面）。
+///
+/// # Safety
+///
+/// 只能由配置腿线程调用一次；整段是 IDF 起栈链，重复或并发调用会与 IDF
+/// 全局状态冲突（本函数不提供幂等保证）。
 unsafe fn start_httpd(
     bus: &Arc<Mutex<Bus>>,
     cred_source: &str,

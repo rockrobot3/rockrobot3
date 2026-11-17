@@ -469,12 +469,12 @@ fn cmd_info(bus: &Arc<Mutex<Bus>>) -> Result<String, String> {
     } else {
         "unknown"
     };
+    // SAFETY：两个堆查询都是无参只读的 IDF 系统调用，不触碰 Rust 内存状态。
+    let (free, min_free) = unsafe { (esp_get_free_heap_size(), esp_get_minimum_free_heap_size()) };
     Ok(format!(
-        "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} rail={rail} rail_tier={rail_tier_name} low_events={rail_low} selfheal_skip={selfheal_skip} audio={} seq={audio_seq} sent={audio_sent} drop={audio_dropped} q={audio_q} job_drop={job_drop} reply_drop={reply_drop} oled_last=\"{last_text}\" free={}B min_free={}B",
+        "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} rail={rail} rail_tier={rail_tier_name} low_events={rail_low} selfheal_skip={selfheal_skip} audio={} seq={audio_seq} sent={audio_sent} drop={audio_dropped} q={audio_q} job_drop={job_drop} reply_drop={reply_drop} oled_last=\"{last_text}\" free={free}B min_free={min_free}B",
         if wander { "on" } else { "off" },
         if audio_on { "on" } else { "off" },
-        unsafe { esp_get_free_heap_size() },
-        unsafe { esp_get_minimum_free_heap_size() }
     ))
 }
 

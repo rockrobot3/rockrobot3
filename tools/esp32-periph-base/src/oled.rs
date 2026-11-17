@@ -78,6 +78,8 @@ pub(crate) fn i2c_bus_recover(force: bool) -> bool {
     let (sda, scl) = rr3_i2c_recovery();
     let (sda, scl) = (sda as i32, scl as i32);
     let mut clear = true;
+    // SAFETY：只用 GPIO 号调用 IDF GPIO API，不涉及裸指针/所有权；调用方保证
+    // 与本函数的 I2C 事务不并发（运行面持总线锁，启动期单线程且驱动未装）。
     unsafe {
         // **空闲快路（批N41 件二修订）**：非强制且 SDA 高 → 直接返回，不夺脚、不
         // `i2c_set_pin`。旧版每拍 force 会在 SCAN/密集动作中反复把 I2C 引脚切到
@@ -146,6 +148,11 @@ pub(crate) fn i2c_bus_recover(force: bool) -> bool {
 ///
 /// 返回：`true` = SDA 本已高（无需动作）或 9 时钟后已释放；`false` = 9 时钟后
 /// 仍被拉低（模块未上电/硬短/线松）——**不硬打 STOP**，由调用方点名、继续 boot。
+///
+/// # Safety
+///
+/// 调用方必须保证：I2C 驱动尚未安装（启动期）或已确认总线静止（无并发事务）；
+/// 函数直接把两脚切到 GPIO 功能，若同时有 I2C 事务在途会把事务半途打断。
 pub(crate) unsafe fn i2c_bus_unstick() -> bool {
     use esp_idf_sys as sys;
     let (sda, scl) = rr3_i2c_recovery();

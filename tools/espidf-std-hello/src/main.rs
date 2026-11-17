@@ -15,9 +15,12 @@ use std::ffi::CStr;
 use esp_idf_sys::{esp_get_free_heap_size, esp_get_idf_version};
 
 fn main() {
+    // SAFETY：esp_get_idf_version 返回指向 IDF 静态存储的 NUL 结尾字符串，进程
+    // 生命周期内有效；CStr::from_ptr 只借用不取得所有权。
     let idf_ver = unsafe { CStr::from_ptr(esp_get_idf_version()) }
         .to_string_lossy()
         .into_owned();
+    // SAFETY：无参只读的 IDF 堆查询，不触碰 Rust 内存状态。
     let free_heap = unsafe { esp_get_free_heap_size() };
     println!("[espidf-std-hello] IDF={idf_ver} free_heap={free_heap}B std-println-OK");
 }

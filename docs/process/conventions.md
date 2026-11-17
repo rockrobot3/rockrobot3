@@ -3782,8 +3782,12 @@ checkout/upload/download 升 v7/v7/v8，setup-qemu 升 v4（只换 Node 24 运�
 路径），允许条数住 `tools/ci/unsafe-baseline.txt`（**只降不升**，与 gate-a/gate-d/
 行数/体积门同款）；gate `scripts` job 执法。首批把 Linux 目标面 11 处补全
 （rr-ipc uart/excl、rrd daemon/ctl 的 signal/write/chmod/getgrnam/chown、
-rr-hal linux_gpio/linux_power 的 close、nmcli 的 fcntl），基线自 78 降至 **67**；
-剩余为 esp32 板侧与 macaudio，按批补注释后同批下调基线。
+rr-hal linux_gpio/linux_power 的 close、nmcli 的 fcntl），基线自 78 降至 **67**。
+**同轮批次二/三**：esp32 板侧 `httpd/serve.rs`/`cred.rs`/`main.rs`/`oled.rs`/
+`commands.rs`/`state.rs`/`link.rs` 与 `espidf-sentinel`/`espidf-std-hello` 共 49 处、
+macaudio 18 处补齐 `// SAFETY:` / `/// # Safety`（unsafe fn 用调用方契约形式），
+**基线降至 0**；`commands.rs` 与两处状态行的内联 unsafe 顺带提为带前言的局部变量
+（行为不变）。此后任何新增未注释 unsafe 即红。
 
 ## 3 结构纪律
 
