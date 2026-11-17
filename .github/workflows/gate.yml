@@ -51,20 +51,14 @@ jobs:
           exit 1
       - name: 规约门禁检查（check.sh 全步，含 ⑫ 质量度量）
         run: |
-          # 失败把日志尾部写成注解：匿名日志接口 403 时，check-run annotations
-          # 是唯一公开可读的归因通道（与 esp 五门同款）。
-          # 注解必须压成一行：GitHub 把多行 message 拆成逐行注解且每次只留 10 条，
-          # 多行尾部会丢掉真正的 FAIL 行（首版实测踩过）。
+          # 失败归因走 tools/ci/log-digest.sh 单点（信号提取/噪音过滤/单行注解/
+          # 末段回显）；本步只给策略——标题、信号面与回显行数。
+          # 匿名日志接口 403 时 check-run annotations 是唯一公开可读通道，
+          # 注解必须单行（多行会被拆条并只留前 10 条，真因被挤掉）。
           set -o pipefail
           if ! bash tools/ci/check.sh 2>&1 | tee /tmp/gate.log; then
-            fails=$(grep -E "^(FAIL|ERROR)" /tmp/gate.log | tail -4 | tr '\n' ' ')
-            errs=$(grep -E "error(\[|:)" /tmp/gate.log | head -3 | tr '\n' ' ')
-            # 两类特征都没抓到（脚本自身崩、被信号打断等）时，退回日志尾部，保证不空
-            if [ -z "${fails}${errs}" ]; then
-              errs=$(tail -3 /tmp/gate.log | tr '\n' ' ')
-            fi
-            echo "::error title=check.sh::${fails:0:500} @@ ${errs:0:700}"
-            grep -E "^(FAIL|ERROR)" /tmp/gate.log | tail -20
+            bash tools/ci/log-digest.sh --title check.sh --log /tmp/gate.log \
+              --sig '^FAIL|^ERROR' --tail 20
             exit 1
           fi
 
@@ -93,16 +87,16 @@ jobs:
         run: |
           set -o pipefail
           if ! cargo clippy --all-targets --manifest-path base/runtime/Cargo.toml --workspace -- -D warnings 2>&1 | tee /tmp/clippy.log; then
-            errs=$(grep -E "error(\[|:)|warning: unused" /tmp/clippy.log | head -4 | tr '\n' ' ')
-            echo "::error title=clippy::${errs:0:900}"
+            bash tools/ci/log-digest.sh --title clippy --log /tmp/clippy.log \
+              --sig 'error(\[|:)|warning: unused' --tail 12
             exit 1
           fi
           while IFS= read -r -d '' m; do
             # 独立工程逐个编译：失败按同一口径压成单行注解（cargo 失败退出码是 101，
             # 不带本注解时 GitHub 只报"exit code 101"，根因不可见）。
             if ! cargo clippy -q --all-targets --manifest-path "$m" -- -D warnings 2>&1 | tee /tmp/clippy_one.log; then
-              errs=$(grep -E "error(\[|:)|warning: unused" /tmp/clippy_one.log | head -4 | tr '\n' ' ')
-              echo "::error title=clippy($m)::${errs:0:900}"
+              bash tools/ci/log-digest.sh --title "clippy($m)" --log /tmp/clippy_one.log \
+                --sig 'error(\[|:)|warning: unused' --tail 12
               exit 1
             fi
           done < <(find modules tools base/ota -name Cargo.toml \
@@ -132,19 +126,12 @@ jobs:
           tool: cargo-deny
       - name: 供应链审计（全部工程根，--strict）
         run: |
-          # 失败压成单行注解：匿名日志接口 403，注解是唯一公开可读的归因通道。
-          # 顺序：诊断行 → FAIL 行 → 日志尾部，保证命令级错误（参数/配置）不被
-          # 逐工程的 FAIL 行挤出注解上限（首跑实证：只取 head 时错误行全被挤掉）。
+          # 失败归因单点见 tools/ci/log-digest.sh：诊断行优先，缺诊断时退
+          # FAIL 行与末段（命令级错误不带 error[...] 形态，不能被挤掉）。
           set -o pipefail
           if ! bash tools/ci/supply-audit.sh --strict 2>&1 | tee /tmp/supply.log; then
-            bad=$(grep -E '^error(\[|:)' /tmp/supply.log | head -4 | tr '\n' ' ')
-            if [ -z "${bad}" ]; then
-              bad=$(grep -E '^FAIL' /tmp/supply.log | head -4 | tr '\n' ' ')
-            fi
-            if [ -z "${bad}" ]; then
-              bad=$(tail -3 /tmp/supply.log | tr '\n' ' ')
-            fi
-            echo "::error title=supply::${bad:0:900}"
+            bash tools/ci/log-digest.sh --title supply --log /tmp/supply.log \
+              --sig '^error(\[|:)|^FAIL' --head --tail 12
             exit 1
           fi
 
@@ -168,8 +155,8 @@ jobs:
             echo "::warning title=apt::apt-get update 失败，继续尝试安装"
           fi
           if ! sudo apt-get install -y -qq libasound2-dev pkg-config 2>&1 | tee /tmp/apt-alsa.log; then
-            why=$(grep -iE "unable to locate|has no installation candidate|depends|error" /tmp/apt-alsa.log | tail -3 | tr '\n' ' ')
-            echo "::error title=apt-alsa::${why:0:700}"
+            bash tools/ci/log-digest.sh --title apt-alsa --log /tmp/apt-alsa.log \
+              --sig 'unable to locate|has no installation candidate|depends|error' --tail 3
             exit 1
           fi
       - name: rr-hal alsa 特性全目标编译 + 单测
@@ -177,15 +164,15 @@ jobs:
           set -o pipefail
           if ! cargo check --all-targets --manifest-path base/runtime/Cargo.toml \
                -p rr-hal --features alsa 2>&1 | tee /tmp/alsa.log; then
-            errs=$(grep -E "error(\[|:)" /tmp/alsa.log | head -4 | tr '\n' ' ')
-            echo "::error title=alsa::${errs:0:900}"
+            bash tools/ci/log-digest.sh --title alsa --log /tmp/alsa.log \
+              --sig 'error(\[|:)' --tail 12
             exit 1
           fi
           # 单测不打开音频设备（选择器只在 open 时真连 PCM），CI 无设备也可跑。
           if ! cargo test -q --manifest-path base/runtime/Cargo.toml \
                -p rr-hal --features alsa --lib 2>&1 | tee /tmp/alsa-test.log; then
-            errs=$(grep -E "error(\[|:)|FAILED|panicked at" /tmp/alsa-test.log | head -4 | tr '\n' ' ')
-            echo "::error title=alsa-test::${errs:0:900}"
+            bash tools/ci/log-digest.sh --title alsa-test --log /tmp/alsa-test.log \
+              --sig 'error(\[|:)|FAILED|panicked at' --tail 12
             exit 1
           fi
 
@@ -207,8 +194,8 @@ jobs:
           set -o pipefail
           if ! cargo build -q --locked --release \
                --manifest-path base/ota/rr3-ota-ctl/Cargo.toml 2>&1 | tee /tmp/ota-build.log; then
-            errs=$(grep -E "error(\[|:)" /tmp/ota-build.log | head -4 | tr '\n' ' ')
-            echo "::error title=ota-build::${errs:0:900}"
+            bash tools/ci/log-digest.sh --title ota-build --log /tmp/ota-build.log \
+              --sig 'error(\[|:)' --tail 12
             exit 1
           fi
       - name: OTA bundle 正例 + 三条负例
@@ -266,6 +253,6 @@ jobs:
           [ "$fail" -eq 0 ] && echo "全部脚本语法通过"
       # 归因脚本自身的判据也要有回执：噪音过滤/信号提取写成"看起来跑过了"
       # 时，构建失败会更难读；自检用 --plain 不产生假注解。
-      - name: log-digest 自检（正例 + 三条负例）
+      - name: log-digest 自检（正例 + 四条负例）
         run: bash tools/ci/log-digest.sh --self-test
 

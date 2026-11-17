@@ -55,9 +55,12 @@ CI 单一事实源在 [`.github/workflows/`](../../.github/workflows)（gate / p
 信号提取（error/fatal/failed/…）→ 噪音过滤（`Error 1 (ignored)`、makeinfo 版本
 提示、`pyerrors.h` 等不指向失败的命中）→ 单行 `::error` 注解 → 末段回显。
 buildroot 轨的 `stage-build`/`br-defconfig`/`br-uboot`/`br-build`/`ota-build`
-都用它，workflow 只传标题、日志路径与回显行数（策略），正则不再逐 step 复制。
-判据自检由 `--self-test` 给出（正例 + 缺日志/截断/回显三条负例），gate 流水线
-`scripts` job 执法；自检走 `--plain`，不产生假注解。
+与 gate 轨的 `check.sh`/`supply`/`clippy`/`alsa`/`apt-alsa` 都用它，workflow
+只传标题、日志路径与信号面（策略），正则不再逐 step 复制。
+判据自检由 `--self-test` 给出（正例 + 缺日志/截断/回显/取首条四条负例），gate
+流水线 `scripts` job 执法；自检走 `--plain`，不产生假注解。gate 的
+check.sh / supply / clippy / alsa / ota-build 各步也用同一入口，`--head` 用于
+"命令级错误在前、逐项 FAIL 在后"的日志（供给审计）。
 
 ## 点验矩阵出数入口：`matrix.sh`
 
