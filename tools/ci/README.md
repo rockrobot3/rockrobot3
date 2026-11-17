@@ -72,6 +72,9 @@ check.sh / supply / clippy / alsa / ota-build 各步也用同一入口，`--head
 `scripts` job 先跑 `--self-test`（生产/测试/extern 三类扫描面各一条夹具）再执法。
 `--report` 是**只读扩面报告**：单列测试路径未注释 unsafe 与生产面 `extern "C"`
 声明缺 SAFETY 的清单，不计基线、不改退出码——扩面观察不制造假红，清理对象进下一批。
+首份报告 6 处声明块（bridge `conn.rs`、rrd `ctl.rs`、pi `ports.rs`×2、ipc `excl.rs`、
+macaudio `ffi.rs`）已逐块核对：调用点 SAFETY 全覆盖（生产面审计 0 即证），结论＝
+**豁免**（声明面契约住调用点）；报告保留为信息项，新增声明块即须复核。
 
 ## 点验矩阵出数入口：`matrix.sh`
 
