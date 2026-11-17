@@ -3651,6 +3651,17 @@ U-Boot 预构建步与 `.binman_stamp` 回执。
 篡改镜像、非空输出、坏版本、0644 私钥四类负例均按预期非 0；`bash -n`、YAML 解析、
 `check.sh` 全量通过；CI 回执待推送后核对。
 
+**2026-11-17 Buildroot 全量 make 根因三（rootfs.ext2 容量）**：证据——run
+`43984190313` 的 `br-build` 注解：阶段 `post-build → rootfs.ext2`，
+`make: *** [fs/ext2/ext2.mk:66: /tmp/br-out/images/rootfs.ext2] Error 1`。
+Buildroot 2024.02 的 `BR2_TARGET_ROOTFS_EXT2_SIZE` 缺省 `60M`，而本档 target 树含
+glibc + Python3 + ALSA utils，60M 放不下。处置——defconfig 显式
+`BR2_TARGET_ROOTFS_EXT2_SIZE="512M"`；该值只约束中间产物 `rootfs.ext2`，
+最终 `rr_a`/`rr_b`/`rr_factory` 由 genimage 从同一 target 目录按各自
+`@XXX_SIZE@` 生成，不受此值影响。同批改失败诊断：U-Boot 预构建与全量 make 的
+注解过滤 `Error 1 (ignored)` 与 makeinfo 噪音，全量 make 注解收
+"Maybe you need to increase…"，失败时打印末 40 行。验证——下一拍全量构建回执。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按

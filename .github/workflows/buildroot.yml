@@ -197,7 +197,11 @@ jobs:
           # 诊断拍的价值就在"快失败"。
           if ! make -C /tmp/buildroot O=/tmp/br-out BR2_DL_DIR=/tmp/buildroot/dl \
               -j"$(nproc)" uboot > /tmp/br-uboot.log 2>&1; then
-            errs=$(grep -nE "error:|Error [0-9]|fatal:|No rule|Stop\.|Failed|too old" /tmp/br-uboot.log | tail -12 | tr '\n' ' ')
+            # 过滤宿主工具噪音：`Error 1 (ignored)` 与 makeinfo 版本提示不是失败点，
+            # 留在注解里会把真正的 binman/编译错误挤掉（2026-11-17 实测）。
+            errs=$(grep -nE "error:|Error [0-9]|fatal:|No rule|Stop\.|Failed|too old|binman:" /tmp/br-uboot.log \
+              | grep -v "(ignored)" | grep -v "Makeinfo is too old" | grep -v "Makeinfo is missing" \
+              | tail -12 | tr '\n' ' ')
             # dtc 版本是 scripts_dtc 失败的第一现场：缺文件/版本过旧都在这里现形。
             dtc_v=$([ -x /tmp/br-out/host/bin/dtc ] && /tmp/br-out/host/bin/dtc -v 2>&1 | head -1 || echo MISSING)
             echo "::error title=br-uboot::U-Boot 构建失败｜dtc=${dtc_v}｜${errs:0:1000}"
@@ -215,8 +219,13 @@ jobs:
           if ! make -C /tmp/buildroot O=/tmp/br-out BR2_DL_DIR=/tmp/buildroot/dl \
               -j"$(nproc)" > /tmp/br-build.log 2>&1; then
             phase=$(grep -E "^>>>" /tmp/br-build.log | tail -3 | tr '\n' ' ')
-            errs=$(grep -E "error:|Error [0-9]|fatal:|No rule|Stop\." /tmp/br-build.log | tail -8 | tr '\n' ' ')
-            echo "::error title=br-build::Buildroot 全量 make 失败｜阶段=${phase:0:300}｜错误=${errs:0:800}"
+            # 排除 `Error 1 (ignored)` 这类宿主工具噪音；把 Buildroot 自己给的
+            # 容量提示（"Maybe you need to increase…"）也收进注解。
+            errs=$(grep -E "error:|Error [0-9]|fatal:|No rule|Stop\.|Maybe you need" /tmp/br-build.log \
+              | grep -v "(ignored)" | tail -8 | tr '\n' ' ')
+            echo "::error title=br-build::Buildroot 全量 make 失败｜阶段=${phase:0:300}｜错误=${errs:0:1000}"
+            echo "---- 末 40 行 ----"
+            tail -40 /tmp/br-build.log
             exit 1
           fi
           tail -5 /tmp/br-build.log
