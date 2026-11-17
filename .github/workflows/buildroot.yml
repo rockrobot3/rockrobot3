@@ -146,6 +146,18 @@ jobs:
           cp -a base/os/buildroot/board/. /tmp/buildroot/board/
           ls /tmp/buildroot/configs/rock3_zero3_defconfig /tmp/buildroot/board/radxa-zero3/patches/
 
+      # 只缓存下载面（DL_DIR）：包源码 + custom git（U-Boot/rkbin）。输出树不缓存
+      # ——半成品 O= 树跨拍复用会把"上一拍失败的残骸"带进下一拍，是假绿的经典来源。
+      # key 含 Buildroot 版本与 defconfig 哈希；restore-keys 允许同版本配置变更后
+      # 复用仍然有效的包源码（Buildroot 对每个包自带 hash/revision 校验）。
+      - name: 恢复 Buildroot 下载缓存
+        uses: actions/cache@v4
+        with:
+          path: /tmp/buildroot/dl
+          key: br-dl-2024.02.11-${{ hashFiles('base/os/buildroot/configs/rock3_zero3_defconfig') }}
+          restore-keys: |
+            br-dl-2024.02.11-
+
       # U-Boot 源已改 custom git（defconfig 内钉 tag）：不再依赖 ftp.denx.de 的
       # tarball 下载面（runner 到该站的 443 连接超时，2026-11-16 实测）。
       - name: 交叉构建注入产物（aarch64-musl 静态）
