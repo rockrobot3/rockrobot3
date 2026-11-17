@@ -28,6 +28,8 @@ import sys
 
 KEYWORD = re.compile(r"(?<![A-Za-z0-9_])unsafe(?![A-Za-z0-9_])")
 EXTERN_C = re.compile(r'extern\s+"C"')
+# `extern "C" fn` 是实现/类型别名（契约住注册点与调用点），不算声明面
+EXTERN_FN = re.compile(r'extern\s+"C"\s+fn\b')
 ROOTS = ("base", "modules", "tools")
 SKIP = ("/tests/", "/tests.rs", "/test_support.rs", "/target/")
 
@@ -105,11 +107,11 @@ def extern_sites():
         if is_test_path(s):
             continue
         lines = p.read_text(errors="replace").splitlines()
-        bad = [
-            i + 1
-            for i, line in enumerate(lines)
-            if EXTERN_C.search(line.split("//", 1)[0]) and not has_safety(lines, i)
-        ]
+        bad = []
+        for i, line in enumerate(lines):
+            code = line.split("//", 1)[0]
+            if EXTERN_C.search(code) and not EXTERN_FN.search(code) and not has_safety(lines, i):
+                bad.append(i + 1)
         if bad:
             hits[s] = bad
     return hits
