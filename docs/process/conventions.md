@@ -3790,7 +3790,8 @@ macaudio 18 处补齐 `// SAFETY:` / `/// # Safety`（unsafe fn 用调用方契�
 （行为不变）。此后任何新增未注释 unsafe 即红。**续轮六扩面**：加 `--self-test`
 （生产/测试/extern 三类扫描面夹具）进 gate `scripts` job；`--report` 只读单列测试
 路径未注释 unsafe 与生产面 `extern "C"` 缺 SAFETY 的清单，不计基线、不改退出码
-（首份报告：测试路径 0、extern 声明 9 处待下批清理）。
+（首份报告：测试路径 0、`extern "C"` 声明块 6 处待下批评审——`extern "C" fn`
+实现/类型别名不计，契约住注册点与调用点）。
 
 ## 3 结构纪律
 
