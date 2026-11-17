@@ -264,4 +264,8 @@ jobs:
             bash -n "$f" || { echo "SYNTAX FAIL $f"; fail=1; }
           done < <(git -c core.quotepath=false ls-files '*.sh')
           [ "$fail" -eq 0 ] && echo "全部脚本语法通过"
+      # 归因脚本自身的判据也要有回执：噪音过滤/信号提取写成"看起来跑过了"
+      # 时，构建失败会更难读；自检用 --plain 不产生假注解。
+      - name: log-digest 自检（正例 + 三条负例）
+        run: bash tools/ci/log-digest.sh --self-test
 

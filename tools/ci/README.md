@@ -49,6 +49,16 @@ CI 单一事实源在 [`.github/workflows/`](../../.github/workflows)（gate / p
 本机未装 cargo-deny 时 SKIP 并明说；CI 以 `--strict` 执法，工具缺位即红（不由 SKIP
 冒充通过）。
 
+## 构建失败归因入口：`log-digest.sh`
+
+[log-digest.sh](log-digest.sh) 是 CI 失败日志的**单点归因**（2026-11-17 立）：
+信号提取（error/fatal/failed/…）→ 噪音过滤（`Error 1 (ignored)`、makeinfo 版本
+提示、`pyerrors.h` 等不指向失败的命中）→ 单行 `::error` 注解 → 末段回显。
+buildroot 轨的 `stage-build`/`br-defconfig`/`br-uboot`/`br-build`/`ota-build`
+都用它，workflow 只传标题、日志路径与回显行数（策略），正则不再逐 step 复制。
+判据自检由 `--self-test` 给出（正例 + 缺日志/截断/回显三条负例），gate 流水线
+`scripts` job 执法；自检走 `--plain`，不产生假注解。
+
 ## 点验矩阵出数入口：`matrix.sh`
 
 [matrix.sh](matrix.sh) 不改判据、只出数（0.0.5 批K H3/C12/C11）：按 architecture §12.6
