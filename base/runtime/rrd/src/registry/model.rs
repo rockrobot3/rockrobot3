@@ -155,6 +155,9 @@ pub struct Rr3HealthRow {
     /// 判定处回显 `now - last_beat_ms`（与 `Rr3Expiry.elapsed_ms` 同一条理据：
     /// 表外的人拿不到 `last_beat_ms`，少回显就只能靠掐时间，那是随机红的来源）
     pub since_beat_ms: u64,
+    /// 注册完成距 daemon 起点的毫秒数（冷启动观测；基准未定格时为 None——
+    /// 后门/单元构造路径不造假值，与降级原因 null 同口径）。
+    pub boot_ms: Option<u64>,
 }
 
 /// 心跳的三态回报（D-6）：11b 要"广播一次 running"，而"一次"必须建立在

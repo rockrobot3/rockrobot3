@@ -57,6 +57,9 @@ pub struct RrdRegistry {
     exposes: BTreeMap<String, BTreeSet<u64>>,
     next_task: u64,
     restart_base_ms: u64,
+    /// 冷启动基准（daemon 起点，同一单调毫秒轴）：`ctl.health` 的 boot_ms 列
+    /// 由 `registered_at_ms - boot_ms` 导出。None = 未定格（单元/后门路径）。
+    boot_ms: Option<u64>,
     denied_publish: u32,
     /// 崩溃连击计数（D-1）：键是 **name**，所以重注册、换 task、条目被整体替换都不影响它。
     /// 唯一写入方是 `rr3_charge`；唯一清空方是 `rr3_reg_expire` 的恢复归零段（D-2）。

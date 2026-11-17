@@ -151,7 +151,7 @@ fn rr3_ctl_health(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
                 json!({
                     "name": r.name, "task": r.src_task, "phase": r.phase.as_str(),
                     "heartbeat_ms": r.heartbeat_ms, "watchdog_ms": r.watchdog_ms,
-                    "since_beat_ms": r.since_beat_ms,
+                    "since_beat_ms": r.since_beat_ms, "boot_ms": r.boot_ms,
                 })
             })
             .collect::<Vec<Value>>()

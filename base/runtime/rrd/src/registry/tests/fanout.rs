@@ -256,6 +256,31 @@ fn health_snapshot_since_beat_never_wraps() {
     );
 }
 
+/// 冷启动观测列：boot_ms = 注册时刻 - 基准；基准未定格时为 None（不拿 0 冒充）
+#[test]
+fn health_snapshot_boot_ms_is_registration_offset() {
+    let mut r = RrdRegistry::new(1000);
+    r.rr3_reg_add(&facts("rr3-simb", 200, 1000, "always"), chan().0, 1350)
+        .unwrap();
+    assert_eq!(
+        r.rr3_reg_health(2000)[0].boot_ms,
+        None,
+        "未定格基准 = null，不拿 0 冒充零耗时"
+    );
+    r.rr3_reg_boot_set(1000);
+    assert_eq!(
+        r.rr3_reg_health(2000)[0].boot_ms,
+        Some(350),
+        "boot_ms 必须是注册时刻相对 daemon 起点的偏移"
+    );
+    // 基准晚于注册（时钟倒退/构造错序）也不得回绕成大数
+    let mut r2 = RrdRegistry::new(1000);
+    r2.rr3_reg_add(&facts("rr3-simc", 200, 1000, "always"), chan().0, 100)
+        .unwrap();
+    r2.rr3_reg_boot_set(1000);
+    assert_eq!(r2.rr3_reg_health(2000)[0].boot_ms, Some(0));
+}
+
 /// 四个阶段名与 `as_str()` 一对一：下行状态广播与集成测试按这些字面量比对
 #[test]
 fn phase_names_are_the_wire_vocabulary() {

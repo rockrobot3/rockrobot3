@@ -130,10 +130,17 @@ impl RrdRegistry {
                 heartbeat_ms: e.facts.heartbeat_ms,
                 watchdog_ms: e.facts.watchdog_ms,
                 since_beat_ms: now_ms.saturating_sub(e.last_beat_ms),
+                boot_ms: self.boot_ms.map(|b| e.registered_at_ms.saturating_sub(b)),
             })
             .collect();
         v.sort_by_key(|r| r.src_task);
         v
+    }
+
+    /// 冷启动基准定格（daemon 启动一次）：`boot_ms` 列 = 注册时刻 - 本基准。
+    /// 未定格时 health 的该列为 null（单元/后门路径），不拿 0 冒充"零耗时"。
+    pub fn rr3_reg_boot_set(&mut self, boot_ms: u64) {
+        self.boot_ms = Some(boot_ms);
     }
 
     /// 查 `rr3.call` 的被调方（M3 模块间请求路由的路由表读取口）。

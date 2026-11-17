@@ -90,6 +90,9 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     let listener = rr3_daemon_bind(cfg)?;
 
     let shared = Arc::new(Mutex::new(RrdRegistry::new(cfg.restart_base_ms)));
+    // 冷启动基准定格（ctl.health 的 boot_ms 列）：在册表的时刻轴本就是
+    // `rr3_now_ms(t0)`（相对 daemon 入口），故基准取 0——与注册行日志同一个起点。
+    rr3_lock(&shared).rr3_reg_boot_set(0);
     // G4：装配缺项的模块预降级——注册入表即 Degraded，且不被解除传播捞回
     if !boot.predegraded.is_empty() {
         rr3_lock(&shared).rr3_reg_predegrade(boot.predegraded.clone());

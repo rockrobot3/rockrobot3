@@ -10,6 +10,7 @@ impl RrdRegistry {
             exposes: BTreeMap::new(),
             next_task: rr_bus::RR3_TASK_FIRST_MODULE,
             restart_base_ms,
+            boot_ms: None,
             denied_publish: 0,
             crash_streak: BTreeMap::new(),
             owned: BTreeSet::new(),
