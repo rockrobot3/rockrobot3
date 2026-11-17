@@ -66,6 +66,8 @@ pub(crate) fn rr3_nm_read_capped(
     s: &mut (impl Read + std::os::fd::AsRawFd),
     deadline: Instant,
 ) -> Vec<u8> {
+    // SAFETY：s 在其生命周期内给出有效 raw fd；F_GETFL/F_SETFL 不带指针参数，
+    // 失败只是拿不到/设不上非阻塞位，下面的有界读循环仍按 deadline 收敛。
     let flags = unsafe { libc::fcntl(s.as_raw_fd(), libc::F_GETFL) };
     if flags >= 0 {
         unsafe { libc::fcntl(s.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) };

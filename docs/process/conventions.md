@@ -3775,6 +3775,16 @@ checkout/upload/download 升 v7/v7/v8，setup-qemu 升 v4（只换 Node 24 运�
 输入面未变；login/buildx 留发布面正回执后升）。验证——`582b4c7` / `316920e` /
 `424c754` / `6ea24c3` 的 gate/integration/platforms 回执。
 
+**2026-11-17 unsafe/FFI 注释审计门（续轮四）**：事实——生产面 122 处 `unsafe`
+关键字中 78 处没有 SAFETY 前言，集中在 esp32 板侧、macaudio 开发面与少数 Linux
+目标面；"有没有注释"此前没有任何门在管。处置——新增
+`tools/ci/unsafe_audit.py`（静态扫描，关键字匹配 + 到空行的紧邻注释段，跳过测试
+路径），允许条数住 `tools/ci/unsafe-baseline.txt`（**只降不升**，与 gate-a/gate-d/
+行数/体积门同款）；gate `scripts` job 执法。首批把 Linux 目标面 11 处补全
+（rr-ipc uart/excl、rrd daemon/ctl 的 signal/write/chmod/getgrnam/chown、
+rr-hal linux_gpio/linux_power 的 close、nmcli 的 fcntl），基线自 78 降至 **67**；
+剩余为 esp32 板侧与 macaudio，按批补注释后同批下调基线。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按

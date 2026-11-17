@@ -62,6 +62,16 @@ buildroot 轨的 `stage-build`/`br-defconfig`/`br-uboot`/`br-build`/`ota-build`
 check.sh / supply / clippy / alsa / ota-build 各步也用同一入口，`--head` 用于
 "命令级错误在前、逐项 FAIL 在后"的日志（供给审计）。
 
+## unsafe 注释审计入口：`unsafe_audit.py`
+
+[unsafe_audit.py](unsafe_audit.py) 静态扫描 `base/`、`modules/`、`tools/` 的生产面
+`.rs`（跳过测试路径），要求每个 `unsafe` 关键字上方有 `SAFETY` 前言（同一行或紧邻
+注释段，到空行为止）。允许条数住 [unsafe-baseline.txt](unsafe-baseline.txt)，
+**只降不升**：新增未注释 unsafe 即红；降到基线以下通过并提示下调。Linux 目标面
+（rr-ipc uart、rrd ctl、rr-hal linux_gpio/linux_power/nmcli）已全部带前言；剩余
+基线是 esp32 板侧与 macaudio 开发面，按批补注释后下调数字。gate 的 `scripts`
+job 执法。
+
 ## 点验矩阵出数入口：`matrix.sh`
 
 [matrix.sh](matrix.sh) 不改判据、只出数（0.0.5 批K H3/C12/C11）：按 architecture §12.6
