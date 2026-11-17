@@ -25,7 +25,11 @@ BR2_ROOTFS_POST_BUILD_SCRIPT="board/radxa-zero3/post-build.sh"
 # post-image 脚本序：先注入容量参数（genimage.cfg 在 git 里只有占位符），
 # 再跑 Buildroot 自带的 genimage.sh 生成整盘镜像。
 BR2_ROOTFS_POST_IMAGE_SCRIPT="board/radxa-zero3/post-image.sh support/scripts/genimage.sh"
-BR2_ROOTFS_POST_IMAGE_SCRIPT_ARGS="-c $(BUILD_DIR)/genimage-rock3.cfg"
+# 真符号是 BR2_ROOTFS_POST_SCRIPT_ARGS（Buildroot 的 Makefile 只读这个名字）。
+# 写成 `BR2_ROOTFS_POST_IMAGE_SCRIPT_ARGS` 会被 kconfig 当未知符号**静默忽略**，
+# 于是 genimage.sh 收不到 `-c`，post-image 阶段只报 `Error: Missing argument`
+# （2026-11-17 第 7 拍实证）。改名前先 grep Buildroot 的 system/Config.in。
+BR2_ROOTFS_POST_SCRIPT_ARGS="-c $(BUILD_DIR)/genimage-rock3.cfg"
 
 # ---- 内核：Linux 6.6 mainline + Radxa ZERO 3 板级 dts 回移 -------------------
 BR2_LINUX_KERNEL=y
