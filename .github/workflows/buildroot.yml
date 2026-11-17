@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 安装内核 dts 构建依赖
         run: |
@@ -107,7 +107,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 释放磁盘（Buildroot 全量构建）
         run: |
@@ -234,7 +234,7 @@ jobs:
 
       - name: 上传构建日志（失败时）
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: buildroot-logs
           path: |
@@ -365,7 +365,7 @@ jobs:
       # 产物留档是为了让 OTA 签名链有**真实载体**可签（tag/发布面消费），
       # 不是演示下载；保留 14 天与一次全量构建的复核窗口同档。
       - name: 上传镜像与摘要
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rock3-zero3-image
           path: |
@@ -389,8 +389,8 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: rock3-zero3-image
           path: /tmp/rr3-release
