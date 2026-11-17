@@ -3823,6 +3823,16 @@ gate `scripts` job 先 `--self-test`（好例 + 缺并发/缺超时/版本漂移
 处置——表头加 `BOOT_MS` 第七列，JSON null（基准未定格）渲染 `?`（沿用"缺失字段不得
 显示 null"口径）；单测钉数值/表头/null 三态。
 
+**2026-11-17 日志落盘序（macOS 腿红根因）**：事实——`0db37f8` platforms 的 host-macos
+红在 `rrd_reboot_recovers_previous_run_lines_from_disk`；`rr3_log` 先写 stdout 再落盘，
+用例等 stdout 的收尸行后立刻 SIGTERM，而关停 flush 线程落盘后直接 `process::exit(0)`
+不等其他线程 ⇒ 文件里可能缺这行，第二世回填判据偶发失败（时间窗窄，本机 15 次未复现，
+macOS runner 时序更紧）。处置——`rr3_log` 改**落盘先于 stdout**（"可观察即已持久"；
+落盘失败仍只降级自身）；host-macos 失败注解补 `panicked at` 与末 12 行（只抓 test FAILED
+等于只报门牌号）。本机 e2e_profile 5/5、该用例重复 20 次全绿。同批把日志面自
+`lib.rs` 结构化拆到 `src/log.rs`（修序后 lib 触到 600 行门；纯移位，`lib.rs` re-export
+保持 `crate::rr3_log*` 路径零改动——lib 86 行 / log 532 行）。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按

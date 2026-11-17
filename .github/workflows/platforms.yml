@@ -315,8 +315,14 @@ jobs:
         run: |
           set -o pipefail
           if ! cargo test --workspace 2>&1 | tee /tmp/mac.log; then
-            fails=$(grep -E "^test .* FAILED|^error(\[|:)" /tmp/mac.log | head -4 | tr '\n' ' ')
+            # 失败面要能定位到断言：test 行 + panic 位置 + 末 12 行（断言文案常在
+            # panic 行的下一行，只抓 "test ... FAILED" 等于只报门牌号不报原因）。
+            fails=$(grep -E "^test .* FAILED|^error(\[|:)|panicked at" /tmp/mac.log \
+                    | head -6 | tr '\n' ' ')
             echo "::error title=host-macos::${fails:0:900}"
+            while IFS= read -r line; do
+              [ -n "$line" ] && echo "::error title=host-macos-tail::${line:0:900}"
+            done < <(tail -12 /tmp/mac.log)
             exit 1
           fi
       - name: 独立工程测试（门禁 ④/⑥ 同口径；esp 条件工程除外）
