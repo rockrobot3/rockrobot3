@@ -3640,6 +3640,17 @@ U-Boot 预构建步与 `.binman_stamp` 回执。
 两行，与 Buildroot 默认骨架同口径。验证——`sh -n` 通过；镜像内 `/etc/fstab` 随下一拍
 全量构建回执复核（板上启动实录仍归 M1 硬件到位后）。
 
+**2026-11-17 OTA bundle 机制单点 + CI 门（ADR-0028 施工前半）**：事实——ADR-0028 的
+组包/签名/复验顺序若写在 workflow 内联 shell，只能在打标签那天第一次真跑；
+`rr3-ota-ctl` 的签名链已有单测，但"规范名 → manifest → 签名 → 公钥复验 → 摘要"这条
+发布顺序没有可本地复跑的载体。处置——新增
+[`tools/deploy/ota-bundle.sh`](../../tools/deploy/ota-bundle.sh)（输出目录非空即拒、
+版本只认 `major.minor.patch`、私钥不复制不打印；产物含四件 + `checksums.txt` +
+`bundle.txt`），`gate.yml` 增 `ota-bundle` job：1MiB 随机件走正例，并断三条负例
+（篡改镜像 / 非空输出目录 / 坏版本）。验证——本地正例六件齐、摘要四行；
+篡改镜像、非空输出、坏版本、0644 私钥四类负例均按预期非 0；`bash -n`、YAML 解析、
+`check.sh` 全量通过；CI 回执待推送后核对。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
