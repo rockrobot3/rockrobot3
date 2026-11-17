@@ -3620,6 +3620,18 @@ artifact（14 天）。验证——YAML/脚本语法门通过、镜像名解析�
 段，历史文字不改；M3 的"真麦/板上 ALSA 实录"与 M5 的"真硬件动作证据"敞口维持，不因
 ADR 或 CI 门存在而改判。验证——`check.sh` ⑤ 文档门通过（ADR-0027 相对链接可解析）。
 
+**2026-11-17 Buildroot U-Boot 根因二（binman Error 103）**：证据——第五拍（run
+`43979037538`）的 U-Boot 预构建失败，注解 `br-uboot` 给出 `dtc=1.7.0` 与
+`.binman_stamp Error 103`；其余行是 host-gnutls 构建噪音（`libhogweed` 的 ignored
+Error 与 makeinfo 版本提示），不是失败点。根因——RK3566 的 DDR 初始化 TPL 与 BL31
+不在 U-Boot 源码内，defconfig 未启用 `rockchip-rkbin`，binman 组 `idbloader.img`
+与 `u-boot.itb` 时找不到必需 blob。处置——补
+`BR2_PACKAGE_ROCKCHIP_RKBIN`（TPL=`bin/rk35/rk3566_ddr_1056MHz_v1.18.bin`、
+BL31=`bin/rk35/rk3568_bl31_v1.43.elf`，文件名按 Buildroot 2024.02.11 钉住的 rkbin
+提交 `b4558da` 实查）与 `BR2_TARGET_UBOOT_NEEDS_ROCKCHIP_RKBIN=y`；不走源码编译
+ATF 的第二条路（rkbin 已含 BL31，双来源会造第二个真值）。验证——下一拍全量构建的
+U-Boot 预构建步与 `.binman_stamp` 回执。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
