@@ -213,9 +213,16 @@ fn rr3_hs_admit(
     // 硬规矩：锁结果先 `let` 绑再 `match`——Guard 临时量不得延寿到 Err 臂的
     // rr3_refuse（那边要取另一把锁），与 rr3_conn_finish 同形。
     let task = rr3_hs_register(ctx, facts, fan_tx, out, reported_task, req_id)?;
+    // boot_ms = 本连接注册完成距 daemon 起点的毫秒数。冷启动基线（P2 观测项）
+    // 只需要每模块一行就能出分布：首份注册快照的耗时 = 首个 boot_ms，全就绪
+    // 看最后一个——不为此另立状态机或采数接口。
     rr3_log(&format!(
-        "注册 {} task={task} hb={}ms wd={}ms policy={}",
-        facts.name, facts.heartbeat_ms, facts.watchdog_ms, facts.restart_policy
+        "注册 {} task={task} hb={}ms wd={}ms policy={} boot_ms={}",
+        facts.name,
+        facts.heartbeat_ms,
+        facts.watchdog_ms,
+        facts.restart_policy,
+        ctx.t0.elapsed().as_millis()
     ));
     // 应答与广播的先后不确定（两条线程两个写点），测试按类型挑帧，不按序号
     rr3_write(
