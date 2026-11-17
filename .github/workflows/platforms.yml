@@ -5,7 +5,11 @@ name: platforms
 on:
   push:
     branches: [main, "dev/**"]
+    # 纯文档改动跳过平台面：交叉链/esp 工具链/宿主等价对 docs/** 与 *.md 零敏感
+    #（文档门 ⑤ 在 gate）（2026-11-17 结构治理）。
+    paths-ignore: ["docs/**", "**.md"]
   pull_request:
+    paths-ignore: ["docs/**", "**.md"]
   workflow_dispatch:
   # UTC 周日 18:00 = 北京周一 02:00：重工具链档（esp）与全平台固定跑一轮。
   schedule:
@@ -303,12 +307,11 @@ jobs:
             exit 1
           }
 
-  # 门禁之外的 lint 拆步：fmt 与 clippy 各自独立失败，一步红即整 job 红，
-  # 失败归因不用翻混合日志。绿色基线 = 提交 fd0942c（rustfmt 全仓归一 + clippy 清零）。
   # 宿主等价面（macOS）：本地开发环境与 CI 的编译器/链接器/系统库不同，
-  # "本地绿、CI 红"的另一半来自宿主差异。本 job 在 macOS 上把 workspace 全量测试
-  # 与全部独立工程的测试按门禁 ④/⑥ 同口径跑一遍——它不替代 ubuntu 上的门禁，
-  # 只回答"换宿主后行为是否一致"。esp 条件工程（xtensa/espidf）按门禁同口径排除。
+  # "本地绿、CI 红"的另一半来自宿主差异。按门禁 ④/⑥ 同口径拆两腿并行跑
+  # （2026-11-17 治理：串行集中曾是平台面最长尾，macOS runner 又慢）——
+  # 不替代 ubuntu 上的门禁，只回答"换宿主后行为是否一致"。esp 条件工程
+  #（xtensa/espidf）按门禁同口径排除。
   host-macos:
     runs-on: macos-latest
     timeout-minutes: 45
@@ -335,6 +338,21 @@ jobs:
             done < <(tail -12 /tmp/mac.log)
             exit 1
           fi
+
+  host-macos-independent:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # 独立工程清单共写仓根 target-dir（/tmp/rr3-build，见 .cargo/config.toml）：
+          # cache-all-crates 把共享依赖一并缓存，否则模块依赖每拍冷编。
+          workspaces: base/runtime
+          cache-all-crates: "true"
       - name: 独立工程测试（门禁 ④/⑥ 同口径；esp 条件工程除外）
         run: |
           set -o pipefail

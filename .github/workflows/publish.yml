@@ -51,7 +51,10 @@ jobs:
           toolchain: "1.100.0"
       - uses: Swatinem/rust-cache@v2
         with:
+          # 十件产物跨九个清单（runtime + 六模块 + rrctl + ota-ctl + rr3-pack）
+          # 共写 /tmp/rr3-build：全量缓存共享依赖，单靠 workspace 缓存会冷编模块面。
           workspaces: base/runtime
+          cache-all-crates: "true"
 
       - name: 计算发布标签
         id: meta
