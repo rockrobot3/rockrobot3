@@ -91,4 +91,10 @@ BR2_PACKAGE_PYTHON3=y
 # rootfs.ext4 生成（两槽内容在出厂烧录时一致，升级后才分叉）。
 BR2_TARGET_ROOTFS_EXT2=y
 BR2_TARGET_ROOTFS_EXT2_4=y
+# Buildroot 2024.02 的缺省容量是 60M；本档目标树含 glibc + Python3 + ALSA
+# utils，60M 放不下——mkfs.ext4 直接失败（2026-11-17 实测，ext2.mk 的
+# "Maybe you need to increase the filesystem size" 提示）。
+# 512M 只是**中间产物** rootfs.ext2 的容量；最终 rr_a/rr_b/rr_factory 由
+# genimage 从同一 target 目录按各自 @XXX_SIZE@ 生成，不受此值约束。
+BR2_TARGET_ROOTFS_EXT2_SIZE="512M"
 BR2_PACKAGE_HOST_GENIMAGE=y
