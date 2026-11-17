@@ -86,10 +86,99 @@ def jobs_of(text):
     return jobs
 
 
+def trigger_block(lines, i):
+    """`  push:` 之后的子块（缩进 ≥4 的行）。"""
+    out = []
+    for line in lines[i + 1 :]:
+        if line.strip() and not line.startswith("    "):
+            break
+        out.append(line)
+    return out
+
+
+def trigger_problems(text, rel):
+    """触发面：必须有 on:；push 必须收窄到 branches/tags；publish 必须吃 tag。"""
+    bad = []
+    if not re.search(r"^on:\s*$", text, re.M):
+        bad.append(f"{rel} 缺顶层 on: 触发面")
+        return bad
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.rstrip() != "  push:":
+            continue
+        block = trigger_block(lines, i)
+        if not any(re.match(r"^\s+(branches|tags):", b) for b in block):
+            bad.append(f"{rel} push 触发缺 branches/tags 范围（全分支推送会白烧 CI）")
+        if rel.name == "publish.yml" and not any(
+            re.match(r"^\s+tags:", b) for b in block
+        ):
+            bad.append(f"{rel} 发布面必须由 tag 触发（push.tags 缺失）")
+    return bad
+
+
+def needs_of(block):
+    """job 块的 needs 列表（支持内联 [a, b] / 标量 / 多行 - a）。"""
+    for idx, line in enumerate(block):
+        m = re.match(r"^\s{4}needs:\s*(.*)$", line)
+        if not m:
+            continue
+        rest = m.group(1).strip()
+        if rest.startswith("["):
+            return [x.strip().strip("'\"") for x in rest.strip("[]").split(",") if x.strip()]
+        if rest:
+            return [rest.strip("'\"")]
+        out = []
+        for nxt in block[idx + 1 :]:
+            m2 = re.match(r"^\s{6}-\s*(\S+)", nxt)
+            if not m2:
+                break
+            out.append(m2.group(1).strip("'\""))
+        return out
+    return []
+
+
+def graph_problems(rel, jobs):
+    """needs 图：引用必须存在，且不得成环。"""
+    names = {n for n, _ in jobs}
+    graph = {n: needs_of(b) for n, b in jobs}
+    bad = []
+    for n, deps in graph.items():
+        for d in deps:
+            if d not in names:
+                bad.append(f"{rel} job {n} needs 指向不存在的 job {d}")
+    if cycle := graph_cycle(graph):
+        bad.append(f"{rel} needs 成环: {' -> '.join(cycle)}")
+    return bad
+
+
+def graph_cycle(graph):
+    state, stack = {}, []
+
+    def dfs(n):
+        if state.get(n) == 1:
+            return stack[stack.index(n) :] + [n]
+        if state.get(n) == 2:
+            return None
+        state[n] = 1
+        stack.append(n)
+        for d in graph.get(n, []):
+            if found := dfs(d):
+                return found
+        stack.pop()
+        state[n] = 2
+        return None
+
+    for n in graph:
+        if found := dfs(n):
+            return found
+    return None
+
+
 def workflow_problems(path, root):
     text = path.read_text(encoding="utf-8")
     rel = path.relative_to(root)
     bad = uses_problems(text, str(rel))
+    bad.extend(trigger_problems(text, rel))
     if not re.search(r"^concurrency:\s*$", text, re.M):
         bad.append(f"{rel} 缺顶层 concurrency（同 ref 并发组）")
     jobs = jobs_of(text)
@@ -98,6 +187,7 @@ def workflow_problems(path, root):
     for name, block in jobs:
         if not any(re.match(r"^\s{4}timeout-minutes:", l) for l in block):
             bad.append(f"{rel} job {name} 缺 timeout-minutes")
+    bad.extend(graph_problems(rel, jobs))
     return bad
 
 
@@ -122,14 +212,23 @@ def self_test():
         wf = root / ".github" / "workflows"
         wf.mkdir(parents=True)
         (wf / "good.yml").write_text(
-            "name: good\nconcurrency:\n  group: g\njobs:\n"
+            "name: good\non:\n  push:\n    branches: [main]\n"
+            "concurrency:\n  group: g\njobs:\n"
             "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
             "    steps:\n      - uses: actions/checkout@v7\n",
             encoding="utf-8",
         )
         (wf / "bad.yml").write_text(
-            "name: bad\njobs:\n  b:\n    runs-on: ubuntu-latest\n"
+            "name: bad\non:\n  push:\njobs:\n  b:\n    runs-on: ubuntu-latest\n"
+            "    needs: [nope]\n"
             "    steps:\n      - uses: actions/checkout@v5\n",
+            encoding="utf-8",
+        )
+        (wf / "cycle.yml").write_text(
+            "name: cyc\non:\n  push:\n    branches: [main]\n"
+            "concurrency:\n  group: c\njobs:\n"
+            "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    needs: [b]\n"
+            "  b:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    needs: [a]\n",
             encoding="utf-8",
         )
         bad = audit(root)
@@ -138,6 +237,9 @@ def self_test():
         ("缺 concurrency 被抓", any("concurrency" in b for b in bad)),
         ("缺 timeout 被抓", any("timeout-minutes" in b for b in bad)),
         ("版本漂移被抓", any("版本漂移" in b for b in bad)),
+        ("needs 悬空被抓", any("不存在的 job" in b for b in bad)),
+        ("needs 成环被抓", any("成环" in b for b in bad)),
+        ("push 无范围被抓", any("branches/tags" in b for b in bad)),
         ("好例零误报", not any("good.yml" in b for b in bad)),
     ]
     for name, ok in cases:
