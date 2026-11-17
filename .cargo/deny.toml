@@ -1,14 +1,15 @@
-# 供应链策略唯一真源（2026-11-16 建）：依赖许可证、RustSec 安全公告、来源白名单
-# 与通配依赖。执法入口是 CI `gate.yml` 的 `supply` job，脚本
-# `tools/ci/supply-audit.sh` 负责枚举工程根并逐项调用 cargo-deny。
+# 供应链策略唯一真源：依赖许可证、RustSec 安全公告、来源白名单与通配依赖。
+# 执法入口是 CI `gate.yml` 的 `supply` job，脚本 `tools/ci/supply-audit.sh`
+# 负责枚举工程根并逐项调用 cargo-deny。
 #
 # 判据只约束第三方依赖：本仓全部工程 `license = "UNLICENSED"` 且 `publish = false`，
 # 属私有件，不参与对外分发面（licenses.private 显式忽略）。
 #
 # 许可证策略是**显式白名单**：新增许可证必须改本文件（可评审、可回滚），不用
 # "OSI/FSF 自动放行"这类隐式扩展——隐式规则会让依赖树里的许可证变化绕过评审。
-# 白名单依据 2026-11-16 全工程根依赖实测（MIT/Apache-2.0/ISC/Unicode-3.0/
-# BSD-3-Clause/Unlicense/CDLA-Permissive-2.0 七类，无 copyleft 依赖）。
+# 白名单覆盖当前全工程根依赖树的七类许可证（MIT/Apache-2.0/ISC/Unicode-3.0/
+# BSD-3-Clause/Unlicense/CDLA-Permissive-2.0，无 copyleft 依赖）；依赖树新增
+# 许可证类别时，先在本表登记并随评审入库。
 [licenses]
 # 私有件（publish = false）不参与许可证判据
 private = { ignore = true }
