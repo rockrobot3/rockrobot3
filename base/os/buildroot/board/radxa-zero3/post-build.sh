@@ -153,10 +153,15 @@ else
 	echo "post-build.sh: 警告：RR3_REPO_ROOT 未设且仓根定位失败，装载真值集未随装（基-25）" >&2
 fi
 
-# ---- 2. fstab：/var/run tmpfs + data / staging 挂载 --------------------------
+# ---- 2. fstab：内核伪文件系统 + /var/run tmpfs + data / staging 挂载 ----------
+# sysfs/devtmpfs 必须显式列出：本轨是 BusyBox init，唯一的伪文件系统挂载器是
+# inittab 的 `mount -a`（读本文件）。缺 sysfs 时 /sys 为空（模块拿不到设备树与
+# class 节点）；devtmpfs 若内核未开自动挂载，/dev 下连 null 都没有。
 cat > "$TARGET/etc/fstab" <<'EOF'
 # <fs>                  <mountpoint>    <type>  <opts>                  <dump> <pass>
 proc                    /proc           proc    defaults                0      0
+sysfs                   /sys            sysfs   defaults                0      0
+devtmpfs                /dev            devtmpfs mode=0755,nosuid       0      0
 devpts                  /dev/pts        devpts  defaults,gid=5,mode=620 0      0
 tmpfs                   /dev/shm        tmpfs   mode=0777               0      0
 tmpfs                   /tmp            tmpfs   mode=1777               0      0
