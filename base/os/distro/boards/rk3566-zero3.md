@@ -26,7 +26,9 @@ bash tools/ci/rk3566-onboard-check.sh --strict # 发布前：轴档案也必须�
 ### A. Buildroot 保底轨（出厂镜像）
 
 1. 由 CI `buildroot` 工作流产出的 aarch64 镜像（含 `root=LABEL=rr_a` 的
-   `extlinux.conf` 与 `rr3-ota-ctl`）。
+   `extlinux.conf` 与 `rr3-ota-ctl`）。**2026-11-17 实况**：全量镜像已产出
+   （run `44035094772`，artifact `rock3-zero3-image` 265,842,537 B），
+   e2fsck/分区标签/rrd/S99rrd/fstab/FIT 内容断言全过；实烧仍待板。
 2. 按 [flash-maskrom.md](../../buildroot/board/radxa-zero3/flash-maskrom.md)
    用 rkdeveloptool 进 maskrom 烧录。
 3. 串口（默认 1500000 8N1）应出现 U-Boot 与内核日志；登录后确认：
