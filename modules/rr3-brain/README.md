@@ -11,7 +11,7 @@ modules/rr3-brain/
 ├── module.toml          ← manifest（type = "brain", lang = "rust"；entry = target/debug 同名二进制）
 ├── composite.toml       ← 组合件装配清单（dialog ⊗ asr ⊗ llm ⊗ tts）
 ├── config.toml          ← 运行参数；密钥不落盘（env: 前缀 → 环境变量；裸名 → 面板 secrets）
-├── Cargo.toml           ← 模块 crate（workspace 成员，六模块同形）
+├── Cargo.toml           ← 模块 crate（独立 workspace，六模块同形）
 ├── atoms/               ← 原子件五件套（atom.toml + assemble.toml + <名>.rs + mech.rs + private.rs）
 │   ├── dialog/          ← utterance 边界状态机（onset 起轮 / offset+时长双判停；预滚环防短句削头）
 │   ├── asr/             ← Rr3AsrClient（SiliconFlow /v1/audio/transcriptions，multipart + WAV 头仓内自建）

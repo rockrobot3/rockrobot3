@@ -15,7 +15,7 @@
 
 ## Introduction
 
-Rockrobot-3 is a robot system base.
+Rockrobot 3 is a robot system base.
 
 Swapping the chip on the same robot body enables cross-chip-platform deployment in as little as **3 days**, with no code changes.
 
