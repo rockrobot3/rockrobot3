@@ -3787,7 +3787,10 @@ rr-hal linux_gpio/linux_power 的 close、nmcli 的 fcntl），基线自 78 降�
 `commands.rs`/`state.rs`/`link.rs` 与 `espidf-sentinel`/`espidf-std-hello` 共 49 处、
 macaudio 18 处补齐 `// SAFETY:` / `/// # Safety`（unsafe fn 用调用方契约形式），
 **基线降至 0**；`commands.rs` 与两处状态行的内联 unsafe 顺带提为带前言的局部变量
-（行为不变）。此后任何新增未注释 unsafe 即红。
+（行为不变）。此后任何新增未注释 unsafe 即红。**续轮六扩面**：加 `--self-test`
+（生产/测试/extern 三类扫描面夹具）进 gate `scripts` job；`--report` 只读单列测试
+路径未注释 unsafe 与生产面 `extern "C"` 缺 SAFETY 的清单，不计基线、不改退出码
+（首份报告：测试路径 0、extern 声明 9 处待下批清理）。
 
 ## 3 结构纪律
 

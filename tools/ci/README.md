@@ -69,7 +69,9 @@ check.sh / supply / clippy / alsa / ota-build 各步也用同一入口，`--head
 注释段，到空行为止；`unsafe fn` 的 `/// # Safety` 调用方契约同权）。允许条数住
 [unsafe-baseline.txt](unsafe-baseline.txt)，**只降不升**：新增未注释 unsafe 即红。
 基线现为 **0**（Linux 目标面、esp32 板侧与 macaudio 开发面均已补前言）；gate 的
-`scripts` job 执法。
+`scripts` job 先跑 `--self-test`（生产/测试/extern 三类扫描面各一条夹具）再执法。
+`--report` 是**只读扩面报告**：单列测试路径未注释 unsafe 与生产面 `extern "C"`
+声明缺 SAFETY 的清单，不计基线、不改退出码——扩面观察不制造假红，清理对象进下一批。
 
 ## 点验矩阵出数入口：`matrix.sh`
 
