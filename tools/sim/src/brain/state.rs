@@ -523,8 +523,20 @@ fn rr3_log_tail(seen: &str) -> String {
 }
 
 /// 日志里首个含 `needle` 的行（无则 None）。
-fn rr3_log_find(s: &str, needle: &str) -> Option<String> {
-    s.lines().find(|l| l.contains(needle)).map(str::to_string)
+/// 完整行查找：**只认以换行收尾的行**——写一半的末行可能缺后半段字段
+/// （真实缺陷：brain 分次写「对话轮完成」行，探测在 `tts_pcm_ms=` 处命中，
+/// `actions=1` 尚未落盘，演练按"动作数不是 1"误判）。
+pub(crate) fn rr3_log_find(s: &str, needle: &str) -> Option<String> {
+    for chunk in s.split_inclusive('\n') {
+        if !chunk.ends_with('\n') {
+            continue;
+        }
+        let line = chunk.trim_end_matches('\n');
+        if line.contains(needle) {
+            return Some(line.to_string());
+        }
+    }
+    None
 }
 
 /// 读一次日志并找 needle；未命中时把最新全文存进 `seen`（超时尾部用）。

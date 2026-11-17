@@ -5,6 +5,18 @@ use std::path::Path;
 
 use crate::drill::{RR3_SIM_MODULE_A, RR3_SIM_MODULE_B, RR3_SIM_MODULE_BRAIN};
 
+/// 日志判据只认完整行：写一半的末行不得提前返回（否则字段缺半截误判）。
+#[test]
+fn log_find_ignores_partial_tail() {
+    let partial = "启动\n对话轮完成: trace=1 tts_pcm_ms=";
+    assert_eq!(rr3_log_find(partial, "对话轮完成"), None);
+    let full = "启动\n对话轮完成: trace=1 actions=1\n";
+    assert_eq!(
+        rr3_log_find(full, "对话轮完成").as_deref(),
+        Some("对话轮完成: trace=1 actions=1")
+    );
+}
+
 /// 钉住"演练用的名字/主题必须真实在契约里"——契约改名时这里红，不是演练跑到一半红
 #[test]
 fn brain_sim_identities_exist_in_the_real_contract() {
