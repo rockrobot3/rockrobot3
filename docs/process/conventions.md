@@ -3690,6 +3690,13 @@ usage；失败注解的末 12 行点明了 `post-image.sh` 已注入配置、`ge
 红，只会让参数凭空消失。处置——改用真符号 `BR2_ROOTFS_POST_SCRIPT_ARGS`，并在
 defconfig 就地注明"改名先 grep Buildroot 的 system/Config.in"。验证——下一拍全量构建。
 
+**2026-11-17 Buildroot 全量 make 根因六（genimage `label` 位置）**：证据——第 8 拍
+（run `44012093158`）genimage 报 `genimage-rock3.cfg:26: no such option 'label'`。
+根因——`label` 是 genimage **文件系统子段**的选项（`vfat_opts` / `ext_opts`），
+`image` 公共段（`image_common_opts`）不认；`boot.vfat` 的 `label = "boot"` 原写在
+`vfat {}` 块外。处置——把 label 移入 `vfat {}`；四个 ext4 段的 label 本就在
+`ext4 {}` 内，不动。验证——下一拍全量构建。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
