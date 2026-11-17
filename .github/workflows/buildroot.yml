@@ -334,7 +334,20 @@ jobs:
             fi
             echo "PASS  $f.ext4 e2fsck + label=$got"
           done
-          fstab=$("$host/sbin/debugfs" -R "cat /etc/fstab" "$d/rr_a.ext4" 2>/dev/null || true)
+          if [ ! -x "$host/sbin/debugfs" ]; then
+            echo "::error title=br-tool::host debugfs 缺席（host-e2fsprogs 未装 debugfs）"
+            exit 1
+          fi
+          # rootfs 内容断言：只查 fstab 不够——空文件系统也可能有标签。
+          # /usr/bin/rrd 与 S99rrd 必须真在 rr_a.ext4 里，才证明 srcpath 生效。
+          for p in /usr/bin/rrd /etc/init.d/S99rrd; do
+            if ! "$host/sbin/debugfs" -R "stat $p" "$d/rr_a.ext4" 2>&1 | grep -q 'Inode:'; then
+              echo "::error title=br-rootfs::rr_a.ext4 缺 $p（rootfs 未装入）"
+              exit 1
+            fi
+            echo "PASS  rr_a.ext4 含 $p"
+          done
+          fstab=$("$host/sbin/debugfs" -R "cat /etc/fstab" "$d/rr_a.ext4" 2>&1 || true)
           for k in sysfs devtmpfs "LABEL=rr_data" "LABEL=rr_staging"; do
             if ! printf '%s\n' "$fstab" | grep -q "$k"; then
               echo "::error title=br-fstab::rr_a.ext4 的 /etc/fstab 缺 '$k'"

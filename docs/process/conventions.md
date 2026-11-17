@@ -3724,6 +3724,18 @@ genimage `label` 位置 → 空分区 `empty` / `use-mke2fs`。
 sysfs/devtmpfs/rr_data/rr_staging、`fdtdump` 断言 `atf-bl31`、idbloader 体量下限。
 验证——下一次全量构建回执；失败即红，不以"genimage 成功"代替内容真值。
 
+**2026-11-17 空 rootfs 根因（genimage `--rootpath` 空旷）**：证据——第 11 拍
+（run `44026993488`）内容断言 `br-fstab` 报 `rr_a.ext4` 的 `/etc/fstab` 缺 sysfs；
+同拍 e2fsck 与 dumpe2fs 标签**全过**。根因——Buildroot 的 `genimage.sh` 给 genimage
+传的 `--rootpath` 是**空临时目录**（避免整树复制），ext4 段只写
+`mountpoint = "/"` 时 genimage 从空 rootpath 生成**空文件系统**：标签对、e2fsck 过、
+`/etc/fstab` 与 rrd 全都不在。这就是"绿但不对"的典型形态——genimage 成功 + 标签过
+不等于 rootfs 装进去了。处置——`rr_a`/`rr_b`/`rr_factory` 改用
+`srcpath = "@TARGET_DIR@"`，由 `post-image.sh` 注入真实 target 目录（路径白名单校验，
+残留占位符全量点名）；`rr_staging`/`data` 保持 `empty = true`。内容断言补
+`/usr/bin/rrd` 与 `/etc/init.d/S99rrd` 存在性（`debugfs stat`）与 debugfs 工具在位检查。
+验证——下一拍内容断言全绿。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
