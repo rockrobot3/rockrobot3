@@ -88,6 +88,25 @@ qemu v3 残留并修复）。**触发与依赖图**：`push:` 必须收窄到 `b
 不存在的 job、不得成环。`--self-test` 给好例 + 缺并发/缺超时/版本漂移/needs 悬空/
 needs 成环/push 无范围六条负例，gate 的 `scripts` job 先自检后执法。
 
+## 平台覆盖矩阵（2026-11-17 首立，按 workflow 事实源抄录）
+
+"每个芯片平台都在流水线里验证"的对照表。**编译腿**只证明目标 ISA 能构建，
+**执行腿**才证明产物在目标环境跑得起来；两者都缺的格子必须如实留空。
+
+| 平台 | 编译/构建腿 | 目标环境执行 | 契约字节面 | 发布制品 | 缺口（不冒领） |
+|---|---|---|---|---|---|
+| 英特尔 / AMD（x86_64） | gate + integration 全量；`cross` x86_64 | 原生直跑 `rrd` / `rr3-ctl` | `ipct003_dump` golden | `publish` linux/amd64 镜像 | 工控真板未上（A 轨） |
+| 瑞芯微 RK3566/RK3588（aarch64） | `cross` aarch64-musl 七件；`buildroot` 全量镜像（aarch64） | alpine arm64 容器真跑 | 容器内 `ipct003_dump` golden | buildroot 镜像 artifact；`publish` linux/arm64 | 实烧/串口 shell 不在 CI |
+| 进迭时空 K1/K3（riscv64） | `cross` riscv64-gnu 七件 | `qemu-riscv64` 真跑 | qemu 内 golden 对拍（第 5 路编译期 const 已接） | **无**（publish 仅 amd64/arm64） | 真板环境与发布面缺 |
+| ESP32（classic） | `esp32-gates`：periph-base / uart-echo / espidf-std / sentinel / act-sense | **无运行腿**（xtensa 无 qemu，运行归真板） | 编译期 const + `ipct003` 第④路 | tag release 固件 ELF（`firmware` job） | 真板运行证据不在 CI |
+| ESP32-S3 | `esp32-gates`：periph-base S3 / act-sense S3 | **无运行腿** | xtensa 编译期 | **无**（firmware 仅 classic） | 真板运行与发布面缺 |
+| 宿主 Windows x86_64 | `host-windows`：workspace check + test | 原生 | 由测试面覆盖 | — | 独立工程门未在 Windows 跑 |
+| 宿主 macOS | `host-macos`：workspace 全量测试 + 独立工程测试 | 原生 | 由测试面覆盖 | — | esp 条件工程按门禁口径排除 |
+
+**已知缺口四条**（下一轮补腿对象，不冒充已覆盖）：① riscv64 无发布镜像；
+② S3 无固件 release 资产；③ 三块真板（esp32 / rock3 / spacemit）的运行证据不属 CI
+能力，归板上批次；④ Windows 只跑 workspace 门，独立工程（modules/tools）未覆盖。
+
 ## 点验矩阵出数入口：`matrix.sh`
 
 [matrix.sh](matrix.sh) 不改判据、只出数（0.0.5 批K H3/C12/C11）：按 architecture §12.6
