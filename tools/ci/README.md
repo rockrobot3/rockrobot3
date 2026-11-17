@@ -76,6 +76,16 @@ check.sh / supply / clippy / alsa / ota-build 各步也用同一入口，`--head
 macaudio `ffi.rs`）已逐块核对：调用点 SAFETY 全覆盖（生产面审计 0 即证），结论＝
 **豁免**（声明面契约住调用点）；报告保留为信息项，新增声明块即须复核。
 
+## 流水线结构审计入口：`workflows_audit.py`
+
+[workflows_audit.py](workflows_audit.py) 把 CI 自身的结构面纳入门禁（2026-11-17 立）：
+每个 workflow 必须有顶层 `concurrency:`、每个 job 必须有 `timeout-minutes:`、
+第三方 `uses:` 必须命中 `ACTION_MATRIX`（`checkout@v7`、`upload-artifact@v7`、
+`download-artifact@v8`、`cache@v4`、`setup-qemu@v4` 等）；本地 action（`./`）不查。
+**版本升级 = 显式改矩阵**，同一工作流两版 action 并存即红（首查抓到 ipct003 的
+qemu v3 残留并修复）。`--self-test` 给好例 + 缺并发/缺超时/版本漂移三条负例，
+gate 的 `scripts` job 先自检后执法。
+
 ## 点验矩阵出数入口：`matrix.sh`
 
 [matrix.sh](matrix.sh) 不改判据、只出数（0.0.5 批K H3/C12/C11）：按 architecture §12.6

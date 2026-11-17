@@ -3793,6 +3793,13 @@ macaudio 18 处补齐 `// SAFETY:` / `/// # Safety`（unsafe fn 用调用方契�
 （首份报告：测试路径 0、`extern "C"` 声明块 6 处待下批评审——`extern "C" fn`
 实现/类型别名不计，契约住注册点与调用点）。
 
+**2026-11-17 流水线结构审计门（续轮七）**：事实——五条 workflow 的 21 个 job 均有
+`timeout-minutes` 与顶层 `concurrency`，但 action 版本靠人记：platforms 的 ipct003
+仍用 `setup-qemu@v3`，而 cross 腿已升 v4（同一工作流两版并存），"升级漏一拍"
+没有任何门在管。处置——新增 `tools/ci/workflows_audit.py`（文本扫描：并发组 /
+job 超时 / `ACTION_MATRIX` 版本矩阵；升级走显式提交改表），ipct003 的 qemu 升 v4；
+gate `scripts` job 先 `--self-test`（好例 + 缺并发/缺超时/版本漂移三负例）后执法。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
