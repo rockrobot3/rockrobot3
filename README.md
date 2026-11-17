@@ -54,7 +54,6 @@ rockrobot3/
 ├── profiles/     # Model configuration: chip, peripherals, pins, enabled modules
 ├── hardware/     # Wiring configuration: device-to-pin mapping
 ├── tools/        # Check scripts, module generator, simulation tools (see tools/README.md)
-├── web/          # Project website (static pages)
 └── docs/         # Architecture, development, and status documentation
 ```
 
