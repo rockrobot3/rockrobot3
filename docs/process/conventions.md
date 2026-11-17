@@ -3857,6 +3857,9 @@ macaudio 18 处补齐 `// SAFETY:` / `/// # Safety`（unsafe fn 用调用方契�
   整树删除在案（0.0.4 批F）+ 工作树残留 `legacy/firmware-c/sdkconfig` 清盘 +
   `!legacy/` 白名单与 ESP-IDF 段忽略规则摘除；本条目转为历史口径存档，原文不改。
 - 状态与进度只写 `docs/status.md`；ADR 只在现状注记里记"决策落地到哪一步"的一句话指针；不写散落的周报式文档
+- `docs/status.md` 只写现状；「在制品」历史原文已迁 [status-history.md](../status-history.md)
+  （2026-11-17 结构化拆分，逐字节照搬）：**历史段只增不改、不回流快照**，现状变更只改
+  status.md 并在快照指针处留一句归属说明
 - `docs/architecture/architecture.md` 是唯一架构图；目录树变更必须同步其 §3
 - `docs/reference/` 三件的代码定位一律用**符号名锚定**（如 `registry.rs 的 rr3_reg_beat`、
   `Rr3Envelope 的 seq 字段`），**不写行号**（行号随代码漂移，是系统性风险源）；函数体内某段用
