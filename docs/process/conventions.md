@@ -3745,6 +3745,17 @@ sysfs/devtmpfs/rr_data/rr_staging、`fdtdump` 断言 `atf-bl31`、idbloader 体�
 为空），第 11 拍内容断言将其拦下——这是"绿但不对"的实证；内容断言自此是 M1
 构建半边的必过项，不再以"genimage 成功 + 分区名在 GPT"作为收口证据。
 
+**2026-11-17 ADR-0028 施工后半（release job）**：事实——签名机制与 CI 门已落
+（`ota-bundle.sh` + gate `ota-bundle`），但发布面从未接线：tag 不触发 buildroot，
+镜像不签、不推 ghcr。处置——`buildroot.yml` 的 `on.push` 增 `tags: ["v*"]`；
+image job 的 `if` 纳入 tag 且对 `head_commit` 做空值兜底；新增 `release` job
+（`needs: image`）：download-artifact → `checksums.txt` 复核 → 宿主编译
+`rr3-ota-ctl` → Secret 落 0600 临时件（缺/坏即失败）→ `ota-bundle.sh` →
+`oras` 不可变标签检查（只认 404）→ 推 `rockrobot3-ota` / `rockrobot3-buildroot`
+两个 OCI 制品 → 回读 → job summary；私钥在 `always` 步删除。验证——YAML 静态通过；
+机制由 gate `ota-bundle` job 覆盖（正例 + 三负例）；tag + Secret 的正回执是外部
+依赖，未取得前不冒领。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
