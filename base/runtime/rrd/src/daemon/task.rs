@@ -2,7 +2,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -148,7 +147,7 @@ pub(super) struct Rr3AcceptCtx {
     pub(super) t0: Instant,
     pub(super) pre_register_timeout_ms: u64,
     pub(super) sup: Rr3Supervisor,
-    pub(super) counters_path: Option<PathBuf>,
+    pub(super) ctr_store: Option<std::sync::mpsc::SyncSender<()>>,
     pub(super) counters_gate: Arc<Mutex<crate::counters::Rr3CountersGate>>,
 }
 
@@ -243,7 +242,7 @@ impl Rr3AcceptCtx {
             t0: self.t0,
             pre_register_timeout_ms: self.pre_register_timeout_ms,
             sup: self.sup.clone(),
-            counters_path: self.counters_path.clone(),
+            ctr_store: self.ctr_store.clone(),
             counters_gate: self.counters_gate.clone(),
         }
     }
