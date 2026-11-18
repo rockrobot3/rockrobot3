@@ -38,12 +38,12 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     let t0 = Instant::now();
     let boot = rr3_daemon_boot(cfg)?;
     // rrd 自身日志落盘（批N5 件二笔2，§17 运维留痕同轨判据）：`<socket>.log/rrd.log`
-    // append——与 per-unit 文件同目录同派生单点。每行同步 append、不轮转；下一行
-    // 的启动回填把崩溃前的文件尾置回环头，`rr3.ctl.logs` 重启后仍取得到崩溃前的
-    // 最后若干行（模块侧批N4 件八已同轨成立，rrd 自身自此同权）。打不开 = 点名
-    // 退纯内存，观测通道故障降级、不放大成可用性故障（supervisor stderr 回退
-    // inherit 同一条纪律）。位置钉死在装配链 match **之后**：--profile 路径此刻
-    // 环容量已定格（回填行数按真容量收）；--manifest 调试路径按 512 兜底收。
+    // append——与 per-unit 文件同目录同派生单点。续轮十四起常持句柄：每行一次写、
+    // 累计超 2MiB 单代轮转（`log/sink.rs`）；启动回填把崩溃前的文件尾置回环头，
+    // `rr3.ctl.logs` 重启后仍取得到崩溃前的最后若干行。打不开 = 点名退纯内存，
+    // 观测通道故障降级、不放大成可用性故障（supervisor stderr 回退 inherit 同一条
+    // 纪律）。位置钉死在装配链 match **之后**：--profile 路径此刻环容量已定格
+    // （回填行数按真容量收）；--manifest 调试路径按 512 兜底收。
     rr3_daemon_logs(cfg);
     // 启动摘要（可观测性）：一行钉住本次装配的输入面与规模，排障先看这一行。
     // 后门（--manifest）无装配单：tier/chip 显示 `-`，不造假值。

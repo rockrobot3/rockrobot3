@@ -2,124 +2,30 @@
 //!
 //! 2026-11-17 自 `lib.rs` 结构化拆分（纯移位）：公开路径由 `lib.rs` 的 re-export
 //! 保持，`crate::rr3_log*` 调用点零改动；落盘**先于** stdout 的顺序见 [`rr3_log`]。
+//! 2026-11-18 续轮十四把落盘臂（句柄 / 轮转 / 路径派生）拆到 `sink`，本文件只留
+//! 出口、环、回填与启动快照；落盘从"每行 4 系统调用"改为常持句柄的 1 次写。
 
 use std::collections::VecDeque;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use crate::rr3_lock;
 
-/// per-unit 日志目录的派生单点：socket 全路径 + `.log` 后缀（批N4 件八定形，批N5
-/// 件二笔2 迁本文件供两路共用——supervisor 的 per-unit 文件与 rrd 自身落盘同一
-/// 目录）。同机多实例（测试 `/tmp/rr3-m2-*.sock`、产线 `/var/run/rock3-ipc.sock`）
-/// 天然按实例隔离，不需要新 CLI 键；只算路径不建目录不打开，副作用留给调用方。
 #[cfg(unix)]
-pub fn rr3_unit_log_dir(bus_path: &Path) -> PathBuf {
-    let mut dir = bus_path.as_os_str().to_os_string();
-    dir.push(".log");
-    PathBuf::from(dir)
-}
-
-/// rrd 自身日志的落盘文件路径（批N5 件二笔2，§17 运维留痕）：OnceLock 首份胜出，
-/// daemon 装配链后定格一次。未定格（启动早于接线 / `--manifest` 前段 / Windows）
-/// = 纯内存，`rr3_log` 行为与笔1 之前一字不变。
-static RR3_LOG_SINK: OnceLock<PathBuf> = OnceLock::new();
-
-/// 建 `<socket>.log` 目录并收紧到 0o750（属主 rwx / 属主组 r-x / other 无份）：
-/// 日志面与 rrd socket 的 0o660 组访问模型对齐——同机无组身份的用户不得旁读
-/// 运行日志（模块名/错误链/请求 id 都是运维内部面）。位元设置失败不阻断
-/// （观测通道故障不放大成可用性故障），留痕后续沿用默认位。
+mod sink;
 #[cfg(unix)]
-pub(crate) fn rr3_log_dir_ensure(bus_path: &Path) -> std::io::Result<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-    let dir = rr3_unit_log_dir(bus_path);
-    std::fs::create_dir_all(&dir)?;
-    if let Err(e) = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o750)) {
-        eprintln!("rrd 日志目录收紧 0750 失败（继续，{}）: {e}", dir.display());
-    }
-    Ok(dir)
-}
-
-/// 落盘写失败后的降级记账位：置位后本进程不再重试（磁盘故障不是每行日志都要
-/// 重新撞一遍的墙），点名一次交给运维，之后退纯内存。
-static RR3_LOG_SINK_DEAD: AtomicBool = AtomicBool::new(false);
-
-/// 定格 rrd 自身日志落盘（批N5 件二笔2）：`<socket>.log/rrd.log`，与 per-unit
-/// 文件同目录同派生单点（[`rr3_unit_log_dir`]）。目录建不出 = 返回 Err，调用方
-/// 点名降级纯内存——观测通道故障降级、不放大成可用性故障。`bus_path` 必须已
-/// 绝对化（main 的 [`crate::cli::rr3_socket_abs`]）——相对路径就是链条
-/// 上游破了，fail-closed 拒定格（与 supervisor 的 `rr3_open_unit_log` 同一口径）。
+pub(crate) use sink::{rr3_log_dir_ensure, rr3_log_rotate};
 #[cfg(unix)]
-pub fn rr3_log_sink_set(bus_path: &Path) -> Result<(), String> {
-    if !bus_path.is_absolute() {
-        return Err("socket 路径非绝对（上游绝对化失效）".into());
-    }
-    let dir = rr3_log_dir_ensure(bus_path).map_err(|e| format!("建日志目录失败: {e}"))?;
-    RR3_LOG_SINK
-        .set(dir.join("rrd.log"))
-        .map_err(|_| "落盘路径已定格过（首份胜出，重复定格被拒）".to_string())
-}
-
-/// 单日志文件体量上界（0.0.8c 审计 B-8）：SD 卡设备上 append 无界 = 磁盘耗尽
-/// 炸弹（错误循环模块 10KB/s ≈ 900MB/天，盘满后 journal/OTA/配置写全灭）。
-/// 2MiB×（rrd + ≤16 单元）×2 代 ≈ 68MB 最坏驻留，装机可承受。
-pub(crate) const RR3_LOG_MAX_BYTES: u64 = 2 * 1024 * 1024;
-
-/// 单代轮转：文件超上界即 rename 到 `<名>.1`（旧 `.1` 被覆盖），下一段写新文件。
-/// 失败只留痕不阻断——观测通道绝不允许因磁盘抖动打断业务主路；容量判据是尽力
-/// 而为的防线，不是事务。
-pub(crate) fn rr3_log_rotate(path: &std::path::Path) {
-    let Ok(md) = std::fs::metadata(path) else {
-        return;
-    };
-    if md.len() <= RR3_LOG_MAX_BYTES {
-        return;
-    }
-    let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
-        return;
-    };
-    let _ = std::fs::rename(path, path.with_file_name(format!("{name}.1")));
-}
+pub use sink::{rr3_log_sink_set, rr3_unit_log_dir};
 
 /// 行字节（单点）：文本 + 换行一次成片。**分行两次 write 会在多线程日志下交错**
-/// （A 行头 + B 行头 + 两个换行 ⇒ 排障看到被吞并的半截行），且每次 write 各自
+/// （A 行头 + B 行头 + 两个换行 ⇒ 排障看到被吞并的半行），且每次 write 各自
 /// 一次系统调用；O_APPEND 的单次 write 是"行完整性"的唯一保证。
 fn rr3_line_bytes(line: &str) -> Vec<u8> {
     let mut buf = Vec::with_capacity(line.len() + 1);
     buf.extend_from_slice(line.as_bytes());
     buf.push(b'\n');
     buf
-}
-
-/// `rr3_log` 的落盘臂：一行同步 append，不缓冲不批写——"崩溃前最后 N 行"的判据
-/// 要求打过的行当场就在文件里。超上界单代轮转（B-8，修订批N4 件八"不轮转"纪律）。
-/// 每行现开现写：运维留痕是事件级频率，不值得常持句柄。打开或写失败 = 点名
-/// 一次后置降级位，之后静默退纯内存。
-fn rr3_log_sink_append(line: &str) {
-    let Some(path) = RR3_LOG_SINK.get() else {
-        return;
-    };
-    if RR3_LOG_SINK_DEAD.load(Ordering::Relaxed) {
-        return;
-    }
-    rr3_log_rotate(path);
-    let res = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .and_then(|mut f| f.write_all(&rr3_line_bytes(line)));
-    if let Err(e) = res {
-        if !RR3_LOG_SINK_DEAD.swap(true, Ordering::Relaxed) {
-            // eprintln 不走 rr3_log：降级说明本身不能再依赖降级中的通道（递归），
-            // 也绝不进 stdout 管道（测试的可观察面是"rrd 说过什么"，不许混入）
-            eprintln!(
-                "rrd: 落盘写失败（{}）: {e} —— 运维留痕退纯内存，本进程不再重试",
-                path.display()
-            );
-        }
-    }
 }
 
 /// 统一日志出口：stdout、行首 `rrd: `。集成测试的可观察面全靠它。
@@ -137,7 +43,8 @@ pub fn rr3_log(msg: &str) {
     // "看到了这行"不等于"这行已在文件里"，关停/崩溃窗口会把已打过的行从取证面丢掉
     // （2026-11-17 macOS 腿实证：收尸行先到 stdout，紧随的 SIGTERM 让第二世回填缺行）。
     // 落盘失败只降级自身（`rr3_log_sink_append` 内点名一次），不挡 stdout 与环。
-    rr3_log_sink_append(&line);
+    #[cfg(unix)]
+    sink::rr3_log_sink_append(&line);
     // stdout 是观测通道：管道关闭（EPIPE）时 `println!` 会 panic，主线程/收件线程
     // 一 panic 就把整个守护带走——与落盘臂"通道故障降级、不放大成可用性故障"的
     // 纪律相悖。写失败静默降级，环照常。
@@ -256,7 +163,7 @@ fn rr3_log_filter(lines: &VecDeque<String>, prefix: &str, tail: usize) -> Vec<St
 /// "最后 cap 行"。
 #[cfg(unix)]
 pub fn rr3_log_backfill() {
-    let Some(path) = RR3_LOG_SINK.get() else {
+    let Some(path) = sink::rr3_log_sink_path() else {
         return;
     };
     let Ok(mut f) = std::fs::File::open(path) else {
@@ -411,31 +318,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// 单代轮转（B-8）：超上界 rename 到 `.1`（旧 `.1` 覆盖），未超界不动；
-    /// 文件不存在 = 静默返回。
-    #[test]
-    fn log_rotate_triggers_only_over_cap() {
-        let dir = std::env::temp_dir().join(format!("rr3-rrd-rot-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let f = dir.join("u.log");
-        // 未超界：不轮转
-        std::fs::write(&f, b"short").unwrap();
-        rr3_log_rotate(&f);
-        assert!(f.exists() && !dir.join("u.log.1").exists(), "界内不轮转");
-        // 超界：轮转（不预建 .1——Windows 的 rename 不覆盖既有目标，产线语义为
-        // 尽力而为：覆盖失败 = 下拍再试，容量判据不是事务）
-        std::fs::write(&f, vec![b'x'; (RR3_LOG_MAX_BYTES + 1) as usize]).unwrap();
-        rr3_log_rotate(&f);
-        assert!(!f.exists(), "超界原文件已让位");
-        assert_eq!(
-            std::fs::read(dir.join("u.log.1")).unwrap().len(),
-            RR3_LOG_MAX_BYTES as usize + 1
-        );
-        // 不存在：静默
-        rr3_log_rotate(&f);
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
     /// 回填行集（批N5 件二笔2）：取尾 cap 行、push_front 消费序（最新在前）；
     /// drop_first 只丢块首可能截断的半行；空文本回填空。
     #[test]
@@ -478,9 +360,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn unit_log_dir_appends_log_suffix() {
+        use std::path::Path;
         assert_eq!(
             rr3_unit_log_dir(Path::new("/tmp/rr3-a.sock")),
-            PathBuf::from("/tmp/rr3-a.sock.log")
+            std::path::PathBuf::from("/tmp/rr3-a.sock.log")
         );
     }
 
