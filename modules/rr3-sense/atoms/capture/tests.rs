@@ -65,7 +65,7 @@ impl Xorshift {
 /// 延迟立体声窗：τ>0 声源在右（frame[0]=物理右麦先到，R 无延迟、L 延迟 |τ|），
 /// τ<0 声源在左（frame[1] 先到）——与机制取样语义 1:1（b3 回归双侧交叉定案：
 /// esp32 档 frame[0]=物理右、frame[1]=物理左，lag>0 = frame[0] 先到 = 右）。
-fn delayed_stereo(tau: i32, frames: usize, amp: i32) -> Vec<i16> {
+pub(super) fn delayed_stereo(tau: i32, frames: usize, amp: i32) -> Vec<i16> {
     let mut xs = Xorshift(0x1234_5678);
     let u: Vec<i16> = (0..frames + tau.unsigned_abs() as usize)
         .map(|_| xs.next_i16_scaled(amp))
@@ -78,7 +78,7 @@ fn delayed_stereo(tau: i32, frames: usize, amp: i32) -> Vec<i16> {
     (0..frames).flat_map(|t| [r[t], l[t]]).collect()
 }
 
-fn doa_cfg() -> Rr3DoaCfg {
+pub(super) fn doa_cfg() -> Rr3DoaCfg {
     Rr3DoaCfg {
         sample_rate_hz: 16000,
         frame_ms: 20,
@@ -167,41 +167,4 @@ fn tdoa_uses_first_two_channels_only() {
         rr3_doa_fix(&three, 3, &cfg),
         "第三路不得影响 L/R 对的判向"
     );
-}
-
-// ---------- 两腿对拍用例（0.0.5 批K H1，architecture §4.0.3 判据②） ----------
-
-#[test]
-fn parity_leg1_capture_output_train_is_deterministic() {
-    // 腿一·确定性：同一延迟立体声序列两跑，(下混流, 判向序列) 逐帧相等
-    fn run() -> (Vec<i16>, Vec<Option<Rr3DoaFix>>) {
-        let cfg = doa_cfg();
-        let seq: Vec<Vec<i16>> = [(-4i32, 800usize), (0, 800), (5, 800)]
-            .iter()
-            .map(|&(tau, n)| delayed_stereo(tau, n, 3000))
-            .collect();
-        let mixed: Vec<i16> = seq
-            .iter()
-            .flat_map(|s| rr3_pcm_best_channel(s, 2))
-            .collect();
-        let fixes: Vec<Option<Rr3DoaFix>> = seq.iter().map(|s| rr3_doa_fix(s, 2, &cfg)).collect();
-        (mixed, fixes)
-    }
-    assert_eq!(run(), run(), "同输入序列两跑逐帧相等（腿一·确定性）");
-}
-
-#[test]
-fn parity_leg2_capture_matches_ruling_semantics() {
-    // 腿二·正确性：分档等号边界独立重写（|deg| ≤ 30° 含等号落中档）；
-    // 零值输入不产帧循环（0 帧换算、空样本安全返回）
-    for (tau, want_bin) in [(-4, Rr3DoaBin::Left), (4, Rr3DoaBin::Right)] {
-        let fix = rr3_doa_fix(&delayed_stereo(tau, 3200, 3000), 2, &doa_cfg()).unwrap();
-        assert_eq!(fix.bin, want_bin, "tau={tau} 档位");
-    }
-    // 零值：0ms 节拍与 0Hz 采样都换算出 0 帧（调用方不得拿 0 帧当 buf 死循环）
-    assert_eq!(rr3_frames_per_tick(16000, 0), 0, "(16000, 0) → 0 帧");
-    assert_eq!(rr3_frames_per_tick(0, 20), 0, "(0, 20) → 0 帧");
-    // 零样本单声道化/判向安全返回（空进空出，不 panic 不产帧）
-    assert!(rr3_pcm_best_channel(&[], 2).is_empty());
-    assert_eq!(rr3_doa_fix(&[], 2, &doa_cfg()), None, "空窗无方向可判");
 }
