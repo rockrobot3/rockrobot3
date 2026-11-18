@@ -101,6 +101,10 @@ fn ctl_status_lists_registered_modules_and_does_not_register_itself() {
         "ctr_store 计数落盘执行面状态必须可读（on/off/dead）: {v}"
     );
     assert!(
+        v["result"]["log_sink_max_us"].is_u64() && v["result"]["log_sink_slow"].is_u64(),
+        "落盘写阻塞窗（峰值 us / 慢写计数）必须在场: {v}"
+    );
+    assert!(
         v["result"]["boot"]
             .as_str()
             .is_some_and(|s| s.contains("启动摘要")),

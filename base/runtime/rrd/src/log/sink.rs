@@ -64,6 +64,26 @@ fn rr3_sink_now_ms() -> u64 {
     RR3_SINK_T0.get_or_init(Instant::now).elapsed().as_millis() as u64
 }
 
+/// 单次落盘耗时窗口（续轮二十五）：日志写发生在模块线程与 registry 调用链上，
+/// "写一行的阻塞窗"就是观测通道对业务主路的实际干扰。判据可证伪：稳态下
+/// `max_us` 应远小于 50ms（`slow` 恒 0）；磁盘抖动时 `slow` 增长可读。
+const RR3_SINK_SLOW_US: u64 = 50_000;
+
+#[derive(Debug, Default)]
+struct Rr3SinkLat {
+    max_us: u64,
+    slow: u64,
+}
+
+impl Rr3SinkLat {
+    fn observe(&mut self, us: u64) {
+        self.max_us = self.max_us.max(us);
+        if us >= RR3_SINK_SLOW_US {
+            self.slow = self.slow.saturating_add(1);
+        }
+    }
+}
+
 /// 落盘可用性闸：`down_until_ms` = 0 健康；非 0 表示冷却到该时刻再试。
 #[derive(Debug, Default)]
 struct Rr3SinkGate {
@@ -117,6 +137,7 @@ struct Rr3LogSink {
     path: PathBuf,
     written: u64,
     gate: Rr3SinkGate,
+    lat: Rr3SinkLat,
 }
 
 impl Rr3LogSink {
@@ -133,6 +154,7 @@ impl Rr3LogSink {
             path,
             written,
             gate: Rr3SinkGate::default(),
+            lat: Rr3SinkLat::default(),
         })
     }
 
@@ -201,14 +223,29 @@ pub(super) fn rr3_log_sink_path() -> Option<&'static Path> {
     RR3_LOG_SINK.get().map(PathBuf::as_path)
 }
 
-/// 落盘状态读口（`ctl.status.log_sink`，续轮十七）：`off` = 未定格（纯内存）、
-/// `on` = 句柄在位且最近一次写成功、`dead` = 处于冷却重试窗（续轮二十三：到点会
-/// 自动重开重试，成功即回 `on`——读到 dead 表示"此刻取证面不可用"，但不是终态）。
-pub fn rr3_log_sink_state() -> &'static str {
+/// 落盘读面（`ctl.status`）：状态 + 单次写阻塞窗（`max_us` 行长）与超阈次数。
+/// 写失败进入冷却（续轮二十三），`dead` 是"此刻不可用"而非终态。
+#[derive(Debug, Clone, Copy)]
+pub struct Rr3LogSinkInfo {
+    pub state: &'static str,
+    pub max_us: u64,
+    pub slow: u64,
+}
+
+pub fn rr3_log_sink_info() -> Rr3LogSinkInfo {
     let Some(sink) = RR3_LOG_SINK_FILE.get() else {
-        return "off";
+        return Rr3LogSinkInfo {
+            state: "off",
+            max_us: 0,
+            slow: 0,
+        };
     };
-    rr3_lock(sink).gate.state()
+    let g = rr3_lock(sink);
+    Rr3LogSinkInfo {
+        state: g.gate.state(),
+        max_us: g.lat.max_us,
+        slow: g.lat.slow,
+    }
 }
 
 /// `rr3_log` 的落盘臂：一行一次 `write_all`，不缓冲不批写——"崩溃前最后 N 行"的
@@ -228,7 +265,10 @@ pub(super) fn rr3_log_sink_append(line: &str) {
     }
     let path = sink.path.display().to_string();
     let mut note = None;
-    match sink.rr3_append(line) {
+    let t0 = Instant::now();
+    let res = sink.rr3_append(line);
+    sink.lat.observe(t0.elapsed().as_micros() as u64);
+    match res {
         Ok(()) => {
             if sink.gate.on_ok() {
                 note = Some(format!("日志落盘恢复（{path}）"));
@@ -286,7 +326,22 @@ mod tests {
     /// 状态读口（续轮十七）：单测进程不定格 sink，必须是 off 而不是 on/dead。
     #[test]
     fn sink_state_is_off_until_fixed() {
-        assert_eq!(rr3_log_sink_state(), "off");
+        assert_eq!(rr3_log_sink_info().state, "off");
+        assert_eq!(rr3_log_sink_info().max_us, 0, "未定格无写耗时");
+    }
+
+    /// 写阻塞窗（续轮二十五）：max 只记峰值、不在窗口内回落；≥50ms 才计一次慢写。
+    #[test]
+    fn sink_lat_tracks_peak_and_slow_count() {
+        let mut l = Rr3SinkLat::default();
+        l.observe(120);
+        assert_eq!((l.max_us, l.slow), (120, 0), "低于阈只记峰值");
+        l.observe(30);
+        assert_eq!(l.max_us, 120, "峰值不回落到最近一次");
+        l.observe(RR3_SINK_SLOW_US);
+        assert_eq!((l.max_us, l.slow), (RR3_SINK_SLOW_US, 1), "到阈计一次慢写");
+        l.observe(80_000);
+        assert_eq!((l.max_us, l.slow), (80_000, 2));
     }
 
     /// 落盘冷却闸（续轮二十三）：失败后一个冷却窗内不重试（不逐行撞盘），到点
