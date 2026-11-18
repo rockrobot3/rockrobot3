@@ -189,12 +189,15 @@ CI `sim-chain` 缺省 hold 60s（`RR3_SIM_HOLD_MS` 可覆写，0 关闭）。
 - **ADR-0028 release job**：码面在案（`c345c1f`）；缺一次 `v*` 标签 + Secret
   `RR3_OTA_SIGNING_KEY` 的正回执；
 - **action 运行时升级**：checkout / upload / download / setup-qemu 已升 Node 24 档；
-  docker/login、setup-buildx、actions/cache 等发布面正回执后升；
+  docker/login、setup-buildx 维持 v3（main 发布回执 run `44257954571` 已验证可用，
+  升级单独立项）；
 - **unsafe 注释审计**：生产面 122 处全部带前言，基线 **0**（`96972e0` + `a47693c`）；
   新代码由 gate `scripts` job 执法；
 - **CI 冷启动基线取回**：`rr3-sim --chain` 的「启动基线」行数值需 job 日志鉴权，
   待取回归档（不拿本机值替代）；
-- **publish 合并标签冒烟**：待一次 tag 或带凭据的 `workflow_dispatch`。
+- **publish 合并标签冒烟**：main 推送已给正回执（run `44257954571`：edge 镜像
+  build×2 + merge 全 success，多架构清单与 image-smoke 通过）；`v*` tag /
+  自定义 dispatch 仍待凭据。
 
 历史在制品与 0.0.5–0.0.8 批次全景（原文照搬，含历次锚点重锚记录）已迁出为
 [status-history.md](status-history.md)；**历史原文不改写**，与现状冲突处以本节、

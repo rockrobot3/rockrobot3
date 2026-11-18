@@ -37,6 +37,76 @@ ACTION_MATRIX = {
 
 USES = re.compile(r"^\s*-?\s*uses:\s*(\S+)")
 JOB = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
+STEP_USES = re.compile(r"^\s*-\s*uses:\s*(\S+)")
+
+# 工具链基线与作业上限（结构真源 = docs/process/ci-workflows.md；升级走显式提交）
+TOOLCHAIN = "1.100.0"
+MAX_JOBS = 10
+# 跨多清单共写仓根 target-dir 的作业：rust-cache 必须全量缓存共享依赖
+CACHE_ALL_JOBS = {"conventions", "lint", "sim-assemble", "sim-chain", "matrix"}
+
+
+def step_block(lines, i):
+    """第 i 行（`- uses:`）之后的步骤块（缩进更深的行）。"""
+    indent = len(lines[i]) - len(lines[i].lstrip())
+    out = []
+    for line in lines[i + 1 :]:
+        if line.strip() and len(line) - len(line.lstrip()) <= indent:
+            break
+        out.append(line)
+    return out
+
+
+def has_key(block, key, value=None):
+    """块内 `key:` 是否存在（给了 value 则值必须相等，去引号）。"""
+    for line in block:
+        m = re.match(rf"^\s+{re.escape(key)}:\s*(.*)$", line)
+        if not m:
+            continue
+        got = m.group(1).strip().strip('"').strip("'")
+        if value is None or got == value:
+            return True
+    return False
+
+
+def step_problems(rel, jobs):
+    """工具链钉版与缓存参数：缺参即红（新结构政策）。"""
+    bad = []
+    for name, block in jobs:
+        for i, line in enumerate(block):
+            m = STEP_USES.match(line)
+            if not m:
+                continue
+            ref = m.group(1)
+            if ref.startswith("dtolnay/rust-toolchain") and not has_key(
+                step_block(block, i), "toolchain", TOOLCHAIN
+            ):
+                bad.append(f"{rel} job {name} 工具链未显式钉 {TOOLCHAIN}（with.toolchain 缺失或漂移）")
+            if ref.startswith("Swatinem/rust-cache"):
+                sb = step_block(block, i)
+                if not has_key(sb, "workspaces"):
+                    bad.append(f"{rel} job {name} rust-cache 缺 workspaces（扫仓库根=空转）")
+                if name in CACHE_ALL_JOBS and not has_key(sb, "cache-all-crates", "true"):
+                    bad.append(f"{rel} job {name} 跨清单构建缺 cache-all-crates: \"true\"")
+    return bad
+
+
+def paths_ignore_problems(text, rel):
+    """integration/platforms 的 push/PR 必须跳过纯文档（文档门在 gate）。"""
+    if rel.name not in ("integration.yml", "platforms.yml"):
+        return []
+    lines = text.splitlines()
+    bad = []
+    for trig in ("push", "pull_request"):
+        idx = next((i for i, l in enumerate(lines) if l.rstrip() == f"  {trig}:"), None)
+        if idx is None:
+            bad.append(f"{rel} 缺 {trig} 触发")
+            continue
+        joined = "\n".join(trigger_block(lines, idx))
+        missing = [k for k in ("paths-ignore", "docs/**", "**.md") if k not in joined]
+        if missing:
+            bad.append(f"{rel} {trig} 触发缺 {', '.join(missing)}（纯文档应跳过）")
+    return bad
 
 
 def uses_problems(text, where):
@@ -179,14 +249,20 @@ def workflow_problems(path, root):
     rel = path.relative_to(root)
     bad = uses_problems(text, str(rel))
     bad.extend(trigger_problems(text, rel))
+    bad.extend(paths_ignore_problems(text, rel))
     if not re.search(r"^concurrency:\s*$", text, re.M):
         bad.append(f"{rel} 缺顶层 concurrency（同 ref 并发组）")
+    if rel.name == "publish.yml" and not re.search(r"cancel-in-progress:\s*false", text):
+        bad.append(f"{rel} 发布面必须 cancel-in-progress: false（发布不可中断）")
     jobs = jobs_of(text)
     if not jobs:
         bad.append(f"{rel} 没有可识别的 job")
+    if len(jobs) > MAX_JOBS:
+        bad.append(f"{rel} job 定义 {len(jobs)} > 上限 {MAX_JOBS}（塞不下就拆流水线）")
     for name, block in jobs:
         if not any(re.match(r"^\s{4}timeout-minutes:", l) for l in block):
             bad.append(f"{rel} job {name} 缺 timeout-minutes")
+    bad.extend(step_problems(rel, jobs))
     bad.extend(graph_problems(rel, jobs))
     return bad
 
@@ -215,13 +291,42 @@ def self_test():
             "name: good\non:\n  push:\n    branches: [main]\n"
             "concurrency:\n  group: g\njobs:\n"
             "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
-            "    steps:\n      - uses: actions/checkout@v7\n",
+            "    steps:\n      - uses: actions/checkout@v7\n"
+            "      - uses: dtolnay/rust-toolchain@stable\n"
+            '        with:\n          toolchain: "1.100.0"\n'
+            "      - uses: Swatinem/rust-cache@v2\n"
+            "        with:\n          workspaces: base/runtime\n",
             encoding="utf-8",
         )
         (wf / "bad.yml").write_text(
             "name: bad\non:\n  push:\njobs:\n  b:\n    runs-on: ubuntu-latest\n"
             "    needs: [nope]\n"
-            "    steps:\n      - uses: actions/checkout@v5\n",
+            "    steps:\n      - uses: actions/checkout@v5\n"
+            "      - uses: dtolnay/rust-toolchain@stable\n"
+            "      - uses: Swatinem/rust-cache@v2\n",
+            encoding="utf-8",
+        )
+        (wf / "integration.yml").write_text(
+            "name: integ\non:\n  push:\n    branches: [main]\n  pull_request:\n"
+            "concurrency:\n  group: i\njobs:\n"
+            "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    steps:\n      - uses: actions/checkout@v7\n",
+            encoding="utf-8",
+        )
+        (wf / "publish.yml").write_text(
+            "name: pub\non:\n  push:\n    tags: [\"v*\"]\n"
+            "concurrency:\n  group: p\n  cancel-in-progress: true\njobs:\n"
+            "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    steps:\n      - uses: actions/checkout@v7\n",
+            encoding="utf-8",
+        )
+        many = "".join(
+            f"  j{i}:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            for i in range(MAX_JOBS + 1)
+        )
+        (wf / "big.yml").write_text(
+            "name: big\non:\n  push:\n    branches: [main]\n"
+            "concurrency:\n  group: b\njobs:\n" + many,
             encoding="utf-8",
         )
         (wf / "cycle.yml").write_text(
@@ -240,6 +345,11 @@ def self_test():
         ("needs 悬空被抓", any("不存在的 job" in b for b in bad)),
         ("needs 成环被抓", any("成环" in b for b in bad)),
         ("push 无范围被抓", any("branches/tags" in b for b in bad)),
+        ("工具链未钉版被抓", any("工具链未显式钉" in b for b in bad)),
+        ("缓存缺 workspaces 被抓", any("缺 workspaces" in b for b in bad)),
+        ("paths-ignore 缺失被抓", any("paths-ignore" in b for b in bad)),
+        ("publish 可取消被抓", any("cancel-in-progress: false" in b for b in bad)),
+        ("job 超限被抓", any("> 上限" in b for b in bad)),
         ("好例零误报", not any("good.yml" in b for b in bad)),
     ]
     for name, ok in cases:
