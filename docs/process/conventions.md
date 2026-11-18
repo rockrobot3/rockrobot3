@@ -3906,6 +3906,16 @@ workspace，独立工程（`modules/*`、`tools/*`、`base/ota/*`）在 Windows 
 `contents: read`、不得 `write-all`；`continue-on-error` 非 false 即红。自检负例
 11→13，政策真源 [ci-workflows.md](ci-workflows.md) 与 `tools/ci/README` 同批登记。
 
+**2026-11-18 落盘状态可观测与锁内 I/O 清零（续轮十七）**：事实——① 日志落盘
+写失败只有 stderr 一行，`rr3-ctl status/logs` 看不到"崩溃取证面已经没了"；
+② fanout 满队列点名、影子统计首见、计数键上界三处都在持 registry 锁时直接
+`rr3_log`（每行一次 write，慢盘下是锁内阻塞）。处置——① `ctl.status` 增
+`log_sink`（on/off/dead），失败分支先置降级位再走 `rr3_log`（ring/stdout 可见、
+不重入落盘），CLI 同名行；② registry 增 `pending_logs`，锁内只收集，新增
+`rr3_reg_with` 放锁后统一落盘，凡可能产生日志的调用（fanout/shadow/ctr_merge）
+全部改走该入口。判据——单测钉"收集一行、取走即空"与状态读口，e2e 钉字段可读；
+rrd 315 单测 / rr3-ctl 25 测试 / clippy / check.sh / metrics 全绿。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
