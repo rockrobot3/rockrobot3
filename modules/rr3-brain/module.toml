@@ -3,9 +3,9 @@ schema_version = 1
 name = "rr3-brain"
 version = "0.0.1"
 type = "brain"
-lang = "python"
-# 打包时由 base/os/package/rr3-brain 安装同名 shim，实际执行 `python -m rr3_brain`
-# （naming.md §3：目录名 == 进程名 == manifest.name）
+# 0.0.8 批N32 件四（ADR-0016 收口）：Python 承载侧整体退役，brain 是 Rust 模块
+# （entry = target/debug 同名二进制，与其余模块同形）
+lang = "rust"
 entry = "rr3-brain"
 
 [provides]
@@ -17,12 +17,29 @@ optional = ["power.battery"]
 
 # brain 只走事务面与意图事件：ASR/LLM/TTS 编排是云端往返，不进反射路径
 # （ADR-0007 控制面三级分层）。密钥一律构建期环境变量注入，不落盘、不入库。
+# C14（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：订阅面对齐实然面——
+# asr/text 走 retired（号位保留、义务解除）、net/link 撤申报（不补实现）；
+# pcm + vad_start 是 composite.py 实际消费的语音主链入口（B-1 只增补齐）。
+# MC-1（TTS 下行通路）：新增发布面 rr3-brain/audio/tts_pcm（stream）——brain 把
+# TTS 合成结果按 20ms 块分帧广播；rr3-interact 订阅消费后经事务面点名播放。
 [events]
-publishes = ["rr3-brain/intent/result"]
-subscribes = ["rr3-interact/asr/text", "rr3-connect/net/link"]
+publishes = ["rr3-brain/intent/result", "rr3-brain/audio/tts_pcm"]
+subscribes = ["rr3-sense/audio/pcm", "rr3-sense/audio/vad_start"]
 
 [rpc]
-exposes = ["rr3-brain/llm/completion"]
+# ops/list = 槽值快照读口（批N4 件六二 B-12）：白名单六槽应答，密钥不进应答；
+# ops/set = 槽写口（批N4 件九三 配置面）：组.槽寻址、live 内存生效不落盘（应答
+# persisted:false 如实申报），密钥与 key_ref 不在写面；
+# model/list|set|test = 模型行面（ADR-0023）：OpenAI 兼容多厂商 CRUD，写面落盘
+# config.toml（.bak + 原子写）并 live 换客户端，test 按名探测一次
+exposes = [
+    "rr3-brain/llm/completion",
+    "rr3-brain/ops/list",
+    "rr3-brain/ops/set",
+    "rr3-brain/model/list",
+    "rr3-brain/model/set",
+    "rr3-brain/model/test",
+]
 
 [resources]
 restart_policy = "on-failure"

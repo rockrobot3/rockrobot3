@@ -1,0 +1,563 @@
+//! rr3-brain 接入层（批N32 迁移件1 立树，ADR-0017 五层表接入层）。
+//!
+//! config schema 解析（自 Python composite.py 迁入，ADR-0016 裁定 2.4 键名逐键
+//! 对照）：TOML → JSON 文档树（ops/set 写面 live 真值的唯一载体）＋ boot 投影
+//! （模型行实效 / cloud timeout / bus call timeout / dialog max_utterance_ms）。
+//! 缺段/缺键 fail-closed 点名拒 boot——Python 侧 KeyError 裸奔文案（如 `'cloud'`）
+//! 是字典直取的意外产物、非装配观测面设计，Rust 侧按五模块同款中文点名文案承载，
+//! 语义（缺即拒、退出交 supervisor）不变。
+//!
+//! 启动序语义差（批N32 增补裁定 4）：遵 rr3mod bootstrap 固定序（先连总线后读
+//! config），Python 侧「config 先于总线连接」的更早 fail-closed 不保留；代价
+//! `[rr3-brain.bus].connect_timeout_s` 键随迁移退役（Rust rr3_connect 无该参数
+//! 入口，连接等待上界归 rr-bus-api 内部承载），本解析面不再读它。
+
+use std::path::PathBuf;
+
+use serde_json::Value;
+
+/// LLM 模式（对位 cloud/llm.py `LLM_MODE_API`/`LLM_MODE_LOCAL`——常量真值点随
+/// 迁移件三归一至 [`crate::cloud`]：解析面按字面 "api"/"local" 承载，鉴权消费面
+/// 在 [`crate::cloud::Rr3LlmClient`]）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Rr3LlmMode {
+    Api,
+    Local,
+}
+
+/// LLM 连接行实效（`[[rr3-brain.model]]` 恰一 active 行解析产物，或无表时
+/// cloud 段 fallback）。`mode = None` = 随全局档（RR3_BRAIN_CLOUD）——cloud
+/// fallback 路径的 Python 同形状。key_ref/mode 的消费面（LLM 客户端鉴权/免鉴权）
+/// 在 llm 件 mech [`crate::llm::Rr3LlmHistory`]（客户端在 [`crate::cloud`]）。
+#[derive(Debug, Clone)]
+pub(crate) struct Rr3ModelRow {
+    pub(crate) base_url: String,
+    pub(crate) model_id: String,
+    pub(crate) key_ref: Option<String>,
+    pub(crate) mode: Option<Rr3LlmMode>,
+}
+
+/// cloud 段四键实效（asr/llm/tts 三客户端装配与 ops/set 写后重建共用的取数口——
+/// Python composite 读 `cloud_cfg` 字典同形状：live 写后重建读 doc 新值，重启回
+/// config.toml 真值）。
+#[derive(Debug, Clone)]
+pub(crate) struct Rr3CloudCfg {
+    pub(crate) base_url: String,
+    pub(crate) asr_model: String,
+    pub(crate) tts_model: String,
+    pub(crate) timeout_s: f64,
+}
+
+/// cloud 段四键读取（boot 校验保证在册，缺失时 Err 点名——fail-closed 不静默）。
+pub(crate) fn rr3_cloud_cfg_of(doc: &Value) -> Result<Rr3CloudCfg, String> {
+    let cloud = rr3_brain_sect(doc, "cloud")?;
+    Ok(Rr3CloudCfg {
+        base_url: rr3_req_str(cloud, "cloud", "base_url")?.to_string(),
+        asr_model: rr3_req_str(cloud, "cloud", "asr_model")?.to_string(),
+        tts_model: rr3_req_str(cloud, "cloud", "tts_model")?.to_string(),
+        timeout_s: rr3_req_f64(cloud, "cloud", "timeout_s")?,
+    })
+}
+
+/// 本模块 config 形状：JSON 文档树（ops/set 写面 live 真值）＋ boot 投影。
+/// 投影是 boot 时的解析快照——ops/list llm 组回显源（model）刻意**不随 live 写
+/// 回填**（Python composite base_url/model_id boot 局部变量同形状，B-14① 双源
+/// 分裂不在本单修，重启回新值）；doc 是 ops/set 的唯一写面。
+#[derive(Debug, Clone)]
+pub(crate) struct Rr3BrainCfg {
+    pub(crate) doc: Value,
+    pub(crate) model: Rr3ModelRow,
+    pub(crate) cloud_timeout_s: f64,
+    pub(crate) call_timeout_s: f64,
+    pub(crate) max_utterance_ms: i64,
+    /// 唤醒词门控（`[rr3-brain.wake]` 可选段；缺段 = 关闭，行为与旧版逐点等价）
+    pub(crate) wake: Rr3WakeCfg,
+    /// config 文件路径（面板模型行落盘写面消费，ADR-0023）：解析器是纯函数不碰
+    /// 路径解析，`main` 装配段用 `rr3mod::rr3_config_path` 投影后注入。
+    /// `None` = 未注入（测试直造 cfg），落盘写面 fail-closed 拒写。
+    pub(crate) config_path: Option<PathBuf>,
+}
+
+/// 总线 RPC 超时缺省（B-13①：`[rr3-brain.bus].call_timeout_s` 缺键时的回落值——
+/// 对位 composite.py `RR3_BUS_CALL_TIMEOUT_DEFAULT_S`，真值点 = config.toml 注释）
+pub(crate) const RR3_BUS_CALL_TIMEOUT_DEFAULT_S: f64 = 30.0;
+
+/// 超时类配置的合理上界（秒）：语音链路里超过 1h 的超时等同挂死；同时保证
+/// `Duration::from_secs_f64` 不会因 NaN/负数/超 u64 范围在运行期 panic。
+const RR3_CFG_TIMEOUT_MAX_S: f64 = 3600.0;
+
+/// dialog 话轮封顶缺省（`[rr3-brain.dialog].max_utterance_ms` 缺键回落；
+/// 对位 composite.py `dialog_cfg.get("max_utterance_ms", 8000)`）
+pub(crate) const RR3_DIALOG_MAX_UTTERANCE_DEFAULT_MS: i64 = 8000;
+
+/// 唤醒词段的缺省应答（`[rr3-brain.wake].ack` 缺键回落）：用户口径
+/// "我在呢 / 有什么可以帮您" 的合并版，一句话即可（TTS 合成一次）。
+pub(crate) const RR3_WAKE_ACK_DEFAULT: &str = "我在呢，有什么可以帮您？";
+/// 唤醒后跟进窗缺省（`followup_ms` 缺键回落）：唤醒应答后 15s 内继续说话
+/// 不必重复唤醒词；每接受一轮即续窗（对话式追问）。
+pub(crate) const RR3_WAKE_FOLLOWUP_DEFAULT_MS: u64 = 15_000;
+
+/// 唤醒词配置（`[rr3-brain.wake]` 段，2026-10-31）：**ASR 文本前缀匹配**，
+/// 不是本地 KWS（仓内无端侧关键词引擎；云端 ASR 已在 VAD 起音后必跑）。
+/// 语义：命中任一短语（去标点/空白归一后的前缀）→ 唤醒；命中且无后续文本 →
+/// 回固定应答（不进 LLM）；命中带后续文本 → 后续文本进 LLM；未命中但在
+/// 唤醒后的跟进窗内 → 原文本进 LLM；窗外 → 静默丢弃（不 LLM、不 TTS）。
+/// `enable=false`（缺省）= 关闭门控，行为与未加唤醒词逐点等价。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Rr3WakeCfg {
+    pub(crate) enable: bool,
+    pub(crate) phrases: Vec<String>,
+    pub(crate) ack: String,
+    pub(crate) followup_ms: u64,
+}
+
+impl Default for Rr3WakeCfg {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            phrases: vec!["你好洛克".to_string()],
+            ack: RR3_WAKE_ACK_DEFAULT.to_string(),
+            followup_ms: RR3_WAKE_FOLLOWUP_DEFAULT_MS,
+        }
+    }
+}
+
+/// `[rr3-brain.wake]` 段解析（可选段：缺段 = 关闭门控，缺省值见 [`Rr3WakeCfg`]；
+/// 类型错/短语表空/应答空一律 Err 点名——配置劣化不静默收编）。
+fn rr3_wake_cfg_of(doc: &Value) -> Result<Rr3WakeCfg, String> {
+    let mut cfg = Rr3WakeCfg::default();
+    let Some(w) = doc.get("rr3-brain").and_then(|b| b.get("wake")) else {
+        return Ok(cfg);
+    };
+    rr3_wake_apply(w, &mut cfg)?;
+    Ok(cfg)
+}
+
+/// 唤醒段逐键应用（键表顺序即应用序，坏值逐条点名）。
+fn rr3_wake_apply(w: &Value, cfg: &mut Rr3WakeCfg) -> Result<(), String> {
+    for (key, set) in RR3_WAKE_SETS {
+        if let Some(v) = w.get(key) {
+            set(cfg, v)?;
+        }
+    }
+    Ok(())
+}
+
+/// 唤醒段四键 → 落位（未给键保留缺省；未知键维持原状不拒）。
+type Rr3WakeSet = fn(&mut Rr3WakeCfg, &Value) -> Result<(), String>;
+const RR3_WAKE_SETS: [(&str, Rr3WakeSet); 4] = [
+    ("enable", |c, v| {
+        c.enable = v
+            .as_bool()
+            .ok_or_else(|| "config [rr3-brain.wake] enable 须布尔".to_string())?;
+        Ok(())
+    }),
+    ("phrases", |c, v| {
+        c.phrases = rr3_wake_phrases(v)?;
+        Ok(())
+    }),
+    ("ack", |c, v| {
+        c.ack = rr3_wake_ack(v)?;
+        Ok(())
+    }),
+    ("followup_ms", |c, v| {
+        c.followup_ms = v
+            .as_u64()
+            .ok_or_else(|| "config [rr3-brain.wake] followup_ms 须非负整数".to_string())?;
+        Ok(())
+    }),
+];
+
+/// `ack`：非空字符串（trim 后空即拒）。
+fn rr3_wake_ack(v: &Value) -> Result<String, String> {
+    let s = v
+        .as_str()
+        .ok_or_else(|| "config [rr3-brain.wake] ack 须字符串".to_string())?
+        .trim();
+    if s.is_empty() {
+        return Err("config [rr3-brain.wake] ack 不得为空".to_string());
+    }
+    Ok(s.to_string())
+}
+
+/// `phrases` 项形状核：字符串数组、项去空白、空项跳过——全空即拒（空短语表
+/// 等于"永不唤醒"却挂着 enable=true，是误配不是关闭语义）。
+fn rr3_wake_phrases(v: &Value) -> Result<Vec<String>, String> {
+    let arr = v
+        .as_array()
+        .ok_or("config [rr3-brain.wake] phrases 须字符串数组")?;
+    let out: Vec<String> = arr
+        .iter()
+        .filter_map(|item| rr3_wake_item(item).transpose())
+        .collect::<Result<Vec<String>, String>>()?;
+    if out.is_empty() {
+        return Err("config [rr3-brain.wake] phrases 须至少一个非空短语".to_string());
+    }
+    Ok(out)
+}
+
+/// 单项：必为字符串，trim 后空返回 None（空项跳过）。
+fn rr3_wake_item(item: &Value) -> Result<Option<String>, String> {
+    let s = item
+        .as_str()
+        .ok_or("config [rr3-brain.wake] phrases 项须字符串")?
+        .trim();
+    Ok(if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    })
+}
+
+// ---------- 文档树下钻助手（点名文案与 power/sense 同款中文形状） ----------
+
+/// 取 `[rr3-brain.<sect>]` 段（缺段点名拒）。
+fn rr3_brain_sect<'a>(doc: &'a Value, sect: &str) -> Result<&'a Value, String> {
+    doc.get("rr3-brain")
+        .and_then(|b| b.get(sect))
+        .ok_or_else(|| format!("config 缺 [rr3-brain.{sect}] 段"))
+}
+
+/// 段内字符串键（缺键/非串点名拒）。
+fn rr3_req_str<'a>(sect: &'a Value, sect_name: &str, key: &str) -> Result<&'a str, String> {
+    sect.get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("config [rr3-brain.{sect_name}] 缺 {key}（字符串）"))
+}
+
+/// 段内超时类数值键（缺键/非数/非有限/非正/超上界一律点名拒）：这些值最终
+/// 进 `Duration::from_secs_f64`，NaN/负数/超 u64 范围会在运行期 panic，配置面
+/// 必须先把它们挡在启动路径外。
+fn rr3_req_f64(sect: &Value, sect_name: &str, key: &str) -> Result<f64, String> {
+    let v = sect
+        .get(key)
+        .ok_or_else(|| format!("config [rr3-brain.{sect_name}] 缺 {key}（数值）"))?;
+    rr3_timeout_value(v, sect_name, key)
+}
+
+/// 超时值域校验（已取到的 `Value`）：有限、>0、≤ 上界。
+fn rr3_timeout_value(v: &Value, sect_name: &str, key: &str) -> Result<f64, String> {
+    let x = v
+        .as_f64()
+        .ok_or_else(|| format!("config [rr3-brain.{sect_name}] {key} 须数值"))?;
+    rr3_timeout_cap(x, sect_name, key)?;
+    Ok(x)
+}
+
+/// 超时上界（有限、>0、≤ 上界）。
+fn rr3_timeout_cap(x: f64, sect_name: &str, key: &str) -> Result<(), String> {
+    if !x.is_finite() || x <= 0.0 || x > RR3_CFG_TIMEOUT_MAX_S {
+        return Err(format!(
+            "config [rr3-brain.{sect_name}] {key} 须为 (0, {RR3_CFG_TIMEOUT_MAX_S}] 秒内的有限数，收到 {x}"
+        ));
+    }
+    Ok(())
+}
+
+/// Python float 的打印形状（config 就绪行逐字对位）：整值补 .0（20 → "20.0"），
+/// 小数走最短往返（17.25 → "17.25"）。
+pub(crate) fn rr3_py_float_repr(x: f64) -> String {
+    if x.fract() == 0.0 && x.is_finite() {
+        format!("{x:.1}")
+    } else {
+        format!("{x}")
+    }
+}
+
+/// 模型行 `base_url` 语义（ADR-0023）：**完整 OpenAI 兼容 API 根**（含版本段），
+/// 客户端只追加 `/chat/completions`。各厂商版本段各写各的——DeepSeek
+/// `https://api.deepseek.com/v1`、GLM `https://open.bigmodel.cn/api/paas/v4`、
+/// Qwen `https://dashscope.aliyuncs.com/compatible-mode/v1`——**不按主机名猜**，
+/// 否则就是换了个方式的厂商绑定。
+///
+/// cloud 段 fallback 路径的 `cloud.base_url` 是主机根（ASR/TTS 的
+/// `{base}/v1/audio/*` 同源消费），此处补成完整根：路径为空补 `/v1`，已有路径原样。
+fn rr3_model_api_root(host_or_root: &str) -> String {
+    let s = host_or_root.trim().trim_end_matches('/');
+    if s.is_empty() {
+        return String::new();
+    }
+    let has_path = rr3_root_has_path(s);
+    if has_path {
+        s.to_string()
+    } else {
+        format!("{s}/v1")
+    }
+}
+
+/// 根串是否已含路径（`scheme://host` 后的首字符 `/` 之外也算路径段）。
+fn rr3_root_has_path(s: &str) -> bool {
+    match s.split_once("://") {
+        Some((_, rest)) => rest.contains('/'),
+        None => s.contains('/'),
+    }
+}
+
+/// 模型行 `base_url` 取值裁决（boot 解析与面板写面共用一档）：非空、
+/// `http(s)://` 开头、不得含 `/chat/completions`（客户端自拼，防双拼 404）。
+pub(crate) fn rr3_base_url_check(base_url: &str) -> Result<(), String> {
+    if base_url.is_empty() {
+        return Err("base_url 不得为空".to_string());
+    }
+    rr3_base_url_scheme(base_url)?;
+    rr3_base_url_tail(base_url)
+}
+
+/// 协议头判定：须为 `http(s)://` 完整 API 根。
+fn rr3_base_url_scheme(base_url: &str) -> Result<(), String> {
+    if base_url.starts_with("http://") || base_url.starts_with("https://") {
+        return Ok(());
+    }
+    Err(format!(
+        "base_url 须为完整 API 根（http:// 或 https:// 开头）: {base_url}"
+    ))
+}
+
+/// 尾段判定：不得含 `/chat/completions`（客户端自拼，防双拼 404）。
+fn rr3_base_url_tail(base_url: &str) -> Result<(), String> {
+    if !base_url
+        .trim_end_matches('/')
+        .ends_with("/chat/completions")
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "base_url 是完整 API 根，不得含 /chat/completions（客户端自拼）: {base_url}"
+    ))
+}
+
+/// LLM 连接行解析（自 composite.py `rr3_brain_model_row` 逐语义迁入，0.0.6 抽象批）：
+/// `[[rr3-brain.model]]` 恰一 active 行；无表 → cloud 段 fallback 四元组。
+/// fail-closed：active 数≠1、mode/api_format 不认、缺 base_url/model_id 一律
+/// Err 点名行 name，不静默挑行。错误文案逐字对位 Python。
+pub(crate) fn rr3_brain_model_row(doc: &Value) -> Result<Rr3ModelRow, String> {
+    let rows = rr3_model_rows(doc)?;
+    if rows.is_empty() {
+        return rr3_model_legacy(doc);
+    }
+    rr3_model_act(rr3_model_pick(rows)?)
+}
+
+/// 取 [[rr3-brain.model]] 行表：缺键/Null = 空表（走 legacy 四元组），非数组拒 boot
+fn rr3_model_rows(doc: &Value) -> Result<&[Value], String> {
+    let brain = doc
+        .get("rr3-brain")
+        .ok_or_else(|| "config 缺 [rr3-brain] 段".to_string())?;
+    rr3_model_row_list(brain)
+}
+
+/// 行表形状：缺键/Null = 空表（走 legacy 四元组），非数组拒 boot。
+fn rr3_model_row_list(brain: &Value) -> Result<&[Value], String> {
+    match brain.get("model") {
+        None | Some(Value::Null) => Ok(&[]),
+        Some(Value::Array(rows)) => Ok(rows.as_slice()),
+        Some(_) => Err("config [[rr3-brain.model]] 须为行表（数组）".to_string()),
+    }
+}
+
+/// 无模型行表 → 旧路径四元组：cloud 段 base_url + llm_model，key_ref=None 走
+/// 通用环境变量键，mode=None 随全局档。cloud.base_url 是主机根（ASR/TTS 亦消费），
+/// LLM 腿在此补成完整 API 根：路径为空补 `/v1`。
+fn rr3_model_legacy(doc: &Value) -> Result<Rr3ModelRow, String> {
+    let cloud = rr3_brain_sect(doc, "cloud")?;
+    Ok(Rr3ModelRow {
+        base_url: rr3_model_api_root(rr3_req_str(cloud, "cloud", "base_url")?),
+        model_id: rr3_req_str(cloud, "cloud", "llm_model")?.to_string(),
+        key_ref: None,
+        mode: None,
+    })
+}
+
+/// 在行表里挑唯一 active 行；非恰一行即拒（错误文案带全部行名，便于对表）
+fn rr3_model_pick(rows: &[Value]) -> Result<&Value, String> {
+    let names: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            r.get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("?")
+                .to_string()
+        })
+        .collect();
+    let active: Vec<&Value> = rows
+        .iter()
+        .filter(|r| r.get("active").and_then(Value::as_bool) == Some(true))
+        .collect();
+    if active.len() != 1 {
+        return Err(format!(
+            "[[rr3-brain.model]] 须恰一行 active=true（现 {} 行: {}）",
+            active.len(),
+            rr3_py_list_repr(&names)
+        ));
+    }
+    Ok(active[0])
+}
+
+/// active 行 → 投影四元组：mode 词表（api/local）、api_format（本批仅 openai）、
+/// base_url/model_id 非空 + API 根形制、api_key_ref 双源引用归一
+fn rr3_model_act(row: &Value) -> Result<Rr3ModelRow, String> {
+    let name = row.get("name").and_then(Value::as_str).unwrap_or("?");
+    let mode = rr3_row_mode(name, row)?;
+    rr3_row_fmt(name, row)?;
+    let base_url = row
+        .get("base_url")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let model_id = row
+        .get("model_id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if base_url.is_empty() || model_id.is_empty() {
+        return Err(format!("模型行 {name} 缺 base_url/model_id"));
+    }
+    rr3_base_url_check(&base_url).map_err(|e| format!("模型行 {name} {e}"))?;
+    // key_ref 双源引用：`env:变量名` → 环境变量，裸名 → 面板 secrets 文件（语义
+    // 承载在 cloud/llm.py，迁移件三落）；空白串折 None（Python strip() or None）
+    let key_ref = row
+        .get("api_key_ref")
+        .and_then(Value::as_str)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    Ok(Rr3ModelRow {
+        base_url,
+        model_id,
+        key_ref,
+        mode: Some(mode),
+    })
+}
+
+/// 行 mode 词表（api/local；缺省 api，词表外点名带行名）。
+fn rr3_row_mode(name: &str, row: &Value) -> Result<Rr3LlmMode, String> {
+    match row.get("mode").and_then(Value::as_str).unwrap_or("api") {
+        "api" => Ok(Rr3LlmMode::Api),
+        "local" => Ok(Rr3LlmMode::Local),
+        other => Err(format!(
+            "模型行 {name} mode 不认: {other}（允许 api/local）"
+        )),
+    }
+}
+
+/// 行 api_format 门（本批仅 openai；缺省 openai）。
+fn rr3_row_fmt(name: &str, row: &Value) -> Result<(), String> {
+    let fmt = row
+        .get("api_format")
+        .and_then(Value::as_str)
+        .unwrap_or("openai");
+    if fmt != "openai" {
+        return Err(format!(
+            "模型行 {name} api_format 暂不支持: {fmt}（本批仅 openai）"
+        ));
+    }
+    Ok(())
+}
+
+/// Python 列表 repr 形状（错误文案逐字对位）：`['a', 'b']`——单引号、逗号空格。
+fn rr3_py_list_repr(items: &[String]) -> String {
+    let quoted: Vec<String> = items.iter().map(|s| format!("'{s}'")).collect();
+    format!("[{}]", quoted.join(", "))
+}
+
+/// TOML 文本 → Rr3BrainCfg。文档树整体进 [`Rr3BrainCfg::doc`]（ops/set 写面），
+/// boot 投影当场解析——缺段/缺键/类型不合法一律 Err 拒 boot（fail-closed）。
+pub(crate) fn rr3_brain_cfg_parse(text: &str) -> Result<Rr3BrainCfg, String> {
+    let doc: Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
+    let cloud_timeout_s = rr3_cloud_check(&doc)?;
+    let (model, call_timeout_s, max_utterance_ms, wake) = rr3_cfg_proj(&doc)?;
+    Ok(Rr3BrainCfg {
+        doc,
+        model,
+        cloud_timeout_s,
+        call_timeout_s,
+        max_utterance_ms,
+        wake,
+        config_path: None,
+    })
+}
+
+/// boot 投影：模型行实效 + bus/dialog/wake 三段（cloud 段由 [`rr3_cloud_check`] 核）。
+fn rr3_cfg_proj(doc: &Value) -> Result<(Rr3ModelRow, f64, i64, Rr3WakeCfg), String> {
+    // 模型行实效（fail-closed 同 boot：active 数≠1 等在连接注册之后仍拒不放行）
+    let model = rr3_brain_model_row(doc)?;
+    // bus 段可选（Python cfg["rr3-brain"].get("bus", {}) 同形状）；
+    // connect_timeout_s 已随迁移退役（批N32 增补裁定 4），本面不读
+    let call_timeout_s = rr3_bus_timeout_of(doc)?;
+    // dialog 段必填（Python dialog_cfg = cfg["rr3-brain"]["dialog"] 直取同义），
+    // 键可选缺省 8000；<=0 与 ops/set 写臂同一判据拒（起轮即过期/永不过期都是误配）
+    let max_utterance_ms = rr3_dialog_ms_of(doc)?;
+    // 唤醒词段可选（缺段 = 关闭门控；见 [`rr3_wake_cfg_of`]）
+    let wake = rr3_wake_cfg_of(doc)?;
+    Ok((model, call_timeout_s, max_utterance_ms, wake))
+}
+
+/// cloud 段必填四键 + timeout_s（Python cfg["rr3-brain"]["cloud"] 直取同义；
+/// llm_model 只在无模型行表的 fallback 路径消费，由 rr3_brain_model_row 点名）。
+fn rr3_cloud_check(doc: &Value) -> Result<f64, String> {
+    let cloud = rr3_brain_sect(doc, "cloud")?;
+    rr3_req_str(cloud, "cloud", "base_url")?;
+    rr3_req_str(cloud, "cloud", "asr_model")?;
+    rr3_req_str(cloud, "cloud", "tts_model")?;
+    rr3_req_f64(cloud, "cloud", "timeout_s")
+}
+
+/// `[rr3-brain.bus]` 段（可选段）：`call_timeout_s` 缺段/缺键一律回落总线缺省，
+/// 在册即按超时值域核（非有限/≤0/超上界点名拒）。
+fn rr3_bus_timeout_of(doc: &Value) -> Result<f64, String> {
+    let Some(bus) = rr3_bus_sect(doc) else {
+        return Ok(RR3_BUS_CALL_TIMEOUT_DEFAULT_S);
+    };
+    match bus.get("call_timeout_s") {
+        Some(v) => rr3_timeout_value(v, "bus", "call_timeout_s"),
+        None => Ok(RR3_BUS_CALL_TIMEOUT_DEFAULT_S),
+    }
+}
+
+/// `[rr3-brain.bus]` 段（可选段）。
+fn rr3_bus_sect(doc: &Value) -> Option<&Value> {
+    doc.get("rr3-brain").and_then(|b| b.get("bus"))
+}
+
+/// `[rr3-brain.dialog]` 段（必填段）：`max_utterance_ms` 缺键回落缺省，在册即
+/// 整数且 >0（<=0 与 ops/set 写臂同判据）。
+fn rr3_dialog_ms_of(doc: &Value) -> Result<i64, String> {
+    let dialog = rr3_brain_sect(doc, "dialog")?;
+    let Some(v) = dialog.get("max_utterance_ms") else {
+        return Ok(RR3_DIALOG_MAX_UTTERANCE_DEFAULT_MS);
+    };
+    let n = v
+        .as_i64()
+        .ok_or("config [rr3-brain.dialog] max_utterance_ms 须整数")?;
+    if n <= 0 {
+        return Err(format!(
+            "config [rr3-brain.dialog] max_utterance_ms 须 >0，收到 {n}"
+        ));
+    }
+    Ok(n)
+}
+
+/// config 路径投影（ADR-0023 模型行落盘用）：与 [`rr3mod::bootstrap`] 实读同一
+/// 解析单点 [`rr3mod::rr3_config_path`]——解析器本身是纯函数不碰路径，装配段把
+/// 此处结果注入 [`Rr3BrainCfg::config_path`]，面板写面才能落回同一份文件。
+pub(crate) fn rr3_brain_cfg_path(config_env: Option<&'static str>) -> Result<PathBuf, String> {
+    let manifest_path = std::env::var(rr3mod::RR3_MANIFEST_ENV).map_err(|_| {
+        format!(
+            "缺环境变量 {}（rrd spawn 注入；bootstrap 同源）",
+            rr3mod::RR3_MANIFEST_ENV
+        )
+    })?;
+    Ok(PathBuf::from(rr3mod::rr3_config_path(
+        config_env,
+        &manifest_path,
+    )))
+}
+
+#[cfg(test)]
+mod fixtures;
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+pub(crate) use fixtures::*;

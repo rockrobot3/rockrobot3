@@ -1,0 +1,92 @@
+# 开放项数据结构（ADR-0022 裁定 6.3，批N4 件九首笔立）。
+#
+# 裁定 6.3 原文（docs/process/adr/ADR-0022-*.md 裁定 6 第 3 条）：新增一类开放项
+# 数据结构（status.md 的表由它生成，散文不再当唯一载体）：
+#   { 条目, 分类: 缺码|无载体, 工单号|触发条件, 证据路径, 状态 }
+# 它同时是面板覆盖率门（门 d）的差集落点（谁红着、为什么红、谁负责）。
+#
+# 与两个既有面的分工（单真值点纪律，谁答什么不混装）：
+# - 门 d 差集的**机器真值** = `tools/ci/check.sh` step ⑩ 逐条 " D " 行打印
+#   （哪些字段红着，步 ⑩ 说了算；低水位基线 `tools/ci/gate-d-baseline.txt`）；
+# - **status.md 敞口表** = 本机无法收口的项与里程碑进度（敞口表章程：缺码＋工单号
+#   与无载体证据不许混装一行）；
+# - **本表** = 归因登记：每个红项组"为什么红、谁负责（工单号）、证据在哪、现状态"。
+#   `fields` 成员清单是登记时的快照（非执法面——成员增减以步 ⑩ 打印为准，
+#   本表随转绿同批改状态与清单）。
+#
+# "status.md 的表由它生成"：生成关系随本表落地后建立（全案 §17 可达终点表行
+# "生成关系随 Nn-6.3 落地后建立"）；status.md 现存敞口行迁移不做本批（历史行
+# 不改写，新增行按本结构登记）。
+#
+# 五字段口径（TOML 键 ↔ 裁定字段）：
+#   entry    = 条目（组级描述）
+#   kind     = 分类（缺码 | 无载体——二选一，裁定 6.3 取值域）
+#   owner    = 工单号（谁负责；无工单时写"触发条件"）
+#   evidence = 证据路径（机器真值点或 `文件:符号`）
+#   status   = 状态（open | done——转绿即 done 并注记提交号）
+
+schema = 1
+
+# ============ 门 d 差集归因（批N4 件九登记，基线 73/79 时点） ============
+# 五组 = 门 d 分母五路减去已转绿的 brain ops 六槽（批N4 件六二，79→73）。
+# 成员清单来自 step ⑩ " D " 行打印（本文件落笔时点快照）。
+# 2026-10-19 对表：件九二观测面收官——ops 组 30 槽全转绿（status=done、fields
+# 清空），基线 73→43；余下四组（pin/role/domain/axis 43 项）状态不变。
+# 2026-10-20 对表：件九笔4 接线图收官——pin/role/domain/axis 四组 43 项全转绿
+# （GET /api/wiring 一端点 covers 申报四族全集，status=done、fields 清空），
+# 基线 43→0，差集空，门 d 转红（差集 > 0 即 FAIL）；提交见 conventions 同日对表。
+
+[[gap]]
+entry = "ops 槽读口缺失：五模块 ops 槽无面板可见读口（brain 六槽已随件六二转绿；本组随件九二全组转绿——观测面五端点建成，提交见 conventions 同日对表）"
+kind = "无载体"
+fields = [
+]
+owner = "批N4 件九二（已收口）：五模块 ops/list RPC＋面板 /api/{act,connect,interact,power,sense}/ops 五 GET 端点＋covers 申报 30 槽"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（0）；contracts/topics.toml 五 ops/list 主题"
+status = "done"
+
+[[gap]]
+entry = "pin 装配数据读口缺失：[pins] 派生视图字段无面板可见读口（本组随件九笔4 全组转绿——装配快照读口建成，提交见 conventions 同日对表）"
+kind = "无载体"
+fields = [
+]
+owner = "批N4 件九笔4（已收口）：rrd rr3.ctl.wiring 快照读口＋面板 GET /api/wiring＋covers 申报 pin 11 字段"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（0）；base/runtime/rrd/src/assembly.rs"
+status = "done"
+
+[[gap]]
+entry = "role.requires 读口缺失：roles.toml 角色依赖项无面板可见读口（本组随件九笔4 与 pin 组同端点合并申报转绿）"
+kind = "无载体"
+fields = [
+]
+owner = "批N4 件九笔4（已收口）：rrd rr3.ctl.wiring 快照读口＋面板 GET /api/wiring＋covers 申报 role 7 字段"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（0）；base/runtime/rrd/src/assembly.rs"
+status = "done"
+
+[[gap]]
+entry = "domain 域档读口缺失：能源域字段无面板可见读口（本组随件九笔4 全组转绿——装配快照读口建成，提交见 conventions 同日对表）"
+kind = "无载体"
+fields = [
+]
+owner = "批N4 件九笔4（已收口）：rrd rr3.ctl.wiring 快照读口＋面板 GET /api/wiring＋covers 申报 domain 11 字段"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（0）；base/runtime/rrd/src/assembly.rs"
+status = "done"
+
+[[gap]]
+entry = "axis 轴档案读口缺失：执行件档案十四键无面板可见读口（本组随件九笔4 全组转绿——装配快照读口建成，提交见 conventions 同日对表）"
+kind = "无载体"
+fields = [
+]
+owner = "批N4 件九笔4（已收口）：rrd rr3.ctl.wiring 快照读口＋面板 GET /api/wiring＋covers 申报 axis 14 字段"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（0）；base/runtime/rrd/src/assembly.rs"
+status = "done"
+
+# ============ 批B13 静态审计登记（2026-11-10） ============
+
+[[gap]]
+entry = "ESP 专用门 CI 覆盖缺口：esp-uart-echo / espidf-std / espidf-sentinel / rr3-act-sense-espidf 四门只在人工清单里，未进 ci.yml 的 esp job（该 job 仅跑两档 periph-base）；平台工程编译中断在合入后可长期隐形——2026-11-10 esp-uart-echo 的 E0412 即由此存活到批B13 才被人工跑门发现"
+kind = "无载体"
+fields = []
+owner = "批B60（已收口）：ci.yml 的 esp32-gates job 增四 step——esp-uart-echo / espidf-std / espidf-sentinel / rr3-act-sense-espidf，工具链缺位照既有三门的 SKIP 纪律明说"
+evidence = "tools/ci/check.sh 头部 14–25 行（专用门清单）；.github/workflows/ci.yml esp32-gates job"
+status = "done"

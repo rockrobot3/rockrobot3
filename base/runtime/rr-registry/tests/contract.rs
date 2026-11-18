@@ -1,3 +1,9 @@
+//! 契约册形状的对拍用例：slots/roles/devices/topics/platform/wiring 的成员与判据。
+//!
+//! 判据源一律取仓内真册（`contracts/`、`profiles/`、`hardware/`），不手抄第二份；
+//! 每个用例钉一类跨表判等（如 tier↔tier_scope、pin↔角色、平台词表），改了契约
+//! 册或解析器都会在这里显形。
+
 use std::path::{Path, PathBuf};
 
 fn repo_root() -> PathBuf {
@@ -10,85 +16,29 @@ fn topics_toml() -> String {
         .expect("contracts/topics.toml 必须存在（Task 4 产物）")
 }
 
-#[test]
-fn topics_prefix_accepts_canonical_topic() {
-    let owners = rr_registry::rr3_registry_topic_owners(&topics_toml());
-    let errs = rr_registry::rr3_registry_validate_topics(
-        r#"
-[[topic]]
-name = "rr3-sense/audio/vad_start"
-owner = "rr3-sense"
-kind = "event"
-"#,
-        &owners,
-    );
-    assert!(errs.is_empty(), "合法主题被误拒: {errs:?}");
-}
-
-#[test]
-fn topics_prefix_rejects_foreign_owner() {
-    let owners = rr_registry::rr3_registry_topic_owners(&topics_toml());
-    let errs = rr_registry::rr3_registry_validate_topics(
-        r#"
-[[topic]]
-name = "rr3-power/audio/vad"
-owner = "rr3-sense"
-kind = "event"
-"#,
-        &owners,
-    );
-    assert_eq!(errs.len(), 1, "越权发布必须被抓: {errs:?}");
-}
-
-#[test]
-fn topics_prefix_rejects_topic_outside_owner_namespace() {
-    let owners = rr_registry::rr3_registry_topic_owners(&topics_toml());
-    let errs = rr_registry::rr3_registry_validate_topics(
-        r#"
-[[topic]]
-name = "rr3-sense/audio/vad_start/extra"
-owner = "rr3-sense"
-kind = "event"
-"#,
-        &owners,
-    );
-    assert_eq!(errs.len(), 1, "四段主题必须被拒: {errs:?}");
-    assert!(errs[0].contains("topic 非法"), "{errs:?}");
-}
-
-#[test]
-fn topics_prefix_rejects_unregistered_owner() {
-    let owners = rr_registry::rr3_registry_topic_owners(&topics_toml());
-    let errs = rr_registry::rr3_registry_validate_topics(
-        r#"
-[[topic]]
-name = "rr3-ghost/x/y"
-owner = "rr3-ghost"
-kind = "event"
-"#,
-        &owners,
-    );
-    assert_eq!(errs.len(), 1);
-}
-
-#[test]
-fn topics_prefix_contract_self_consistency() {
-    let owners = rr_registry::rr3_registry_topic_owners(&topics_toml());
-    assert_eq!(owners.len(), 7, "v0.0.1 固定 7 个 owner（5+1 模块 + rrd）");
-    let errs = rr_registry::rr3_registry_validate_topics(&topics_toml(), &owners);
-    assert!(errs.is_empty(), "contracts/topics.toml 自身必须自洽: {errs:?}");
-}
-
-#[test]
-fn schema_embedded_has_expected_field_count() {
-    let specs = rr_registry::rr3_registry_field_specs();
-    assert_eq!(specs.len(), 19, "manifest 契约固定 19 字段（方案 §4 表格逐行落地）");
-    assert_eq!(
-        specs.iter().filter(|f| f.required).count(),
-        11,
-        "11 个必填：manifest 6 + events 2 + resources 1 + health 2"
-    );
-}
+// 集成测试目标是 crate root，子模块按 tests/ 解析（而非 contract/），故显式给路径。
+#[path = "contract/assemble.rs"]
+mod assemble;
+#[path = "contract/depends.rs"]
+mod depends;
+#[path = "contract/failopen.rs"]
+mod failopen;
+#[path = "contract/manifest.rs"]
+mod manifest;
+#[path = "contract/profile_board.rs"]
+mod profile_board;
+#[path = "contract/profile_default.rs"]
+mod profile_default;
+#[path = "contract/profile_esp32.rs"]
+mod profile_esp32;
+#[path = "contract/profile_pi4b.rs"]
+mod profile_pi4b;
+#[path = "contract/shape.rs"]
+mod shape;
+#[path = "contract/slots.rs"]
+mod slots;
+#[path = "contract/topics.rs"]
+mod topics;
 
 fn fixture_text() -> String {
     std::fs::read_to_string(
@@ -103,402 +53,383 @@ fn staged(tag: &str, text: String) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("modules/rr3-sense")).unwrap();
     std::fs::create_dir_all(dir.join("contracts")).unwrap();
-    std::fs::copy(repo_root().join("contracts/topics.toml"), dir.join("contracts/topics.toml"))
-        .unwrap();
+    std::fs::copy(
+        repo_root().join("contracts/topics.toml"),
+        dir.join("contracts/topics.toml"),
+    )
+    .unwrap();
     let m = dir.join("modules/rr3-sense/module.toml");
     std::fs::write(&m, text).unwrap();
     m
 }
 
-#[test]
-fn manifest_fixture_passes_validation() {
-    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rr3-sense.toml");
-    let report = rr_registry::rr3_registry_validate_manifest(&p);
-    assert!(report.ok(), "合法 manifest 必须通过: {:?}", report.errors);
-}
-
-#[test]
-fn manifest_missing_required_field_fails() {
-    let m = staged("miss", fixture_text().replace("type = \"module\"\n", ""));
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
-    assert!(
-        report.errors.iter().any(|e| e.contains("缺少必填字段 manifest.type")),
-        "{:?}",
-        report.errors
-    );
-}
-
-#[test]
-fn manifest_bad_name_version_policy_fails() {
-    let m = staged(
-        "bad3",
-        fixture_text()
-            .replace("name = \"rr3-sense\"", "name = \"Sense_Module\"")
-            .replace("version = \"0.0.1\"", "version = \"v1\"")
-            .replace("restart_policy = \"on-failure\"", "restart_policy = \"always!\""),
-    );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
-    // 三个原始违规；name 非法还会连带让 publishes 的前缀归属失败（≥1 条），故只断言包含关系
-    for want in ["manifest.name 非法", "semver 非法", "restart_policy 越界"] {
-        assert!(report.errors.iter().any(|e| e.contains(want)), "缺 {want}: {:?}", report.errors);
-    }
-}
-
-#[test]
-fn manifest_heartbeat_must_be_below_watchdog() {
-    let m = staged(
-        "health",
-        fixture_text().replace("heartbeat_ms = 2000", "heartbeat_ms = 20000"),
-    );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
-    assert!(
-        report.errors.iter().any(|e| e.contains("必须小于 watchdog")),
-        "{:?}",
-        report.errors
-    );
-}
-
-#[test]
-fn manifest_publish_prefix_ownership_enforced() {
-    // D7③ 的 manifest 侧：发布主题前缀必须等于 manifest.name
-    let m = staged(
-        "prefix",
-        fixture_text().replace(
-            "publishes = [\"rr3-sense/audio/vad_start\", \"rr3-sense/env/temperature\"]",
-            "publishes = [\"rr3-power/battery/state\"]",
-        ),
-    );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
-    assert!(
-        report.errors.iter().any(|e| e.contains("越权主题")),
-        "{:?}",
-        report.errors
-    );
-}
-
-#[test]
-fn manifest_unregistered_topic_rejected() {
-    let m = staged(
-        "unreg",
-        fixture_text().replace(
-            "publishes = [\"rr3-sense/audio/vad_start\", \"rr3-sense/env/temperature\"]",
-            "publishes = [\"rr3-sense/audio/ghost\"]",
-        ),
-    );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
-    assert!(
-        report.errors.iter().any(|e| e.contains("未注册主题")),
-        "{:?}",
-        report.errors
-    );
-}
-
-#[test]
-fn manifest_unknown_dependency_rejected() {
-    let m = staged(
-        "dep",
-        fixture_text().replace("required = [\"bus.subscribe\"]", "required = [\"motor.foc\"]"),
-    );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
-    assert!(
-        report.errors.iter().any(|e| e.contains("未知能力 motor.foc")),
-        "{:?}",
-        report.errors
-    );
-}
-
-#[test]
-fn manifest_capability_shape_and_type_and_bool_enforced() {
-    // provides 段形状非法 + type/lang 越界 + upgrades.staging 类型错
-    let m = staged(
-        "shape",
-        fixture_text()
-            .replace("capabilities = [\"audio.capture\", \"env.temperature\"]", "capabilities = [\"root\"]")
-            .replace("lang = \"rust\"", "lang = \"cpp\"")
-            .replace("staging = true", "staging = \"true\""),
-    );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
-    assert_eq!(report.errors.len(), 3, "{:?}", report.errors);
-}
-
-#[test]
-fn check_rules_cover_spec_section4_shapes() {
-    assert!(rr_registry::rr3_registry_check("module_name", "rr3-sense").is_empty());
-    assert_eq!(rr_registry::rr3_registry_check("module_name", "rr3-sense2").len(), 1);
-    assert_eq!(rr_registry::rr3_registry_check("module_name", "rr3-a-b").len(), 1);
-    assert!(rr_registry::rr3_registry_check("capability", "audio.capture").is_empty());
-    assert_eq!(rr_registry::rr3_registry_check("capability", "audio").len(), 1);
-    assert!(rr_registry::rr3_registry_check("topic", "rr3-sense/audio/vad_start").is_empty());
-    assert_eq!(rr_registry::rr3_registry_check("topic", "rr3-sense/audio").len(), 1);
-    assert!(rr_registry::rr3_registry_check("none", "任意").is_empty());
-    assert_eq!(rr_registry::rr3_registry_check("no_such_rule", "x").len(), 1);
-}
-
-#[test]
-fn check_rule_semver() {
-    assert!(rr_registry::rr3_registry_check("semver", "0.1.2").is_empty());
-    for bad in ["1.0.0-rc1", "v1", "1", ".1.2", "1.2."] {
-        assert_eq!(rr_registry::rr3_registry_check("semver", bad).len(), 1, "{bad} 必须被拒");
-    }
-}
-
-// ---------- Fix round 1：封死三处 fail-open 漏洞 ----------
-
-#[test]
-fn manifest_non_string_publish_item_is_rejected() {
-    // F1：publishes 混入非字符串项必须报告，而非被 filter_map 静默丢弃
-    let m = staged(
-        "f1pub",
-        fixture_text().replace(
-            "publishes = [\"rr3-sense/audio/vad_start\", \"rr3-sense/env/temperature\"]",
-            "publishes = [\"rr3-sense/audio/vad_start\", 42]",
-        ),
-    );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
-    assert!(
-        report
-            .errors
-            .iter()
-            .any(|e| e.contains("events.publishes") && e.contains("应为字符串") && e.contains("42")),
-        "非字符串列表项必须被抓: {:?}",
-        report.errors
-    );
-    assert!(!report.ok(), "{:?}", report.errors);
-}
-
-#[test]
-fn manifest_non_string_dependency_item_is_rejected() {
-    // F1：depends.required 混入非字符串项同样必须报告
-    let m = staged(
-        "f1dep",
-        fixture_text().replace("required = [\"bus.subscribe\"]", "required = [42]"),
-    );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
-    assert!(
-        report
-            .errors
-            .iter()
-            .any(|e| e.contains("depends.required") && e.contains("应为字符串")),
-        "非字符串依赖项必须被抓: {:?}",
-        report.errors
-    );
-}
-
-#[test]
-fn manifest_rpc_exposes_must_be_registered() {
-    // F2：rpc.exposes 命中 contracts/topics.toml（CI 检查③），未注册的 RPC 名必须被拒
-    let m = staged(
-        "f2rpc",
-        fixture_text().replace(
-            "exposes = [\"rr3-sense/capture/dump\"]",
-            "exposes = [\"rr3-sense/capture/typooo\"]",
-        ),
-    );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
-    assert!(
-        report
-            .errors
-            .iter()
-            .any(|e| e.contains("未注册主题 rr3-sense/capture/typooo")),
-        "未注册 RPC 名必须被抓: {:?}",
-        report.errors
-    );
-}
-
-#[test]
-fn manifest_fixture_rpc_exposes_still_accepted() {
-    // F2：新增 rr3-sense/capture/dump 后，合法 fixture 的 rpc.exposes 仍须通过
-    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rr3-sense.toml");
-    let report = rr_registry::rr3_registry_validate_manifest(&p);
-    assert!(report.ok(), "含已注册 RPC 的合法 manifest 必须通过: {:?}", report.errors);
-}
-
-#[test]
-fn topics_registry_zero_topics_is_rejected() {
-    // F3：7 owner / 0 topic 的空注册表必须被拒——空表不是放行许可证
-    let owners = rr_registry::rr3_registry_topic_owners(&topics_toml());
-    assert_eq!(owners.len(), 7);
-    let owners_only: String = topics_toml()
-        .lines()
-        .take_while(|l| !l.trim_start().starts_with("[[topic]]"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let errs = rr_registry::rr3_registry_validate_topics(&owners_only, &owners);
-    assert!(
-        errs.iter().any(|e| e.contains("主题注册表为空")),
-        "空注册表必须被拒: {errs:?}"
-    );
-
-    // 下游成员检查不得被空注册表空洞满足：manifest 仍须因未注册主题被拒
-    let dir = std::env::temp_dir().join("rr3-mf-emptyreg");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(dir.join("modules/rr3-sense")).unwrap();
-    std::fs::create_dir_all(dir.join("contracts")).unwrap();
-    std::fs::write(dir.join("contracts/topics.toml"), &owners_only).unwrap();
-    let m = dir.join("modules/rr3-sense/module.toml");
-    std::fs::write(
-        &m,
-        fixture_text()
-            .replace(
-                "publishes = [\"rr3-sense/audio/vad_start\", \"rr3-sense/env/temperature\"]",
-                "publishes = [\"rr3-sense/audio/ghost\"]",
-            )
-            .replace(
-                "subscribes = [\"rr3-runtime/module/state\"]",
-                "subscribes = [\"rr3-runtime/no/such\"]",
-            ),
+/// 仲裁只吃 name / provides / depends.required / start_priority 四样事实，
+/// 夹具因此只写这四样——其余字段的语法归单件校验，不在本节重复
+fn depends_manifest(name: &str, provides: &[&str], requires: &[&str], prio: i64) -> String {
+    let list = |v: &[&str]| {
+        v.iter()
+            .map(|s| format!("\"{s}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    format!(
+        "[manifest]\nname = \"{name}\"\n\
+         [provides]\ncapabilities = [{}]\n\
+         [depends]\nrequired = [{}]\n\
+         [resources]\nstart_priority = {prio}\n",
+        list(provides),
+        list(requires)
     )
-    .unwrap();
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
-    assert!(
-        !report.ok(),
-        "空注册表不得放行未注册主题: {:?}",
-        report.errors
-    );
 }
 
-// ---------- 最终整枝评审 C2：append-only 的形状守护 ----------
-
-/// v0.0.1 注册表的全部 21 条 `(name, owner, kind)` 三元组。
-/// 顺序即 `contracts/topics.toml` 的登记顺序。
-const RR3_PINNED_TOPICS: [(&str, &str, &str); 21] = [
-    ("rr3-sense/audio/pcm", "rr3-sense", "stream"),
-    ("rr3-sense/audio/vad_start", "rr3-sense", "event"),
-    ("rr3-sense/env/temperature", "rr3-sense", "event"),
-    ("rr3-sense/imu/state", "rr3-sense", "stream"),
-    ("rr3-act/servo/command", "rr3-act", "request"),
-    ("rr3-act/servo/state", "rr3-act", "stream"),
-    ("rr3-act/motor/reflex", "rr3-act", "notification"),
-    ("rr3-act/led/effect", "rr3-act", "request"),
-    ("rr3-interact/face/expression", "rr3-interact", "request"),
-    ("rr3-interact/tts/text", "rr3-interact", "request"),
-    ("rr3-interact/asr/text", "rr3-interact", "event"),
-    ("rr3-interact/dialog/turn", "rr3-interact", "event"),
-    ("rr3-power/battery/state", "rr3-power", "event"),
-    ("rr3-power/charger/state", "rr3-power", "event"),
-    ("rr3-connect/net/link", "rr3-connect", "event"),
-    ("rr3-connect/cloud/session", "rr3-connect", "request"),
-    ("rr3-brain/llm/completion", "rr3-brain", "request"),
-    ("rr3-brain/intent/result", "rr3-brain", "event"),
-    ("rr3-runtime/system/heartbeat", "rr3-runtime", "notification"),
-    ("rr3-runtime/module/state", "rr3-runtime", "notification"),
-    ("rr3-sense/capture/dump", "rr3-sense", "request"),
-];
-
-/// 从 topics.toml 文本解析出的 (name, owner, kind) 三元组
-fn registry_triples(text: &str) -> Vec<(String, String, String)> {
-    fn topic_str(v: &toml::Value, k: &str) -> String {
-        v.get(k).and_then(toml::Value::as_str).unwrap_or_default().to_string()
-    }
-
-    let root: toml::Value = text
-        .parse()
-        .expect("contracts/topics.toml 必须是合法 TOML");
-    let arr = root
-        .get("topic")
-        .and_then(toml::Value::as_array)
-        .expect("contracts/topics.toml 缺 [[topic]] 数组");
-    arr.iter().map(|e| (topic_str(e, "name"), topic_str(e, "owner"), topic_str(e, "kind"))).collect()
+fn facts_of(texts: &[String]) -> Vec<rr_registry::Rr3DependsFacts> {
+    texts
+        .iter()
+        .map(|t| rr_registry::rr3_depends_parse(t).expect("夹具事实提取不该失败"))
+        .collect()
 }
 
-/// C2：把 `contracts/topics.toml` 的**形状**钉死——owner 数、topic 数、kind 分布，
-/// 以及全部 21 条 `(name, owner, kind)` 三元组逐条在册（且不多不少）。
-///
-/// 计数做成硬 pin 是**故意**的，不是"禁止 append"：契约只增不改，新增主题合法，
-/// 但必须是一次**有意识的编辑**——同一次改动里既要改 `contracts/topics.toml`，
-/// 也要更新这里的 `RR3_PINNED_TOPICS` / 四个计数期望，以及把这些形状当事实来写的
-/// 文档（`docs/architecture/architecture.md` §6.3、`docs/architecture/naming.md` §3、`contracts/README.md`）。
-/// 少改任何一处，本用例即红。
-///
-/// 反过来说，删一条主题、改一条 kind、改一个 owner 数同样会红——评审证明这正是
-/// 此前门禁的空洞（只有 owner 数与 fixture 引用的四条主题被钉住）。
-#[test]
-fn registry_shape_is_pinned() {
-    use std::collections::HashSet;
+// ---------- 能力格查册门（ADR-0012 裁定 5②）：manifest 与 profile 双侧对 slots.toml 查册 ----------
 
-    let text = topics_toml();
-
-    // 1) owner 侧：7 个，且不重名
-    let owners = rr_registry::rr3_registry_topic_owners(&text);
-    assert_eq!(owners.len(), 7, "v0.0.1 契约固定 7 个 owner（5+1 模块 + rrd）");
-    let unique_owners: HashSet<&String> = owners.iter().collect();
-    assert_eq!(unique_owners.len(), owners.len(), "owner 名不得重复登记: {owners:?}");
-
-    // 2) topic 侧：21 条，且不重名（重名会让下面的子集论证失去意义）
-    let topics = registry_triples(&text);
-    assert_eq!(topics.len(), 21, "v0.0.1 契约固定 21 条主题");
-    let names: HashSet<&str> = topics.iter().map(|t| t.0.as_str()).collect();
-    assert_eq!(names.len(), topics.len(), "topic 名不得重复登记");
-
-    // 3) kind 分布：7 request / 8 event / 3 stream / 3 notification
-    let count = |want: &str| topics.iter().filter(|t| t.2 == want).count();
-    assert_eq!(count("request"), 7, "kind=request 的分布漂移");
-    assert_eq!(count("event"), 8, "kind=event 的分布漂移");
-    assert_eq!(count("stream"), 3, "kind=stream 的分布漂移");
-    assert_eq!(count("notification"), 3, "kind=notification 的分布漂移");
-    assert_eq!(
-        count("request") + count("event") + count("stream") + count("notification"),
-        topics.len(),
-        "存在四类之外的 kind: {topics:?}"
-    );
-
-    // 4) 21 条三元组逐条在册；配合上面的等长与唯一性，等价于"不多不少"
-    for (name, owner, kind) in RR3_PINNED_TOPICS {
-        assert!(
-            topics.iter().any(|t| t.0 == name && t.1 == owner && t.2 == kind),
-            "主题三元组缺失或漂移: 期望 ({name}, {owner}, {kind})，实际注册表 {:?}",
-            topics
-                .iter()
-                .filter(|t| t.0 == name)
-                .map(|t| (&t.0, &t.1, &t.2))
-                .collect::<Vec<_>>()
-        );
-    }
+fn slots_toml() -> String {
+    std::fs::read_to_string(repo_root().join("contracts/slots.toml"))
+        .expect("contracts/slots.toml 必须存在（ADR-0012 裁定 1 产物）")
 }
 
-/// modules/ 下每个模块的 module.toml 都必须过同一份 manifest 契约。
-/// 骨架可以没有实现，manifest 不可以不合契约——否则要等 rrd 上线才暴露拒注册。
-#[test]
-fn every_module_manifest_passes_contract() {
+/// modules/ 六模块的 (模块名, manifest 根 Value)，按名字升序
+fn module_manifest_values() -> Vec<(String, toml::Value)> {
     let modules = repo_root().join("modules");
-    let mut dirs: Vec<std::path::PathBuf> = std::fs::read_dir(&modules)
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(&modules)
         .expect("读不到 modules/ 目录")
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.join("module.toml").is_file())
-        .collect();
-    dirs.sort();
-    let names: Vec<&str> = dirs
-        .iter()
-        .map(|p| p.file_name().unwrap().to_str().unwrap())
-        .collect();
+    {
+        let m = entry.join("module.toml");
+        if m.is_file() {
+            let v: toml::Value = toml::from_str(&std::fs::read_to_string(&m).unwrap())
+                .expect("module.toml 必须可解析");
+            let name = v
+                .get("manifest")
+                .and_then(|m| m.get("name"))
+                .and_then(toml::Value::as_str)
+                .expect("manifest 缺 name")
+                .to_string();
+            out.push((name, v));
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+fn str_list(v: &toml::Value, path: &str) -> Vec<String> {
+    let Some(node) = path.split('.').try_fold(v, |acc, seg| acc.get(seg)) else {
+        return vec![];
+    };
+    node.as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(toml::Value::as_str)
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// [supplies] 表在册 + 六个安全供给键逐一在册（default/distro 装配单共用），带回表续用
+fn supplies_keys(v: &toml::Value) -> &toml::Table {
+    let supplies = v
+        .get("supplies")
+        .and_then(toml::Value::as_table)
+        .expect("缺 [supplies]");
+    for k in [
+        "watchdog_present",
+        "watchdog_timeout_ms",
+        "watchdog_feeder",
+        "tick_period_ms",
+        "tick_jitter_ms",
+        "safety_core_interval_ms",
+    ] {
+        assert!(supplies.contains_key(k), "缺 [supplies].{k}");
+    }
+    supplies
+}
+
+/// [supplies.budget]（校验⑩ 分母，批N2）全段 pin（host 机装配单共用）：
+/// not_applicable 显式 true，数字预算键不得并存
+fn pin_budget(supplies: &toml::Table, what: &str) {
+    let budget = supplies
+        .get("budget")
+        .and_then(toml::Value::as_table)
+        .expect("缺 [supplies.budget]（校验⑩ 分母，批N2）");
     assert_eq!(
-        names,
-        ["rr3-act", "rr3-brain", "rr3-connect", "rr3-interact", "rr3-power", "rr3-sense"],
-        "modules/ 的模块集合漂移：新增须走 rr3-mkmod，删除须走 ADR"
+        budget.get("not_applicable").and_then(toml::Value::as_bool),
+        Some(true),
+        "{what} 档 budget 合法不适用必须显式 true"
     );
-    for name in names {
-        let report =
-            rr_registry::rr3_registry_validate_manifest(&modules.join(name).join("module.toml"));
-        assert!(report.ok(), "{name} 的 module.toml 不合契约: {:?}", report.errors);
+    for num_key in [
+        "task_stack_budget_bytes",
+        "heap_total_bytes",
+        "heap_reserved_bytes",
+    ] {
+        assert!(
+            budget.get(num_key).is_none(),
+            "host 档 not_applicable = true 与数字预算键 {num_key} 并存（自相矛盾）"
+        );
     }
 }
 
-/// contracts/topics.toml 每条 owner 的 `path` 必须真的存在。
-/// 曾经 6 个 owner 指向不存在的 modules/rr3-*：契约在说谎，且五步检查无人拦截。
-#[test]
-fn every_owner_path_exists() {
-    let root = repo_root();
-    let v: toml::Value = toml::from_str(&topics_toml()).expect("topics.toml 必须可解析");
-    let owners = v.get("owner").and_then(toml::Value::as_array).expect("缺 [[owner]] 数组");
-    assert_eq!(owners.len(), 7, "owner 计数漂移（注册表形状 pin 之外的交叉检查）");
-    for o in owners {
-        let name = o.get("name").and_then(toml::Value::as_str).expect("owner 缺 name");
-        let path = o.get("path").and_then(toml::Value::as_str).expect("owner 缺 path");
-        assert!(
-            !path.starts_with('/') && !path.split('/').any(|s| s == ".."),
-            "owner {name} 的 path 必须是仓库内相对路径: {path}"
+/// [enabled_slots] 对账（default/distro 装配单共用）：覆盖模块集合 == modules/ 在册，
+/// 每模块格位集合 == manifest provides（normal 格），引用格位全部在表
+fn enabled_slots_check(
+    v: &toml::Value,
+    manifests: &std::collections::BTreeMap<String, toml::Value>,
+    table: &rr_registry::Rr3SlotTable,
+) {
+    let enabled_slots = v
+        .get("enabled_slots")
+        .and_then(toml::Value::as_table)
+        .expect("缺 [enabled_slots]");
+    let mut face_modules: Vec<&String> = enabled_slots.keys().collect();
+    face_modules.sort();
+    let mut manifest_modules: Vec<&String> = manifests.keys().collect();
+    manifest_modules.sort();
+    assert_eq!(
+        face_modules, manifest_modules,
+        "[enabled_slots] 覆盖的模块集合与 modules/ 漂移"
+    );
+    for (module, face) in enabled_slots {
+        let mut slots: Vec<String> = face
+            .as_array()
+            .expect("enabled_slots 值必须是数组")
+            .iter()
+            .filter_map(toml::Value::as_str)
+            .map(String::from)
+            .collect();
+        slots.sort();
+        // manifest provides 可能含 placeholder/retired 格（模块"能提供"≠"装配单启用"），
+        // 装配面只启用 normal 格；此处对 caps 做同口径过滤再判等。
+        let mut caps: Vec<String> = str_list(&manifests[module], "provides.capabilities")
+            .into_iter()
+            .filter(|c| {
+                let s = table.rr3_slot_status(c).unwrap_or_default();
+                s != "placeholder" && s != "retired"
+            })
+            .collect();
+        caps.sort();
+        assert_eq!(
+            slots, caps,
+            "{module} 的 [enabled_slots] 与 manifest provides（normal 格）漂移"
         );
-        assert!(root.join(path).is_dir(), "owner {name} 登记的 path 不存在: {path}");
+        for s in &slots {
+            assert!(
+                table.rr3_slot_contains(s),
+                "[enabled_slots] 引用表外格位 {s}"
+            );
+        }
+    }
+}
+
+/// platform.chip 断言（同板多机型共用）：档位所配 chip 必须与平台表登记一致
+fn assert_chip(v: &toml::Value, chip: &str, what: &str) {
+    assert_eq!(
+        v.get("platform")
+            .and_then(|p| p.get("chip"))
+            .and_then(toml::Value::as_str),
+        Some(chip),
+        "{what} chip 漂移（平台表选 contracts/platform/{chip}.toml）"
+    );
+}
+
+/// platform.tier 钉值断言（七处 profile 同款）：消息各自点名机型档位
+fn assert_tier(v: &toml::Value, want: &str, msg: &str) {
+    assert_eq!(
+        v.get("platform")
+            .and_then(|p| p.get("tier"))
+            .and_then(toml::Value::as_str),
+        Some(want),
+        "{msg}"
+    );
+}
+
+/// S3 板侧十一键真值（esp32s3-mini 与 pi4b-host-esp32s3 两处装配单同源：
+/// 与 board/pins_s3.rs、main.rs 具名装配三方同值，漂移即红）
+fn s3_hardware_keys(hardware: &toml::Table, what: &str, why: &str) {
+    for (k, expected) in [
+        ("i2c_sda", "8"),
+        ("i2c_scl", "9"),
+        ("adc_rail_pin", "1"),
+        ("uart2_tx", "41"),
+        ("uart2_rx", "42"),
+        ("ledc_pan", "4"),
+        ("ledc_tilt", "5"),
+        ("i2s_bclk", "6"),
+        ("i2s_sd", "15"),
+        ("i2s_ws", "7"),
+        ("cred_store", "nvs:rr3"),
+    ] {
+        assert_eq!(
+            hardware.get(k).and_then(toml::Value::as_str),
+            Some(expected),
+            "{what} hardware.{k} 漂移（{why}）"
+        );
+    }
+}
+
+/// 生产格位全集：非 base 且非 placeholder/retired（[slots].present 对账与
+/// 未绑格位检查两处同款 filter 链，一份判据一份真值）
+fn normal_slots(table: &rr_registry::Rr3SlotTable) -> Vec<String> {
+    table
+        .rr3_slot_names()
+        .into_iter()
+        .filter(|n| table.rr3_slot_layer(n).as_deref() != Some("base"))
+        .filter(|n| {
+            let s = table.rr3_slot_status(n).unwrap_or_default();
+            s != "placeholder" && s != "retired"
+        })
+        .collect()
+}
+
+/// 装配单 [slots].present 的字符串集（缺段/缺键 expect 点名，不静默放空）
+fn present_of(v: &toml::Value) -> Vec<String> {
+    v.get("slots")
+        .and_then(|s| s.get("present"))
+        .and_then(toml::Value::as_array)
+        .expect("缺 [slots].present")
+        .iter()
+        .filter_map(toml::Value::as_str)
+        .map(String::from)
+        .collect()
+}
+
+/// [bindings] 逐项对账底座（default/distro 与 esp32-mini 两处装配单同款）：
+/// provider 字符串化 + 格位在册 + 非基础层 + provider 确实 provides 该格位，
+/// 返回 (格位, provider) 序列由调用方按各自形状对账
+fn bindings_walk<'a>(
+    bindings: &'a toml::Table,
+    table: &rr_registry::Rr3SlotTable,
+    manifests: &std::collections::BTreeMap<String, toml::Value>,
+) -> Vec<(&'a str, &'a str)> {
+    let mut bound = Vec::new();
+    for (slot, provider) in bindings {
+        let provider = provider
+            .as_str()
+            .unwrap_or_else(|| panic!("bindings.{slot} 非字符串"));
+        assert!(
+            table.rr3_slot_contains(slot),
+            "bindings 引用表外格位 {slot}"
+        );
+        assert_ne!(
+            table.rr3_slot_layer(slot).unwrap(),
+            "base",
+            "基础层格位 {slot} 由基座内建承载，不得绑定模块"
+        );
+        let m = manifests
+            .get(provider)
+            .unwrap_or_else(|| panic!("bindings.{slot} 绑到不在册模块 {provider}"));
+        assert!(
+            str_list(m, "provides.capabilities")
+                .iter()
+                .any(|c| c == slot),
+            "{provider} 的 manifest 未 provides 被绑格位 {slot}"
+        );
+        bound.push((slot.as_str(), provider));
+    }
+    bound
+}
+/// schema 3 [pins] 与 roles.toml 的对账 pin（增补轮六批N1，§4.2 + 校验①的 CI 全集
+/// 层同判）：[[pin]] 的 role 外键查册、direction 与角色一致、instance 有无与
+/// per_instance 相符；[hardware] 不得出现八物理键（门 n 稳态判据的 CI 侧 pin——
+/// 运行期判在 rrd 装载，两轴缺一即带病；spi_device 批N3 件六随 SPI 词形进表）。
+fn assert_profile_pins_schema3(v: &toml::Value, root: &std::path::Path, expect_pin_roles: &[&str]) {
+    let roles = rr_registry::rr3_role_parse(
+        &std::fs::read_to_string(root.join("contracts/roles.toml"))
+            .expect("读 contracts/roles.toml"),
+    );
+    let pins = v
+        .get("pin")
+        .and_then(toml::Value::as_array)
+        .expect("缺 [[pin]]（schema 3 物理绑定真值点，§4.2）");
+    let mut pin_roles: Vec<String> = pins
+        .iter()
+        .map(|p| {
+            p.get("role")
+                .and_then(toml::Value::as_str)
+                .expect("pin 缺 role")
+                .to_string()
+        })
+        .collect();
+    pin_roles.sort();
+    assert_eq!(
+        pin_roles.iter().map(String::as_str).collect::<Vec<_>>(),
+        expect_pin_roles,
+        "[[pin]] 角色集漂移"
+    );
+    for p in pins {
+        let role = p.get("role").and_then(toml::Value::as_str).unwrap();
+        assert!(
+            roles.rr3_role_contains(role),
+            "[[pin]] 角色 {role} 未在 roles.toml 在册（校验①-a）"
+        );
+        if let (Some(pd), Some(rd)) = (
+            p.get("direction").and_then(toml::Value::as_str),
+            roles.rr3_role_direction(role),
+        ) {
+            assert_eq!(pd, rd, "pin {role} direction 与角色不一致（校验①）");
+        }
+        let per = roles.rr3_role_per_inst(role).unwrap_or(false);
+        let has_inst = p
+            .get("instance")
+            .and_then(toml::Value::as_str)
+            .is_some_and(|s| !s.is_empty());
+        assert_eq!(
+            has_inst, per,
+            "pin {role} instance 有无与 per_instance = {per} 不符（校验①-b）"
+        );
+    }
+    if let Some(hardware) = v.get("hardware").and_then(toml::Value::as_table) {
+        for k in [
+            "pwm_chip",
+            "pwm_channel",
+            "gpio_chip",
+            "gpio_led_line",
+            "gpio_relay_line",
+            "i2c_bus",
+            "ina219_addr",
+            "spi_device",
+        ] {
+            assert!(
+                !hardware.contains_key(k),
+                "[hardware] 出现物理键 {k}（门 n：schema 3 起唯一来源 = [pins] 派生）"
+            );
+        }
+    }
+    // 域 pin（校验⑥ CI 侧静态面）：[[supplies.domain]] 域名非空不重复；
+    // [pins].rail ∈ 域名集 ∪ {"none"}（⑥-a 在册 + ⑥-b 功率面挂真轨的名单面）
+    let mut domains: Vec<String> = Vec::new();
+    for d in v
+        .get("supplies")
+        .and_then(|s| s.get("domain"))
+        .and_then(toml::Value::as_array)
+        .expect("缺 [[supplies.domain]]（第七供给位，schema 3 起必填）")
+    {
+        let name = d
+            .get("name")
+            .and_then(toml::Value::as_str)
+            .expect("域条目缺 name");
+        assert!(!name.is_empty(), "域名不得为空");
+        assert!(!domains.contains(&name.to_string()), "域名 {name} 重复声明");
+        domains.push(name.to_string());
+    }
+    for p in pins {
+        if let Some(rail) = p.get("rail").and_then(toml::Value::as_str) {
+            if rail != "none" {
+                assert!(
+                    domains.contains(&rail.to_string()),
+                    "pin {} rail = {rail} 未在 [[supplies.domain]] 在册（校验⑥-a）",
+                    p.get("role").and_then(toml::Value::as_str).unwrap_or("?")
+                );
+            }
+        }
     }
 }

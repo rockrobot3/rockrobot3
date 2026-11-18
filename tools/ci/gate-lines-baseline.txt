@@ -1,0 +1,39 @@
+# ⑭ 源文件行数门低水位基线（2026-11-13 立规：每个 .rs <600 行）。
+# 语义：git ls-files 追踪的 .rs 中，行数 ≥600 的文件数不得超过本值——
+#   count > 本值即 FAIL（新增长文件）；count 下降须同批下调本值（只降不升）；
+#   文件缺/无整数计数即 FAIL（fail-closed）。
+# 处置纪律：不是"把长文件塞进白名单"，而是按职责结构化拆分后同批减一。
+# 初值 58 = 立规时的存量盘点（2026-11-13，含测试文件；最大三件：
+#   rr-registry/tests/contract.rs 2632、rr3-interact/src/panel/server.rs 2079、
+#   rrd/src/registry/tests.rs 1917）。
+# 2026-11-13 首拆：rrd registry 测试 1917 行拆成 tests/{mod,fanout,register,beat,
+#   publish,restart,death,degrade}.rs（最大 421 行）→ 超标数 58→57。
+# 2026-11-13 二拆：rr-registry 契约对拍 2632 行拆成 tests/contract.rs（夹具 435）
+#   + tests/contract/ 十一段（最大 326 行）→ 超标数 57→56。
+# 2026-11-13 三拆：rr3-interact panel/server.rs 2079 行拆成 server.rs（路由 550）
+#   + server/{ctl,selftest,serve}.rs + server/tests/ 四段（最大 424 行）→ 56→55。
+# 2026-11-14 四拆（测试体抽取）：rrctl commands.rs 638→374 + commands/tests.rs 262；
+#   sim main.rs 735→497 + src/tests.rs 236 → 55→53。
+# 2026-11-14 五拆（批量测试体抽取，15 件，生产面均 <600、测试面最大 457）：
+#   rr-hal esp32_uart、rr-ipc protocol/header、rr-mech control、rr-registry atom/depends、
+#   rrd assembly/cli/manifest/topics_load/wiring、rr3-act intent、rr3-interact boot、
+#   rr3-power dispatch、rr3-sense boot、pi-periph-base ports → 53→38。
+# 2026-11-14 六拆（按能力面/会话职责拆，非测试体抽取）：rr-hal backend 1224→167
+#   + backend/{selector,parse,sink,acts,power,link,tests}；rr-hal sim 1082→28
+#   + sim/{parse,source,sink,periph,tests}；rr3-brain rpc 1436→13 + rpc/{ops,model,tests}；
+#   cloud 1365→29 + cloud/{cfg,client,payload,retry,testkit,tests}；rr3-audio-rec main
+#   1514→156 + 十件会话职责件；rrd tests/support 189→29 + 四夹具件 → 38→23。
+# 2026-11-14 七拆：rr-hal-api lib 1197→59 + 八契约族件；rrd daemon 1196→25 + 六件、
+#   profile/boot 1007→23 + 三件；rr-bus-api client 1124→28 + 五件；rr-registry
+#   validate 898→26 + 五件 → 23→18。
+# 2026-11-14 八拆（audio/sim/sentinel/bridge）：rr-hal esp32audio 1461→59 + 六件、
+#   macaudio 822→39 + 五件；tools/sim chain 1058→38、assemble 1014→37、brain 800→29
+#   （各三到五件）；sentinel-harness main 1090→89 + 五件；bridge link 976→11 + 四件
+#   → 18→11。
+# 2026-11-14 九拆（收口）：rrd profile/parse 999→19、profile_checks 970→21、
+#   supervisor 854→237、registry/lifecycle 767→12、tests/register_publish 734→25、
+#   profile/tests/boot 634→11；rr3-interact mech 1199→384（测试与 parity 两腿留本件）、
+#   panel/exec 641→85；rr3-act boot 938→293；rr3-sense dispatch 791→307；
+#   pi-periph-base main 732→109 → 11→0。
+# **0 = 铁律落地**：此后任何 ≥600 行的 .rs 新增即红，无需再降基线。
+0

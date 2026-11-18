@@ -1,0 +1,156 @@
+# 集成演练流水线：真装、装配冒烟、全链闭环、点验矩阵。
+# 拆分自 ci.yml（2026-11-13）：按职责分开，job 正文原样搬运；
+# 判据仍以 tools/ci/check.sh 与 tools/ci/*.sh 为唯一真源。
+name: integration
+on:
+  push:
+    branches: [main, "dev/**"]
+    # 纯文档改动跳过集成面：文档门 ⑤ 在 gate；sim/distro/matrix 对 docs/** 与
+    # *.md 零敏感，全量跑是白烧（2026-11-17 结构治理）。
+    paths-ignore: ["docs/**", "**.md"]
+  pull_request:
+    paths-ignore: ["docs/**", "**.md"]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: never   # 纯文本输出：注解/日志可读，不再被 ANSI 转义吃掉
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  # 发行版快路轨冒烟（0.0.2 T5 / D8，ADR-0013 裁定 5 首证）：单步容器
+  # （rust:bookworm，glibc 自洽，本机产物装本机 deb）内构建 → rr3-pack 出 deb →
+  # dpkg -i → rrd 装配单正门起 5 模块 + rr3-brain 缺格点名。macOS 本机无法真装
+  # deb（方案 P1），真装只认这个 job 的远端回执。
+  distro-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      # 构建全程在 rust:bookworm 容器内（distro-smoke.sh 用镜像自带 rustc + 容器内
+      # /tmp/rr3-target），宿主侧不编一行 Rust——不装宿主工具链、不挂 rust-cache
+      #（2026-11-17 治理：宿主钉版与缓存对容器内构建零命中，纯烧起步时间）。
+      - name: deb 装机冒烟（rust:bookworm 容器）
+        run: bash tools/ci/distro-smoke.sh
+
+  # OTA 签名演练（ADR-0026，A1c）：临时测试种子走 keypub→manifest→sign→verify，
+  # 正例一条 + 镜像篡改/清单篡改/错公钥/降级四条负例；真实私钥不进 CI。
+  ota-sign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # 缺 workspaces 会扫仓库根（本仓根无 Cargo.toml）→ 缓存空转；锚到唯一清单。
+          workspaces: base/ota/rr3-ota-ctl
+      - name: 构建 rr3-ota-ctl
+        env:
+          CARGO_TARGET_DIR: /tmp/rr3-build
+        run: |
+          cargo build -q --locked --release \
+            --manifest-path base/ota/rr3-ota-ctl/Cargo.toml
+      - name: 签名/验签演练（正例 + 四负例）
+        run: bash tools/ci/ota-sign-smoke.sh /tmp/rr3-build/release/rr3-ota-ctl
+
+  # RK3566 到货前静态点验（A3）：装配单/平台表/接线档/轴档案/模块引用面。
+  # 不冒充真板证据；轴档案未标定只警告（--strict 才判红）。
+  rk3566-onboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: 静态点验（默认非 strict）
+        run: bash tools/ci/rk3566-onboard-check.sh
+
+  # 保底轨装配冒烟（0.0.2 修复批）：post-build.sh 装机布局 / entry 绝对化 /
+  # config 随装 / 坏模块警告不阻断。纯 bash + 系统工具，夹具侧模拟 Buildroot
+  # 目标根（TARGET_DIR），不需要 Docker 或 Buildroot 全量构建。
+  buildroot-assembly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: 保底轨装配冒烟（post-build.sh）
+        run: bash tools/ci/buildroot-assembly-smoke.sh
+
+  # D9 装配演练（0.0.2 T6）：装配单驱动 boot + 六 Rust 模块真进程（批N32 件四起
+  # brain 也是 Rust），判据六模块全 running + denied_publish = 0。
+  sim-assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # 九个清单（runtime + rrctl + sim + 六模块）共写仓根 target-dir
+          # （/tmp/rr3-build，见 .cargo/config.toml）：锚 base/runtime 定 key，
+          # cache-all-crates 把共享 target 里的全部包一并缓存——缺参扫仓库根
+          # 即空转，模块依赖反复冷编（2026-11-17 治理）。
+          workspaces: base/runtime
+          cache-all-crates: "true"
+      - name: 装配演练（构建 + rr3-sim --profile）
+        run: bash tools/ci/sim-assemble.sh
+
+  # 批F4 全链闭环演练（§5.2 判据 10 sim 档）：采集→意图→判向→转向→表情六真
+  # 进程 mock 闭环 + 总线观察者取证。
+  sim-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # 与 sim-assemble 同口径：九清单共写 /tmp/rr3-build，全量缓存共享依赖。
+          workspaces: base/runtime
+          cache-all-crates: "true"
+      - name: 全链闭环演练（构建 + rr3-sim --chain）
+        run: bash tools/ci/sim-chain.sh
+
+  # 点验矩阵出数入口（0.0.5 批M MC-10 L-1）：`tools/ci/matrix.sh` 此前**无任何调用方**
+  # （不在 check.sh、不在 ci.yml）——本 job 让它真跑并出一行矩阵（architecture §12.6
+  # 七列 / H3），产出**人工搬进** docs/status.md 矩阵行。出数 ≠ 判据：判据真源仍是
+  # tools/ci/*.sh 与 check.sh 十步，矩阵只如实记"本环境实跑了什么、跑出什么"。
+  # 非 --strict：⑦ 时序达标无固定载体（E4 真板专属，云 runner 是共享 x86、时间非硬件
+  # 时间），默认口径如实记"未跑"不冒领 PASS、退 0；矩阵出现 FAIL 列时退 1（job 红）。
+  matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+          targets: |
+            aarch64-unknown-linux-gnu
+            riscv64gc-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # 交叉目标依赖落 /tmp/rr3-build/<triple>/，同口径全量缓存。
+          workspaces: base/runtime
+          cache-all-crates: "true"
+      # ① 的 ipct003.sh 第③路 arm64 容器真跑（docker run --platform linux/arm64）
+      # 需要 binfmt——runner 缺省没有，缺它容器真跑失败（非 SKIP），① 被误判
+      # "对拍破裂"致 job 红。ipct003 job 有同一步，此处与之同源。
+      - uses: docker/setup-qemu-action@v4
+      - name: 点验矩阵出数（bash tools/ci/matrix.sh）
+        run: |
+          set -o pipefail
+          if ! bash tools/ci/matrix.sh 2>&1 | tee /tmp/matrix.log; then
+            fails=$(grep -E "(^| )FAIL" /tmp/matrix.log | tail -4 | tr '\n' ' ')
+            echo "::error title=matrix::${fails:0:900}"
+            exit 1
+          fi
+

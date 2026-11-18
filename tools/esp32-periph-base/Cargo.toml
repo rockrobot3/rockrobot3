@@ -1,0 +1,67 @@
+[package]
+name = "esp32-periph-base"
+version = "0.4.0"
+edition = "2021"
+rust-version = "1.82"
+license = "UNLICENSED"
+publish = false
+description = "0.0.5 增补轮五 批B 外设底座档 + 批C 帧执行面 + 批D I2S/音频（espidf std：SSD1306 OLED + LEDC 双轴舵机 + UART2 行/帧双面指令 @1.5M）"
+
+# 独立 workspace：xtensa-esp32-espidf 目标 + build-std 与 base/runtime 主 workspace 互斥，
+# 门禁 ④/⑥ 的宿主 check/test 不扫本目录（check.sh 显式排除；编译走
+# tools/ci/esp32-periph-base-check.sh，工具链缺位 SKIP 纪律同 espidf-sentinel-check.sh）。
+# 批B 不进城（行协议临时面）；批C 起加帧执行面——rr-ipc（字节契约 + 窄缝 +
+# blanket conn，xtensa 编译面由批J G2 真绿背书）+ serde_json（帧体组包/拆包，
+# 依赖闭包 L1 档位，与哨兵同口径），但**不进城**（不依赖 rr-core，不注册总线
+# 身份——路线二裁定：宿主 HAL 桥后端直连，本固件只是被点名的执行面）。
+[workspace]
+
+# 芯片档位（W1/T2 件三）：esp-idf-sys 的 `cargo:rustc-cfg=esp32*` 只作用于其自身
+# crate，**不传递给依赖方**——本 crate 内的 `cfg(esp32)` / `cfg(esp32s3)` 恒假。
+# 故本 crate 自行以 Cargo feature 表达芯片档：默认 classic（既有 runbook 不变），
+# S3 门禁显式 `--no-default-features --features esp32s3`。两档互斥，禁同开。
+[features]
+default = ["esp32"]
+esp32 = []
+esp32s3 = []
+
+# 批D③ 真板实锤（2026-10-13）：dev 缺省 opt-level=0 下 mic 线程的逐元素堆写
+# （extend_from_slice / String::push / serde_json 序列化）慢两个数量级——组帧
+# 分段实测 pcm≈280ms / b64≈200ms / json≈150ms / memcpy 面（body/frame）≈2ms，
+# 合计 ~680ms/片 → 组帧期间 I2S DMA 环溢出丢数（[mic] 16.5kHz→2.8kHz 崩塌，
+# 与 128ms 音频 + 680ms 组帧 = 2.5kHz 自洽）。此前"b64/JSON ms 级"的排除按
+# -O3 直觉估算，-O0 全不成立。真板性能验收必须走优化码：dev profile 全域提到
+# opt-level=2，门禁构建与烧录产物同位形，根治"-O0 不代表真板性能"失真。
+[profile.dev]
+opt-level = 2
+
+[dependencies]
+# 版本组合对表批W1 钉死登记（tools/espidf-std-hello/README.md）：
+# esp-idf-sys =0.35.0 ↔ ESP-IDF v5.2.2 ↔ embuild =0.32.0 ↔ ldproxy 0.3.5。
+esp-idf-sys = { version = "=0.35.0", features = ["binstart"] }
+# I2C（SSD1306）与 LEDC（舵机 PWM）驱动：esp-idf-hal 0.44.x 与 esp-idf-sys 0.35
+# 同代（其 Cargo.toml 依赖 esp-idf-sys ^0.35），精确 pin 保版本组合可复现。
+esp-idf-hal = "=0.44.1"
+# 批C 帧执行面：128B 头 + payload 前缀 + Rr3FrameBuf 缓冲（rr3_framebuf_read
+# 收帧 / rr3_send_buf 发帧，blanket conn 免费覆盖——UartIo wrapper 见 main.rs）。
+rr-ipc = { path = "../../base/runtime/rr-ipc" }
+# 外设帧面协议共享层（ADR-0024）：task 位形/主题/magic/请求解析/应答组帧的真值
+# 单点，与宿主 rr-hal 双向复用；本固件只消费协议件，平台面（UART/I2C/LEDC/I2S）
+# 仍在本 crate 的端口层。
+rr-periph-proto = { path = "../../base/runtime/rr-periph-proto" }
+# 外设机制核（P0-A A3）：帧面收发/OLED 编码/舵机与降档核心/轨压判定的单点真值
+# （零 esp-idf，宿主与板档共用）；本档只剩驱动构造与端口实现。
+periph-mech = { path = "../periph-mech" }
+# 判定核（方案A Q2）：欠压迟滞边沿 `Rr3LowEdge` 取用 rr-mech 安全核下沉件——板档
+# 直接消费判定核（安全核离线仍须成立），rr-mech 是零依赖 no_std 叶子（不牵总线栈，
+# 故不违反本 crate"不依赖 rr-core"的裁线）。
+rr-mech = { path = "../../base/runtime/rr-mech" }
+# 帧体 JSON-RPC 组包/拆包（method 恒 rr3.call、主题在 params.topic；哨兵同款）。
+serde_json = "1"
+
+[build-dependencies]
+# 链接参数接力（同 espidf-sentinel build.rs 注释）：esp-idf-sys 的
+# cargo:rustc-link-arg 只作用于它自己包内 bins 面，根 crate 必须经 links 元数据
+# （DEP_ESP_IDF_EMBUILD_LINK_ARGS）自行取回并转发。
+embuild = "=0.32.0"
+

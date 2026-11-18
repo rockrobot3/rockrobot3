@@ -1,0 +1,18 @@
+# led 装配清单（五件套④）：装配期注入面声明（ADR-0019 修订 1 ③——
+# [assemble.handles] 声明件用哪个能力面 trait ← 绑描述符哪个键、[assemble.ops]
+# 声明件暴露哪些参数槽 ← 取哪个 config 键；装配段校验缺项即该格 Degraded）。
+schema_version = 2
+
+[assemble]
+# 灯面经能力面 Rr3GpioOut（role=led），绑描述符 gpio_chip + gpio_led_line 两键
+handles = [
+  { trait = "Rr3GpioOut", desc_key = "gpio_chip" },
+  { trait = "Rr3GpioOut", desc_key = "gpio_led_line" },
+]
+# blink 周期 ← config.toml [rr3-act.led]（§3；代码再 .max(1)）
+ops = [
+  { slot = "blink_period_ms", src_key = "rr3-act.led.blink_period_ms" },
+  # 灯效白名单子集 ← config.toml [rr3-act.led] effects（A-9：本形态接受哪个子集—
+  # 值不许改、集合可注入，"某形态不开 blink"= 改数据不改码）
+  { slot = "led_effects", src_key = "rr3-act.led.effects" },
+]

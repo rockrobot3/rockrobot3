@@ -1,6 +1,591 @@
 <!doctype html>
-<!-- rr3-interact 面板静态页占位：状态展示随 M5 接入总线后填充。 -->
+<!-- 洛克三号面板（0.0.4 批C + 批D）：单文件静态页，无外部资源，vanilla JS。
+     数据面端点（全集以后端 RR3_PANEL_ROUTES 为真值，MC-8③/I-12：本页不手写计数）：
+     状态页签 = /api/status；硬件页签 = relay/beep/face/selftest/wiring（接线图，批N4 件九笔4）；
+     系统页签 = /api/data + /api/logs + reboot + 恢复出厂 WiFi（/api/wifi/forget）
+                 + 模型密钥（/api/model/keys|key）+ 模型行（/api/brain/models|model|model/test，
+                 ADR-0023 OpenAI 兼容多厂商 CRUD）+ brain/五模块 ops 槽（配置面）；
+     WiFi 页签 = /api/wifi/scan|connect|forget（rr3-connect 三 RPC，0.0.4 批D 上线）。 -->
+<html lang="zh-CN">
+<head>
 <meta charset="utf-8">
-<title>rr3-interact 面板</title>
-<h1>rr3-interact</h1>
-<p>骨架页面。运行状态、表情与播放控制随 M5 经 rr-bus 接入。</p>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>洛克三号面板</title>
+<style>
+  :root { --bg:#10151c; --card:#1b232e; --line:#2c3a4a; --fg:#d8e2ee; --dim:#8aa0b6; --ok:#5ad29b; --bad:#f27979; --acc:#6cb6ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  header { padding:14px 18px; border-bottom:1px solid var(--line); display:flex; align-items:baseline; gap:12px; }
+  header h1 { font-size:17px; margin:0; }
+  header small { color:var(--dim); }
+  nav { display:flex; gap:4px; padding:8px 18px 0; border-bottom:1px solid var(--line); }
+  nav button { background:none; border:1px solid transparent; border-bottom:none; color:var(--dim); padding:8px 16px; font-size:14px; cursor:pointer; border-radius:6px 6px 0 0; }
+  nav button.on { color:var(--acc); border-color:var(--line); background:var(--card); }
+  main { padding:16px 18px; max-width:860px; }
+  section { display:none; }
+  section.on { display:block; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px 16px; margin-bottom:14px; }
+  .card h2 { font-size:14px; margin:0 0 10px; color:var(--dim); font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:500; }
+  tr:last-child td { border-bottom:none; }
+  .btn { background:var(--acc); color:#0b1016; border:none; border-radius:6px; padding:8px 18px; font-size:14px; cursor:pointer; margin:4px 8px 4px 0; }
+  .btn.warn { background:var(--bad); color:#1c0d0d; }
+  .btn.off { background:var(--line); color:var(--fg); }
+  select { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:7px 10px; font-size:14px; }
+  input { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:7px 10px; font-size:14px; width:200px; margin-right:8px; }
+  pre { background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:10px; overflow:auto; max-height:320px; font-size:12px; margin:0; white-space:pre-wrap; word-break:break-all; }
+  .msg { color:var(--dim); min-height:20px; margin-top:6px; font-size:13px; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  .ph { color:var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1>洛克三号面板</h1>
+  <small>rr3-interact · 局域网可信面 · 控制全走 RPC 归属门</small>
+</header>
+<nav>
+  <button data-tab="status" class="on">状态</button>
+  <button data-tab="hw">硬件</button>
+  <button data-tab="sys">系统</button>
+  <button data-tab="wifi">WiFi</button>
+</nav>
+<main>
+
+<section id="tab-status" class="on">
+  <div class="card">
+    <h2>模块健康（ctl.health，2s 刷新）</h2>
+    <table id="health"><thead><tr><th>模块</th><th>task</th><th>相位</th><th>心跳间隔</th><th>距上次心跳</th></tr></thead><tbody></tbody></table>
+    <div class="msg" id="health-msg"></div>
+  </div>
+  <div class="card">
+    <h2>网络链路（rr3-connect/net/link 订阅缓存）</h2>
+    <div id="link" class="ph">暂无链路事件（发布方随批D 配网上线）</div>
+  </div>
+</section>
+
+<section id="tab-hw">
+  <div class="card">
+    <h2>继电器（rr3.call → rr3-act/relay/set）</h2>
+    <button class="btn" onclick="relay(true)">吸合</button>
+    <button class="btn off" onclick="relay(false)">断开</button>
+    <div class="msg" id="relay-msg"></div>
+  </div>
+  <div class="card">
+    <h2>喇叭（进程内测试音）</h2>
+    <button class="btn" onclick="beep()">响一声</button>
+    <div class="msg" id="beep-msg"></div>
+  </div>
+  <div class="card">
+    <h2>表情（进程内表情机）</h2>
+    <select id="face-sel">
+      <option>idle</option><option>blink</option><option>think</option><option>happy</option><option>listen</option><option>turn</option>
+      <optgroup label="单字符（8x8 显示）"><option>charA</option><option>charB</option><option>charC</option><option>charD</option><option>charE</option><option>charF</option><option>charG</option><option>charH</option><option>charI</option><option>charJ</option><option>charK</option><option>charL</option><option>charM</option><option>charN</option><option>charO</option><option>charP</option><option>charQ</option><option>charR</option><option>charS</option><option>charT</option><option>charU</option><option>charV</option><option>charW</option><option>charX</option><option>charY</option><option>charZ</option><option>char0</option><option>char1</option><option>char2</option><option>char3</option><option>char4</option><option>char5</option><option>char6</option><option>char7</option><option>char8</option><option>char9</option></optgroup>
+    </select>
+    <button class="btn" onclick="face()">切换</button>
+    <div class="msg" id="face-msg"></div>
+  </div>
+  <div class="card">
+    <h2>自检（逐腿三调＋接线全交叉）</h2>
+    <button class="btn" onclick="selftest()">开始自检</button>
+    <pre id="selftest-out">喇叭 + 继电器 + 表情 逐腿各做一次＋接线全交叉逐条（判果在 rrd），单项失败不连锁；判定 = 结果集与预期集等值——固定腿逐名三态对表（缺腿或腿册外多腿即失败），接线组内零失败即过（不适用不拖累）。</pre>
+  </div>
+  <div class="card">
+    <h2>接线图（ctl.wiring 装配快照读口，批N4 件九笔4）</h2>
+    <button class="btn off" onclick="wiringLoad()">拉取接线图</button>
+    <div class="msg" id="wiring-msg">判据真值在 rrd（[pins]×wiring 全交叉逐条），面板只透传渲染不重判；未以 --profile 启动如实报不可得，不造假数据。</div>
+    <div id="wiring-body"></div>
+  </div>
+</section>
+
+<section id="tab-sys">
+  <div class="card">
+    <h2>运维计数（ctl.counters）</h2>
+    <table id="counters"><thead><tr><th>键</th><th>值</th></tr></thead><tbody></tbody></table>
+    <div class="msg" id="counters-msg"></div>
+  </div>
+  <div class="card">
+    <h2>rrd 日志环（ctl.logs 尾部）</h2>
+    <pre id="logs">（空）</pre>
+  </div>
+  <div class="card">
+    <h2>重启（rr3.ctl.reboot，双重门缺省恒拒）</h2>
+    <button class="btn warn" onclick="reboot()">重启整机</button>
+    <div class="msg" id="reboot-msg">需 rrd 执行面解锁：cfg(linux) 且 env RR3_REBOOT_OK=1（由 rr3.service 注入）。</div>
+  </div>
+  <div class="card">
+    <h2>恢复出厂 WiFi（rr3.call → rr3-connect/wifi/forget）</h2>
+    <button class="btn warn" onclick="wifiForget()">清除 WiFi 凭据</button>
+    <div class="msg" id="wifi-reset-msg">仅清配网凭据回 AP 态；≠ 整机恢复出厂（M6 分区回滚，两语义不合并）。</div>
+  </div>
+  <div class="card">
+    <h2>模型密钥（仓外 secrets 文件，0600；值只写不回显）</h2>
+    <p class="ph">引用名 <input id="model-ref" list="model-ref-presets" placeholder="如 SiliconFlow 或 DeepSeek官方"> 密钥 <input id="model-key" type="password" placeholder="sk-...（留空=删除该引用）"></p>
+    <datalist id="model-ref-presets">
+      <option value="DeepSeek官方"></option>
+      <option value="deepseek"></option>
+      <option value="glm"></option>
+      <option value="qwen"></option>
+      <option value="siliconflow"></option>
+    </datalist>
+    <button class="btn" onclick="modelKeySave()">保存密钥</button>
+    <button class="btn off" onclick="modelKeysRefresh()">刷新清单</button>
+    <table id="model-keys"><thead><tr><th>引用名</th><th>状态</th></tr></thead><tbody></tbody></table>
+    <div class="msg" id="model-key-msg">模型连接（地址/模型名）在 rr3-brain config.toml 的 [[rr3-brain.model]] 表；此处只管密钥。brain 每轮现读，保存后下一轮对话即生效。</div>
+  </div>
+  <div class="card">
+    <h2>模型行（OpenAI 兼容多厂商，rr3.call → rr3-brain/model list/set/test）</h2>
+    <p class="ph">预设 <select id="model-preset" onchange="modelPresetChange()">
+      <option value="">（手动填写）</option>
+      <option value="deepseek">DeepSeek</option>
+      <option value="glm">GLM（智谱）</option>
+      <option value="qwen">Qwen（百炼兼容模式）</option>
+      <option value="openai">OpenAI</option>
+    </select></p>
+    <p class="ph">名称 <input id="model-name" placeholder="如 DeepSeek官方" style="width:16ch">
+      API 根 <input id="model-base" placeholder="https://api.deepseek.com/v1" style="width:34ch"></p>
+    <p class="ph">模型 <input id="model-id" placeholder="如 deepseek-chat" style="width:18ch">
+      密钥引用 <input id="model-key-ref" placeholder="如 DeepSeek官方 或 env:DEEPSEEK_API_KEY" style="width:26ch">
+      <label class="ph"><input id="model-active" type="checkbox" style="width:auto"> 设为当前</label></p>
+    <button class="btn" onclick="modelSave()">保存模型行</button>
+    <button class="btn off" onclick="modelRowsLoad()">刷新列表</button>
+    <table id="model-rows"><thead><tr><th>名称</th><th>API 根</th><th>模型</th><th>格式/模式</th><th>密钥</th><th>当前</th><th>操作</th></tr></thead><tbody></tbody></table>
+    <div class="msg" id="model-rows-msg">API 根填「完整根」（含版本段，如 /v1），客户端只追加 /chat/completions。保存即写 config.toml（自动留 .bak 备份）并 live 换客户端；测试只发一次 max_tokens=1 探测，不改配置。</div>
+  </div>
+  <div class="card">
+    <h2>通用 cloud 槽（ASR/TTS/超时/话轮，rr3.call → rr3-brain/ops/list 读 / ops/set 写）</h2>
+    <button class="btn off" onclick="brainOpsLoad()">读取槽值</button>
+    <table id="brain-ops"><thead><tr><th>原子</th><th>槽</th><th>值</th></tr></thead><tbody></tbody></table>
+    <p class="ph">写槽：组 <input id="brain-set-group" placeholder="asr | llm | tts | dialog" style="width:14ch"> 槽 <input id="brain-set-slot" placeholder="如 asr_model / timeout_s" style="width:22ch"> 值 <input id="brain-set-value" placeholder="新值（数值槽填数字）" style="width:24ch"></p>
+    <button class="btn" onclick="brainOpsSave()">写入槽值</button>
+    <div class="msg" id="brain-set-msg">live 内存生效（写后重建 asr/llm/tts 客户端，llm 重建即换会话）；**不落盘**——进程重启回 config.toml 真值（应答 persisted:false 如实申报）。密钥不在写面（走上方模型密钥卡）；白名单外组/槽与类型域值错由 brain 拒。</div>
+  </div>
+  <div class="card">
+    <h2>模块配置面（rr3.call → rr3-模块/ops/list，只读；批N4 件九二）</h2>
+    <button class="btn off" onclick="moduleOpsLoad('act')">act</button>
+    <button class="btn off" onclick="moduleOpsLoad('connect')">connect</button>
+    <button class="btn off" onclick="moduleOpsLoad('interact')">interact</button>
+    <button class="btn off" onclick="moduleOpsLoad('power')">power</button>
+    <button class="btn off" onclick="moduleOpsLoad('sense')">sense</button>
+    <table id="module-ops"><thead><tr><th>模块</th><th>组</th><th>槽</th><th>值</th></tr></thead><tbody></tbody></table>
+    <div class="msg" id="module-ops-msg">各模块 config 注入的 ops 槽快照（槽名与装配清单申报同源）；行程/凭据/瞬态不在快照面。</div>
+  </div>
+</section>
+
+<section id="tab-wifi">
+  <div class="card">
+    <h2>扫描（rr3.call → rr3-connect/wifi/scan，sim 后端）</h2>
+    <button class="btn" onclick="wifiScan()">扫描</button>
+    <table id="wifi-list"><thead><tr><th>SSID</th><th>信号</th><th>加密</th></tr></thead><tbody></tbody></table>
+    <div class="msg" id="wifi-scan-msg"></div>
+  </div>
+  <div class="card">
+    <h2>连接（rr3.call → rr3-connect/wifi/connect）</h2>
+    <p class="ph">SSID <input id="wifi-ssid" placeholder="家庭 WiFi 名称"> 密码 <input id="wifi-pass" type="password" placeholder="至少 8 位"></p>
+    <button class="btn" onclick="wifiConnect()">连接</button>
+    <div class="msg" id="wifi-connect-msg">凭据由后端承载持久化（linux = NetworkManager 连接配置），重启后仍在册。</div>
+  </div>
+  <div class="card">
+    <h2>忘记网络（rr3.call → rr3-connect/wifi/forget）</h2>
+    <button class="btn off" onclick="wifiForget()">忘记当前网络</button>
+    <div class="msg" id="wifi-forget-msg"></div>
+  </div>
+</section>
+
+</main>
+<script>
+"use strict";
+// ---- 骨架 ----
+const $ = (id) => document.getElementById(id);
+function setMsg(id, text, ok) {
+  const el = $(id);
+  el.textContent = text;
+  el.className = "msg " + (ok === undefined ? "" : ok ? "ok" : "bad");
+}
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: "POST", body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  const v = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(v.error || ("HTTP " + r.status));
+  return v;
+}
+// 页签切换
+for (const b of document.querySelectorAll("nav button")) {
+  b.onclick = () => {
+    document.querySelectorAll("nav button, main section").forEach((el) => el.classList.remove("on"));
+    b.classList.add("on");
+    $("tab-" + b.dataset.tab).classList.add("on");
+  };
+}
+// ---- 状态页签 ----
+async function refreshStatus() {
+  try {
+    const v = await api("/api/status");
+    const tb = $("health").tBodies[0];
+    tb.innerHTML = "";
+    for (const m of (v.health && v.health.modules) || []) {
+      const tr = tb.insertRow();
+      [m.name, m.task, m.phase, m.heartbeat_ms + "ms", m.since_beat_ms + "ms"]
+        .forEach((t) => tr.insertCell().textContent = t);
+    }
+    setMsg("health-msg", tb.rows.length ? "" : "总线上暂无在册模块");
+    $("link").textContent = v.link ? JSON.stringify(v.link, null, 2) : "暂无链路事件";
+    $("link").className = v.link ? "" : "ph";
+  } catch (e) { setMsg("health-msg", "状态拉取失败：" + e.message, false); }
+}
+setInterval(refreshStatus, 2000);
+refreshStatus();
+// ---- 硬件页签 ----
+async function relay(on) {
+  try { const v = await api("/api/relay", { on }); setMsg("relay-msg", "已" + (on ? "吸合" : "断开") + "（" + JSON.stringify(v.result) + "）", true); }
+  catch (e) { setMsg("relay-msg", "失败：" + e.message, false); }
+}
+async function beep() {
+  try { const v = await api("/api/beep", {}); setMsg("beep-msg", "播放 " + v.result.played_ms + "ms", true); }
+  catch (e) { setMsg("beep-msg", "失败：" + e.message, false); }
+}
+async function face() {
+  try {
+    const expression = $("face-sel").value;
+    const v = await api("/api/face", { expression });
+    setMsg("face-msg", expression + "（前一态：" + v.result.previous + "）", true);
+  } catch (e) { setMsg("face-msg", "失败：" + e.message, false); }
+}
+// 自检逐腿渲染（批N4 件五 I-18③）：应答 {legs:[{leg,pass,reason?}],verdict}，
+// pass = pass|fail|n-a 三态（n-a = 本形态不具备该腿）；恒败腿如实 fail 不折算。
+async function selftest() {
+  $("selftest-out").textContent = "自检中……";
+  try {
+    const v = await api("/api/selftest", {});
+    const mark = { pass: "[通过]", fail: "[失败]", "n-a": "[不适用]" };
+    const lines = (v.legs || []).map(
+      (l) => (mark[l.pass] || "[" + l.pass + "]") + " " + l.leg + (l.reason ? "：" + l.reason : "")
+    );
+    lines.unshift("判定：" + v.verdict);
+    $("selftest-out").textContent = lines.join("\n");
+  }
+  catch (e) { $("selftest-out").textContent = "自检失败：" + e.message; }
+}
+// 接线图（批N4 件九笔4）：/api/wiring 原样透传 rrd 装配快照，前端只渲染不重判；
+// available:false = 未以 --profile 启动的诚实面，如实展示不可得
+function mkTable(headers, rows) {
+  const t = document.createElement("table");
+  const hr = t.createTHead().insertRow();
+  headers.forEach((h) => { const th = document.createElement("th"); th.textContent = h; hr.appendChild(th); });
+  const tb = t.createTBody();
+  (rows || []).forEach((r) => {
+    const tr = tb.insertRow();
+    r.forEach((c) => {
+      const td = tr.insertCell();
+      td.textContent = c === undefined || c === null || c === "" ? "—" : String(c);
+    });
+  });
+  return t;
+}
+function wiringHeading(txt) {
+  const el = document.createElement("p");
+  el.className = "ph";
+  el.style.margin = "10px 0 4px";
+  el.textContent = txt;
+  return el;
+}
+async function wiringLoad() {
+  setMsg("wiring-msg", "拉取中……");
+  const body = $("wiring-body");
+  body.innerHTML = "";
+  try {
+    const v = await api("/api/wiring");
+    if (!v.available) {
+      setMsg("wiring-msg", "接线图不可得：" + (v.reason || "rrd 未申报理由"), false);
+      return;
+    }
+    const mark = { pass: "通过", "not-applicable": "不适用", fail: "失败" };
+    body.appendChild(wiringHeading("形态：" + v.profile + " · 全交叉判果 " + (v.checks || []).length + " 条（三态，判据真值在 rrd）"));
+    body.appendChild(mkTable(["检查项", "判果", "说明"],
+      (v.checks || []).map((c) => [c.item, mark[c.pass] || c.pass, c.reason])));
+    if ((v.pins || []).length) {
+      body.appendChild(wiringHeading("针脚（" + v.pins.length + "）"));
+      body.appendChild(mkTable(["pin", "角色", "实例", "控制器", "通道", "物理脚", "方向", "轨", "地址", "器件", "失效态", "复用组"],
+        v.pins.map((p) => [p.pin_id, p.role, p.instance, p.controller, p.channel, p.physical, p.direction, p.rail, p.addr, p.device, p.failsafe, p.mux_group])));
+    }
+    if ((v.domains || []).length) {
+      body.appendChild(wiringHeading("电源域（" + v.domains.length + "）"));
+      body.appendChild(mkTable(["域", "标称mV", "轻降mV", "重降mV", "上限mA", "采样", "开关", "可开关", "已武装", "账龄ms"],
+        v.domains.map((d) => [d.name, d.nominal_mv, d.mild_mv, d.severe_mv, d.current_cap_ma, d.sense, d.switch, d.switchable, d.armed, d.max_age_ms])));
+    }
+    if ((v.wires || []).length) {
+      body.appendChild(wiringHeading("线组（" + v.wires.length + "）"));
+      body.appendChild(mkTable(["连接器", "针脚", "信号", "网络", "馈给", "对位", "键位", "额定A", "地回流"],
+        v.wires.map((w) => [w.connector, (w.hdr_pin || []).join("/"), (w.signal || []).join("/"), w.net, (w.feeds || []).join("/"), w.mate, w.keyed ? "有键" : "无键", w.rated_a, w.gnd_common])));
+    }
+    if ((v.axis || []).length) {
+      body.appendChild(wiringHeading("轴档案（" + v.axis.length + "）"));
+      body.appendChild(mkTable(["轴", "中位°", "下限°", "上限°", "方向", "速率°/s", "整定ms", "保持", "上限mA", "预热ms", "硬限位", "已标定"],
+        v.axis.map((a) => [a.pin, a.center_deg, a.lo_deg, a.hi_deg, a.dir_sign, a.slew_deg_s, a.settle_ms, a.hold, a.current_ceil_ma, a.warmup_ms, a.hard_stop, a.calibrated ? "是" : "否"])));
+    }
+    setMsg("wiring-msg", "已渲染（在册角色 " + (v.roles || []).length + " 条；判据逐条以上方检查项表为准）", true);
+  } catch (e) {
+    setMsg("wiring-msg", "拉取失败：" + e.message, false);
+    body.innerHTML = "";
+  }
+}
+// ---- 系统页签 ----
+async function refreshSys() {
+  if (!$("tab-sys").classList.contains("on")) return;
+  try {
+    const d = await api("/api/data");
+    const tb = $("counters").tBodies[0];
+    tb.innerHTML = "";
+    const counters = (d && d.counters) || {};
+    for (const k of Object.keys(counters)) {
+      const tr = tb.insertRow();
+      tr.insertCell().textContent = k;
+      tr.insertCell().textContent = counters[k];
+    }
+    setMsg("counters-msg", tb.rows.length ? "" : "暂无计数");
+    const l = await api("/api/logs");
+    $("logs").textContent = (l.lines || []).join("\n") || "（空）";
+    $("logs").scrollTop = $("logs").scrollHeight;
+  } catch (e) { setMsg("counters-msg", "拉取失败：" + e.message, false); }
+}
+setInterval(refreshSys, 2000);
+async function reboot() {
+  if (!confirm("确认重启整机？")) return;
+  try { const v = await api("/api/reboot", {}); setMsg("reboot-msg", "重启指令已受理：" + JSON.stringify(v), true); }
+  catch (e) { setMsg("reboot-msg", "被拒：" + e.message, false); }
+}
+// ---- WiFi 页签（0.0.4 批D：connect 三 RPC，参数裁决在 owner 模块） ----
+async function wifiScan() {
+  setMsg("wifi-scan-msg", "扫描中……");
+  try {
+    const v = await api("/api/wifi/scan");
+    const tb = $("wifi-list").tBodies[0];
+    tb.innerHTML = "";
+    for (const it of v.result.items || []) {
+      const tr = tb.insertRow();
+      tr.insertCell().textContent = it.ssid;
+      tr.insertCell().textContent = it.rssi + " dBm";
+      tr.insertCell().textContent = it.auth ? "是" : "开放";
+    }
+    setMsg("wifi-scan-msg", (v.result.items || []).length + " 个网络（backend=" + v.result.backend + "）", true);
+  } catch (e) { setMsg("wifi-scan-msg", "扫描失败：" + e.message, false); }
+}
+async function wifiConnect() {
+  const ssid = $("wifi-ssid").value.trim();
+  const pass = $("wifi-pass").value;
+  try {
+    const v = await api("/api/wifi/connect", { ssid, pass });
+    setMsg("wifi-connect-msg",
+      "已转入 station 态（ssid=" + v.result.ssid + "，链路读数 connected=" + v.result.connected + "）", true);
+  } catch (e) { setMsg("wifi-connect-msg", "失败：" + e.message, false); }
+}
+async function wifiForget() {
+  try {
+    const v = await api("/api/wifi/forget", {});
+    setMsg("wifi-forget-msg", "已清除凭据，mode=" + v.result.mode, true);
+    setMsg("wifi-reset-msg", "已清除凭据，mode=" + v.result.mode, true);
+  } catch (e) { setMsg("wifi-forget-msg", "失败：" + e.message, false); }
+}
+// ---- 模型密钥（0.0.6 抽象批：值只写不回显，清单只回 ref 名）----
+async function modelKeysRefresh() {
+  try {
+    const v = await api("/api/model/keys");
+    const tb = $("model-keys").querySelector("tbody");
+    tb.innerHTML = "";
+    (v.keys || []).forEach((k) => {
+      const tr = document.createElement("tr");
+      const td1 = document.createElement("td"); td1.textContent = k.ref;
+      const td2 = document.createElement("td"); td2.textContent = "已设置";
+      tr.appendChild(td1); tr.appendChild(td2); tb.appendChild(tr);
+    });
+    if (!(v.keys || []).length) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 2; td.textContent = "（空）";
+      tr.appendChild(td); tb.appendChild(tr);
+    }
+    setMsg("model-key-msg", "清单已刷新（共 " + (v.keys || []).length + " 条，值不回显）。", true);
+  } catch (e) { setMsg("model-key-msg", "刷新失败：" + e.message, false); }
+}
+async function modelKeySave() {
+  const ref = $("model-ref").value.trim();
+  const key = $("model-key").value;
+  if (!ref) { setMsg("model-key-msg", "引用名不能为空", false); return; }
+  try {
+    const v = await api("/api/model/key", { ref, value: key });
+    setMsg("model-key-msg", key ? "引用「" + v.ref + "」已保存（brain 下一轮对话生效）。" : "引用「" + v.ref + "」已删除。", true);
+    $("model-key").value = "";
+    await modelKeysRefresh();
+  } catch (e) { setMsg("model-key-msg", "保存失败：" + e.message, false); }
+}
+// ---- 模型行（ADR-0023：OpenAI 兼容多厂商 CRUD + 切换 + 连通性测试）----
+// 预设只填「API 根 + 模型名」，名称/密钥引用由操作者定；手动填亦可（其他 OpenAI 兼容厂商）
+const MODEL_PRESETS = {
+  deepseek: { base_url: "https://api.deepseek.com/v1", model_id: "deepseek-chat" },
+  glm: { base_url: "https://open.bigmodel.cn/api/paas/v4", model_id: "glm-4.5" },
+  qwen: { base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", model_id: "qwen-plus" },
+  openai: { base_url: "https://api.openai.com/v1", model_id: "gpt-4o-mini" },
+};
+let modelRows = [];
+function modelPresetChange() {
+  const p = MODEL_PRESETS[$("model-preset").value];
+  if (!p) return;
+  $("model-base").value = p.base_url;
+  $("model-id").value = p.model_id;
+}
+async function modelRowsLoad() {
+  try {
+    const v = await api("/api/brain/models");
+    modelRows = v.models || [];
+    const tb = $("model-rows").querySelector("tbody");
+    tb.innerHTML = "";
+    for (const m of modelRows) {
+      const tr = document.createElement("tr");
+      tr.insertCell().textContent = m.name;
+      tr.insertCell().textContent = m.base_url;
+      tr.insertCell().textContent = m.model_id;
+      tr.insertCell().textContent = m.api_format + " / " + m.mode;
+      tr.insertCell().textContent = (m.key_ref || "（无）") + (m.key_set ? " · 已就位" : " · 缺密钥");
+      tr.insertCell().textContent = m.active ? "当前" : "—";
+      const td = tr.insertCell();
+      [["测试", () => modelTest(m.name)], ["激活", () => modelActivate(m.name)],
+       ["编辑", () => modelEdit(m.name)], ["删除", () => modelDelete(m.name)]]
+        .forEach(([label, fn]) => {
+          const b = document.createElement("button");
+          b.className = "btn off";
+          b.textContent = label;
+          b.style.padding = "4px 10px"; b.style.margin = "2px 4px 2px 0";
+          b.onclick = fn;
+          td.appendChild(b);
+        });
+      tb.appendChild(tr);
+    }
+    if (!modelRows.length) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 7; td.textContent = "（空表——当前走 config [rr3-brain.cloud] 的 fallback 连接）";
+      tr.appendChild(td); tb.appendChild(tr);
+    }
+    setMsg("model-rows-msg", "模型行 " + modelRows.length + " 条；当前生效：" + (v.active || "无（cloud fallback）"), true);
+  } catch (e) { setMsg("model-rows-msg", "列表拉取失败：" + e.message, false); }
+}
+function modelEdit(name) {
+  const m = modelRows.find((x) => x.name === name);
+  if (!m) return;
+  $("model-name").value = m.name;
+  $("model-base").value = m.base_url;
+  $("model-id").value = m.model_id;
+  $("model-key-ref").value = m.key_ref || "";
+  $("model-active").checked = !!m.active;
+  $("model-preset").value = "";
+  setMsg("model-rows-msg", "已载入「" + name + "」——改完点保存即 upsert（同名覆盖）。", true);
+}
+async function modelSave() {
+  const body = {
+    op: "upsert",
+    name: $("model-name").value.trim(),
+    base_url: $("model-base").value.trim(),
+    model_id: $("model-id").value.trim(),
+    api_format: "openai",
+    active: $("model-active").checked,
+  };
+  const ref = $("model-key-ref").value.trim();
+  if (ref) body.api_key_ref = ref;
+  if (!body.name) { setMsg("model-rows-msg", "名称不能为空", false); return; }
+  try {
+    const v = await api("/api/brain/model", body);
+    setMsg("model-rows-msg",
+      "已保存「" + v.name + "」（persisted=" + v.persisted + "，applies=" + v.applies
+      + "；当前生效：" + (v.active || "无") + "）", true);
+    await modelRowsLoad();
+  } catch (e) { setMsg("model-rows-msg", "保存失败：" + e.message, false); }
+}
+async function modelActivate(name) {
+  try {
+    await api("/api/brain/model", { op: "activate", name });
+    setMsg("model-rows-msg", "已切换到「" + name + "」并落盘（下一轮对话即用它）。", true);
+    await modelRowsLoad();
+  } catch (e) { setMsg("model-rows-msg", "切换失败：" + e.message, false); }
+}
+async function modelDelete(name) {
+  if (!confirm("删除模型行「" + name + "」？（当前生效行不可删，先切换）")) return;
+  try {
+    await api("/api/brain/model", { op: "delete", name });
+    setMsg("model-rows-msg", "已删除「" + name + "」并落盘。", true);
+    await modelRowsLoad();
+  } catch (e) { setMsg("model-rows-msg", "删除失败：" + e.message, false); }
+}
+async function modelTest(name) {
+  setMsg("model-rows-msg", "测试「" + name + "」中……");
+  try {
+    const v = await api("/api/brain/model/test", { name });
+    if (v.ok && v.mock) setMsg("model-rows-msg", "「" + name + "」mock 档探测通过（未真发请求）。", true);
+    else if (v.ok) setMsg("model-rows-msg", "「" + name + "」连通：" + v.latency_ms + "ms（HTTP " + v.status + "）", true);
+    else setMsg("model-rows-msg", "「" + name + "」不通：" + v.error, false);
+  } catch (e) { setMsg("model-rows-msg", "测试失败：" + e.message, false); }
+}
+// brain ops 槽读面（B-12，批N4 件六二）：只读点名，应答按原子分组逐槽渲染
+async function brainOpsLoad() {
+  try {
+    const v = await api("/api/brain/ops");
+    const ops = v.ops || {};
+    const tb = $("brain-ops").querySelector("tbody");
+    tb.innerHTML = "";
+    let n = 0;
+    for (const [atom, slots] of Object.entries(ops)) {
+      for (const [slot, val] of Object.entries(slots)) {
+        const tr = document.createElement("tr");
+        const td1 = document.createElement("td"); td1.textContent = atom;
+        const td2 = document.createElement("td"); td2.textContent = slot;
+        const td3 = document.createElement("td"); td3.textContent = String(val);
+        tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tb.appendChild(tr);
+        n++;
+      }
+    }
+    setMsg("brain-ops-msg", "已读取 " + n + " 槽（密钥不在此面，值零回显守脑面）。", true);
+  } catch (e) { setMsg("brain-ops-msg", "读取失败：" + e.message, false); }
+}
+// brain ops 槽写口（批N4 件九三 配置面）：group/slot/value 透传，裁决在 owner；
+// 数值槽（timeout_s/max_utterance_ms）前端转 Number，其余按字符串交 brain 校验
+async function brainOpsSave() {
+  try {
+    const slot = $("brain-set-slot").value.trim();
+    const raw = $("brain-set-value").value;
+    const numSlots = new Set(["timeout_s", "max_utterance_ms"]);
+    const v = await api("/api/brain/ops", {
+      group: $("brain-set-group").value.trim(),
+      slot: slot,
+      value: numSlots.has(slot) ? Number(raw) : raw,
+    });
+    setMsg("brain-set-msg",
+      "已写入 " + v.group + "." + v.slot + "：" + JSON.stringify(v.old) + " → " + JSON.stringify(v.new)
+      + "（live 内存生效，persisted=" + v.persisted + "——重启回 config.toml 真值）", true);
+  } catch (e) { setMsg("brain-set-msg", "写入失败：" + e.message, false); }
+}
+// 五模块 ops 槽读面（批N4 件九二）：同一渲染范式，模块名入列（数组值逐字展示）
+async function moduleOpsLoad(mod) {
+  try {
+    const v = await api("/api/" + mod + "/ops");
+    const ops = v.ops || {};
+    const tb = $("module-ops").querySelector("tbody");
+    tb.innerHTML = "";
+    let n = 0;
+    for (const [group, slots] of Object.entries(ops)) {
+      for (const [slot, val] of Object.entries(slots)) {
+        const tr = document.createElement("tr");
+        const td1 = document.createElement("td"); td1.textContent = mod;
+        const td2 = document.createElement("td"); td2.textContent = group;
+        const td3 = document.createElement("td"); td3.textContent = slot;
+        const td4 = document.createElement("td"); td4.textContent = Array.isArray(val) ? val.join(" / ") : String(val);
+        tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tr.appendChild(td4); tb.appendChild(tr);
+        n++;
+      }
+    }
+    setMsg("module-ops-msg", mod + " 已读取 " + n + " 槽（白名单组体，策略面快照）。", true);
+  } catch (e) { setMsg("module-ops-msg", mod + " 读取失败：" + e.message, false); }
+}
+</script>
+</body>
+</html>

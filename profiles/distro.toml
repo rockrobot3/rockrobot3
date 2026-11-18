@@ -1,0 +1,208 @@
+# RockRobot3 装配单：distro 机型（发行版快路轨，0.0.2 T5 / ADR-0013 裁定 3）
+# 纯数据、零逻辑，门禁与 profiles/default.toml 完全同一套（ADR-0012 裁定 5② 查册门）。
+# 快路 payload 含五个 Rust 模块 + Python brain（0.0.6 批F1 起：brain stdlib-only，
+# 打包器按 lang=python 生成 shim 装机，判据"brain 随 deb 装机"）。0.0.2 时代四格
+# 不绑定、brain 不进 boot 队列（缺格点名冒烟）——批F1 兑现后 cognition.* 绑定
+# rr3-brain，随装配单进 boot 队列（CI distro-smoke 同步改断"六模块 spawn"）。
+# schema_version = 2（0.0.5 批J，ADR-0018 修订 1 ④ 描述符七段定形）：三新段与
+# default 同板同供给（[platform]/[supplies]/[slots] 逐值一致）。
+# schema_version = 3（0.0.5 增补轮六批N1，§4.2 [pins] 定形）：[[pin]] 物理绑定段进场、
+# 引脚侧键自 [hardware] 下移为 [pins] 派生视图（门 n 注入路径唯一，power P-13）——
+# 批N3 件六起 SPI 词形同轨（spi_device 由 controller+channel 派生），[hardware] 只留
+# 两非引脚键，与 default 同板同引脚（[[pin]] 逐值一致）。
+# schema_version = 4（0.0.5 增补轮六批N2，校验⑩ 定形）：[supplies.budget] 内存预算
+# 子段进场（⑩-a/⑩-b 分母），与 default 同板同值——3→4 为破坏性变更。
+# schema_version = 5（0.0.5 增补轮六批N5，F-30 环容量判据落数据）：[runtime] rrd
+# 运行参数段进场（log_ring_cap 与 default 同值）——装载期缺即红，4→5 为破坏性变更。
+
+schema_version = 5
+
+[os]
+route = "distro" # distro | buildroot（双轨见 ADR-0013）
+
+[runtime]
+# rrd 自身运维参数（批N5 件二，F-30）：日志环容量（行数），取值与 default 同源同值。
+log_ring_cap = 512
+# P0-3 根因门：HAL 后端必须进装配单显式数据，不靠隐式缺省。发行版全局 = linux
+# （ALSA 采集/回放、sysfs PWM、nmcli 链路、I2C 电源）。
+hal_backend = "linux"
+
+[platform]
+# 平台档位（ADR-0018 修订 1）：与 default 同一块参考机 = host。取值依据同 default 注释。
+tier = "host"
+# 平台事实表外键（§4.6，批N1 基-22）：与 default 同一块 RK3566（contracts/platform/
+# rk3566.toml，演练实例——status.md 敞口在案）。
+chip = "rk3566"
+
+[supplies]
+# 平台供给声明：与 profiles/default.toml 同板同值（注释见 default——
+# watchdog_timeout_ms 平台兜底、tick_period_ms 对齐 rrd tick 生产真值、
+# 时序两位为声明预算位，对账归 0.0.6 点验矩阵）。
+watchdog_present = true
+watchdog_timeout_ms = 15000
+watchdog_feeder = "rrd"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
+
+# [[supplies.domain]] 电力网络声明：与 default 同板同域（[[supplies.domain]] 逐值
+# 一致；占位口径与对账归宿见 default 注释）。
+[[supplies.domain]]
+name = "batt"
+nominal_mv = 3700
+mild_mv = 3500
+severe_mv = 3300
+current_cap_ma = 2000
+sense = "power.battery.meter"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+evidence = "none"
+max_age_ms = 0
+
+[[supplies.domain]]
+name = "rail5v"
+nominal_mv = 5000
+mild_mv = 4600
+severe_mv = 4400
+current_cap_ma = 2000
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+evidence = "none"
+max_age_ms = 0
+
+[[supplies.domain]]
+name = "rail3v3"
+nominal_mv = 3300
+mild_mv = 3100
+severe_mv = 3000
+current_cap_ma = 600
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+evidence = "none"
+max_age_ms = 0
+
+# [supplies.budget] 内存预算声明（校验⑩ 分母，schema 4，批N2）：与 default 同板同值
+# ——host 档校验⑩ 不适用，"合法不适用"显式写 true 不许留空（F-6）。
+[supplies.budget]
+not_applicable = true
+
+[bindings]
+# 格位 → 件。基础层（slots.toml layer=base）由基座内建承载，不在此绑定；
+# placeholder 格（net.bt/sensor.env/sensor.imu，真件未落地）不进生产装配面。
+"act.servo" = "rr3-act"
+"act.led" = "rr3-act"
+"act.relay" = "rr3-act"
+"net.wifi" = "rr3-connect"
+"ui.face" = "rr3-interact"
+"audio.playback" = "rr3-interact"
+"audio.capture" = "rr3-sense"
+"audio.vad" = "rr3-sense"
+"power.charger" = "rr3-power"
+"cognition.dialog" = "rr3-brain"
+"cognition.asr" = "rr3-brain"
+"cognition.llm" = "rr3-brain"
+"cognition.tts" = "rr3-brain"
+
+[hardware]
+# 非引脚键直给（schema 3，增补轮六 §4.2）：键位语义与取值同 profiles/default.toml
+# 注释（runbook 件 4）；引脚侧键已下移 [[pin]] 派生（门 n：[hardware] 出现引脚侧
+# 派生键即拒 boot）。alsa_device 用 CARD 名不钉卡号（卡号随枚举顺序可变）；"default"
+# 在无 pulse/pipewire 的发行版快路轨上映射 PulseAudio 插件 → open 失败（真板实测
+# EINVAL/524），参考机真值 = voicehat 声卡（0.0.6 批F5a R13 换装，googlevoicehat 单卡双向）。
+alsa_device = "plughw:CARD=sndrpigooglevoi"
+link_ifname = "wlan0"
+
+[[pin]]
+# 物理绑定真值点（schema 3，增补轮六 §4.2）：与 default 同一块板同引脚，
+# [[pin]] 逐值一致（字段语义与取值依据见 default 注释）。
+role = "act.axis.pwm"
+instance = "pan"
+controller = "pwm0"
+channel = 0
+physical = [12]
+direction = "out"
+rail = "rail5v"
+failsafe = "release"
+mux_group = []
+
+[[pin]]
+role = "act.led.gpio"
+controller = "gpiochip0"
+physical = [4]
+direction = "out"
+rail = "none"
+failsafe = "hold"
+mux_group = []
+
+[[pin]]
+role = "act.relay.gpio"
+controller = "gpiochip0"
+physical = [17]
+direction = "out"
+rail = "none"
+failsafe = "driven_low"
+mux_group = []
+
+[[pin]]
+role = "power.battery.meter"
+controller = "i2c1"
+addr = "0x40"
+device = "INA219" # 器件型号词（外键 → devices.toml；③-c 共址对账的身份字段）
+direction = "in"
+mux_group = []
+
+[[pin]]
+# SPI 显示面（批N3 件六拆格，敞口 18 行收口）：spidev0 = 总线 0、channel = 0 =
+# 片选 0，装载期派生合成 spi_device="/dev/spidev0.0"（链④真件档 MAX7219 双位模块
+# 接 SPI0 CE0，接线 4：DIN=脚19/CS=脚24/CLK=脚23；旧 [hardware] 直给值由此下移）。
+role = "ui.face.spi"
+controller = "spidev0"
+channel = 0
+direction = "out"
+mux_group = []
+
+# —— 批N3 件八（器件角色进场）：与 default 同板同取值（P-5 共读源 + 演练实例，
+# 语义见 default.toml 同段注记——charger 同 (i2c1, 0x40) 同 device 共址合法）。
+[[pin]]
+role = "power.charger.meter"
+controller = "i2c1"
+addr = "0x40"
+device = "INA219"
+direction = "in"
+mux_group = []
+
+[enabled_slots]
+# 模块 → 本形态启用的格位集合。enabled_slots 决定起谁（Q3 裁定）。
+rr3-act = ["act.servo", "act.led", "act.relay"]
+rr3-connect = ["net.wifi"]
+rr3-interact = ["ui.face", "audio.playback"]
+rr3-sense = ["audio.capture", "audio.vad"]
+rr3-power = ["power.battery", "power.charger"]
+rr3-brain = ["cognition.dialog", "cognition.asr", "cognition.llm", "cognition.tts"]
+
+[slots]
+# 本板物理在位格位声明：与 default 同一块板；placeholder 格（net.bt/sensor.env/
+# sensor.imu）不进生产装配面；13 格在位，升序排列（注释见 default）。
+present = [
+    "act.servo",
+    "act.led",
+    "act.relay",
+    "audio.capture",
+    "audio.playback",
+    "audio.vad",
+    "cognition.asr",
+    "cognition.dialog",
+    "cognition.llm",
+    "cognition.tts",
+    "net.wifi",
+    "power.charger",
+    "ui.face",
+]

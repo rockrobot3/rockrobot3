@@ -1,0 +1,367 @@
+# 平台环境流水线：五类芯片的构建/执行环境验证（x86_64 主门在 gate）。
+# 拆分自 ci.yml（2026-11-13）：按职责分开，job 正文原样搬运；
+# 判据仍以 tools/ci/check.sh 与 tools/ci/*.sh 为唯一真源。
+name: platforms
+on:
+  push:
+    branches: [main, "dev/**"]
+    # 纯文档改动跳过平台面：交叉链/esp 工具链/宿主等价对 docs/** 与 *.md 零敏感
+    #（文档门 ⑤ 在 gate）（2026-11-17 结构治理）。
+    paths-ignore: ["docs/**", "**.md"]
+  pull_request:
+    paths-ignore: ["docs/**", "**.md"]
+  workflow_dispatch:
+  # UTC 周日 18:00 = 北京周一 02:00：重工具链档（esp）与全平台固定跑一轮。
+  schedule:
+    - cron: "0 18 * * 0"
+permissions:
+  contents: read
+concurrency:
+  group: platforms-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: never   # 纯文本输出：注解/日志可读，不再被 ANSI 转义吃掉
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  # 五平台矩阵的三条非 xtensa 面（esp32 家族在 esp32-gates）：
+  #   英特尔 / AMD → x86_64 原生（同一 ISA/ABI，一腿覆盖两家，不用交叉）；
+  #   瑞芯微 RK3566/RK3588 → aarch64-musl（cargo + rust-lld 全静态）；
+  #   进迭时空 SpacemiT K1/K3 → riscv64-musl（cross 镜像提供 musl 交叉工具链）。
+  # 每条腿三件事同口径：① 七件产物构建 + ELF 断言；② 目标 ISA 真执行（native 直跑 /
+  # musl 进 alpine 容器 / riscv-gnu 经 qemu-user-static）并断言用法输出；③ 上传产物。
+  # brain 的 ureq+ring 需目标 C 工具链，归板上原生构建（pack-bundle ③ 同一分工）。
+  cross-artifacts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - chip: 英特尔 / AMD（x86_64）
+            triple: x86_64-unknown-linux-gnu
+            arch: "x86-64"
+            mode: native
+            assert: any
+            platform: linux/amd64
+          - chip: 瑞芯微（RK3566/RK3588）
+            triple: aarch64-unknown-linux-musl
+            arch: "ARM aarch64"
+            mode: musl
+            assert: static
+            platform: linux/arm64
+          - chip: 进迭时空（SpacemiT K1/K3）
+            triple: riscv64gc-unknown-linux-gnu
+            arch: "RISC-V"
+            mode: gnu
+            assert: any
+            platform: linux/riscv64
+    name: cross / ${{ matrix.chip }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+          targets: ${{ matrix.triple }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      # riscv64 缺 musl 交叉工具链（rust-lld 找不到 -lc/-lgcc_s），故该腿走 gnu：
+      # apt 交叉 gcc + qemu-user-static（执行用 -L 指向 riscv64 sysroot）。
+      # 2026-11-16 首跑实证：cross 镜像链路不可控（链接走宿主 cc 直接失败）。
+      - name: 安装 riscv64 交叉工具链与 qemu（gnu 目标）
+        if: matrix.mode == 'gnu'
+        run: |
+          set -o pipefail
+          sudo apt-get update -qq 2>&1 | tail -3 || true
+          if ! sudo apt-get install -y -qq gcc-riscv64-linux-gnu qemu-user 2>&1 | tee /tmp/apt.log; then
+            why=$(grep -iE "unable to locate|has no installation candidate|depends|conflicts|error" /tmp/apt.log | tail -3 | tr '\n' ' ')
+            echo "::error title=apt-riscv::${why:0:700}"
+            exit 1
+          fi
+          command -v riscv64-linux-gnu-gcc && command -v qemu-riscv64
+      # binfmt 走 setup-qemu（与 ipct003 同源，已在本仓长期验证）：musl 腿的执行
+      # 冒烟在目标 ISA 容器里跑。riscv-gnu 腿改用 apt 的 qemu-user-static（不经 docker）。
+      - uses: docker/setup-qemu-action@v4
+        if: matrix.mode == 'musl'
+      - name: 确认 riscv64 std 已装（gnu 目标）
+        if: matrix.mode == 'gnu'
+        run: |
+          # 2026-11-16 首跑实证：action 的 targets 参数之后仍报
+          # `can't find crate for core`——显式补一次并打印已装清单当证据。
+          rustup target add "${{ matrix.triple }}"
+          rustup target list --installed | grep riscv64 || {
+            echo "::error title=riscv-std::rustup target list 无 riscv64"
+            exit 1
+          }
+      - name: 目标平台构建（七件产物 + ELF 断言；失败压成单行注解）
+        env:
+          # gnu 交叉腿的链接器：cargo 按目标三元组读该变量，其他腿目标名不同不读取。
+          # 原生腿与 musl 腿不受影响（musl 走 rust-lld，原生走系统 cc）。
+          CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
+        run: |
+          set -o pipefail
+          if ! bash tools/ci/cross-artifacts.sh "${{ matrix.triple }}" "${{ matrix.arch }}" "${{ matrix.assert }}" 2>&1 | tee /tmp/cross.log; then
+            # 链接错误的关键行不在 "error"/"failed" 上（undefined reference / collect2 /
+            # cannot find），只抓前四行会丢掉真因——关键词按实测补全。
+            errs=$(grep -iE "error(\[|:)|failed|FAIL|undefined reference|cannot find|collect2|ld returned" /tmp/cross.log | tail -5 | tr '\n' ' ')
+            echo "::error title=platform-build::${errs:0:900}"
+            exit 1
+          fi
+      # 判据从"没报 exec format error"升到"真打印出预期用法"：前者对 native 腿近乎
+      # 恒真（跑得起来就有输出），后者要求二进制走到自己的 CLI 面。
+      - name: 目标 ISA 执行冒烟（真跑产物并断言用法输出）
+        run: |
+          rel="/tmp/rr3-build/${{ matrix.triple }}/release"
+          for b in rrd rr3-ctl; do
+            case "$b" in
+              rrd) want="用法: rrd" ;;
+              *) want="可用" ;;
+            esac
+            case "${{ matrix.mode }}" in
+              native) out=$("$rel/$b" --help 2>&1) || true ;;
+              musl) out=$(docker run --rm --platform "${{ matrix.platform }}" \
+                       -v "$rel:/b:ro" alpine:3.20 "/b/$b" --help 2>&1) || true ;;
+              gnu) out=$(qemu-riscv64 -L /usr/riscv64-linux-gnu "$rel/$b" --help 2>&1) || true ;;
+            esac
+            printf '%s\n' "$out" | head -3
+            if ! printf '%s' "$out" | grep -q "$want"; then
+              brief=$(printf '%s' "$out" | head -3 | tr '\n' ' ')
+              echo "::error title=platform-run::${b} 在 ${{ matrix.chip }} 上未打印预期用法：${brief:0:600}"
+              exit 1
+            fi
+            echo "PASS  $b 可在 ${{ matrix.chip }} 执行"
+          done
+      # 契约面从"能执行"升到"字节等价"：各芯片环境真跑 ipct003_dump，header 行与
+      # contracts/golden/event-header-128.hex 逐字节比对——128B 头布局在目标 ISA 的
+      # 真实执行环境里成立，不再只靠编译期 const 断言（IPC-T-003 的运行时补面）。
+      - name: 协议字节契约真跑（跨芯片 golden 对拍）
+        run: |
+          set -o pipefail
+          rel="/tmp/rr3-build/${{ matrix.triple }}/release"
+          case "${{ matrix.mode }}" in
+            native) "$rel/ipct003_dump" > /tmp/ipct003.txt ;;
+            musl) docker run --rm --platform "${{ matrix.platform }}" \
+                    -v "$rel:/b:ro" alpine:3.20 "/b/ipct003_dump" > /tmp/ipct003.txt ;;
+            gnu) qemu-riscv64 -L /usr/riscv64-linux-gnu "$rel/ipct003_dump" > /tmp/ipct003.txt ;;
+          esac
+          got=$(sed -n 's/^header //p' /tmp/ipct003.txt | head -1)
+          want=$(cat contracts/golden/event-header-128.hex)
+          if [ "$got" != "$want" ]; then
+            echo "::error title=chip-contract::${{ matrix.chip }} 的 128B 头与 golden 不一致（got=${got:0:64}）"
+            exit 1
+          fi
+          echo "PASS  128B 头 golden 在 ${{ matrix.chip }}（${{ matrix.triple }}）执行环境逐字节一致"
+      - name: 上传产物
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-${{ matrix.triple }}
+          # upload-artifact v4 不做 brace 展开，必须逐行列（首跑即红实证）。
+          path: |
+            /tmp/rr3-build/${{ matrix.triple }}/release/rrd
+            /tmp/rr3-build/${{ matrix.triple }}/release/rr3-ctl
+            /tmp/rr3-build/${{ matrix.triple }}/release/rr3-act
+            /tmp/rr3-build/${{ matrix.triple }}/release/rr3-connect
+            /tmp/rr3-build/${{ matrix.triple }}/release/rr3-interact
+            /tmp/rr3-build/${{ matrix.triple }}/release/rr3-sense
+            /tmp/rr3-build/${{ matrix.triple }}/release/rr3-power
+          if-no-files-found: error
+          retention-days: 7
+
+  # 重工具链 ESP 构建档（A 任务构建面）：espup 钉版 v0.17.1 + ESP-IDF v5.2.2 克隆 +
+  # 乐鑫 esp-clang + ldproxy——冷跑 20 分钟量级，靠 action 内三处 cache 压到分钟级。
+  # 安装面与"失败压注解"模板分别收在 .github/actions/{esp-toolchain,guarded-run}
+  # （2026-11-16 流水线治理：此前同一套安装写了两份、注解模板写了六份）。
+  #
+  # 按芯片拆腿（2026-11-16 二轮治理）：此前六门串行共用一个 job（实测 18–20 分钟），
+  # S3 档失败会连带掩盖 classic 档结论，且单腿只能看到"第几个 step 挂了"。矩阵按芯片
+  # 各成一条腿：每腿独立装工具链（targets 只给自己那一档）、独立跑该芯片的全部门，
+  # 失败注解的 title 带芯片前缀，归因不再跨芯片混淆。**六门判据与覆盖面零缩水**——
+  # classic 腿 5 门（periph-base / uart-echo / espidf-std / espidf-sentinel /
+  # act-sense-espidf 的 classic 面），S3 腿 2 门（S3 periph-base / act-sense 的 S3 面）。
+  esp32-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - chip: esp32
+            label: ESP32（classic）
+          - chip: esp32s3
+            label: ESP32-S3
+    name: esp32-gates / ${{ matrix.label }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - uses: ./.github/actions/esp-toolchain
+        with:
+          # 每腿只装自己芯片的工具链：S3 腿不再为 classic 工具链付时间，反之亦然。
+          targets: ${{ matrix.chip }}
+      # 两芯片共有的外设底座门：脚本名按芯片命名（esp32-/esp32s3- 前缀），直接拼名。
+      - uses: ./.github/actions/guarded-run
+        with:
+          title: ${{ matrix.chip }}-periph-base
+          prelude: ~/export-esp.sh
+          command: bash tools/ci/${{ matrix.chip }}-periph-base-check.sh
+      # 以下三门是 classic（ESP32）专属工程：xtensa-esp32-none-elf 固件 / espidf std /
+      # 哨兵，S3 腿不适用（S3 的对应面由 periph-base 的 S3 档与 act-sense 的 S3 腿覆盖）。
+      - uses: ./.github/actions/guarded-run
+        if: matrix.chip == 'esp32'
+        with:
+          title: esp-uart-echo
+          prelude: ~/export-esp.sh
+          command: bash tools/ci/esp-uart-echo-check.sh
+      - uses: ./.github/actions/guarded-run
+        if: matrix.chip == 'esp32'
+        with:
+          title: espidf-std
+          prelude: ~/export-esp.sh
+          command: bash tools/ci/espidf-std-check.sh
+      - uses: ./.github/actions/guarded-run
+        if: matrix.chip == 'esp32'
+        with:
+          title: espidf-sentinel
+          prelude: ~/export-esp.sh
+          command: bash tools/ci/espidf-sentinel-check.sh
+      # 双档模块门：脚本接芯片参数（esp32 / esp32s3 / all），每条腿只跑自己那一档；
+      # 缺省 all 保持本地整门口径不变。
+      - uses: ./.github/actions/guarded-run
+        with:
+          title: ${{ matrix.chip }}-act-sense
+          prelude: ~/export-esp.sh
+          command: bash tools/ci/rr3-act-sense-espidf-check.sh ${{ matrix.chip }}
+
+  # IPC-T-003 跨架构对拍（ADR-0006 后果项，平台条件脚本——不进门禁步序，
+  # 但 ubuntu runner 恰好具备全部平台条件：x86_64 宿主 + QEMU arm64 仿真 +
+  # Docker + espup 装的 esp 工具链（第④路 xtensa 对拍））。--strict：任何
+  # 一步 SKIP 即不放行（退 2）。
+  # QEMU 仿真下容器内 cargo 构建较慢属预期；rust-cache 与 conventions/lint 共享加速。
+  ipct003:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+          targets: |
+            aarch64-unknown-linux-gnu
+            riscv64gc-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      - uses: docker/setup-qemu-action@v4
+      - uses: ./.github/actions/esp-toolchain
+        with:
+          targets: esp32
+      - uses: ./.github/actions/guarded-run
+        with:
+          title: ipct003
+          prelude: ~/export-esp.sh
+          command: bash tools/ci/ipct003.sh --strict
+
+  # Windows（登记平台 L1，敞口 #5）：本地无该环境，此前只有"推算条数"。
+  # GitHub 的 windows-latest 是现成载体——POSIX 段由 cfg 门控不参与编译，
+  # 这一腿给出"非 Unix 面可编"的远端回执。先落编译面，测试面随后单独一步加，
+  # 避免一次引入两类失败（编译缺件 vs 测试断言不适用于非 Unix）。
+  host-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      - name: workspace 编译面（Windows）
+        working-directory: base/runtime
+        run: cargo check --workspace
+      # ①b 同口径（workspace 全量测试）。Windows 的日志取不到（匿名 API 无 admin），
+      # 所以失败必须自带注解：把 FAILED/error/panicked 行压成一条 ::error。
+      - name: workspace 全量测试（Windows，①b 同口径）
+        working-directory: base/runtime
+        shell: pwsh
+        run: |
+          # --no-fail-fast：cargo **test** 的对应选项（`--keep-going` 只属于 cargo build，
+          # 2026-11-16 实测 cargo 1.100 上 `cargo test --keep-going` 直接参数错误退出）。
+          # --message-format short：错误行自带 `file:line:col`。
+          # Tee-Object 默认写 UTF-16，而 Select-String 按 UTF-8 读会零匹配（实测
+          # "共 0 条"）——统一 -Encoding utf8，失败时再补日志尾部，避免只见 exit code。
+          cargo test --workspace --no-fail-fast --message-format short 2>&1 |
+            Tee-Object -FilePath "$env:RUNNER_TEMP\win-test.log"
+          if ($LASTEXITCODE -ne 0) {
+            $log = "$env:RUNNER_TEMP\win-test.log"
+            # 区分大小写：`0 failed` 是小写，不能用不敏感匹配（上一轮注解被它灌满）。
+            $bad = Get-Content -Path $log -Encoding utf8 |
+              Select-String -CaseSensitive -Pattern 'error\[|^test .* FAILED|panicked at|test result: FAILED' |
+              Select-Object -First 8 | ForEach-Object { $_.Line.Trim() }
+            foreach ($b in $bad) { Write-Output "::error title=windows-test::$b" }
+            foreach ($t in (Get-Content -Path $log -Encoding utf8 -Tail 20)) {
+              if ($t.Trim()) { Write-Output "::error title=windows-test-tail::$t" }
+            }
+            exit 1
+          }
+
+  # 宿主等价面（macOS）：本地开发环境与 CI 的编译器/链接器/系统库不同，
+  # "本地绿、CI 红"的另一半来自宿主差异。按门禁 ④/⑥ 同口径拆两腿并行跑
+  # （2026-11-17 治理：串行集中曾是平台面最长尾，macOS runner 又慢）——
+  # 不替代 ubuntu 上的门禁，只回答"换宿主后行为是否一致"。esp 条件工程
+  #（xtensa/espidf）按门禁同口径排除。
+  host-macos:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      - name: workspace 全量测试（macOS 宿主）
+        working-directory: base/runtime
+        run: |
+          set -o pipefail
+          if ! cargo test --workspace 2>&1 | tee /tmp/mac.log; then
+            # 失败面要能定位到断言：test 行 + panic 位置 + 末 12 行（断言文案常在
+            # panic 行的下一行，只抓 "test ... FAILED" 等于只报门牌号不报原因）。
+            fails=$(grep -E "^test .* FAILED|^error(\[|:)|panicked at" /tmp/mac.log \
+                    | head -6 | tr '\n' ' ')
+            echo "::error title=host-macos::${fails:0:900}"
+            while IFS= read -r line; do
+              [ -n "$line" ] && echo "::error title=host-macos-tail::${line:0:900}"
+            done < <(tail -12 /tmp/mac.log)
+            exit 1
+          fi
+
+  host-macos-independent:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # 独立工程清单共写仓根 target-dir（/tmp/rr3-build，见 .cargo/config.toml）：
+          # cache-all-crates 把共享依赖一并缓存，否则模块依赖每拍冷编。
+          workspaces: base/runtime
+          cache-all-crates: "true"
+      - name: 独立工程测试（门禁 ④/⑥ 同口径；esp 条件工程除外）
+        run: |
+          set -o pipefail
+          for m in $(find modules tools base/ota -name Cargo.toml \
+                     -not -path "*/target/*" -not -path "base/runtime/*" \
+                     -not -path "tools/esp32-uart-echo/*" -not -path "tools/espidf-std-hello/*" \
+                     -not -path "tools/espidf-sentinel/*" -not -path "tools/esp32-periph-base/*" \
+                     | sort); do
+            echo "=== $m ==="
+            cargo test -q --manifest-path "$m"
+          done
+

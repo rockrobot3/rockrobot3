@@ -1,0 +1,20 @@
+# battery 装配清单（五件套④）：装配期注入面声明（ADR-0019 修订 1 ③——
+# [assemble.handles] 声明件用哪个能力面 trait ← 绑描述符哪个键、[assemble.ops]
+# 声明件暴露哪些参数槽 ← 取哪个 config 键；装配段校验缺项即该格 Degraded）。
+schema_version = 2
+
+[assemble]
+# battery 读数经 rr-hal 电源面（rr3_hal_power → INA219）直取，绑 i2c_bus + ina219_addr 两键
+handles = [
+  { trait = "Rr3Power", desc_key = "i2c_bus" },
+  { trait = "Rr3Power", desc_key = "ina219_addr" },
+]
+# 参数槽 ← config.toml [rr3-power.battery] 三键（Rr3BatteryCfg 字段同源）
+ops = [
+  { slot = "sample_period_ms", src_key = "rr3-power.battery.sample_period_ms" },
+  { slot = "low_voltage_mv", src_key = "rr3-power.battery.low_voltage_mv" },
+  # cutoff 声明未生效（0.0.5 批M MC-8① 裁定 (c)）：本版不关断（关断动作归 M6），
+  # 键保留为策略数据；本 ops 槽即其**机器读者**（注入门按点路径取值，⑧-c 门强制）——
+  # 非启动日志的 println 回显（回显不算读者）。键若被删，本槽当场注入缺、门变红。
+  { slot = "cutoff_voltage_mv", src_key = "rr3-power.battery.cutoff_voltage_mv" },
+]

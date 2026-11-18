@@ -1,18 +1,74 @@
 # rr3-brain 运行期配置
-# 铁律：密钥 / token 一律走环境变量（SILICONFLOW_API_KEY），本文件不落任何凭据。
+# 铁律：密钥 / token 一律走环境变量（RR3_CLOUD_API_KEY，通用键名——供应商由本段
+# base_url/模型名承载，0.0.5 批M MC-8②），本文件不落任何凭据。
 # 逐行来源：legacy/core/{asr,llm,tts}/src/*_config.h 中曾硬编码密钥，迁移时改为读环境。
 
 [rr3-brain]
 log_level = "info"
 
 [rr3-brain.cloud]
-base_url = "https://api.siliconflow.cn/v1"
+# base_url 是主机根：客户端自拼 /v1/<路径>（tests/test_cloud.py 假端点同契约）。
+# 写成带 /v1 的 API 根会拼出 /v1/v1/... 必 404——真云冒烟（C4）前修正。
+base_url = "https://api.siliconflow.cn"
 asr_model = "iic/SenseVoiceSmall"
 llm_model = "deepseek-ai/DeepSeek-V3"
 tts_model = "FunAudioLLM/CosyVoice2-0.5B"
-timeout_s = 20
+# 单次云端 HTTP 上界；ASR/TTS 瞬时失败最多重试一次，避免故障轮拖到 40 秒级。
+timeout_s = 8
+
+# 模型连接表（0.0.6 抽象批，LLM 腿）：每行一个连接，填"格式/地址/模型名"即可接
+# 任意云端或本地 OpenAI 兼容服务（DeepSeek 官方 / SiliconFlow / GLM / Qwen / Ollama…），
+# 换云只改配置不改码。字段：mode = api|local；api_format 本批仅 openai（anthropic
+# 预留）；api_key_ref 双源引用——`env:变量名` → 环境变量，裸名 → 面板维护的
+# secrets 文件（~/.rr3/secrets.json，0600，仓外；RR3_SECRETS_FILE 可改路径）。
+# base_url = **完整 OpenAI 兼容 API 根**（含版本段），客户端只追加
+# `/chat/completions`（ADR-0023）——各厂商版本段各写各的，不按主机名猜：
+#   DeepSeek https://api.deepseek.com/v1
+#   GLM      https://open.bigmodel.cn/api/paas/v4
+#   Qwen     https://dashscope.aliyuncs.com/compatible-mode/v1
+#   硅基流动 https://api.siliconflow.cn/v1
+# 注意 [rr3-brain.cloud].base_url 仍是**主机根**（ASR/TTS 拼 /v1/audio/*），两者不同义。
+# 铁律不变：密钥值不进本文件、不进代码/仓库；active 全表恰一行（解析器强制）。
+[[rr3-brain.model]]
+name = "DeepSeek官方"
+mode = "api"
+api_format = "openai"
+base_url = "https://api.deepseek.com/v1"
+model_id = "deepseek-chat"
+api_key_ref = "DeepSeek官方"
+active = true
+
+[rr3-brain.bus]
+# 总线 RPC 超时（批N4 件六 B-13①，自 composite.py/bus.py 码内常量退役数据化）：
+# call_timeout_s = 点名 interact/tts/text 的等待上界。与 [rr3-brain.dialog]
+# max_utterance_ms（话轮封顶）及 [rr3-brain.cloud] timeout_s（云 HTTP 预算）
+# 三值解耦（D7 裁定：不写派生凑法，各管各的维度）。
+# 0.0.8 批N32 增补评审裁定 4：connect_timeout_s 删除——它是 Python 承载侧注册
+# 帧等待上界的注入口，Rust 侧 rr3_connect 无该参数入口（上界由 rr-bus-api 内部
+# 承载），键留无消费点即死键病形（批I B-2 先例：死参数必删、留键误导）。过渡态
+# Python 面回落默认 5.0 与原键值同值，行为零变化。
+call_timeout_s = 30.0
 
 [rr3-brain.dialog]
-# 对话策略：拾音状态机的静默判停阈值，来自 legacy/main.c
-silence_tail_ms = 700
-max_turn_chars = 800
+# 0.0.5 批I B-2：silence_tail_ms 删除（死参数——dialog.py 从不读它，判停完全
+# 依赖 sense 的 Offset 边沿；留键会让人以为它在生效）。
+# 0.0.5 批I B-8：max_turn_chars 删除（在册无读者；实装截断随真用例回归）。
+# 一轮 utterance 的时长上限：连续语音无 offset 边沿时也要有界
+# （继承 legacy asr_begin(max_seconds) 的精神，ADR-0014 裁定 3）
+max_utterance_ms = 8000
+
+[rr3-brain.wake]
+# 唤醒词（2026-10-31，ASR 文本前缀匹配——非本地 KWS；sense 的 VAD 起音后
+# 云端 ASR 必跑，本段只决定"这一轮进不进对话"）。**用户当日裁定**：云端 ASR
+# 对生僻名"洛克"不稳定（同一句实测识成 骆天/洛天/要是/老师/洛哥/洛师），故
+# 唤醒判定放宽为「ASR 文本以"你好"开头即唤醒」——"你好"后 ≤2 字视为名字/误识
+# 尾巴 → 回 ack；更长 → 去掉"你好"后进 LLM。归一化（去标点/空白）后匹配。
+# phrases 表仍保留：精确剥前缀（"你好洛师，今天天气"→命令只留"今天天气"）与
+# 未来换非"你好"前缀唤醒词用；未命中且在 followup_ms 窗内 → 追问放行；窗外
+# 未命中 → 静默丢弃（不 LLM、不 TTS，用户听不到回声）。
+enable = true
+phrases = ["你好洛克", "你好老师"]
+ack = "我在呢，有什么可以帮您？"
+# 跟进窗 30s（2026-10-31 实机：15s 在"唤醒应答→用户想问题→开口"之间偏紧，
+# 用户自然追问会被静默门挡掉；30s 覆盖一轮思考与停顿）
+followup_ms = 30000

@@ -1,0 +1,10 @@
+# 换行归一：文本一律 LF 入库与检出，跨平台逐字节一致。
+* text=auto eol=lf
+
+# 二进制面不做换行转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.gz binary
+*.wav binary

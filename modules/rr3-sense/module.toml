@@ -22,11 +22,14 @@ publishes = [
     "rr3-sense/env/temperature",
     "rr3-sense/imu/state",
 ]
-subscribes = []
+# B批 b2：订阅 brain 的 TTS 回放流喂播放期门控（扬声器自声不触发听声转头）——
+# 零新契约，主题在册（裁定②）
+subscribes = ["rr3-brain/audio/tts_pcm"]
 
 # request 语义的自有主题走事务面，不混进 publishes
 [rpc]
-exposes = ["rr3-sense/capture/dump"]
+# ops/list = ops 槽快照读口（批N4 件九二）：白名单十槽应答（audio/doa/vad），面板观测面读口
+exposes = ["rr3-sense/capture/dump", "rr3-sense/ops/list", "rr3-sense/servo/set"]
 
 [resources]
 restart_policy = "always"

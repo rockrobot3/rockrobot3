@@ -12,7 +12,26 @@ publish = false
 name = "rr3-interact"
 path = "src/main.rs"
 
+[features]
+# 板上原生构建开关（0.0.6 批F1，R13）：透传 rr-hal 的 ALSA 后端（播放面 linux 后端换装）。
+# 宿主 musl 交叉不带 → 板上默认 sim；板上 `--features alsa` 构建带真后端（先装
+# libasound2-dev + pkg-config）。非 linux 平台开此 feature 是 no-op（rr-hal 依赖门）。
+alsa = ["rr-hal/alsa"]
+
 [dependencies]
-# M2 接入总线时启用（path 依赖，勿用 crates.io 同名包）：
-# rr-ipc = { path = "../../base/runtime/rr-ipc" }
-# rr-bus = { path = "../../base/runtime/rr-bus" }
+# path 依赖进仓内三件套（勿用 crates.io 同名包）；serde_json/toml 用具体版本——
+# 本 crate 是独立 workspace，吃不到 base/runtime 的 workspace 继承
+rr-ipc = { path = "../../base/runtime/rr-ipc" }
+# 总线承载契约面（基-35 窄化②/批N9 件一）：承载客户端走 rr_bus_api；语义常量直引
+# rr-core（真值单点，不经 re-export 中介）。
+rr-bus-api = { path = "../../base/runtime/rr-bus-api" }
+rr-core = { path = "../../base/runtime/rr-core" }
+# 能力面契约 crate（基-35/⑨-w）：契约符号一律走 rr_hal_api；rr-hal 边仅为装配
+# 选择函数保留（白名单由 check.sh 步 ⑨-w 冻结执法，Cargo 级拆边需装配上移，敞口在册）。
+rr-hal = { path = "../../base/runtime/rr-hal" }
+rr-hal-api = { path = "../../base/runtime/rr-hal-api" }
+# 模块公共骨架（0.0.8 W-A 批0，ADR-0017 裁定 1）：bootstrap/serve/Dispatcher/
+# BusHandle API——批4（批N29）拆分接入（wrap 构造口供面板线程宿主与测试夹具）
+rr3mod = { path = "../../base/runtime/rr3mod" }
+serde_json = "1"
+toml = "0.8"

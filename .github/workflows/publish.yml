@@ -1,0 +1,236 @@
+# 发布流水线：把编译好的运行面推到 ghcr.io。
+#
+# 发布物 = 运行镜像（rrd + 六模块 + rr3-ctl + 契约/装配单/硬件描述），镜像根来自
+# tools/deploy/stage-image.sh 的 rr3-pack stage 树——与 deb 装机布局同一份真值，
+# 不另写一套文件摆放。amd64 / arm64 各在**原生 runner** 上构建（Intel/AMD 与
+# 瑞芯微都是该架构的原生面），不引入交叉工具链，避免"编得过、跑不了"。
+#
+# 触发：打 v* 标签（发版）、main 分支（edge）、手动（自定义 tag）。
+# PR 不触发：发布面不能被未合入的代码覆盖。
+name: publish
+on:
+  push:
+    tags: ["v*"]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "镜像标签（如 0.0.8 或 edge）"
+        required: true
+        default: edge
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # 十件产物跨九个清单（runtime + 六模块 + rrctl + ota-ctl + rr3-pack）
+          # 共写 /tmp/rr3-build：全量缓存共享依赖，单靠 workspace 缓存会冷编模块面。
+          workspaces: base/runtime
+          cache-all-crates: "true"
+
+      - name: 计算发布标签
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          elif [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag=edge
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: 原生构建运行面（rrd / 六模块 / rr3-ctl / rr3-ota-ctl / rr3-pack）
+        env:
+          CARGO_TARGET_DIR: /tmp/rr3-build
+        run: |
+          cargo build -q --locked --release --manifest-path base/runtime/Cargo.toml -p rrd
+          for m in act brain connect interact sense power; do
+            cargo build -q --locked --release --manifest-path "modules/rr3-$m/Cargo.toml"
+          done
+          cargo build -q --locked --release --manifest-path tools/rrctl/Cargo.toml
+          cargo build -q --locked --release --manifest-path base/ota/rr3-ota-ctl/Cargo.toml
+          cargo build -q --locked --release --manifest-path tools/rr3-pack/Cargo.toml
+
+      - name: 铺镜像根（rr3-pack stage 树）
+        env:
+          CARGO_TARGET_DIR: /tmp/rr3-build
+        run: |
+          bash tools/deploy/stage-image.sh /tmp/rr3-image \
+            "${{ matrix.arch }}" "${{ steps.meta.outputs.version }}"
+          test -x /tmp/rr3-image/usr/bin/rrd
+
+      - name: 登录 ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 构建并推送单架构镜像
+        run: |
+          tag="${{ steps.meta.outputs.tag }}"
+          docker build --platform "${{ matrix.platform }}" \
+            -f tools/deploy/Containerfile \
+            -t "${IMAGE}:${tag}-${{ matrix.arch }}" /tmp/rr3-image
+          docker push "${IMAGE}:${tag}-${{ matrix.arch }}"
+
+      # 推完即验：镜像能起来、装机树在、二进制能执行。判据住在
+      # tools/deploy/image-smoke.sh（与本地同一份，改判据不必靠打标签等 CI），
+      # 两段各自独立退出：容器起不来 / 装机树缺件 / 二进制不可执行归因不混。
+      - name: 镜像冒烟（同架构真跑：可执行面 + 装机树 + rrd 用法输出）
+        run: |
+          tag="${{ steps.meta.outputs.tag }}"
+          bash tools/deploy/image-smoke.sh file "${IMAGE}:${tag}-${{ matrix.arch }}"
+
+      # 运行冒烟（比 --help 强一档）：镜像内按装机面真起 rrd，六模块全 spawn、零拒绝。
+      # 判据与 distro-smoke ⑧ 同源，差别只在载体是发布镜像；容器无硬件面 →
+      # 显式 sim 探测档 + mock 云，装配单整树复制做影子根（不搬单文件）。
+      - name: 镜像运行冒烟（sim 探测档：六模块真起 + 零拒绝）
+        run: |
+          tag="${{ steps.meta.outputs.tag }}"
+          bash tools/deploy/image-smoke.sh run "${IMAGE}:${tag}-${{ matrix.arch }}"
+
+  merge:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 登录 ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - name: 合并多架构清单
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          elif [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag=edge
+          fi
+          docker buildx imagetools create -t "${IMAGE}:${tag}" \
+            "${IMAGE}:${tag}-amd64" "${IMAGE}:${tag}-arm64"
+          # 发版标签同时更新 latest（edge 不更新，避免把开发面当稳定版）
+          case "$tag" in
+            v*|[0-9]*) docker buildx imagetools create -t "${IMAGE}:latest" \
+                         "${IMAGE}:${tag}-amd64" "${IMAGE}:${tag}-arm64" ;;
+          esac
+          docker buildx imagetools inspect "${IMAGE}:${tag}"
+          # 合并结果必须真含两架构：单腿都绿但合并丢一条，是"看起来绿"的经典形态
+          # （inspect 只打印不判等，所以这里把平台集合当判据）。python3 是 runner 自带面。
+          # 判据只数**镜像清单**：buildx 默认给每腿附一条 attestation manifest
+          # （provenance/SBOM，platform=unknown/unknown），它合法存在但不能算进架构集
+          # ——2026-11-15 v0.0.13 首跑就是被这条多出来的 unknown 判红（断言过严的假红）。
+          python3 - "${IMAGE}:${tag}" <<'PY'
+          import json, subprocess, sys
+          img = sys.argv[1]
+          raw = subprocess.run(
+              ["docker", "buildx", "imagetools", "inspect", "--raw", img],
+              capture_output=True, text=True, check=True,
+          ).stdout
+          plats, att = [], 0
+          for m in json.loads(raw).get("manifests", []):
+              ann = m.get("annotations") or {}
+              if ann.get("vnd.docker.reference.type") == "attestation-manifest":
+                  att += 1
+                  continue
+              plats.append((m.get("platform") or {}).get("architecture", "?"))
+          plats.sort()
+          want = ["amd64", "arm64"]
+          if plats != want:
+              print(f"::error title=manifest-platforms::合并清单架构 {plats}（期望 {want}）")
+              sys.exit(1)
+          print(f"PASS  多架构清单架构 {plats}（attestation {att} 条，不计入架构集）")
+          PY
+          # 合并标签本身必须可拉取且装机树完整：两只单架构腿绿不等于合并清单
+          # 指向的层都在（清单指向丢失层是"看起来发布成功"的经典形态）。
+          bash tools/deploy/image-smoke.sh file "${IMAGE}:${tag}"
+
+  # 板侧固件制品（2026-11-16）：classic periph-base 的 release ELF 作为 tag
+  # release 的公开资产。为什么放发布流水线：固件常量（如 SCAN 驻留）改了必须
+  # 重编烧录，而 CI 产物要无凭据可下载；release asset 是公开、可审计、不引第三方
+  # 托管的载体。开发令牌档显式带 -dev 后缀，不冒充生产凭据。
+  #
+  # 资产是 ELF 而非裸 bin：ESP-IDF ELF 自带 bootloader/partition-table 段，
+  # 烧录侧 `espflash flash --chip esp32 <elf>` 直接生成并写入 app 镜像，保留 NVS。
+  firmware:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - uses: ./.github/actions/esp-toolchain
+        with:
+          targets: esp32
+      - name: 构建 classic release 固件
+        env:
+          RR3_ALLOW_DEV_ADMIN_TOKEN: "1"
+        run: |
+          set -o pipefail
+          export PATH="$HOME/.cargo/bin:$PATH"
+          export IDF_PATH="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
+          export IDF_GITHUB_ASSETS=dl.espressif.com/github_assets
+          export PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.cloud.tencent.com/pypi/simple}"
+          export PIP_DEFAULT_TIMEOUT=60
+          cd tools/esp32-periph-base
+          if ! cargo +esp build --release \
+               --config 'source.crates-io.replace-with="rsproxy-sparse"' \
+               --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
+               > /tmp/fw-build.log 2>&1; then
+            errs=$(grep -E "error(\[|:)|panicked at" /tmp/fw-build.log | head -5 | tr '\n' ' ')
+            echo "::error title=fw-build::classic release 构建失败：${errs:0:800}"
+            exit 1
+          fi
+          . "$GITHUB_WORKSPACE/tools/ci/cargo-artifact.sh"
+          elf="$(rr3_cargo_artifact xtensa-esp32-espidf release esp32-periph-base)"
+          if [ ! -f "$elf" ]; then
+            echo "::error title=fw-elf::release ELF 不在树: $elf"
+            exit 1
+          fi
+          cp "$elf" "$GITHUB_WORKSPACE/rr3-periph-base-esp32-dev.elf"
+          ls -l "$GITHUB_WORKSPACE/rr3-periph-base-esp32-dev.elf"
+          sha256sum "$GITHUB_WORKSPACE/rr3-periph-base-esp32-dev.elf"
+      - name: 上传 release 资产
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: rr3-periph-base-esp32-dev.elf
+          fail_on_unmatched_files: true

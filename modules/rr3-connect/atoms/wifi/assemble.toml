@@ -1,0 +1,19 @@
+# wifi 装配清单（五件套④）：装配期注入面声明（ADR-0019 修订 1 ③——
+# [assemble.handles] 声明件用哪个能力面 trait ← 绑描述符哪个键、[assemble.ops]
+# 声明件暴露哪些参数槽 ← 取哪个 config 键；装配段校验缺项即该格 Degraded）。
+schema_version = 2
+
+[assemble]
+# 链路读数经能力面 Rr3Link，绑描述符 link_ifname 键（§3 注入面）
+handles = [
+  { trait = "Rr3Link", desc_key = "link_ifname" },
+]
+# 上报周期/子进程超时/配网口令下限 ← config.toml [rr3-connect.wifi]（§3 逐槽落位，
+# L-5 补齐；roam_probe_enabled/tls_min_version 批I N-2 已删键，不占槽）
+ops = [
+  { slot = "link_report_period_ms", src_key = "rr3-connect.wifi.link_report_period_ms" },
+  { slot = "timeout_ms", src_key = "rr3-connect.wifi.timeout_ms" },
+  # 配网口令下限（批N4 件五 N-11①/M-6：自组合件码内数据化——门 d 分母随之 +1，
+  # 基线 tools/ci/gate-d-baseline.txt 同批上调）
+  { slot = "min_pass_len", src_key = "rr3-connect.wifi.min_pass_len" },
+]

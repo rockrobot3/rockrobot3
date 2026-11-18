@@ -1,0 +1,20 @@
+[package]
+name = "rr3-pack"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.82"
+license = "UNLICENSED"
+publish = false
+description = "deb 打包器：注入产物 + 仓内契约/装配单装配成发行版快路 deb（0.0.2 T5，ADR-0013 裁定 5）"
+
+# 独立工程：tools/ 不在 base/runtime workspace 内（与 rr3-ctl 同构）。
+# 依赖 rrd 只为 manifest 解析（rr3_manifest_facts_from_text）——解析真值只有
+# rrd 运行期用的那一册，打包器不得自带第二份 manifest 读取逻辑。
+[workspace]
+
+[[bin]]
+name = "rr3-pack"
+path = "src/main.rs"
+
+[dependencies]
+rrd = { path = "../../base/runtime/rrd" }

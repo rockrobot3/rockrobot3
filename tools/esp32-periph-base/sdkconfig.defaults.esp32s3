@@ -1,0 +1,10 @@
+# ESP32-S3 N16R8 专用档（W1/T2，批N35 件八）：16MB Flash + 8MB Octal PSRAM。
+# esp-idf-sys 按 MCU=esp32s3 自动叠加本文件，公共项仍来自 sdkconfig.defaults。
+#
+# 注意：Octal PSRAM 占用 GPIO33–37；本板引脚表已整体避开 26–37（见
+# src/board/pins_s3.rs），与 classic 的 26/27/32/33/34 不通用。
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y

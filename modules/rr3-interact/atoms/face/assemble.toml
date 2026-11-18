@@ -1,0 +1,20 @@
+# face 装配清单（五件套④）：装配期注入面声明（ADR-0019 修订 1 ③——
+# [assemble.handles] 声明件用哪个能力面 trait ← 绑描述符哪个键、[assemble.ops]
+# 声明件暴露哪些参数槽 ← 取哪个 config 键；装配段校验缺项即该格 Degraded）。
+schema_version = 2
+
+[assemble]
+# 显示面句柄（0.0.6 链④真件档补立，预留注记兑现）：Rr3Display ← 描述符键
+# spi_device（MAX7219 spidev 设备路径，十键批两处同批）；ops 同前（I-11），
+# 故不写 no_injection（该键只允许两数组都空，rr-registry 形状级规则）。
+handles = [
+  { trait = "Rr3Display", desc_key = "spi_device" },
+]
+ops = [
+  # 不可点名集 ← config.toml [rr3-interact.face] non_pointable（I-11：规则从件内
+  # if 迁出——值本身是契约字面量不许改，可注入的是集合，"某形态放开 talk"= 改数据）
+  { slot = "non_pointable", src_key = "rr3-interact.face.non_pointable" },
+  # 兜底表情 ← config.toml [rr3-interact.face] default_expression（I-17/M-3 批N4
+  # 件五：mech 状态机各回落点数据化——"换人格取向"= 改数据不改码；值必须在册）
+  { slot = "default_expression", src_key = "rr3-interact.face.default_expression" },
+]

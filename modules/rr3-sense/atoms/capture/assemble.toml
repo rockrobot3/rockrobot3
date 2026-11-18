@@ -1,0 +1,22 @@
+# capture 装配清单（五件套④）：装配期注入面声明（ADR-0019 修订 1 ③——
+# [assemble.handles] 声明件用哪个能力面 trait ← 绑描述符哪个键、[assemble.ops]
+# 声明件暴露哪些参数槽 ← 取哪个 config 键；装配段校验缺项即该格 Degraded）。
+schema_version = 2
+
+[assemble]
+# 音频源经能力面 Rr3AudioSource 直取，绑描述符 alsa_device 键（§3 注入面）
+handles = [
+  { trait = "Rr3AudioSource", desc_key = "alsa_device" },
+]
+# 采样率/声道/节拍 ← config.toml [rr3-sense.audio]（§3 逐槽落位，L-5 补齐）；
+# DoA 档界与判向窗 ← [rr3-sense.doa]（S-5 阈值出件 + B批 b3b 判向窗三键，
+# "某形态换档口径"= 改数据）
+ops = [
+  { slot = "sample_rate", src_key = "rr3-sense.audio.sample_rate" },
+  { slot = "channels", src_key = "rr3-sense.audio.channels" },
+  { slot = "frame_ms", src_key = "rr3-sense.audio.frame_ms" },
+  { slot = "doa_bin_threshold_deg", src_key = "rr3-sense.doa.bin_threshold_deg" },
+  { slot = "doa_window_ms", src_key = "rr3-sense.doa.window_ms" },
+  { slot = "doa_window_rms_min", src_key = "rr3-sense.doa.window_rms_min" },
+  { slot = "doa_mic_baseline_mm", src_key = "rr3-sense.doa.mic_baseline_mm" },
+]

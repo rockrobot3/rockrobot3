@@ -1,0 +1,32 @@
+#!/bin/bash
+# sim-chain.sh —— 0.0.6 批F4 全链闭环演练的构建 + 运行入口（CI 与本地同一脚本）。
+# 构建 rrd / rr3-ctl / rr3-sim + 全链四模块（sense/interact/brain/act），然后
+# `rr3-sim --chain`：采集→意图→判向→转向→表情六真进程 mock 闭环，判据 = 总线
+# 观察者取证（vad_start 携 doa → servo/state 落角）+ 三段日志留痕（对话轮完成
+# actions=1 / tts talk 挂起 / intent servo 落角）+ denied_publish = 0（§5.2
+# 判据 10 的 sim 档，R9 采购前档，不充当真件收口证据）。
+set -eu -o pipefail
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$REPO_ROOT"
+
+echo "== 构建 rrd + rr3-ctl + rr3-sim =="
+( cd base/runtime && cargo build -q -p rrd )
+cargo build -q --manifest-path tools/rrctl/Cargo.toml
+cargo build -q --manifest-path tools/sim/Cargo.toml
+
+echo "== 构建全链四模块 =="
+for m in rr3-act rr3-sense rr3-interact rr3-brain; do
+        cargo build -q --manifest-path "modules/$m/Cargo.toml"
+done
+
+echo "== rr3-sim --chain（采集→意图→判向→转向→表情，六真进程 mock 闭环）=="
+# 取证后稳态段：缺省 hold 60s，逐拍采 health 判"四模块末拍 running 且心跳峰值
+# 不触看门狗"（实时性基线；RR3_SIM_HOLD_MS=0 关闭，其它值按毫秒覆写）。
+hold_ms="${RR3_SIM_HOLD_MS:-60000}"
+args=(--chain)
+if [ "$hold_ms" != "0" ]; then
+        args+=(--hold-ms "$hold_ms")
+fi
+# 产物落点随仓根 target-dir（源码区外）：cargo run 复用同一 target-dir，
+# 不写死 `<crate>/target`（写死会因产物不在源码区而误报缺件）。
+exec cargo run -q --manifest-path tools/sim/Cargo.toml -- "${args[@]}"

@@ -1,0 +1,283 @@
+# 门禁流水线：与本地 tools/ci/check.sh 同一入口（全步门禁 + lint + 脚本语法）。
+# 拆分自 ci.yml（2026-11-13）：按职责分开，job 正文原样搬运；
+# 判据仍以 tools/ci/check.sh 与 tools/ci/*.sh 为唯一真源。
+name: gate
+on:
+  push:
+    branches: [main, "dev/**"]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # 周程（UTC 周日 18:30 = 北京周一 02:30）：供应链公告随时间变化，没有推送
+    # 也必须周期性复核（supply 的 RustSec 库是按时间漂移的判据）；与 platforms
+    # 的 18:00 错开，避免同一时刻抢 runner。
+    - cron: "30 18 * * 0"
+permissions:
+  contents: read
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: never   # 纯文本输出：注解/日志可读，不再被 ANSI 转义吃掉
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  conventions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      # 工具链显式钉版 1.100.0（编译器基线，不依赖 runner 镜像预装版本）；
+      # components 显式声明，不依赖 runner 镜像预装的 clippy/rustfmt。
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # check.sh ④/⑥ 编全部独立工程进共享 target-dir（/tmp/rr3-build）：
+          # cache-all-crates 把共享依赖一并缓存，否则模块依赖每拍冷编。
+          workspaces: base/runtime
+          cache-all-crates: "true"
+      # ⑨-y 跨平台可编面的前件（批N8 件六）：门内不设 SKIP，target 缺位即红
+      - name: 安装 Windows target（⑨-y 门前置）
+        run: |
+          # 有界重试（3 次，间隔 5s）：rustup 拉 target 会撞网络抖动；失败必须留注解，
+          # 否则 check-run 只剩 "exit code 1"，根因不可见（本步曾整步失败而无任何信息）。
+          for i in 1 2 3; do
+            if rustup target add x86_64-pc-windows-msvc; then
+              exit 0
+            fi
+            echo "::warning title=rustup target::第 ${i} 次安装失败，5s 后重试"
+            sleep 5
+          done
+          echo "::error title=rustup target::x86_64-pc-windows-msvc 连续 3 次安装失败（网络/镜像）"
+          exit 1
+      - name: 规约门禁检查（check.sh 全步，含 ⑫ 质量度量）
+        run: |
+          # 失败归因走 tools/ci/log-digest.sh 单点（信号提取/噪音过滤/单行注解/
+          # 末段回显）；本步只给策略——标题、信号面与回显行数。
+          # 匿名日志接口 403 时 check-run annotations 是唯一公开可读通道，
+          # 注解必须单行（多行会被拆条并只留前 10 条，真因被挤掉）。
+          set -o pipefail
+          if ! bash tools/ci/check.sh 2>&1 | tee /tmp/gate.log; then
+            bash tools/ci/log-digest.sh --title check.sh --log /tmp/gate.log \
+              --sig '^FAIL|^ERROR' --tail 20
+            exit 1
+          fi
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # 与 conventions 同口径：clippy 面覆盖全部独立工程（共享 /tmp/rr3-build）。
+          workspaces: base/runtime
+          cache-all-crates: "true"
+      - name: rustfmt --check（base/runtime + 全部独立工程）
+        run: |
+          cargo fmt --manifest-path base/runtime/Cargo.toml --all -- --check
+          while IFS= read -r -d '' m; do
+            if ! cargo fmt --manifest-path "$m" -- --check; then
+              echo "::error title=fmt($m)::rustfmt --check 有差异（本地跑 cargo fmt --manifest-path $m）"
+              exit 1
+            fi
+          done < <(find modules tools base/ota -name Cargo.toml \
+                     -not -path "*/target/*" -not -path "base/runtime/*" -print0 | sort -z)
+      - name: clippy -D warnings（base/runtime + 全部独立工程）
+        run: |
+          set -o pipefail
+          if ! cargo clippy --all-targets --manifest-path base/runtime/Cargo.toml --workspace -- -D warnings 2>&1 | tee /tmp/clippy.log; then
+            bash tools/ci/log-digest.sh --title clippy --log /tmp/clippy.log \
+              --sig 'error(\[|:)|warning: unused' --tail 12
+            exit 1
+          fi
+          while IFS= read -r -d '' m; do
+            # 独立工程逐个编译：失败按同一口径压成单行注解（cargo 失败退出码是 101，
+            # 不带本注解时 GitHub 只报"exit code 101"，根因不可见）。
+            if ! cargo clippy -q --all-targets --manifest-path "$m" -- -D warnings 2>&1 | tee /tmp/clippy_one.log; then
+              bash tools/ci/log-digest.sh --title "clippy($m)" --log /tmp/clippy_one.log \
+                --sig 'error(\[|:)|warning: unused' --tail 12
+              exit 1
+            fi
+          done < <(find modules tools base/ota -name Cargo.toml \
+                     -not -path "*/target/*" -not -path "base/runtime/*" \
+                     -not -path "tools/esp32-uart-echo/*" -not -path "tools/espidf-std-hello/*" \
+                     -not -path "tools/espidf-sentinel/*" -not -path "tools/esp32-periph-base/*" \
+                     -print0 | sort -z)
+        # esp 工程的排除与门禁 ④ 同口径：xtensa/espidf 专用工具链工程，宿主 stable
+        # clippy 必红，编译执法在专用门（esp-uart-echo-check.sh / espidf-std-check.sh /
+        # espidf-sentinel-check.sh / esp32-periph-base-check.sh / rr3-act-sense-espidf-check.sh，
+        # SKIP 纪律）；fmt 步不编译，对它们照跑。modules/rr3-act、rr3-sense 是双档
+        # 工程（批N8 件三）：宿主 linux 档照常进本 lint 步与门禁 ④/⑥（不整目录排除），
+        # espidf 档归专用门。
+
+  # 供应链门（cargo-deny）：许可证 / RustSec 公告 / 来源白名单 / 通配依赖。
+  # 策略唯一真源 = .cargo/deny.toml，工程根枚举与汇总在 tools/ci/supply-audit.sh；
+  # 本 job 只负责装工具（预编译，不占 runner 编译时间）与把失败压成注解。
+  supply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - name: 安装 cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - name: 供应链审计（全部工程根，--strict）
+        run: |
+          # 失败归因单点见 tools/ci/log-digest.sh：诊断行优先，缺诊断时退
+          # FAIL 行与末段（命令级错误不带 error[...] 形态，不能被挤掉）。
+          set -o pipefail
+          if ! bash tools/ci/supply-audit.sh --strict 2>&1 | tee /tmp/supply.log; then
+            bash tools/ci/log-digest.sh --title supply --log /tmp/supply.log \
+              --sig '^error(\[|:)|^FAIL' --head --tail 12
+            exit 1
+          fi
+
+  # ALSA 真后端编译门（覆盖缺口）：`--features alsa` 不是默认特性，conventions
+  # 的 check.sh（默认特性）与 macOS 腿都不编译 `linux.rs` 与 backend 的 alsa
+  # 分支——没有本 job，那半边代码只在板子上第一次编译。只做 check（含测试目标
+  # 编译），不打开音频设备：运行期行为归板上批。
+  alsa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      - name: 安装 ALSA 开发头
+        run: |
+          set -o pipefail
+          if ! sudo apt-get update -qq 2>&1 | tail -2; then
+            echo "::warning title=apt::apt-get update 失败，继续尝试安装"
+          fi
+          if ! sudo apt-get install -y -qq libasound2-dev pkg-config 2>&1 | tee /tmp/apt-alsa.log; then
+            bash tools/ci/log-digest.sh --title apt-alsa --log /tmp/apt-alsa.log \
+              --sig 'unable to locate|has no installation candidate|depends|error' --tail 3
+            exit 1
+          fi
+      - name: rr-hal alsa 特性全目标编译 + 单测
+        run: |
+          set -o pipefail
+          if ! cargo check --all-targets --manifest-path base/runtime/Cargo.toml \
+               -p rr-hal --features alsa 2>&1 | tee /tmp/alsa.log; then
+            bash tools/ci/log-digest.sh --title alsa --log /tmp/alsa.log \
+              --sig 'error(\[|:)' --tail 12
+            exit 1
+          fi
+          # 单测不打开音频设备（选择器只在 open 时真连 PCM），CI 无设备也可跑。
+          if ! cargo test -q --manifest-path base/runtime/Cargo.toml \
+               -p rr-hal --features alsa --lib 2>&1 | tee /tmp/alsa-test.log; then
+            bash tools/ci/log-digest.sh --title alsa-test --log /tmp/alsa-test.log \
+              --sig 'error(\[|:)|FAILED|panicked at' --tail 12
+            exit 1
+          fi
+
+  # OTA 发布制品组包/签名/复验门（ADR-0028 机制半边）：判据住在
+  # tools/deploy/ota-bundle.sh，不能只在打标签那天第一次真跑。本 job 用 1MiB
+  # 随机件走完整链（规范名 → manifest → 签名 → 公钥复验 → 摘要），并断三条
+  # 负例（篡改镜像 / 非空输出目录 / 坏版本）；只有正例通过不算过。
+  ota-bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/ota/rr3-ota-ctl
+      - name: 构建 rr3-ota-ctl（宿主机）
+        run: |
+          set -o pipefail
+          if ! cargo build -q --locked --release \
+               --manifest-path base/ota/rr3-ota-ctl/Cargo.toml 2>&1 | tee /tmp/ota-build.log; then
+            bash tools/ci/log-digest.sh --title ota-build --log /tmp/ota-build.log \
+              --sig 'error(\[|:)' --tail 12
+            exit 1
+          fi
+      - name: OTA bundle 正例 + 三条负例
+        run: |
+          set -euo pipefail
+          ctl=/tmp/rr3-build/release/rr3-ota-ctl
+          tmp=/tmp/rr3-ota-ci
+          rm -rf "$tmp"
+          mkdir -p "$tmp"
+          head -c 1048576 /dev/urandom > "$tmp/rr_a.ext4"
+          ( umask 077; od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$tmp/sign.key" )
+          RR3_OTA_CTL="$ctl" bash tools/deploy/ota-bundle.sh \
+            --image "$tmp/rr_a.ext4" --version 0.0.16 \
+            --key-file "$tmp/sign.key" --out "$tmp/bundle"
+          img="$tmp/bundle/rr3-rootfs-rk3566-0.0.16.img"
+          pub=$(find "$tmp/bundle/keys" -name '*.pub' -print -quit)
+          # 负例 1：篡改镜像必须被摘要门拒（追加一字节，摘要必变）
+          cp "$img" "$tmp/tampered.img"
+          printf 'x' >> "$tmp/tampered.img"
+          if "$ctl" verify --manifest "$img.manifest" --sig "$img.sig" \
+               --pub "$pub" --image "$tmp/tampered.img" \
+               --platform rk3566 --board radxa-zero3 >/dev/null 2>&1; then
+            echo "::error title=ota-tamper::篡改镜像未被拒（验签链失效）"
+            exit 1
+          fi
+          # 负例 2：非空输出目录必须拒（不覆盖既有制品）
+          if RR3_OTA_CTL="$ctl" bash tools/deploy/ota-bundle.sh \
+               --image "$tmp/rr_a.ext4" --version 0.0.16 \
+               --key-file "$tmp/sign.key" --out "$tmp/bundle" >/dev/null 2>&1; then
+            echo "::error title=ota-overwrite::非空输出目录未被拒"
+            exit 1
+          fi
+          # 负例 3：非 semver 版本必须拒
+          if RR3_OTA_CTL="$ctl" bash tools/deploy/ota-bundle.sh \
+               --image "$tmp/rr_a.ext4" --version v0.0.16 \
+               --key-file "$tmp/sign.key" --out "$tmp/b2" >/dev/null 2>&1; then
+            echo "::error title=ota-version::坏版本未被拒"
+            exit 1
+          fi
+          echo "PASS  OTA bundle 正例与三条负例"
+
+  # 脚本语法门：CI 的全部判据最终都落在 tools/ci/*.sh 上——脚本自身写坏时，
+  # 门禁会"看起来跑过了"。bash -n 不执行、零副作用，覆盖全部追踪脚本。
+  scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: bash 语法检查（全部追踪 .sh）
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            bash -n "$f" || { echo "SYNTAX FAIL $f"; fail=1; }
+          done < <(git -c core.quotepath=false ls-files '*.sh')
+          [ "$fail" -eq 0 ] && echo "全部脚本语法通过"
+      # 归因脚本自身的判据也要有回执：噪音过滤/信号提取写成"看起来跑过了"
+      # 时，构建失败会更难读；自检用 --plain 不产生假注解。
+      - name: log-digest 自检（正例 + 四条负例）
+        run: bash tools/ci/log-digest.sh --self-test
+      # unsafe/FFI 审计（基线只降不升）：生产面 122 处已全部带前言，基线 0；
+      # 自检先钉扫描面（生产/测试/extern 三类），再执法——新增未注释项即红。
+      - name: unsafe 审计自检（夹具三条判定）
+        run: python3 tools/ci/unsafe_audit.py --self-test
+      - name: unsafe 注释审计（基线只降不升）
+        run: python3 tools/ci/unsafe_audit.py
+      # 流水线自身的结构面也要有门：并发组 / job 超时 / action 版本矩阵。
+      # 版本升级 = 显式改 ACTION_MATRIX，防同一工作流里两版 action 并存。
+      - name: 流水线审计自检（好例 + 缺并发/缺超时/版本漂移三负例）
+        run: python3 tools/ci/workflows_audit.py --self-test
+      - name: 流水线结构审计（并发组 / job 超时 / action 版本矩阵）
+        run: python3 tools/ci/workflows_audit.py
+

@@ -1,0 +1,18 @@
+[package]
+name = "rr-bus-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "总线承载契约面（模块侧同步 UDS 客户端：连接/注册/心跳/发布/rr3.call/收帧；基-35 窄化②）"
+
+[lib]
+name = "rr_bus_api"
+path = "src/lib.rs"
+
+[dependencies]
+rr-core = { path = "../rr-core" }
+rr-ipc = { path = "../rr-ipc" }
+toml = { workspace = true }
+serde_json = { workspace = true }

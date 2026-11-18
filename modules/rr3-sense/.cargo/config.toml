@@ -1,0 +1,21 @@
+# espidf 档编译面配置（批N8 件三，照 tools/espidf-sentinel/.cargo/config.toml 先例；
+# 与 modules/rr3-act/.cargo/config.toml 同形）。
+# **双档工程不写死 [build] target**（宿主 linux 档照常进门禁 ④/⑥ 扫面）——门脚本
+# 显式 --target xtensa-esp32-espidf；target 级 linker/rustflags 只作用于该目标，宿主
+# 不取用。注意 `[unstable] build-std` 是**无条件解析**的（不是"仅带 --target 才读"）：
+# 在无 rust-src 的工具链上、CWD 位于本目录时直接 `cargo build` 会因找不到 std 源码报错
+# （2026-11-16 真板实证）。宿主构建一律从仓根用 `--manifest-path`（门禁 ④/④b/⑥ 口径）。
+[target.xtensa-esp32-espidf]
+linker = "ldproxy"
+# esp-idf-sys BUILD-OPTIONS：IDF 5.0+ 必设（libc time_t 64 位面与 C 头对齐）
+rustflags = ["--cfg", "espidf_time64", "-Zunstable-options", "-Cpanic=immediate-abort"]
+
+[unstable]
+build-std = ["std", "panic_abort"]
+# 新工具链里 panic_immediate_abort 已是正式 panic 策略：不再作为 build-std
+# feature 开启，改由 target rustflags 的 -Cpanic=immediate-abort 表达（见上）。
+build-std-features = []
+
+# MCU 必须显式（esp-idf-sys 据此选 IDF 工具链与目标）。
+[env]
+MCU = "esp32"

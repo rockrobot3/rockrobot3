@@ -1,7 +1,172 @@
 //! 反射环宿主进程内的 1k–10kHz 闭环。
 //!
-//! **永不进总线**（ADR-0007 裁定 1）：这里只允许在异常/饱和时发
-//! `rr3-act/motor/reflex` 通告，闭环数据本身不过 IPC。
+//! **永不进总线**（ADR-0007 裁定 1）：闭环数据本身不过 IPC；本文件唯一出总线的
+//! 东西是异常/饱和通告 `rr3-act/motor/reflex`（notification）——它是异常面，
+//! 不是数据流。v0.0.1 的最小环：按 loop_hz 节拍空转的宿主线程——1kHz 闭环的
+//! "宿主位"真实存在（0.0.2 方案 §4：M5 只要求宿主位与命令流存在），环内控制律
+//! （FOC/PID）随电机实装进入同一节拍。
+//!
+//! 饱和检测真值批D₃ 迁 rr-core `control`（ADR-0018 裁定 5：控制原语是注入
+//! 时钟的纯计算）——cfg 形状/节拍方案/episode 状态机及窗结算、速率折算两纯
+//! 函数的真值在 rr-core，本文件 re-export 保既有路径；std 主循环只做平台事
+//! （sleep 节拍 + Instant 取时 + 总线发布）。
 
+use std::time::{Duration, Instant};
+
+use rr3mod::BusHandle;
+use serde_json::json;
+
+pub use rr_core::control::{
+    rr3_reflex_plan, rr3_reflex_rate_hz, rr3_reflex_saturated, Rr3ReflexCfg, Rr3SaturationDetector,
+};
+
+pub const RR3_REFLEX_NOTICE_TOPIC: &str = "rr3-act/motor/reflex";
+
+/// 反射环 tick 运维计数键（批M M-β A-6）：每速率窗结算一次，值 = 窗内实际
+/// 节拍数。1kHz 闭环的"宿主位真实存在"由此从日志宣言升级为可点验的记账线
+/// （经心跳自报 rrd 归并，`rr3.ctl.counters` 读面键 `rr3-act/reflex_ticks`）。
+pub const RR3_REFLEX_TICKS_KEY: &str = "reflex_ticks";
+
+/// 启动自述：本子模块的面一行说明（闭环本体在进程内，总线只见异常通告）
 pub const SURFACE: &[&str] =
-    &["reflex: 1k-10kHz 闭环，进程内 | 异常通告 -> rr3-act/motor/reflex (notification)"];
+    &["reflex: 1k-10kHz 闭环宿主（进程内，永不进总线）| 饱和通告 -> rr3-act/motor/reflex"];
+
+/// 宿主线程主循环（不返回）：按 1/loop_hz 节拍空转；每速率窗结算一次实际速率，
+/// 饱和 episode 触发时经总线发**恰好一条**通告。总线死了不重试不退出——
+/// 主循环的死亡探针会先一步终结整个进程（restart_policy=always 兜底）。
+/// 第二参 `BusHandle`（批N30 件二换型，0.0.8 方案 §4.6）：bootstrap 交出的句柄
+/// clone 只归反射环，承载方法同语义透传（publish/counter_bump）。
+pub fn rr3_reflex_loop(cfg: Rr3ReflexCfg, bus: BusHandle) {
+    let loop_hz = cfg.loop_hz.max(1);
+    let period = Duration::from_micros(1_000_000 / loop_hz as u64);
+    let (window_ms, need, expect) = rr3_reflex_plan(&cfg);
+    let window = Duration::from_millis(window_ms);
+    let mut det = Rr3SaturationDetector::rr3_detector_new(need);
+    let mut seq: u64 = 0;
+    let mut ticks: u64 = 0;
+    let mut window_start = Instant::now();
+    let mut next = window_start;
+    loop {
+        // 环位：控制律的挂点。v0.0.1 最小环为空转，电机实装后同节拍换掉这一行。
+        // 定时用绝对截止推进（见 [`rr3_next_wait`]）：相对 `sleep(period)` 每拍都把
+        // 调度开销叠进周期，越长越偏——真板实测 1000Hz 实跑 888Hz。
+        std::thread::sleep(rr3_next_wait(&mut next, period, Instant::now()));
+        ticks += 1;
+        let now = Instant::now();
+        if now.duration_since(window_start) >= window {
+            rr3_reflex_settle(&bus, &mut det, &mut seq, ticks, window_ms, expect);
+            rr3_reflex_mark(&bus, &mut ticks, &mut window_start, now);
+        }
+    }
+}
+
+/// 下一拍等待额（绝对截止累加）。
+///
+/// `sleep(period)` 是相对睡眠：每拍都把"睡醒到下一次调用"的调度开销叠进周期，
+/// 误差随时间线性累积。改为维护绝对截止 `next`（每拍只加 period），单拍晚醒的
+/// 时差由下一拍自动少睡补回，长时间平均周期回到 period 本身。
+///
+/// 落后超过一整拍时不追帧（基准重置到 `now + period`）：连续补睡会把 CPU 打满，
+/// 控制环宁肯丢一拍也不自伤——丢拍已被饱和检测（`ticks < expect/2`）覆盖。
+fn rr3_next_wait(next: &mut Instant, period: Duration, now: Instant) -> Duration {
+    *next += period;
+    match next.checked_duration_since(now) {
+        Some(rest) => rest,
+        None => {
+            *next = now + period;
+            period
+        }
+    }
+}
+
+/// 窗结算记账（批M M-β A-6）：值 = 窗内实跑节拍数，重置前落账；bump 失败不进
+/// 总线发布面（异常通告语义），静默容忍——计数是运维账。
+fn rr3_reflex_mark(bus: &BusHandle, ticks: &mut u64, window_start: &mut Instant, now: Instant) {
+    bus.counter_bump(RR3_REFLEX_TICKS_KEY, *ticks);
+    *ticks = 0;
+    *window_start = now;
+}
+
+/// 窗结算：饱和 episode 判定，首报时发一条通告并续 seq。
+fn rr3_reflex_settle(
+    bus: &BusHandle,
+    det: &mut Rr3SaturationDetector,
+    seq: &mut u64,
+    ticks: u64,
+    window_ms: u64,
+    expect: u64,
+) {
+    let saturated = rr3_reflex_saturated(ticks, expect);
+    if !det.rr3_detector_feed(saturated) {
+        return;
+    }
+    *seq += 1;
+    let rate_hz = rr3_reflex_rate_hz(ticks, window_ms);
+    let _ = bus.publish(
+        RR3_REFLEX_NOTICE_TOPIC,
+        json!({ "seq": *seq, "reason": "saturate", "rate_hz": rate_hz }),
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 饱和检测真值批D₃ 迁 rr-core `control`（节拍方案/episode/孤立窗/下限
+    /// 用例随迁）——本地只钉"re-export 可用"：cfg→窗方案→喂窗→结算走通
+    /// rr-core 面。
+    #[test]
+    fn saturation_truth_is_rr_core_reexport() {
+        let cfg = Rr3ReflexCfg {
+            loop_hz: 1000,
+            saturate_notice_ms: 500,
+        };
+        let (window_ms, need, expect) = rr3_reflex_plan(&cfg);
+        assert_eq!(
+            (window_ms, need, expect),
+            (250, 2, 250),
+            "节拍方案（rr-core 判定）"
+        );
+        let mut det = Rr3SaturationDetector::rr3_detector_new(need);
+        assert!(
+            !det.rr3_detector_feed(true),
+            "第 1 个饱和窗：还在积累（rr-core 判定）"
+        );
+        assert!(
+            det.rr3_detector_feed(true),
+            "第 2 个连续饱和窗：episode 首报（rr-core 判定）"
+        );
+        assert!(
+            rr3_reflex_saturated(124, 250) && !rr3_reflex_saturated(125, 250),
+            "半拍线（rr-core 判定）"
+        );
+        assert_eq!(rr3_reflex_rate_hz(250, 250), 1000);
+    }
+
+    /// 绝对截止定时：晚醒的时差由下一拍少睡补回，落后超一拍则重置不追帧。
+    /// 2026-11-16 真板实测的相对睡眠欠账（1000Hz→888Hz）由本函数的补回语义消掉。
+    #[test]
+    fn next_wait_absorbs_oversleep_and_never_catches_up_storms() {
+        let period = Duration::from_micros(1000);
+        let t0 = Instant::now();
+        let mut next = t0;
+        assert_eq!(
+            rr3_next_wait(&mut next, period, t0),
+            period,
+            "准时：等满一拍"
+        );
+        let late = t0 + Duration::from_micros(1300);
+        assert_eq!(
+            rr3_next_wait(&mut next, period, late),
+            Duration::from_micros(700),
+            "晚醒 300µs：下一拍只睡 700µs（截止不漂）"
+        );
+        let way_late = t0 + Duration::from_millis(50);
+        assert_eq!(
+            rr3_next_wait(&mut next, period, way_late),
+            period,
+            "落后超一拍：不补睡，按整拍重排"
+        );
+        assert_eq!(next, way_late + period, "基准重置到 now+period");
+    }
+}

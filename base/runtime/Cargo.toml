@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["rr-ipc", "rr-registry", "rr-bus", "rr-hal", "rr-ota", "rrd"]
+members = ["rr-ipc", "rr-mech", "rr-core", "rr-registry", "rr-bus", "rr-bus-api", "rr-hal-api", "rr-periph-proto", "rr-hal", "rr-ota", "rrd", "rr3mod"]
 
 [workspace.package]
 version = "0.0.1"
@@ -11,7 +11,6 @@ publish = false
 
 [workspace.dependencies]
 toml = "0.8"
-async-trait = "0.1"
 serde_json = "1"
 
 # 空壳阶段只看能否编译与测试，产物体积/速度优先

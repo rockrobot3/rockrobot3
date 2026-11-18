@@ -9,11 +9,14 @@
 modules/rr3-power/
 ├── module.toml
 ├── config.toml
+├── composite.toml   ← 组合件装配清单（⊗ 链：battery ⊗ charger）
 ├── Cargo.toml
+├── atoms/           ← 原子件（每格一件，五件套：atom.toml + 入口 + mech + assemble.toml + private.rs）
+│   ├── battery/     ← power.battery：电池采样 + 低电边沿机（同一次低电段恰发一次）
+│   └── charger/     ← power.charger：充电状态（由电池读数的 charging 位派生）
 └── src/
-    ├── main.rs      ← 入口：打印自述与发布面，未接总线
-    ├── battery.rs   ← 电池采样 + 关断决策（本地）
-    └── charger.rs   ← 充电状态
+    ├── main.rs      ← 入口：只装配与启动（≤80 行）
+    └── composite.rs ← 组合件：config 解析 + HAL 电源面探活 + 采样/低电/充电三拍主循环
 ```
 
 ## 总线面
@@ -21,11 +24,22 @@ modules/rr3-power/
 | 方向 | 主题 | kind |
 |---|---|---|
 | publish | `rr3-power/battery/state` | event |
+| publish | `rr3-power/battery/low` | event |
 | publish | `rr3-power/charger/state` | event |
 
 `subscribes` 为空是**设计**：低压关断是本模块的本地决策，不依赖总线、不等 brain
 （[`architecture.md`](../../docs/architecture/architecture.md) §7.3 安全兜底、
 [`contracts/topics.toml`](../../contracts/topics.toml) 同条 note）。总线路径故障不得影响关断。
+
+## 心跳自报计数（0.0.4 批B，Q1 裁定）
+
+`bus.rr3_counter_bump` 记账，随 `rr3.heartbeat` 的可选 `counters` 字段上行，rrd 按
+`rr3-power/<键>` 归并（`rr3.ctl.counters` 可查）。本模块的键：
+
+| 键 | 记账点 |
+|---|---|
+| `battery_read_fail` | 主循环 battery 拍 HAL 读数失败（0.0.5 批I P-2，数据新鲜度）；随后按"不装活着"exit(1) |
+| `errors` | 通用可选键（各模块共用词表），异常路径按需自报 |
 
 ## 本地自检
 

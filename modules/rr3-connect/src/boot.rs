@@ -1,0 +1,297 @@
+//! rr3-connect 接入层（0.0.8 W-A 批2 拆分，ADR-0017 五层表接入层）。
+//!
+//! config schema 解析（自原 composite.rs 迁入：TOML 下钻、缺字段点名、bt 段
+//! 缺段回落——文案是装配观测面，逐字不变）＋ HAL 链路面选择与开机探活编排＋
+//! 配网凭据存储编排（Unsupported / 在册查询失败即 Err 上抛：显式回错不静默
+//! 带病常驻，也不给"没有链路读数还常驻"的假活）。本层零业务 match——策略量
+//! 经 config 数据化注入（周期/超时/口令下限/bt 开机初值），机制件零策略载荷。
+//! config 路径解析（RR3_CONNECT_CONFIG_ENV 覆盖 + manifest 同目录缺省）已随
+//! 批0 并入 rr3mod `load_config_text` 单点，本层不再持有路径段。
+
+use std::time::Duration;
+
+use rr_hal::backend::{
+    rr3_backend_resolve, rr3_hal_link, rr3_hal_wifi_store, RR3_BACKEND_PLACEHOLDER,
+};
+use rr_hal::provision_store::Rr3WifiStore;
+use rr_hal_api::{Rr3Link, Rr3SsidText};
+
+use crate::wifi::{Rr3LinkCfg, Rr3Provision};
+
+/// 启动自述：三面 SURFACE 链式打印（装配段原序逐字沿用）。
+pub(crate) fn rr3_conn_surface() {
+    eprintln!("rr3-connect 0.0.1 (0.0.2 T4c 实装)");
+    for line in crate::wifi::SURFACE
+        .iter()
+        .copied()
+        .chain(crate::session::SURFACE.iter().copied())
+        .chain(crate::bt::SURFACE.iter().copied())
+    {
+        eprintln!("  {line}");
+    }
+}
+
+/// HAL 链路面选择 + 开机探活：首读即探活（Unsupported / 读数失败显式回错），
+/// 「链路面就绪」回显归本编排（方案 §4.2 映射表字面）。nmcli 子进程超时由
+/// config timeout_ms 传入（0.0.5 批I N-2：最坏翻转延迟由配置管住，不再由子
+/// 进程自由决定）。返回二元——句柄半、后端名（"链路读数失败（{backend}）"
+/// 文案复用）。
+pub(crate) fn rr3_connect_probe(
+    timeout_ms: u64,
+) -> Result<(Box<dyn Rr3Link>, &'static str), String> {
+    let (dev, backend) = rr3_hal_link(Duration::from_millis(timeout_ms));
+    let first = dev
+        .state()
+        .map_err(|e| format!("链路面探活失败({backend}): {e}"))?;
+    eprintln!(
+        "链路面就绪: {backend} up={} ssid={:?} rssi={:?}",
+        first.up, first.ssid, first.rssi_dbm
+    );
+    Ok((dev, backend))
+}
+
+/// HAL 配网凭据存储选择 + 在册查询编排（MC-6：凭据由后端承载持久化——linux =
+/// NetworkManager 连接配置）：构造不触设备，首次调用才起 nmcli。开机查在册——
+/// 在册则经 `rr3_prov_restored` 直接起 station（重启仍在册），失败即致命
+/// （fail-closed，不静默当"没配过网"）。「配网面就绪」回显归本编排，随后按
+/// `link_backend` 与配网相位打一行面选择摘要。返回二元——凭据存储（on_rpc
+/// connect/forget 运行期需要）与配网状态机初值。
+pub(crate) fn rr3_wifi_provision(
+    timeout_ms: u64,
+    link_backend: &str,
+) -> Result<(Box<dyn Rr3WifiStore>, Rr3Provision), String> {
+    let (store, store_backend) = rr3_hal_wifi_store(Duration::from_millis(timeout_ms));
+    let ssid = store
+        .rr3_wifi_ssid()
+        .map_err(|e| format!("配网凭据在册查询失败（{store_backend}）: {e}"))?;
+    let restored = ssid.is_some();
+    let prov = rr3_prov_of(store_backend, ssid);
+    // 面选择摘要（可定位一行）：全局 hal 档 + 链路/配网两面后端 + 配网相位
+    eprintln!(
+        "面选择: hal={} link={link_backend} store={store_backend} provision={}",
+        rr3_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER),
+        if restored { "station" } else { "ap" }
+    );
+    Ok((store, prov))
+}
+
+/// 在册则直起 station（重启仍在册），否则出厂 ap。
+fn rr3_prov_of(store_backend: &str, ssid: Option<Rr3SsidText>) -> Rr3Provision {
+    match ssid {
+        Some(ssid) => {
+            let ssid = ssid.rr3_ssid_text_as_str();
+            eprintln!("配网面就绪: {store_backend} 在册 ssid={ssid:?}（重启恢复 station）");
+            Rr3Provision::rr3_prov_restored(ssid)
+        }
+        None => {
+            eprintln!("配网面就绪: {store_backend} 无在册凭据（出厂 ap）");
+            Rr3Provision::rr3_provision_new()
+        }
+    }
+}
+
+/// 链路轮询周期下限（ms）：0/极小值会让 nmcli 子进程每秒被 fork 上千次，
+/// 把 CPU 与 fork 预算吃光；100ms 是"响应可见"与"不制造 fork 风暴"的折中。
+const RR3_MIN_LINK_PERIOD_MS: u64 = 100;
+/// nmcli 子进程超时下限（ms）：低于 1s 的"超时"在正常调度抖动下也必然触发，
+/// 等于把每一次链路读数判成失败。
+const RR3_MIN_NM_TIMEOUT_MS: u64 = 1_000;
+/// nmcli 超时上界（ms）：sync 读数在 on_tick 里执行，超时过长会拖住心跳节拍；
+/// 60s 已远超正常毫秒级返回，超界按配置错拒。
+const RR3_MAX_NM_TIMEOUT_MS: u64 = 60_000;
+
+/// TOML 文本 → (Rr3LinkCfg, bt 开机初值)。手工下钻不引 serde derive：字段
+/// 个位数，点名缺字段的文案比派生宏的默认报错可读（rr3-act/rr3-power 同款）。
+/// 0.0.5 批I N-6：无读者的 roam_probe_enabled / tls_min_version / 总段 log_level
+/// 删除；N-2：timeout_ms 迁 wifi 段，生效点 = nmcli 子进程超时。
+pub(crate) fn rr3_conn_cfg_parse(text: &str) -> Result<(Rr3LinkCfg, bool), String> {
+    let v = rr3_toml_doc(text)?;
+    let wifi_sect = rr3_conn_wifi_sect(&v)?;
+    let link = rr3_conn_link_of(&wifi_sect)?;
+    let bt_up = rr3_bt_up_of(&v)?;
+    Ok((link, bt_up))
+}
+
+/// config 文本 → TOML 文档树（坏文本点名）。
+fn rr3_toml_doc(text: &str) -> Result<toml::Value, String> {
+    toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))
+}
+
+/// wifi 段三键 → 链路 cfg（周期/超时工程域 + 口令下限）。
+fn rr3_conn_link_of(wifi_sect: &toml::Value) -> Result<Rr3LinkCfg, String> {
+    Ok(Rr3LinkCfg {
+        link_report_period_ms: rr3_link_period_of(wifi_sect)?,
+        timeout_ms: rr3_nm_timeout_of(wifi_sect)?,
+        // 配网口令下限（N-11①/M-6，批N4 件五数据化）：缺键回落 8 = legacy
+        // 语义（已部署旧 config 兼容，同 bt 段缺段回落口径）；显式给值时
+        // 必须 ≥1（0 = 无下限是策略漏洞，不当合法配置放行）
+        min_pass_len: rr3_min_pass_len_of(wifi_sect),
+    })
+}
+
+/// `[rr3-connect.wifi]` 段取址（缺段点名）。
+fn rr3_conn_wifi_sect(v: &toml::Value) -> Result<toml::Value, String> {
+    v.get("rr3-connect")
+        .and_then(|s| s.get("wifi"))
+        .cloned()
+        .ok_or_else(|| "config 缺 [rr3-connect.wifi] 段".to_string())
+}
+
+/// 段内非负整数键（缺键/类型错点名）。
+fn rr3_conn_u64_of(sect: &toml::Value, key: &str, sect_name: &str) -> Result<u64, String> {
+    sect.get(key)
+        .and_then(toml::Value::as_integer)
+        .filter(|n| *n >= 0)
+        .map(|n| n as u64)
+        .ok_or_else(|| format!("config [rr3-connect.{sect_name}] 缺 {key}（非负整数）"))
+}
+
+/// 轮询周期/超时的工程域（本轮审计）：0 周期不可折 1ms——那是 fork 风暴；
+/// 超时过小恒失败、过大拖住 on_tick 心跳。周期按 100ms 下限钳制并留痕，
+/// 超时越上界直接拒（配置错，不猜意图）。
+fn rr3_link_period_of(sect: &toml::Value) -> Result<u64, String> {
+    let raw = rr3_conn_u64_of(sect, "link_report_period_ms", "wifi")?;
+    Ok(rr3_period_floor(raw))
+}
+
+/// 上报周期下限钳位（防 nmcli fork 风暴），低于下限即点名并抬到下限。
+fn rr3_period_floor(raw: u64) -> u64 {
+    if raw < RR3_MIN_LINK_PERIOD_MS {
+        eprintln!(
+            "config [rr3-connect.wifi] link_report_period_ms={raw} 低于下限，钳到 {RR3_MIN_LINK_PERIOD_MS}ms（防 nmcli fork 风暴）"
+        );
+        return RR3_MIN_LINK_PERIOD_MS;
+    }
+    raw
+}
+
+/// nmcli 子进程超时：越上界拒（配置错），低于下限抬到 1s。
+fn rr3_nm_timeout_of(sect: &toml::Value) -> Result<u64, String> {
+    let raw = rr3_conn_u64_of(sect, "timeout_ms", "wifi")?;
+    rr3_nm_cap(raw)?;
+    Ok(raw.max(RR3_MIN_NM_TIMEOUT_MS))
+}
+
+/// 超时上界门（越界即配置错拒 boot，不猜意图）。
+fn rr3_nm_cap(raw: u64) -> Result<(), String> {
+    if raw > RR3_MAX_NM_TIMEOUT_MS {
+        return Err(format!(
+            "config [rr3-connect.wifi] timeout_ms 须在 {RR3_MIN_NM_TIMEOUT_MS}..={RR3_MAX_NM_TIMEOUT_MS}，收到 {raw}"
+        ));
+    }
+    Ok(())
+}
+
+/// bt 开机初值（N-1：env 注入退役改 config 数据化注入）：缺段回落 false
+/// =出厂不自动开蓝牙，等价旧 env 未设行为（已部署旧 config 兼容）；
+/// 有段则 up 必须是布尔（类型错点名拒，不静默吞）
+fn rr3_bt_up_of(v: &toml::Value) -> Result<bool, String> {
+    Ok(rr3_bt_flag(v)?.unwrap_or(false))
+}
+
+/// bt 段 up 键（段缺 = None；键在须布尔）。
+fn rr3_bt_flag(v: &toml::Value) -> Result<Option<bool>, String> {
+    v.get("rr3-connect")
+        .and_then(|s| s.get("bt"))
+        .map(|sect| {
+            sect.get("up")
+                .and_then(toml::Value::as_bool)
+                .ok_or_else(|| "config [rr3-connect.bt] 缺 up（布尔）".to_string())
+        })
+        .transpose()
+}
+
+/// 配网口令下限（缺键回落 8 = legacy；显式 0 按 1 拒放）。
+fn rr3_min_pass_len_of(sect: &toml::Value) -> u64 {
+    sect.get("min_pass_len")
+        .and_then(toml::Value::as_integer)
+        .filter(|n| *n >= 0)
+        .map(|n| n as u64)
+        .unwrap_or(8)
+        .max(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 与仓内 config.toml 同形状的最小配置必须解析成功——漂移当场红
+    #[test]
+    fn config_parse_covers_repo_shape() {
+        let text = r#"
+[rr3-connect.wifi]
+link_report_period_ms = 5000
+timeout_ms = 20000
+min_pass_len = 8
+
+[rr3-connect.bt]
+up = false
+"#;
+        let (wifi, bt_up) = rr3_conn_cfg_parse(text).unwrap();
+        assert_eq!(wifi.link_report_period_ms, 5000);
+        assert_eq!(wifi.timeout_ms, 20000);
+        assert_eq!(wifi.min_pass_len, 8);
+        assert!(!bt_up, "未写 bt 段 = 出厂不自动开蓝牙");
+    }
+
+    /// 配网口令下限（批N4 件五 N-11①）：缺键回落 8 = legacy 语义（旧 config
+    /// 兼容，同 bt 缺段回落口径）；显式值生效；显式 0 按 1 拒放（0 = 无下限
+    /// 是策略漏洞，不当合法配置）
+    #[test]
+    fn config_min_pass_len_defaults_to_legacy_eight() {
+        let base = "[rr3-connect.wifi]\nlink_report_period_ms = 5000\ntimeout_ms = 20000\n";
+        assert_eq!(rr3_conn_cfg_parse(base).unwrap().0.min_pass_len, 8);
+        let text = format!("{base}min_pass_len = 6\n");
+        assert_eq!(rr3_conn_cfg_parse(&text).unwrap().0.min_pass_len, 6);
+        let text = format!("{base}min_pass_len = 0\n");
+        assert_eq!(
+            rr3_conn_cfg_parse(&text).unwrap().0.min_pass_len,
+            1,
+            "显式 0 按 1 拒放（无下限不是合法配置）"
+        );
+    }
+
+    /// 轮询周期/超时工程域（本轮审计）：0 周期钳 100ms（防 nmcli fork 风暴），
+    /// 超时 <1s 抬到 1s、>60s 拒（恒失败与拖心跳都是配置错）。
+    #[test]
+    fn config_clamps_period_and_timeout_domains() {
+        let text = |p: u64, t: u64| {
+            format!("[rr3-connect.wifi]\nlink_report_period_ms = {p}\ntimeout_ms = {t}\n")
+        };
+        let (cfg, _) = rr3_conn_cfg_parse(&text(0, 0)).unwrap();
+        assert_eq!(cfg.link_report_period_ms, 100, "0 周期钳 100ms");
+        assert_eq!(cfg.timeout_ms, 1000, "0 超时抬到 1s");
+        let e = rr3_conn_cfg_parse(&text(5000, 60_001)).unwrap_err();
+        assert!(e.contains("timeout_ms"), "超上界必须拒: {e}");
+    }
+
+    #[test]
+    fn config_parse_rejects_missing_sections_and_fields() {
+        let e = rr3_conn_cfg_parse("[rr3-connect]\n").unwrap_err();
+        assert!(e.contains("[rr3-connect.wifi]"), "缺段点名: {e}");
+        let e =
+            rr3_conn_cfg_parse("[rr3-connect.wifi]\nlink_report_period_ms = 5000\n").unwrap_err();
+        assert!(e.contains("timeout_ms"), "缺字段点名: {e}");
+        let e = rr3_conn_cfg_parse("garbage =\n").unwrap_err();
+        assert!(e.contains("TOML"), "坏文本点名: {e}");
+    }
+
+    /// bt 开机初值注入（N-1）：缺段回落 false（旧 config 兼容）、up=true
+    /// 生效、类型错点名拒（不静默吞）。
+    #[test]
+    fn config_bt_up_defaults_false_and_type_checks() {
+        let base = "[rr3-connect.wifi]\nlink_report_period_ms = 5000\ntimeout_ms = 20000\n";
+        // 缺段回落 false
+        assert!(!rr3_conn_cfg_parse(base).unwrap().1);
+        // up=true 生效
+        let text = format!("{base}[rr3-connect.bt]\nup = true\n");
+        assert!(rr3_conn_cfg_parse(&text).unwrap().1);
+        // 类型错点名
+        let text = format!("{base}[rr3-connect.bt]\nup = \"yes\"\n");
+        let e = rr3_conn_cfg_parse(&text).unwrap_err();
+        assert!(
+            e.contains("[rr3-connect.bt]") && e.contains("up"),
+            "类型错点名: {e}"
+        );
+    }
+}

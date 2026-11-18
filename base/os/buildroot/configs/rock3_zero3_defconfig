@@ -1,0 +1,110 @@
+# rockrobot3 —— Radxa ZERO 3（RK3566）Buildroot defconfig
+#
+# 架构裁定：ADR-0001（Buildroot 主路线 + Linux 6.6 mainline + Radxa ZERO 3）。
+# 分区布局的事实源：base/os/buildroot/board/radxa-zero3/genimage.cfg（标签唯一事实源在
+# base/runtime/rr-ota/src/lib.rs，由 cargo test -p rr-ota 的 include_str 守护钉死）。
+#
+# 档位说明（诚实边界）：本文件是"结构就绪"档——配置逻辑本机可评审，全量 make
+# 构建只能在 Linux/容器侧进行（本仓库开发机为 macOS）。**2026-11-16 核对**：
+# v6.6 主线没有 Radxa ZERO 3 的板级 dts（3E 自 v6.11、3W 自 v6.12 才进主线），
+# 故板级文件以 v6.12 为源回移到 6.6，补丁住 board/radxa-zero3/patches/，由下方
+# BR2_LINUX_KERNEL_PATCH 应用；两个变体的 dtb 都构建，extlinux 默认取 3W。
+# U-Boot 2024.10 的 `radxa-zero-3-rk3566_defconfig` 已核对存在（源码树实查）。
+# rrd 与各模块产物**不在 Buildroot 里编译**（它们是本仓自己的 workspace），由
+# aarch64 交叉编译后经 post-build.sh 装入目标根文件系统。
+
+# ---- 架构与工具链 -----------------------------------------------------------
+BR2_aarch64=y
+BR2_cortex_a55=y
+BR2_TOOLCHAIN_BUILDROOT_GLIBC=y
+BR2_TARGET_GENERIC_ISSUE="Welcome to rockrobot3 (rock3_zero3)"
+
+# ---- 系统形态：BusyBox init（无 systemd，开机自启走 /etc/init.d/S99rrd）------
+BR2_INIT_BUSYBOX=y
+BR2_ROOTFS_POST_BUILD_SCRIPT="board/radxa-zero3/post-build.sh"
+# post-image 脚本序：先注入容量参数（genimage.cfg 在 git 里只有占位符），
+# 再跑 Buildroot 自带的 genimage.sh 生成整盘镜像。
+BR2_ROOTFS_POST_IMAGE_SCRIPT="board/radxa-zero3/post-image.sh support/scripts/genimage.sh"
+# 真符号是 BR2_ROOTFS_POST_SCRIPT_ARGS（Buildroot 的 Makefile 只读这个名字）。
+# 写成 `BR2_ROOTFS_POST_IMAGE_SCRIPT_ARGS` 会被 kconfig 当未知符号**静默忽略**，
+# 于是 genimage.sh 收不到 `-c`，post-image 阶段只报 `Error: Missing argument`
+# （2026-11-17 第 7 拍实证）。改名前先 grep Buildroot 的 system/Config.in。
+BR2_ROOTFS_POST_SCRIPT_ARGS="-c $(BUILD_DIR)/genimage-rock3.cfg"
+
+# ---- 内核：Linux 6.6 mainline + Radxa ZERO 3 板级 dts 回移 -------------------
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="6.6"
+BR2_LINUX_KERNEL_USE_ARCH_DEFAULT_CONFIG=y
+BR2_LINUX_KERNEL_IMAGE=y
+BR2_LINUX_KERNEL_DTS_SUPPORT=y
+# 板级 dts 回移（v6.6 无此板；3E/3W 两个变体都构建，extlinux 默认 3W）。
+BR2_LINUX_KERNEL_PATCH="board/radxa-zero3/patches"
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3566-radxa-zero-3w rockchip/rk3566-radxa-zero-3e"
+
+# ---- 引导链：U-Boot（extlinux 走 distro boot）-------------------------------
+BR2_TARGET_UBOOT=y
+BR2_TARGET_UBOOT_BUILD_SYSTEM_KCONFIG=y
+# U-Boot 源：官方 GitHub 仓的 tag（custom git），不用 ftp.denx.de tarball。
+# 根因（2026-11-16 实测）：GitHub runner 到 ftp.denx.de 的 443 连接超时，
+# Buildroot 取不到 u-boot-2024.10.tar.bz2，全量构建在 uboot 阶段失败；预塞
+# GitHub archive 又会撞 Buildroot 对官方 tarball 的 hash。tag 钉版本同样可复现，
+# 且不依赖 denx 的下载面（上游 GitHub 仓是 u-boot 的规范镜像）。
+BR2_TARGET_UBOOT_CUSTOM_GIT=y
+BR2_TARGET_UBOOT_CUSTOM_REPO_URL="https://github.com/u-boot/u-boot.git"
+BR2_TARGET_UBOOT_CUSTOM_REPO_VERSION="v2024.10"
+BR2_TARGET_UBOOT_BOARD_DEFCONFIG="radxa-zero-3-rk3566"
+BR2_TARGET_UBOOT_NEEDS_DTC=y
+# binman 需要 pylibfdt（libfdt 的 Python 绑定）与 pyelftools（解析 ELF）。
+BR2_TARGET_UBOOT_NEEDS_PYLIBFDT=y
+BR2_TARGET_UBOOT_NEEDS_PYELFTOOLS=y
+# defconfig 打开了 CONFIG_TOOLS_MKEFICAPSULE，宿主需要 gnutls 开发头；
+# 缺它时 tools/mkeficapsule.c 报 fatal error: gnutls/gnutls.h（2026-11-17 实测）。
+BR2_TARGET_UBOOT_NEEDS_GNUTLS=y
+# RK3566 需要 idbloader.img（SPL+TPL 合体）与 u-boot.itb 两级产物，
+# 布局中的烧写偏移见 genimage.cfg（板上核对项）。
+#
+# 为什么不用 BR2_TARGET_UBOOT_FORMAT_ITB：它把 `u-boot.itb` 加进
+# UBOOT_MAKE_TARGET，而 U-Boot 2024.10 的该目标只在 ifdef U_BOOT_ITS 下存在
+# （CONFIG_SPL_FIT_SOURCE / CONFIG_USE_SPL_FIT_GENERATOR 才定义）；rk3566 的
+# defconfig 走 binman（CONFIG_SPL_LOAD_FIT/FIT），没有这个目标——2026-11-17
+# 全量构建的 `No rule to make target 'u-boot.itb'` 即由此而来。
+# binman 的顶层镜像 `u-boot-rockchip.bin` 同时把 idbloader.img 与 u-boot.itb
+# 作为**子产物文件**写进构建目录（arch/arm/dts/rockchip-u-boot.dtsi 的
+# filename 字段）。故这里用 FORMAT_CUSTOM 列出两个文件名：只加拷贝清单、
+# 不加 make 目标，`make all` 由 binman 产出后原样拷到 BINARIES_DIR。
+BR2_TARGET_UBOOT_FORMAT_CUSTOM=y
+BR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME="idbloader.img u-boot.itb"
+# RK3566 的 DDR 初始化（TPL）与 BL31 不在 U-Boot 源码里，来自 Rockchip rkbin：
+# binman 组 idbloader.img 要 TPL、组 u-boot.itb 要 BL31，缺任一即
+# `.binman_stamp Error 103`（2026-11-17 全量构建实测，注解里只有这行错误码）。
+# 文件名是 rkbin 仓内路径，版本随 Buildroot 2024.02.11 钉住的 rkbin 提交；
+# 升级 rkbin 时必须同批复核这两个文件名，不存在"缺省自动选最新"。
+BR2_PACKAGE_ROCKCHIP_RKBIN=y
+BR2_PACKAGE_ROCKCHIP_RKBIN_TPL_FILENAME="bin/rk35/rk3566_ddr_1056MHz_v1.18.bin"
+BR2_PACKAGE_ROCKCHIP_RKBIN_BL31_FILENAME="bin/rk35/rk3568_bl31_v1.43.elf"
+BR2_TARGET_UBOOT_NEEDS_ROCKCHIP_RKBIN=y
+
+# ---- 用户态包（M3 音频链路的板上依赖）---------------------------------------
+BR2_PACKAGE_ALSA_LIB=y
+BR2_PACKAGE_ALSA_UTILS=y
+BR2_PACKAGE_PYTHON3=y
+
+# ---- 镜像产物 ---------------------------------------------------------------
+# 根文件系统只出 ext4 一份；rr_a / rr_b 两个槽位镜像由 genimage 从同一份
+# rootfs.ext4 生成（两槽内容在出厂烧录时一致，升级后才分叉）。
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_4=y
+# Buildroot 2024.02 的缺省容量是 60M；本档目标树含 glibc + Python3 + ALSA
+# utils，60M 放不下——mkfs.ext4 直接失败（2026-11-17 实测，ext2.mk 的
+# "Maybe you need to increase the filesystem size" 提示）。
+# 512M 只是**中间产物** rootfs.ext2 的容量；最终 rr_a/rr_b/rr_factory 由
+# genimage 从同一 target 目录按各自 @XXX_SIZE@ 生成，不受此值约束。
+BR2_TARGET_ROOTFS_EXT2_SIZE="512M"
+BR2_PACKAGE_HOST_GENIMAGE=y
+# genimage 的 boot.vfat 分区要宿主 `mkfs.vfat`（dosfstools）与 `mcopy`（mtools）；
+# Buildroot 的 host-genimage 只依赖 libconfuse，不带这两个工具。缺任一时
+# post-image 阶段只报 `target-post-image Error 1`，不点名缺哪个（2026-11-17 实测）。
+# 根文件系统的 mke2fs 由 BR2_TARGET_ROOTFS_EXT2 自动 select host-e2fsprogs。
+BR2_PACKAGE_HOST_DOSFSTOOLS=y
+BR2_PACKAGE_HOST_MTOOLS=y

@@ -1,0 +1,20 @@
+# RockRobot3 装机接线档：pi4b-host 机型（N44：Pi 4B 独立 host-only）。
+# 与 profiles/pi4b-host.toml 配套的最小接线面：Pi 本体电源入一条。九字段语义、
+# 校验⑦ 判据、演练实例取值说明见 hardware/default/wiring.toml 头注。
+#
+# 为什么只有一条：MAX7219 是本地 SPI 模块（spidev0.0），USB 声卡是 USB 枚举设备，
+# 两者都不是可控电源线组；本档没有外部板，也没有舵机/OLED/双麦线束，故不立
+# 其它 [[wire]]。
+
+[[wire]]
+# J0 电源入：官方 5V/3A USB-C 适配器 → Pi 5V 轨（本档唯一下游线组；
+# 3A 主干 ≥ Pi 4B + USB 声卡峰值，⑦-c 的额定加总判据归批N2 消费）
+connector = "J0"
+hdr_pin = [1, 2]
+signal = ["vcc", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "none"
+keyed = true
+rated_a = 3.0
+gnd_common = "star-1"

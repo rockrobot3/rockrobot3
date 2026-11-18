@@ -1,43 +1,64 @@
 //! 单连接服务：本线程 reader + 一条 writer 线程。
 //!
+//! 分面（批B12）：本文件留共享件（帧构造/应答/写出口/`Rr3Flow`/拒绝出口）、
+//! 入站路由 `rr3_serve_frame`、上行方法表 `rr3_serve_request`、收尾与主循环；
+//! 四个协议分面各自成子模块——`conn/handshake.rs`（注册握手）、`conn/ctl.rs`
+//! （控制旁支）、`conn/publish.rs`（业务发布 + 低电兜底）、`conn/beat.rs`
+//! （心跳与升级）、`conn/route.rs`（`rr3.call` 与应答回程）。
+//!
 //! 协议面（spec §5.0 + 偏离 4）：
 //! - 第一条帧必须是 `Request` + `dst_task = RR3_TASK_RRD` 的 `rr3.register`，否则按协议错误断开；
 //! - `src_task` 由 rrd 分配并在应答 result 里回带；注册后上行帧的 `src_task` 必须等于分配值
 //!   （AOS-STD-IPC-024：用户态不得自设）——伪造的那一帧被拒，但连接不断（一次笔误不该让整机掉线）；
 //! - 注册完成前不收心跳、不判活（legacy 教训 76c0ad8）；未注册连接由读超时收掉；
+//!   注册后由静默上界（2 × 该模块看门狗窗口，ADR-0025）回收连接，判死权仍归看门狗；
 //! - `rr3.unregister` 是模块主动退场，**不走** restart_policy（那是崩溃语义）；
 //! - 上行 `Event` 是业务发布：过三层归属检查（冒充内建命名空间 → 前缀/在册 owner 越权 →
 //!   主题未登记）后原样转发给**除发布者外**的在册连接，头改写成发布者 task + `dst=0`；
-//!   任何一种拒法都只回错误帧 + 计数，不断连（spec §6、ADR-0006 决策 2/4）。
+//!   任何一种拒法都只回错误帧 + 计数，不断连（spec §6、ADR-0006 决策 2/4）；
+//! - 上行 `Response` 是 M3 `rr3.call` 的应答回路：trace_id = 调用方 task（转发时写入），
+//!   body 原样、dst 改写为 trace_id 定向回投；trace_id=0 或调用方已不在册都只回错误帧
+//!   不断连（M3 定型，见 `route::rr3_route_call` / `route::rr3_route_response`）。
 //!
 //! 写面（本任务的并发形状）：reader 线程写应答、writer 线程写广播，两者持有同一 socket 的
 //! `try_clone` 句柄、共用一把 `Mutex<UnixStream>`、且一帧一次 `write_all` → **整帧原子**；
 //! 但同一 socket 上"应答 vs 广播"的**相对顺序不保证**，所以测试按类型/字段挑帧，不按序号。
 
 use std::os::unix::net::UnixStream;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use rr_bus::RR3_TASK_RRD;
 use rr_ipc::{
-    opcode, rr3_body_encode, rr3_body_split, rr3_frame_read, rr3_frame_write, Rr3Frame,
-    Rr3FrameError, Rr3Header, Rr3PayloadType, Rr3StatusCode,
+    opcode, rr3_body_encode, rr3_body_split, rr3_frame_read_cap, rr3_frame_write, Rr3Frame,
+    Rr3FrameError, Rr3Header, Rr3PayloadType, Rr3StatusCode, RR3_FRAMING_PLEN_CAP_DEFAULT,
 };
-use rr_registry::{rr3_registry_validate_manifest_text, Rr3TopicSet};
+use rr_registry::{rr3_manifest_chk, Rr3TopicSet};
 use serde_json::{json, Value};
 
 use crate::daemon::{rr3_now_ms, rr3_now_ns, rr3_state_frame};
-use crate::manifest::{rr3_manifest_entry_is_absolute, rr3_manifest_facts_from_text};
-use crate::registry::{rr3_phase_for_exit, Rr3Beat, Rr3Phase, Rr3Death, RrdRegistry};
+use crate::manifest::{rr3_manifest_abs, rr3_manifest_parse, Rr3ManifestFacts};
+use crate::registry::{rr3_phase_for_exit, Rr3Beat, Rr3Death, Rr3Phase, RrdRegistry, RR3_FAN_CAP};
 use crate::rpc::{
-    rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_manifest_param, rr3_rpc_parse_request,
-    rr3_rpc_status_for_publish_deny, rr3_rpc_status_for_register, rr3_rpc_topic_param,
-    Rr3RpcMethod,
+    rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_call_params, rr3_rpc_counters,
+    rr3_rpc_deny_status, rr3_rpc_manifest, rr3_rpc_parse, rr3_rpc_reg_status, rr3_rpc_topic_ref,
+    Rr3RpcMethod, Rr3RpcRequest,
 };
 use crate::supervisor::Rr3Supervisor;
-use crate::{rr3_lock, rr3_log};
+use crate::{rr3_lock, rr3_log, rr3_log_query};
+
+mod beat;
+mod ctl;
+mod handshake;
+mod publish;
+mod route;
+
+/// writer 线程单帧写超时（0.0.8b 审计 B-5）：对端不收时 5s 内必须显形——
+/// 超时即写失败，writer 退出、通道 drop、fanout 走 Disconnected 回收。
+/// 取 5s 与面板/总线读超时同档：正常 Unix socket 写是 µs 级，5s 不可达 = 真卡死。
+const RR3_FAN_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 一条已注册连接的身份证
 struct Rr3Peer {
@@ -54,6 +75,13 @@ pub struct Rr3ConnCtx {
     /// 重启计划的**唯一去路**（`supervisor.rs`）。conn 只负责"要不要投"，
     /// "起不起得来"由 supervisor 按所有权裁定（E-1）——收尾这一路绝不自己 `Command::spawn`。
     pub sup: Rr3Supervisor,
+    /// 运维计数持久化路径（0.0.4 批B，Q2 裁定）：daemon 启动判定一次，`None` =
+    /// 不持久化（心跳聚合照常进内存账，只是断电不保）。conn 心跳归并后按
+    /// R26 合并写节流落盘（0.0.5 增补轮四 批W3 改判，闸门在 counters.rs）。
+    pub counters_path: Option<std::path::PathBuf>,
+    /// 运维计数合并写闸门（R26，批W3）：daemon 造一份、全连接共享（`Arc`）——
+    /// 每条连接各持一份等于把 M 窗口放大 N 连接倍。
+    pub counters_gate: Arc<Mutex<crate::counters::Rr3CountersGate>>,
 }
 
 impl Rr3ConnCtx {
@@ -62,11 +90,16 @@ impl Rr3ConnCtx {
     }
 }
 
-/// 唯一的写出口：锁覆盖整帧 → 与并发 writer 的字节永不交错
-fn rr3_write(out: &Arc<Mutex<UnixStream>>, frame: &Rr3Frame) {
+/// 唯一的写出口：锁覆盖整帧 → 与并发 writer 的字节永不交错。
+/// 写一帧到 `out`（持锁写，帧级原子）。返回 false = 写失败（含写超时）：
+/// writer 线程据此收摊退出（对端不收 = 这条连接写向已死），应答路径忽略返回值
+/// ——失败已点名进日志，连接生死由 reader 侧的 EOF/心跳回收裁定。
+fn rr3_write(out: &Arc<Mutex<UnixStream>>, frame: &Rr3Frame) -> bool {
     if let Err(e) = rr3_frame_write(&mut *rr3_lock(out), frame) {
         rr3_log(&format!("写帧失败 dst={}: {e:?}", frame.header.dst_task));
+        return false;
     }
+    true
 }
 
 /// 组一帧 rrd → 模块（ty=Response/Notification，dst=对端 task）
@@ -81,6 +114,7 @@ fn rr3_out_frame(ty: Rr3PayloadType, dst_task: u64, body: &[u8]) -> Rr3Frame {
             src_task: RR3_TASK_RRD,
             dst_task,
             payload_len: payload.len() as u32,
+            payload_crc32: rr_ipc::rr3_crc32(&payload),
         },
         payload,
     }
@@ -88,12 +122,32 @@ fn rr3_out_frame(ty: Rr3PayloadType, dst_task: u64, body: &[u8]) -> Rr3Frame {
 
 /// 成功/失败应答的两个写法（合起来只有一处构造帧）
 fn rr3_reply_ok(out: &Arc<Mutex<UnixStream>>, me: &Rr3Peer, id: u64, result: &Value) {
-    rr3_write(out, &rr3_out_frame(Rr3PayloadType::Response, me.task, &rr3_rpc_build_result(id, result)));
+    rr3_write(
+        out,
+        &rr3_out_frame(
+            Rr3PayloadType::Response,
+            me.task,
+            &rr3_rpc_build_result(id, result),
+        ),
+    );
 }
 
-fn rr3_reply_err(out: &Arc<Mutex<UnixStream>>, me: &Rr3Peer, id: u64, code: Rr3StatusCode, msg: &str) {
+fn rr3_reply_err(
+    out: &Arc<Mutex<UnixStream>>,
+    me: &Rr3Peer,
+    id: u64,
+    code: Rr3StatusCode,
+    msg: &str,
+) {
     rr3_log(&format!("{} 应答错误 {}: {msg}", me.name, code as i32));
-    rr3_write(out, &rr3_out_frame(Rr3PayloadType::Response, me.task, &rr3_rpc_build_error(id, code, msg)));
+    rr3_write(
+        out,
+        &rr3_out_frame(
+            Rr3PayloadType::Response,
+            me.task,
+            &rr3_rpc_build_error(id, code, msg),
+        ),
+    );
 }
 
 /// 解析失败时尽力取 JSON-RPC 的 id；取不到用 0（客户端只按 code 判定）
@@ -113,154 +167,23 @@ enum Rr3Flow {
 }
 
 /// 注册期拒绝的统一出口：按对端自报的 src_task 回错误帧，再把原因交回上层断开连接
-fn rr3_refuse(out: &Arc<Mutex<UnixStream>>, dst_task: u64, id: u64, code: Rr3StatusCode, msg: &str) -> String {
-    rr3_log(&format!("注册被拒（dst={dst_task}）: {msg}"));
-    rr3_write(out, &rr3_out_frame(Rr3PayloadType::Response, dst_task, &rr3_rpc_build_error(id, code, msg)));
-    msg.to_string()
-}
-
-/// 握手：首帧必须是 rr3.register；成功后把出站 Sender 交给在册表并分配 task
-///
-/// 注册期每一次拒绝都**先回错误帧再断开**（只断连不回码等于让客户端挂在超时上）。
-/// 状态码：首帧类型/dst_task/RPC 畸形/manifest 文本非法/`entry` 非绝对 = `Invalid`；
-/// 重复名与超额 = `Busy`；保留名 = `Permission`（映射只在 `rr3_rpc_status_for_register` 一处）。
-fn rr3_handshake(
-    reader: &mut UnixStream,
+fn rr3_refuse(
     out: &Arc<Mutex<UnixStream>>,
-    ctx: &Rr3ConnCtx,
-    fan_tx: Sender<Rr3Frame>,
-) -> Result<Rr3Peer, String> {
-    let frame = match rr3_frame_read(&mut *reader) {
-        Ok(f) => f,
-        // 连首帧都没读到：无从应答，只把原因交回上层记一条
-        Err(e) => return Err(format!("首帧读取失败: {e:?}")),
-    };
-    // 注册前 rrd 还不知道对端的 task（还没分配），应答只能按对端**自报**的 src_task 回
-    let reported_task = frame.header.src_task;
-    let (ty, body) = match rr3_body_split(&frame.payload) {
-        Ok(v) => v,
-        Err(e) => {
-            return Err(rr3_refuse(
-                out,
-                reported_task,
-                0,
-                Rr3StatusCode::Invalid,
-                &format!("首帧 payload 前缀非法: {e:?}"),
-            ))
-        }
-    };
-    if frame.header.dst_task != RR3_TASK_RRD {
-        return Err(rr3_refuse(
-            out,
-            reported_task,
-            rr3_best_effort_id(&body),
-            Rr3StatusCode::Invalid,
-            &format!("首帧 dst_task 必须为 {RR3_TASK_RRD}，收到 {}", frame.header.dst_task),
-        ));
-    }
-    if ty != Rr3PayloadType::Request {
-        return Err(rr3_refuse(
-            out,
-            reported_task,
-            rr3_best_effort_id(&body),
-            Rr3StatusCode::Invalid,
-            &format!("首帧 payload 类型必须是 Request，收到 {ty:?}"),
-        ));
-    }
-    let req = match rr3_rpc_parse_request(&body) {
-        Ok(r) => r,
-        Err((_, msg)) => {
-            return Err(rr3_refuse(
-                out,
-                reported_task,
-                rr3_best_effort_id(&body),
-                Rr3StatusCode::Invalid,
-                &format!("首帧 RPC 畸形: {msg}"),
-            ))
-        }
-    };
-    if req.method != Rr3RpcMethod::Register {
-        return Err(rr3_refuse(
-            out,
-            reported_task,
-            req.id,
-            Rr3StatusCode::Invalid,
-            &format!("注册前第一条 RPC 必须是 rr3.register，收到 {}", req.method.as_str()),
-        ));
-    }
-    let text = match rr3_rpc_manifest_param(&req.params) {
-        Ok(t) => t,
-        Err((_, msg)) => return Err(rr3_refuse(out, reported_task, req.id, Rr3StatusCode::Invalid, &msg)),
-    };
-    let facts = match rr3_manifest_facts_from_text(&text) {
-        Ok(f) => f,
-        Err(errs) => {
-            return Err(rr3_refuse(out, reported_task, req.id, Rr3StatusCode::Invalid, &errs.join("; ")))
-        }
-    };
-    let report = rr3_registry_validate_manifest_text(&text, &ctx.topics);
-    if !report.ok() {
-        return Err(rr3_refuse(out, reported_task, req.id, Rr3StatusCode::Invalid, &report.errors.join("; ")));
-    }
-    // M2 的 manifest 从线上（wire）来，没有"所在目录"可依据 → entry 必须是绝对路径。
-    // 在仓的 modules/*/module.toml 是**契约工件**而非注册输入：装机时由安装步骤写入绝对
-    // entry（见 modules/README.md），所以这条门禁不吃在仓夹具。
-    if !rr3_manifest_entry_is_absolute(&facts.entry) {
-        return Err(rr3_refuse(
-            out,
-            reported_task,
-            req.id,
-            Rr3StatusCode::Invalid,
-            &format!("manifest.entry 必须是绝对路径，收到 {}", facts.entry),
-        ));
-    }
-    let now = ctx.rr3_ctx_now_ms();
-    // 一份 Sender 进在册表（此后它是这条连接唯一的广播入口），一份留在这里给"后到者补快照"用
-    let replay_tx = fan_tx.clone();
-    // 硬规矩（11a 的回归换来的那条）：锁结果一律先 `let` 绑再 `match`。把
-    // `rr3_lock(..).rr3_reg_add(..)` 写进被匹配表达式，`MutexGuard` 临时量会延寿到整个 `match`
-    // 语句结束，而 `Err` 分支里的 `rr3_refuse` → `rr3_write` 要取的是**另一把**锁（out），
-    // 今天不死锁也只因为臂内没再碰在册表——将来谁在臂里加一次 `rr3_lock(&ctx.shared)` 就是
-    // 同线程重入自死锁，且 `#[cfg(unix)]` 让 Windows 侧全绿看不见。与 `rr3_conn_finish` 同形。
-    let added = rr3_lock(&ctx.shared).rr3_reg_add(&facts, fan_tx, now);
-    let task = match added {
-        Ok(t) => t,
-        Err(e) => {
-            // 状态码映射只在这一处（Task 6 的 rr3_rpc_status_for_register），别在 conn 里重写一遍
-            let code = rr3_rpc_status_for_register(&e);
-            return Err(rr3_refuse(out, reported_task, req.id, code, &e.to_string()));
-        }
-    };
-    rr3_log(&format!(
-        "注册 {} task={task} hb={}ms wd={}ms policy={}",
-        facts.name, facts.heartbeat_ms, facts.watchdog_ms, facts.restart_policy
-    ));
-    // 应答与广播的先后不确定（两条线程两个写点），所以测试按类型挑帧，不按序号
+    dst_task: u64,
+    id: u64,
+    code: Rr3StatusCode,
+    msg: &str,
+) -> String {
+    rr3_log(&format!("注册被拒（dst={dst_task}）: {msg}"));
     rr3_write(
         out,
         &rr3_out_frame(
             Rr3PayloadType::Response,
-            task,
-            &rr3_rpc_build_result(req.id, &json!({"src_task": task})),
+            dst_task,
+            &rr3_rpc_build_error(id, code, msg),
         ),
     );
-    let peer = Rr3Peer { task, name: facts.name.clone() };
-    let n = rr3_lock(&ctx.shared).rr3_reg_fanout(&rr3_state_frame(&peer.name, "registered", peer.task), RR3_TASK_RRD);
-    rr3_log(&format!("广播 registered 到 {n} 个连接"));
-    // 后到者的状态快照：state 是"当前生命周期"的唯一可见面，只发转移不发快照的话，
-    // 按 start_priority 后起的模块永远看不到先起模块上线过（Task 9 的依赖判定就没有输入）。
-    // 注意这里说的只是**入队次序**，不构成上线次序：writer 线程可能在 reader 取锁前就把别的
-    // 广播落盘了。所以这一条连接的帧序不做任何保证，读侧一律按类型/字段挑帧（夹具的按连接
-    // 待处理队列正是为此而存在，见 `rrd/tests/support/mod.rs` 的文件头）。
-    let snapshot = rr3_lock(&ctx.shared).rr3_reg_snapshot();
-    let mut replayed = 0usize;
-    for (name, t, phase) in snapshot.iter().filter(|(name, _, _)| *name != peer.name) {
-        if replay_tx.send(rr3_state_frame(name, phase.as_str(), *t)).is_ok() {
-            replayed += 1;
-        }
-    }
-    rr3_log(&format!("向 {} 补发在册状态 {replayed} 条", peer.name));
-    Ok(peer)
+    msg.to_string()
 }
 
 /// 处理注册后的入站帧。`Err` = 协议违规，该连接按崩溃收尾。
@@ -271,9 +194,13 @@ fn rr3_serve_frame(
     frame: &Rr3Frame,
 ) -> Result<Rr3Flow, String> {
     if frame.header.dst_task != RR3_TASK_RRD {
-        return Err(format!("上行 dst_task 必须为 {RR3_TASK_RRD}，收到 {}", frame.header.dst_task));
+        return Err(format!(
+            "上行 dst_task 必须为 {RR3_TASK_RRD}，收到 {}",
+            frame.header.dst_task
+        ));
     }
-    let (ty, body) = rr3_body_split(&frame.payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
+    let (ty, body) =
+        rr3_body_split(&frame.payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
     if frame.header.src_task != me.task {
         // AOS-STD-IPC-024：src_task 由 rrd 分配，用户态不得自设。
         // 拒这一帧但不断连——一次笔误不该让整个进程掉线（spec §4"rrd 不崩"的连接版）。
@@ -282,14 +209,19 @@ fn rr3_serve_frame(
             me,
             rr3_best_effort_id(&body),
             Rr3StatusCode::Invalid,
-            &format!("src_task 由 rrd 分配，本连接分配值 {}，收到 {}", me.task, frame.header.src_task),
+            &format!(
+                "src_task 由 rrd 分配，本连接分配值 {}，收到 {}",
+                me.task, frame.header.src_task
+            ),
         );
         return Ok(Rr3Flow::Keep);
     }
     match ty {
         Rr3PayloadType::Request => rr3_serve_request(out, ctx, me, &body),
-        Rr3PayloadType::Event => rr3_publish(out, ctx, me, &body),
-        // 拒是默认值，放行才需要理由：Event 之外的非 Request 上行（Notification / Response
+        Rr3PayloadType::Event => publish::rr3_publish(out, ctx, me, &body),
+        // M3：上行 Response 是 rr3.call 的应答回路（trace_id 改道回调用方）
+        Rr3PayloadType::Response => route::rr3_route_response(out, ctx, me, frame, &body),
+        // 拒是默认值，放行才需要理由：Request/Event/Response 之外的上行（Notification
         // 冒充上行）仍然一律拒帧不断连。
         other => {
             rr3_reply_err(
@@ -304,88 +236,6 @@ fn rr3_serve_frame(
     }
 }
 
-/// 业务发布：三层归属检查在 Task 5 的关联函数里，这里只负责"拒的话怎么回、过的话怎么转"。
-/// 三种**归属**拒法（冒充 / 越权前缀 / 未在册）都回错误帧并计数，但**不断连**——发布越权是数据面
-/// 问题，不该带走控制面（与 `src_task` 伪造、payload 类型不支持同一口径：回帧 + `Rr3Flow::Keep`）。
-/// 体的形状错误（非 JSON、缺/坏 `topic`）同理的是**回帧 + 不断连 + 不记崩溃**那一半：那是客户端的
-/// 一次笔误，不是协议失步，按崩溃收尾会白记一次 `rr3_reg_death` 并可能触发重启。
-/// 它**不计数**——`rr3_reg_note_denied` 只在上面那三种归属拒法上调用，口径与 spec §6 的计数条款
-/// （只绑"被拒的越权发布"）一致；把形状错也算进 denied 会让这个数变成"客户端错误总数"。
-///
-/// `sender_name` 取 `me.name`——它是**这条连接注册时**由 rrd 收下并分配的在册身份
-/// （`Rr3Peer` 随握手成功才存在），不是从帧体或注册报文里现读的字。`registry.rs` 那句
-/// "唯一防线建在调用侧"的前提到这里是成立的：帧上的 `src_task` 已在上面被强制等于
-/// `me.task`，而 `me.name` 与 `me.task` 出自同一次 `rr3_reg_add`。
-fn rr3_publish(
-    out: &Arc<Mutex<UnixStream>>,
-    ctx: &Rr3ConnCtx,
-    me: &Rr3Peer,
-    body: &[u8],
-) -> Result<Rr3Flow, String> {
-    let parsed = match serde_json::from_slice::<Value>(body) {
-        Ok(v) => v,
-        Err(e) => {
-            rr3_reply_err(
-                out,
-                me,
-                rr3_best_effort_id(body),
-                Rr3StatusCode::Invalid,
-                &format!("Event 体必须是 JSON 对象: {e}"),
-            );
-            return Ok(Rr3Flow::Keep);
-        }
-    };
-    let topic = match rr3_rpc_topic_param(&parsed) {
-        Ok(t) => t,
-        Err((_, msg)) => {
-            rr3_reply_err(out, me, rr3_best_effort_id(body), Rr3StatusCode::Invalid, &msg);
-            return Ok(Rr3Flow::Keep);
-        }
-    };
-    let deny = {
-        let check = RrdRegistry::rr3_reg_publish_check(&me.name, &topic, &ctx.topics);
-        if let Err(e) = check {
-            rr3_lock(&ctx.shared).rr3_reg_note_denied();
-            Some(e)
-        } else {
-            None
-        }
-    };
-    if let Some(e) = deny {
-        rr3_reply_err(
-            out,
-            me,
-            rr3_best_effort_id(body),
-            rr3_rpc_status_for_publish_deny(&e),
-            &e.to_string(),
-        );
-        return Ok(Rr3Flow::Keep);
-    }
-    // 转发：保留体，头改写成"发布者 task + 广播目的"，类型仍是 Event。
-    // 这里第三处自己构造帧（另两处是 `rr3_out_frame` 的应答）：转发帧的 src 是**发布者**
-    // 而不是 rrd，套不进那个 src 恒为 RR3_TASK_RRD 的写法。
-    // `payload_len` 必须从**编出来的字节串**取，不能从 `body` 取——少了那 2 字节前缀
-    // 就是 Task 1 帧层的 `LengthMismatch`，收侧当场把这条链打死。
-    let payload = rr3_body_encode(Rr3PayloadType::Event, body);
-    let frame = Rr3Frame {
-        header: Rr3Header {
-            opcode: opcode::SEND,
-            flags: 0,
-            trace_id: 0,
-            timestamp_ns: rr3_now_ns(),
-            src_task: me.task,
-            dst_task: rr_bus::RR3_BROADCAST_DST_TASK,
-            payload_len: payload.len() as u32,
-        },
-        payload,
-    };
-    // 排除项是发布者自己：模块不该收到自己发出的广播（`rr3_reg_fanout` 只按 task 排除，
-    // 不看帧的 dst，见该函数文档）。
-    let n = rr3_lock(&ctx.shared).rr3_reg_fanout(&frame, me.task);
-    rr3_log(&format!("转发 {topic} 到 {n} 个连接"));
-    Ok(Rr3Flow::Keep)
-}
-
 /// 三个上行方法。RPC 解析失败一律回 Invalid——Task 6 已保证解析器不产别的码，
 /// 这里不重建 id→code 的映射，避免第二套真值。
 fn rr3_serve_request(
@@ -394,47 +244,50 @@ fn rr3_serve_request(
     me: &Rr3Peer,
     body: &[u8],
 ) -> Result<Rr3Flow, String> {
-    let req = match rr3_rpc_parse_request(body) {
-        Ok(r) => r,
-        Err((_, msg)) => {
-            rr3_reply_err(out, me, rr3_best_effort_id(body), Rr3StatusCode::Invalid, &msg);
-            return Ok(Rr3Flow::Keep);
-        }
+    let Ok(req) = rr3_rpc_parse(body).map_err(|(_, msg)| {
+        rr3_reply_err(
+            out,
+            me,
+            rr3_best_effort_id(body),
+            Rr3StatusCode::Invalid,
+            &msg,
+        )
+    }) else {
+        return Ok(Rr3Flow::Keep);
     };
     match req.method {
         Rr3RpcMethod::Register => {
-            rr3_reply_err(out, me, req.id, Rr3StatusCode::Invalid, "该连接已注册，拒绝重复 rr3.register");
+            rr3_reply_err(
+                out,
+                me,
+                req.id,
+                Rr3StatusCode::Invalid,
+                "该连接已注册，拒绝重复 rr3.register",
+            );
             Ok(Rr3Flow::Keep)
         }
-        Rr3RpcMethod::Heartbeat => {
-            // D-6：三态回报。Rejected 回错误帧；Kept/Promoted 都回 OK（合法心跳都得续命）。
-            let beat = rr3_lock(&ctx.shared).rr3_reg_beat(me.task, ctx.rr3_ctx_now_ms());
-            match beat {
-                Rr3Beat::Rejected => {
-                    rr3_reply_err(out, me, req.id, Rr3StatusCode::TimedOut, "该 task 已过期或不在册，需重新注册");
-                }
-                other => {
-                    rr3_reply_ok(out, me, req.id, &json!({"beat": "accepted"}));
-                    if other == Rr3Beat::Promoted {
-                        // E-8：`registered → running` 的**唯一**升级时刻，11b 起它第一次上线。
-                        // 相位名走 `Rr3Phase::Running.as_str()`，不写字面量 "running"（Task 10
-                        // 定下的同一条理由：写两处就有第二本真值）。
-                        // 只在 Promoted 上广播：`Kept` 走的是同一条 `other` 分支，拿"这一支被接受"
-                        // 当条件就是每次心跳重发一条 state（spec §5.0 的 state 是**转移**流，
-                        // 不是快照流；"恰好一条"这类判据正是靠这一条成立的）。
-                        let frame =
-                            rr3_state_frame(&me.name, Rr3Phase::Running.as_str(), me.task);
-                        // E-9：这里的排除项是 `RR3_TASK_RRD`，等于**不排除**——发起者自己也要收到
-                        // 关于自己的 running（它是唯一知道自己上线的连接）。supervisor 收尸那一路
-                        // 排的是 `crashed.src_task`，两处口径不同是**已知**的第三/第四种口径，
-                        // 归 Task 13 的 A-3 文档化，本轮不"统一"（统一成哪一种都没有判据支持）。
-                        let n = rr3_lock(&ctx.shared).rr3_reg_fanout(&frame, RR3_TASK_RRD);
-                        rr3_log(&format!("{} → running（广播到 {n} 个连接）", me.name));
-                    }
-                }
-            }
+        // ADR-0010：rr3.ctl.* 只对未注册的控制连接开放（握手分流）；已注册模块连接
+        // 上行一律拒——回错误帧不断连，与 src_task 伪造同一口径（一次笔误不掉线）。
+        // 显式 OR 臂而非 is_ctl 守卫：带守卫的臂不计入穷尽性，新增方法时这里必须表态。
+        Rr3RpcMethod::CtlStatus
+        | Rr3RpcMethod::CtlHealth
+        | Rr3RpcMethod::CtlLogs
+        | Rr3RpcMethod::CtlOta
+        | Rr3RpcMethod::CtlCounters
+        | Rr3RpcMethod::CtlReboot
+        | Rr3RpcMethod::CtlWiring
+        | Rr3RpcMethod::CtlContracts
+        | Rr3RpcMethod::CtlDomainSet => {
+            rr3_reply_err(
+                out,
+                me,
+                req.id,
+                Rr3StatusCode::Permission,
+                "rr3.ctl.* 只对未注册的控制连接开放，模块请走 rr3.register / rr3.heartbeat",
+            );
             Ok(Rr3Flow::Keep)
         }
+        Rr3RpcMethod::Heartbeat => beat::rr3_beat_handle(out, ctx, me, req.id, &req.params),
         Rr3RpcMethod::Unregister => {
             // 主动退场 ≠ 崩溃：直接移出在册表，不走 restart_policy。
             // 广播留给收尾处，保证"一次退出只有一条 state"。
@@ -442,6 +295,7 @@ fn rr3_serve_request(
             rr3_reply_ok(out, me, req.id, &json!({"removed": removed}));
             Ok(Rr3Flow::QuitClean)
         }
+        Rr3RpcMethod::Call => route::rr3_route_call(out, ctx, me, req.id, &req.params, body),
     }
 }
 
@@ -502,48 +356,175 @@ fn rr3_conn_finish(ctx: &Rr3ConnCtx, me: &Rr3Peer, clean_exit: bool, reason: &st
                     // 钉在"谁拿到了它"前面，读日志时才不会先看到结果再找原因。
                     ctx.sup.rr3_restart(p);
                 }
-                None => rr3_log(&format!("{} 退出（{reason}），无重启，广播 {phase} 到 {n} 个连接", me.name)),
+                None => rr3_log(&format!(
+                    "{} 退出（{reason}），无重启，广播 {phase} 到 {n} 个连接",
+                    me.name
+                )),
+            }
+            // ADR-0009 裁定 3：本路刚记完一条死亡/注销（EOF 或 unregister），若死者
+            // 是某能力在 boot 全集里的提供者且再无人在位 → 下游逐个置 Degraded 并广播。
+            // 只置位与广播，不记账不出计划（裁定 4）。Deferred/Silent 两路不在这里传播：
+            // 死亡分别由退出码那一路（supervisor）与到期那一路（watchdog）记，各自的
+            // 落点负责各自的传播，一次死亡恰好传播一次。
+            let degraded = rr3_lock(&ctx.shared).rr3_reg_degrade(&me.name);
+            for (dep, task) in degraded {
+                let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
+                    &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
+                    task,
+                );
+                rr3_log(&format!(
+                    "{dep} 依赖断供 → degraded（提供者 {} 离开 Running）广播到 {n} 个连接",
+                    me.name
+                ));
             }
         }
     }
 }
 
+/// 注册后读侧静默上界就位（ADR-0025 裁定 1/4），返回上界毫秒；0 = 不设上界。
+///
+/// 上界 = 该模块自己申报的 `watchdog_ms × 2`：2 倍是归属裁定——保证看门狗先到期，
+/// 连接收尾走 `Silent`，判死/广播/重启预算只归看门狗一拍。健康模块按 heartbeat_ms
+/// 喂狗（< watchdog_ms），正常业务永远触不到这条界。在册事实缺失或看门狗窗口为 0
+/// 时不设上界并留痕——宁可退化为无上界，也不拿错的上界误杀健康连接。
+fn rr3_conn_idle_set(
+    stream: &UnixStream,
+    shared: &Arc<Mutex<RrdRegistry>>,
+    name: &str,
+) -> Result<u64, String> {
+    let idle_ms = rr3_lock(shared)
+        .rr3_reg_facts(name)
+        .map(|f| f.watchdog_ms.saturating_mul(2))
+        .unwrap_or(0);
+    rr3_idle_arm(stream, name, idle_ms)?;
+    Ok(idle_ms)
+}
+
+/// 按上界落位：有窗口即设读超时，无窗口走无上界分支。
+fn rr3_idle_arm(stream: &UnixStream, name: &str, idle_ms: u64) -> Result<(), String> {
+    if idle_ms > 0 {
+        stream
+            .set_read_timeout(Some(Duration::from_millis(idle_ms)))
+            .map_err(|e| format!("set_read_timeout 失败: {e}"))?;
+        Ok(())
+    } else {
+        rr3_idle_unbounded(stream, name)
+    }
+}
+
+/// 无上界分支：留痕并清掉读超时（退化依赖对端断开）。
+fn rr3_idle_unbounded(stream: &UnixStream, name: &str) -> Result<(), String> {
+    rr3_log(&format!(
+        "{name} 无可用看门狗窗口（在册事实缺失或为 0），读侧不设静默上界——\
+         连接回收退化为依赖对端断开"
+    ));
+    stream
+        .set_read_timeout(None)
+        .map_err(|e| format!("清读超时失败: {e}"))
+}
+
+/// 注册后的读循环：逐帧读、逐帧处理，直到干净收尾或带原因断开。
+/// EOF（对端关连接）与 `rr3.unregister` 都是 `QuitClean`；其余读错/处理错带原因返回。
+///
+/// `idle_ms` 是注册后静默上界（ADR-0025：2 × 该模块看门狗窗口，0 = 不设上界）。
+/// 触发时文案点名空闲时长与归属——判死、广播、重启预算仍归看门狗那一拍，本循环
+/// 只回收连接本身。
+fn rr3_read_loop(
+    out: &Arc<Mutex<UnixStream>>,
+    ctx: &Rr3ConnCtx,
+    me: &Rr3Peer,
+    reader: &mut UnixStream,
+    idle_ms: u64,
+) -> Result<Rr3Flow, String> {
+    let mut last_frame = Instant::now();
+    loop {
+        // 逐帧读：`Some` = 该收尾了（干净或带原因），`None` = 继续下一帧。
+        if let Some(done) = rr3_read_step(out, ctx, me, reader, &mut last_frame, idle_ms) {
+            break done;
+        }
+    }
+}
+
+/// 读一帧并处理；`Some(结论)` = 收尾，`None` = 本帧已消化、继续读。
+fn rr3_read_step(
+    out: &Arc<Mutex<UnixStream>>,
+    ctx: &Rr3ConnCtx,
+    me: &Rr3Peer,
+    reader: &mut UnixStream,
+    last_frame: &mut Instant,
+    idle_ms: u64,
+) -> Option<Result<Rr3Flow, String>> {
+    match rr3_frame_read_cap(&mut *reader, RR3_FRAMING_PLEN_CAP_DEFAULT) {
+        Ok(frame) => {
+            *last_frame = Instant::now();
+            match rr3_serve_frame(out, ctx, me, &frame) {
+                Ok(Rr3Flow::Keep) => None,
+                Ok(Rr3Flow::QuitClean) => Some(Ok(Rr3Flow::QuitClean)),
+                Err(reason) => Some(Err(reason)),
+            }
+        }
+        Err(Rr3FrameError::Closed) => Some(Ok(Rr3Flow::QuitClean)),
+        Err(e) => Some(Err(rr3_read_err(&e, *last_frame, idle_ms))),
+    }
+}
+
+/// 读错文案：静默超时（上界 = 2 × 看门狗）与普通读错分流。
+fn rr3_read_err(e: &Rr3FrameError, last_frame: Instant, idle_ms: u64) -> String {
+    let idle = last_frame.elapsed().as_millis() as u64;
+    if idle_ms > 0 && idle >= idle_ms {
+        format!(
+            "静默超时：{idle}ms 无完整帧（上界 = 2 × 看门狗 {idle_ms}ms），\
+             本连接回收；判死与重启归看门狗一拍"
+        )
+    } else {
+        format!("帧读取失败: {e:?}")
+    }
+}
+
+/// 广播写线程：从有界队列取帧，写失败即退出（连接回收随通道 drop 走 Disconnected）。
+fn rr3_conn_writer(
+    out: &Arc<Mutex<UnixStream>>,
+    fan_rx: mpsc::Receiver<Rr3Frame>,
+) -> JoinHandle<()> {
+    let out = out.clone();
+    thread::spawn(move || {
+        for frame in fan_rx.iter() {
+            if !rr3_write(&out, &frame) {
+                break;
+            }
+        }
+    })
+}
+
 /// 服务一条连接。返回 `Err` 只描述**这一条**连接的断开原因；守护进程与别的连接不受影响。
 pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String> {
     let out: Arc<Mutex<UnixStream>> = Arc::new(Mutex::new(
-        stream.try_clone().map_err(|e| format!("try_clone 失败: {e}"))?,
+        stream
+            .try_clone()
+            .map_err(|e| format!("try_clone 失败: {e}"))?,
     ));
-    let (fan_tx, fan_rx) = mpsc::channel::<Rr3Frame>();
-    let writer: JoinHandle<()> = {
-        let out = out.clone();
-        thread::spawn(move || {
-            for frame in fan_rx.iter() {
-                rr3_write(&out, &frame);
-            }
-        })
-    };
+    // 写超时（0.0.8b 审计 B-5）：对端不收时 write 不得无限期占着 writer 线程与
+    // out 锁——5s 写不进 = 对端判死，writer 退出、通道 drop、fanout 走 Disconnected
+    // 回收。缺了它，一个卡死的订阅者能永久占一条 writer 线程。
+    rr3_lock(&out)
+        .set_write_timeout(Some(RR3_FAN_WRITE_TIMEOUT))
+        .map_err(|e| format!("set_write_timeout 失败: {e}"))?;
+    // 有界收件队列（RR3_FAN_CAP）：满侧策略见 registry.rs fanout doc——僵尸订阅者
+    // 的积压被封顶在"上界 × 帧大小"，不再无界吃到 rrd 被 OOM 杀。
+    let (fan_tx, fan_rx) = mpsc::sync_channel::<Rr3Frame>(RR3_FAN_CAP);
+    let writer: JoinHandle<()> = rr3_conn_writer(&out, fan_rx);
 
     // 注册前设读超时：连上却不注册的客户端不能永久占着线程（spec §5.0）
     stream
-        .set_read_timeout(Some(Duration::from_millis(ctx.pre_register_timeout_ms.max(1))))
+        .set_read_timeout(Some(Duration::from_millis(
+            ctx.pre_register_timeout_ms.max(1),
+        )))
         .map_err(|e| format!("set_read_timeout 失败: {e}"))?;
     let mut reader = stream;
-    let me = rr3_handshake(&mut reader, &out, &ctx, fan_tx)?;
-    reader
-        .set_read_timeout(None)
-        .map_err(|e| format!("清读超时失败: {e}"))?;
+    let me = handshake::rr3_handshake(&mut reader, &out, &ctx, fan_tx)?;
+    let idle_ms = rr3_conn_idle_set(&reader, &ctx.shared, &me.name)?;
 
-    let outcome: Result<Rr3Flow, String> = loop {
-        match rr3_frame_read(&mut reader) {
-            Ok(frame) => match rr3_serve_frame(&out, &ctx, &me, &frame) {
-                Ok(Rr3Flow::Keep) => {}
-                Ok(Rr3Flow::QuitClean) => break Ok(Rr3Flow::QuitClean),
-                Err(reason) => break Err(reason),
-            },
-            Err(Rr3FrameError::Closed) => break Ok(Rr3Flow::QuitClean),
-            Err(e) => break Err(format!("帧读取失败: {e:?}")),
-        }
-    };
+    let outcome = rr3_read_loop(&out, &ctx, &me, &mut reader, idle_ms);
 
     let clean_exit = outcome.is_ok();
     let reason = match &outcome {
@@ -551,15 +532,12 @@ pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String>
         Err(e) => e.clone(),
     };
     rr3_conn_finish(&ctx, &me, clean_exit, &reason);
-    // 所有 Sender 都已随注册表条目释放 → writer 的 iter() 自然结束。
-    // 成立前提（F5/I-5）：这句只在**条目被移除时**成立。僵尸在册条目——注册之后不再读 socket
-    // 的模块——条目仍留在表里、Sender 不会被释放，而 `mpsc::channel` 是无界的：writer 一阻塞在
-    // write_all，那条连接的积压就无限增长。有界化 + 丢弃最旧 + 断连是 Task 10 的行为改动（已记
-    // carry，watchdog 心跳过期正是现成的回收路径），本轮只把前提写清、不改通道形状
-    // （brief 29-31 行约定的是 `mpsc::Receiver<Rr3Frame>` 这个类型，`sync_channel` 同样满足）。
-    // Task 10 落地的是 tick 线程，**没有**动通道形状；静默模块的回收现在由 expire 置
-    // `tx = None` 这一路提供（写线程随之结束、fd 随之释放），有界化 + 丢弃最旧**仍没做**
-    // （11b 只加了 supervisor 线程与 boot/重启，通道形状一字未动；这条 carry 还在原处）。
+    // 通道收口（0.0.8b 审计 B-5 落地，原 Task 10 carry）：条目随注册表释放 →
+    // 最后一个 Sender drop → writer 的 iter() 自然结束。僵尸在册条目（注册后不再
+    // 读 socket 的模块）由两路兜住：① 有界队列——writer 阻塞在写时积压封顶
+    // RR3_FAN_CAP 帧，fanout 满侧**丢帧但保留连接**（本轮审计修正：置 tx=None 会
+    // 让心跳仍通的模块永久失聪）；② 写超时——writer 5s 写不进即退出、通道 drop，
+    // fanout 走 Disconnected 才置 tx=None。两条路都不再无界吃内存。
     let _ = writer.join();
     let _ = reader.shutdown(std::net::Shutdown::Both);
     outcome.map(|_| ())

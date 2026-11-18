@@ -1,0 +1,20 @@
+# llm 原子件 manifest（三层 manifest 的 Atom 层，ADR-0019；0.0.5 批C⑤ 原子重铺）
+# 契约：base/runtime/rr-registry/src/atom.schema.toml；查册门查 contracts/slots.toml 同一张表
+# Rust 面（批N32 件四，ADR-0016 收口）：机制 = mech.rs（多轮历史窗口状态机纯机制，
+# 自 src/cloud.rs LLM 段下沉），入口 = llm.rs，私有头 = private.rs；补全客户端
+# （IO/JSON/密钥策略面）在组合件级 src/cloud.rs 按名委托
+schema_version = 1
+
+[atom]
+name = "llm"
+version = "0.0.1"
+
+[provides]
+slots = ["cognition.llm"]   # 大模型补全（DeepSeek-V3 via SiliconFlow；多轮历史记忆）
+
+[uses]
+slots = []   # 云端端点/凭据走环境变量注入（conventions §3），不占描述符句柄
+
+[events]
+publishes = []   # 云端 HTTP 客户端无总线事件流；llm/completion 点名在 module.toml [rpc].exposes（owner 级）
+subscribes = []

@@ -1,0 +1,251 @@
+# RockRobot3 角色词表（[SC] 契约层，增补轮六 §4.1 新建；单一事实源）
+# 消费方：profiles/*.toml [pins] 的 role 外键、rr-registry 查册门（装载期校验①）、
+#   rrd [pins] 派生器（derives 键 → RR3_HAL_BINDINGS 注入文本）、面板配置项生成（批N4）、
+#   门禁六表对账（门 a，§8 待建——建即全红，现状六表从未对齐过）。
+# 纪律（§4.1）：角色 ↔ 格 ↔ trait ↔ 描述符键的一致性由门禁判等（门 a 按六表判：
+#   slots.toml / roles.toml / RR3_ASSEMBLE_HANDLE_TRAITS / 件 handles[].desc_key ×
+#   RR3_ASSEMBLE_DESC_KEYS / [pins] 字段词表 / 平台 role→具名构造表）。
+#   加一类外设 = 同批改多处（本表 + slots + 件 desc_key + [pins] + platform 构造表），一次评审；
+#   这是裁定 4 撤销"闭集"之后防止键域自由生长的唯一替代物。
+# 字段语义（§4.1 + §18 F-27）：
+#   kind          封闭三值 signal | power | logic。power = 必须带 rail（校验⑥-b）；
+#                 logic = 无物理绑定（bus.publish 那类内建格走它，不进 [pins]）。
+#   iface         外键 → RR3_ASSEMBLE_HANDLE_TRAITS（门 a 的 ∃trait(role) 判据对象）。
+#   requires      该角色的 [pins] 必填字段集（校验①-b 判据对象；"合法不适用"必须显式写
+#                 none/false，留空 = 红，§5 缺失语义列）。
+#   direction     out | in | io | passive。
+#   droppable     欠压降载时可否被切断（舵机 true=松轴放行、电表 false=测量面须活着才知欠压）。
+#   input_only_ok 该角色是否允许绑到 input-only 引脚（校验⑤-a 的另一侧输入）。
+#   per_instance  一角色可多实例（双轴即两条 instance）；false 时填 instance 即红（校验①-b）。
+#   status        登记状态：缺省 = 有 prod 实现者的常设角色（键可省）；planned = iface
+#                 无 prod 实现（裁-17：iface 在册 ≠ 有实现者），格升 normal 随真后端
+#                 落位一并转（门 a D 段执法，批N8 件二）。
+#   planned_until 终点登记（decisions.md 决策号，如 D9）；status="planned" 时必填且
+#                 非空（门 a D 段豁免判据的第二条件，终点缺位 = 未豁免）。
+# derives（批N1 实装裁定，§4.1 字段集的增补，随 n1-10 文档回写）：该角色向描述符
+#   派生视图供给的键集——[pins] 是物理绑定唯一真值点，rrd 派生出 RR3_HAL_BINDINGS
+#   注入文本（键名 = rr-hal descriptor.rs 在册键），门 n"注入路径唯一"的另一侧真值。
+#   非引脚键 alsa_device/link_ifname 不派生，留 [hardware] 直给；spi_device 批N3
+#   件六起进派生轨（controller 词形 spidev<N> + channel 片选 → /dev/spidev<N>.<M>，
+#   敞口 18 行收口——裁定 = decisions.md §2 行 2"先立词形、批N3 拆格"）。
+# 变更纪律：加角色 = append（同步六表对账面）；字段语义变更 = 破坏性 = 升
+#   schema_version 并走契约级评审。格位命名两段式同 slots.toml，角色名点分式、
+#   前缀 = 格名的动作侧。
+
+schema_version = 1
+
+[[role]]
+name = "act.axis.pwm"
+slot = "act.servo"
+kind = "power"
+iface = "Rr3PwmServo"
+requires = ["controller", "channel", "physical", "rail", "failsafe"]
+derives = ["pwm_chip", "pwm_channel"]
+direction = "out"
+droppable = true
+input_only_ok = false
+per_instance = true
+note = "SG90 类位置舵机；行程与标定不住这里（住执行件档案，批N3）。host 侧 controller 词形 pwm<N> 派生 pwm_chip=N、channel 派生 pwm_channel；failsafe=release 对应'不保持激磁'既有裁定（§6 复位语义③）"
+
+[[role]]
+name = "act.led.gpio"
+slot = "act.led"
+kind = "signal"
+iface = "Rr3GpioOut"
+requires = ["controller", "physical", "failsafe"]
+derives = ["gpio_chip", "gpio_led_line"]
+direction = "out"
+droppable = true
+input_only_ok = false
+per_instance = false
+note = "指示灯数字输出；控制线是信号侧（负载电流在 LED 模组内），rail 语义（可切轨）不适用。host 侧 controller 词形 gpiochip<N> 派生 gpio_chip=N、physical[0] 派生 gpio_led_line"
+
+[[role]]
+name = "act.relay.gpio"
+slot = "act.relay"
+kind = "signal"
+iface = "Rr3GpioOut"
+requires = ["controller", "physical", "failsafe"]
+derives = ["gpio_chip", "gpio_relay_line"]
+direction = "out"
+droppable = false
+input_only_ok = false
+per_instance = false
+note = "继电器通断控制线；droppable=false——继电器是安全动作面，欠压降载不得切断其控制（被切的是它下游负载，那归 domains 侧管，批N2）。host 侧 physical[0] 派生 gpio_relay_line"
+
+[[role]]
+name = "power.battery.meter"
+slot = "power.battery"
+kind = "signal"
+iface = "Rr3Power"
+requires = ["controller", "addr"]
+derives = ["i2c_bus", "ina219_addr"]
+direction = "in"
+droppable = false
+input_only_ok = true
+per_instance = false
+note = "INA219 电池计（I2C 读数面）；droppable=false——测量面必须活着才知欠压。addr 写 0x 前缀十六进制（七位从地址域）。批N2 起它兼任域测点（domains[].current_sense/sense 一律写本角色 pin_id，校验⑥-d）"
+
+# —— 批N2 件六（基-39 N2 那一刀，decisions.md §2 施工图§6-④ 配套(b)）：域测点两角色进场。
+#    covered normal 格 4→5（power.rail 进账），门 a 红账 23＝tools/ci/gate-a-baseline.txt 基线初值。
+#    iface 取 Rr3Power 设备类面（在册七名）：域级 Rr3Rail 由 rr3-power 组合件经
+#    RailMonitor/RailJudge 承载（批N2 件五），不经 [pins] 句柄——本件不做 trait 扩面。
+#    归批N3 的两笔如实注记：power.switch 不落本表（derives 需新派生键——gpio_relay_line/
+#    gpio_led_line 是格位专名，语义不可混用；扩键属契约级 C4 裁定＋descriptor.rs＋backend＋
+#    门 n 联动）；power.charger 随批N3 器件角色进场（计划 §3）。bus.*/net.online/power.budget
+#    ＝logic 内建格无引脚绑定（logic 角色不进本表），其覆盖口径归门 a 转红收口件另裁。
+[[role]]
+name = "power.rail.sense"
+slot = "power.rail"
+kind = "signal"
+iface = "Rr3Power"
+requires = ["controller", "addr"]
+derives = ["i2c_bus", "ina219_addr"]
+direction = "in"
+droppable = false
+input_only_ok = true
+per_instance = true
+note = "域电平测点；instance=域名 → pin_id=power.rail.sense.rail5v（domains[].sense 一律写 pin_id，校验⑥-d）。droppable=false——测量面必须活着才知欠压（同 power.battery.meter）。host 侧 controller 词形 i2c<N> 派生 i2c_bus=N、addr 派生 ina219_addr（测点器件类同 INA219）"
+
+[[role]]
+name = "power.current.sense"
+slot = "power.rail"
+kind = "signal"
+iface = "Rr3Power"
+requires = ["controller", "addr"]
+derives = ["i2c_bus", "ina219_addr"]
+direction = "in"
+droppable = false
+input_only_ok = true
+per_instance = true
+note = "域电流测点（同 power.rail.sense 形状，域流面）；instance=域名 → pin_id=power.current.sense.rail5v（domains[].current_sense 一律写 pin_id，校验⑥-d）。droppable=false 同上"
+
+# —— 批N3 件六（敞口 18 行收口，decisions.md §2 行 2"先立词形、批N3 拆格"）：SPI 显示
+#    面角色进场。格仍一个 ui.face（拆的是 spi_device 值不是格——全案 §24.4 ②：总线号+
+#    片选号两个数拆成 controller 词形 spidev<N> + channel 的派生对），rr3-interact 的
+#    face 件句柄申报（Rr3Display ← spi_device）不变。 Droppable=true：显示是观感面，
+#    欠压降载可切（同 act.led，负载电流在模组内，rail 语义不适用——kind=signal）。
+[[role]]
+name = "ui.face.spi"
+slot = "ui.face"
+kind = "signal"
+iface = "Rr3Display"
+requires = ["controller", "channel"]
+derives = ["spi_device"]
+direction = "out"
+droppable = true
+input_only_ok = false
+per_instance = false
+note = "SPI 显示器件（链④真件档 MAX7219 点阵类）；host 侧 controller 词形 spidev<N> 派生总线号、channel 派生片选号，合成 spi_device=/dev/spidev<N>.<M>（与旧 [hardware] 直给值逐字节对齐，profiles/distro.toml 迁移批N3 件六）。物理走线（DIN/CS/CLK）由总线自身钉死，不占 physical 维"
+
+# —— P1 审计件四（2026-11-12，基-39 转执法收口）：四格能力面角色进场。
+#    这四格的共同事实：**今天没有任何 [[pin]] 物理绑定**——链路身份是 [hardware].link_ifname，
+#    音频设备名是 [hardware].alsa_device，板侧音频三脚由 board 具名装配直给（I2S 不入
+#    平台表，见平台表内裁定注记）。故 kind=logic（roles.toml 头注：logic = 无物理绑定，
+#    不进 [pins]），requires 显式 [] 即该事实，derives 显式 [] 无注入键。
+#    iface 取该格真实承载的能力面（rr-hal 有 prod 实现，门 a D 段可判）：链路=Rr3Link、
+#    播放=Rr3AudioSink、拾音=Rr3AudioSource；VAD 不独立绑设备、消费同源采集面，故其
+#    iface 指向 Rr3AudioSource（判别参数住 rr3-sense config.toml，不在契约）。
+[[role]]
+name = "net.wifi.link"
+slot = "net.wifi"
+kind = "logic"
+iface = "Rr3Link"
+requires = []
+derives = []
+direction = "io"
+droppable = false
+input_only_ok = false
+per_instance = false
+note = "WiFi 链路管理面（rr-hal linux_link 的 Rr3LinuxNmLink 承载同名 face）。droppable=false：链路是认知面出入口，欠压降载不得切断"
+
+[[role]]
+name = "audio.capture.mic"
+slot = "audio.capture"
+kind = "logic"
+iface = "Rr3AudioSource"
+requires = []
+derives = []
+direction = "in"
+droppable = true
+input_only_ok = false
+per_instance = false
+note = "拾音面（Rr3AudioSource 四实现：linux ALSA / sim / mac / 板侧 I2S）。droppable=true：欠压降载可停采集"
+
+[[role]]
+name = "audio.playback.spk"
+slot = "audio.playback"
+kind = "logic"
+iface = "Rr3AudioSink"
+requires = []
+derives = []
+direction = "out"
+droppable = true
+input_only_ok = false
+per_instance = false
+note = "播放面（Rr3AudioSink 四实现同 audio.capture.mic）。droppable=true：欠压降载可停播放"
+
+[[role]]
+name = "audio.vad.gate"
+slot = "audio.vad"
+kind = "logic"
+iface = "Rr3AudioSource"
+requires = []
+derives = []
+direction = "in"
+droppable = true
+input_only_ok = false
+per_instance = false
+note = "语音活动判别面：不独立绑设备（输入流与 audio.capture 同源），iface 指向其消费的采集能力面；阈/窗等判别参数住 rr3-sense config.toml，契约只登记格—角色—能力面三者关系"
+
+# —— 批N3 件八（基-39 N3 那一刀 + 器件角色进场，decisions.md §2 行 2）：I2C 读数
+#    器件三角色进场。requires 首次引用 device 键（[pins] 字段词表批N3 件八起十一键）：
+#    device = 器件型号词（外键 → contracts/devices.toml，门 o 装载侧执法；校验③-c
+#    精化判据——同 (bus, addr) 的多条 pin 须同 device 且型号在册——的字段）。
+#    derives 一律显式 []：三格共用既有读数源句柄（P-5：charger 与 battery.meter
+#    共用 INA219 同一读数面，env/imu 是 status=placeholder 格无句柄消费），不派生
+#    注入键维持"无第二真值点"——rr3_role_check 的"derives 空"判据随本件放宽
+#    （显式空 = 不派生，合法；显式性由 CI 契约测试逐条点名钉住）。iface=Rr3Sensor
+#    为批N3 契约面先行（rr-hal-api 无实现件，件一 Rr3Actuator 先例）。
+[[role]]
+name = "power.charger.meter"
+slot = "power.charger"
+kind = "signal"
+iface = "Rr3Power"
+requires = ["controller", "addr", "device"]
+derives = []
+direction = "in"
+droppable = false
+input_only_ok = true
+per_instance = false
+note = "充电计读数面（P-5 裁定：与 power.battery.meter 共用同一 INA219 读数源，不另立句柄——同 (i2c1, 0x40) 同 device 共址合法，校验③-c 精化判据的正例形状）。droppable=false 同 battery.meter（测量面必须活着才知欠压）。device=INA219 与 battery.meter 同型号在册"
+
+[[role]]
+name = "sensor.env.meter"
+slot = "sensor.env"
+kind = "signal"
+iface = "Rr3Sensor"
+requires = ["controller", "addr", "device"]
+derives = []
+direction = "in"
+droppable = false
+input_only_ok = true
+per_instance = false
+status = "planned"
+planned_until = "D9"
+note = "环境量读数面（status=placeholder 格的角色面先行，角色标 planned 终点 D9——格升 normal 的时机 = Rr3Sensor 落真后端，D9 一并裁；probe.rs 探测机制本就绪，bus/addr 一旦进 pin 即生效）。device 取值须与 devices.toml 演练行一致（SHTC3@0x70）；derives=[] 无句柄消费不注入（真后端随真板批）"
+
+[[role]]
+name = "sensor.imu.meter"
+slot = "sensor.imu"
+kind = "signal"
+iface = "Rr3Sensor"
+requires = ["controller", "addr", "device"]
+derives = []
+direction = "in"
+droppable = false
+input_only_ok = true
+per_instance = false
+status = "planned"
+planned_until = "D9"
+note = "姿态量读数面（同 sensor.env.meter 形状，同标 planned 终点 D9，kind=Vec3 变体消费；融合归 act 反射环——格 note 明写，契约面只搬运不定融合语义）。device 取值须与 devices.toml 演练行一致（ICM-42688@0x68）；derives=[] 同上"
