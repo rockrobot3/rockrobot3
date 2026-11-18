@@ -96,11 +96,17 @@ impl Rr3ConnCtx {
 /// writer 线程据此收摊退出（对端不收 = 这条连接写向已死），应答路径忽略返回值
 /// ——失败已点名进日志，连接生死由 reader 侧的 EOF/心跳回收裁定。
 fn rr3_write(out: &Arc<Mutex<UnixStream>>, frame: &Rr3Frame) -> bool {
-    if let Err(e) = rr3_frame_write(&mut *rr3_lock(out), frame) {
-        rr3_log(&format!("写帧失败 dst={}: {e:?}", frame.header.dst_task));
-        return false;
+    // 结果先落到局部变量：`if let Err(..) = rr3_frame_write(&mut *rr3_lock(..))`
+    // 的临时 guard 会活到整个 if-let 结束，点名日志就成了**持出向锁写磁盘**
+    // （续轮十九：锁内零文件 I/O）。先结束语句放锁，再落日志。
+    let res = rr3_frame_write(&mut *rr3_lock(out), frame);
+    match res {
+        Ok(()) => true,
+        Err(e) => {
+            rr3_log(&format!("写帧失败 dst={}: {e:?}", frame.header.dst_task));
+            false
+        }
     }
-    true
 }
 
 /// 组一帧 rrd → 模块（ty=Response/Notification，dst=对端 task）
