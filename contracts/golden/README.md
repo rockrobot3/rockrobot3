@@ -10,12 +10,13 @@
 decode→encode 往返无损；`tests/envelope_meta.rs` 另断言其解码字节数等于
 `envelope.schema.json` 的 `x-byte-size`（128）与 Rust `RR3_IPC_HDR_SIZE` 三处一致。
 
-`tts-pcm-frames.json` 是语音下行两条腿的**同机**对拍基准（MC-1③）：Python 腿
-`modules/rr3-brain/tests/test_composite.py` 断言 `rr3_tts_pcm_frames` 的分帧输出与
-golden 帧列逐字段一致；Rust 腿 `modules/rr3-interact/src/composite.rs` 测试把帧列
-逐帧 `rr3_base64_decode` 入收流缓冲，拼接流必须逐字节还原 `pcm_hex`（seq/ms 同拍
-断言）。生成即冻结：由 Python 腿分帧函数一次性产出，重算验证按上述字节模式与
-640B 切分规则。
+`tts-pcm-frames.json` 是语音下行分帧的**同机**对拍基准（MC-1③）。立基准时是
+Python 腿（brain）分帧逐字段 + Rust 腿（interact）收流拼接逐字节两腿对拍；
+ADR-0016 把 brain 迁到 Rust 后 Python 腿退役，现由
+`modules/rr3-interact/src/rpc.rs` 的 `tts_pcm_buf_matches_shared_golden_vector`
+单测把帧列逐帧 `rr3_base64_decode` 入收流缓冲、拼接流逐字节还原 `pcm_hex`
+（seq/ms 同拍断言）——向量保留为**冻结基准**，不再有第二腿。生成即冻结：
+重算验证按上述字节模式与 640B 切分规则。
 
 **效力边界**（与 [`../README.md`](../README.md) 一致）：它只钉住"本机 Rust 编解码与契约
 字节逐位一致"。跨架构等值（x86 与 aarch64 布局一致，即 IPC-T-003）由**契约外**的对拍脚本
