@@ -1,6 +1,7 @@
 //! esp32_uart 的单测（自同名单测模块原样抽出，判据不变）。
 
 use super::*;
+use crate::descriptor::Rr3HalBindings;
 // 协议件（信封编码/载荷类型）与直连 trace：生产面已收拢到 rr-periph-proto，
 // 测试侧显式取用（判据不变）。
 use rr_ipc::{rr3_body_encode, Rr3PayloadType};
