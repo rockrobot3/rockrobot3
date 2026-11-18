@@ -17,7 +17,7 @@ use esp_idf_hal::uart::{UartRxDriver, UartTxDriver};
 /// TX 半体内体：多发送方共享（注册 / 心跳线程 / round-trip 应答），互斥在
 /// 外挂 `Mutex` 锁内。写面真、读面故意不存在（Err = Unsupported）：conn 只用
 /// rr3_send_buf。
-pub(crate) struct UartTxInner(UartTxDriver<'static>);
+pub(crate) struct UartTxInner(pub(crate) UartTxDriver<'static>);
 
 // SAFETY：esp-idf-hal 0.44.1 只给全双工 `UartDriver` 标了 `unsafe Send + Sync`
 // （其状态同为 port + Owner + queue），半体驱动是同源状态的拆面、上游漏标属
@@ -53,7 +53,7 @@ impl Read for UartTxInner {
 
 /// RX 半体：reader 线程独占。读面真（阻塞读，delay = portMAX_DELAY）。
 /// 写面故意不存在（Err = Unsupported）：conn 只用 rr3_recv_buf。
-pub(crate) struct UartRxHalf(UartRxDriver<'static>);
+pub(crate) struct UartRxHalf(pub(crate) UartRxDriver<'static>);
 
 // SAFETY：同 [`UartTxInner`] 的论证——半体是全双工驱动同源状态的拆面，IDF
 // 读面上游本就允许跨任务调用；本仓 RX 半体由 reader 线程独占（move 语义），
