@@ -3860,6 +3860,21 @@ publish 吃 main 推送（edge 标签）；main 首跑 build 两腿绿、merge �
 **只在 tag 触发的作业腿，main/PR 面从未执行**，"流水线里有这条腿"不等于跑过；
 新结构把 publish 扩到 main 后，这类零执行死角才暴露。
 
+**2026-11-18 计数器落盘执行面分离（续轮十三）**：事实——R26 合并写在窗口到点时由
+心跳 reader 线程持全连接共享的 gate 锁做 tmp+fsync+rename；一次 eMMC/SD 抖动就把
+其余模块的心跳判活（`rr3_reg_beat`）排在磁盘后面，慢过看门狗即误判死。处置——新增
+`rrd-ctr-store` 单线程（`counters.rs` 的 `rr3_ctr_store_spawn`），窗口到点只投
+`try_send` 非阻塞信号（快照在落盘时取当值），`Rr3CountersGate` 增 `in_flight`
+合并一轮，`conn/beat.rs` 改为判活记账先于计数归并。判据——心跳路径不再出现
+`rr3_counters_store` 调用；单测钉在飞合并 / 失败回执 / 当下快照；`e2e_ctl` 三条
+counters 用例保持绿。
+
+**2026-11-18 watchdog 拍漂移留痕（续轮十三）**：事实——watchdog 是判活唯一线程，
+自身被长动作或锁竞争拖慢时判死时刻整体后移，而 health 的 `since_beat_ms` 只在扫描
+时刻采样，看不出一条"判死晚了"。处置——每拍起点量距上一拍完成的间隔，>2×tick
+点名（连续漂移每 60 拍再点一次），判死基准不补跳；判据 `rr3_tick_late` 单测钉
+2×tick 边界不误报。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
