@@ -50,9 +50,11 @@ fn rr3_call_fwd(ctx: &Rr3ConnCtx, me: &Rr3Peer, topic: &str, body: &[u8]) -> Res
     let (name, task, sent) = {
         let g = rr3_lock(&ctx.shared);
         match g.rr3_reg_callee_for(topic) {
-            None => return Err(format!(
+            None => {
+                return Err(format!(
                 "没有在册模块 exposes 主题 {topic}（被调方须在 manifest 的 [rpc].exposes 里声明）"
-            )),
+            ))
+            }
             Some((_, task)) if task == me.task => {
                 return Err(format!("主题 {topic} 的唯一被调方就是调用方自己，拒绝自呼"))
             }
