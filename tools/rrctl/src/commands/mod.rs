@@ -246,6 +246,7 @@ fn format_status(envelope: &Value) -> Result<String, String> {
     out.push_str(&rr3_count_note(result, "denied_publish"));
     out.push_str(&rr3_count_note(result, "fan_dropped"));
     out.push_str(&rr3_text_note(result, "log_sink"));
+    out.push_str(&rr3_boot_note(result));
     Ok(out)
 }
 
@@ -285,6 +286,15 @@ fn rr3_text_note(result: &Value, key: &str) -> String {
         .get(key)
         .and_then(Value::as_str)
         .map_or(String::new(), |s| format!("{key} = {s}\n"))
+}
+
+/// 装配摘要行（`boot`）：字符串原样一行；`null`/缺字段渲染 `?`——远程诊断最先要
+/// 的上下文就是这台机器装的是什么，缺失也要显式可见（不静默省行）。
+fn rr3_boot_note(result: &Value) -> String {
+    match result.get("boot").and_then(Value::as_str) {
+        Some(s) => format!("boot = {s}\n"),
+        None => "boot = ?\n".to_string(),
+    }
 }
 
 fn format_health(envelope: &Value) -> Result<String, String> {
