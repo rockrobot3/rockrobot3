@@ -15,6 +15,10 @@
 //!   误判死。现改为 reader 只投递"该落盘了"（`try_send` 非阻塞），快照与 fsync
 //!   全在 `rrd-ctr-store` 单线程；`Rr3CountersGate` 增 `in_flight` 防重复排程，
 //!   判活记账先于计数归并（心跳核心语义不被运维账推迟）。
+//! - 0.0.8 续轮二十一：执行面的**存亡**也可读——`ctl.status.ctr_store` 三态
+//!   （`off`/`on`/`dead`）。线程 panic 展开原本只有 panic hook 一行 stderr，
+//!   运维面看不到"计数账本已经不再落盘"；现由收场守卫在展开时置位，起不来
+//!   同样记 `dead`（启用过但执行面不在，不能读成"未启用"）。
 //!
 //! 旋钮（env，parse-or-default 口径同 rr-hal env 键——运维账旋钮不走 CLI fail-closed）：
 //! - `RR3_COUNTERS_FLUSH_MS`：合并写窗口毫秒数（缺省 10_000——1s 心跳拍下落盘
@@ -31,6 +35,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use serde_json::{json, Value};
 
@@ -39,6 +44,29 @@ use serde_json::{json, Value};
 /// 原子写的"单写者"前提由本锁补上（其它写口各用独立 tmp，不受影响）。
 #[cfg(unix)]
 static RR3_COUNTERS_STORE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// 异步落盘线程状态（`ctl.status.ctr_store`，续轮二十一）。三态词形与
+/// `log_sink` 对齐：`off` = 未启用持久化或已随关停收场、`on` = 线程在位、
+/// `dead` = 启用后执行面异常消失（起不来 / panic 展开）。没有这个位时，
+/// "计数账本已经不再落盘"只能靠翻 panic 日志判断，运维面看不见。
+static RR3_CTR_STORE_STATE: AtomicU8 = AtomicU8::new(RR3_CTR_OFF);
+
+const RR3_CTR_OFF: u8 = 0;
+const RR3_CTR_ON: u8 = 1;
+const RR3_CTR_DEAD: u8 = 2;
+
+fn rr3_ctr_store_mark(state: u8) {
+    RR3_CTR_STORE_STATE.store(state, Ordering::Relaxed);
+}
+
+/// 状态读口（`ctl.status.ctr_store`；off/on/dead）
+pub fn rr3_ctr_store_state() -> &'static str {
+    match RR3_CTR_STORE_STATE.load(Ordering::Relaxed) {
+        RR3_CTR_ON => "on",
+        RR3_CTR_DEAD => "dead",
+        _ => "off",
+    }
+}
 
 /// `boots` 是 rrd 自有的计数键（启动自增，不走心跳），聚合表里的保留字面量
 pub const RR3_COUNTERS_BOOTS_KEY: &str = "boots";
@@ -243,6 +271,7 @@ impl Rr3CountersGate {
 /// （不落盘也就不需要线程）。线程起不来同样回 None 并点名——reader 侧不做
 /// 任何伪装的同步写回退（那正是本轮要拆掉的阻塞面），关停路径的 SIGTERM
 /// flush 仍在，持久化窗口退化为"关停一次"，点名让运维看得见。
+/// 状态位（续轮二十一）在起线程成功/失败处分别定格 `on`/`dead`。
 #[cfg(unix)]
 pub fn rr3_ctr_store_spawn(
     shared: std::sync::Arc<std::sync::Mutex<crate::registry::RrdRegistry>>,
@@ -255,8 +284,12 @@ pub fn rr3_ctr_store_spawn(
         .name("rrd-ctr-store".into())
         .spawn(move || rr3_ctr_store_loop(rx, &shared, &gate, &path, t0));
     match spawned {
-        Ok(_) => Some(tx),
+        Ok(_) => {
+            rr3_ctr_store_mark(RR3_CTR_ON);
+            Some(tx)
+        }
         Err(e) => {
+            rr3_ctr_store_mark(RR3_CTR_DEAD);
             crate::rr3_log(&format!(
                 "counters 异步落盘线程起不来（{e}）——本次仅内存账，关停 flush 仍兜底"
             ));
@@ -277,6 +310,7 @@ fn rr3_ctr_store_loop(
     path: &Path,
     t0: std::time::Instant,
 ) {
+    let mut run = Rr3CtrStoreRun { disarmed: false };
     for _ in rx.iter() {
         let snap = crate::rr3_lock(shared).rr3_reg_counters();
         match rr3_counters_store(path, &snap) {
@@ -288,6 +322,23 @@ fn rr3_ctr_store_loop(
                 crate::rr3_lock(gate).rr3_on_failed();
                 crate::rr3_log(&format!("counters 异步落盘失败（下一窗口自然重试）: {e}"));
             }
+        }
+    }
+    run.disarmed = true;
+    rr3_ctr_store_mark(RR3_CTR_OFF);
+}
+
+/// 落盘线程收场守卫：正常关停（通道 EOF，即全连接 ctx 已释放）由主体 disarm
+/// 后置 `off`；未 disarm 的收场只有 panic 展开一条路，置 `dead`。展开期间不做
+/// 任何日志/加锁（可能二次 panic），panic 文案由 daemon 的 panic hook 负责。
+struct Rr3CtrStoreRun {
+    disarmed: bool,
+}
+
+impl Drop for Rr3CtrStoreRun {
+    fn drop(&mut self) {
+        if !self.disarmed {
+            rr3_ctr_store_mark(RR3_CTR_DEAD);
         }
     }
 }
