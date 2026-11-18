@@ -42,7 +42,8 @@ CI 单一事实源在 GitHub Actions（R30 裁定：atomgit 无流水线功能�
 annotation 是唯一无需凭据的取数通道。`sim-chain` 的稳态摘要（`since_max` /
 `peak_max` / `wd_min` / `wr` / `slow` / `log_max_us` / `boot_max`）以 notice 注解回传
 （失败拍以 error + 失败拍摘要回传）；读法 = `GET /repos/{owner}/{repo}/
-check-runs/{id}/annotations`，无需 token。
+check-runs/{id}/annotations`，无需 token；取数收成单点
+`python3 tools/ci/ci_steady.py [--head <sha>]`（只读，取不到数值即非 0 退出）。
 | `publish.yml`（3） | build ×2 / merge / firmware | 发布面：原生架构双腿构建 → merge 去重 → firmware 打包 |
 | `buildroot.yml`（3） | dtb-backport / image / release | Buildroot 装配轨：交叉工具链与装配冒烟、出厂镜像轨 |
 

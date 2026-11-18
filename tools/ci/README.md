@@ -32,6 +32,12 @@
 **⑨-a…⑨-z 各门**（门 a/c/r/y/z 等，后续批次续增）：判据以 `check.sh` 各 `step`
 段注释为唯一真值，本表不逐行抄录——抄一份就多一处漂移面。
 
+**CI 稳态取数（`ci_steady.py`，只读，无需 token）**：`python3 tools/ci/ci_steady.py
+[--head <sha>] [--repo owner/name]` 按 head 找 `sim-chain` check-run、读 annotations
+打出一行稳态摘要（since / 续命峰值 / 看门狗下限 / 写超时 / 慢写 / 落盘峰值 / `boot_max`）。
+job 日志匿名 403，注解是唯一无需凭据的取数通道；**取不到数值即非 0 退出**——不拿
+"没查到"当"健康"。
+
 **每步跑多少条测试不在本文件登记**：唯一落点是
 [`docs/process/conventions.md`](../../docs/process/conventions.md) §2（含两平台条数为何不等的
 逐条解释）。本文件只写"跑什么命令、为什么这么跑"。
