@@ -3951,6 +3951,16 @@ check.sh / metrics 全绿，九腿 CI 覆盖。
 counters:: 11 测（含 `on`→`off` 收场断言）、e2e `ctl-status`、rrctl 26 测全绿；
 `check.sh` + `metrics.py` 通过。
 
+**2026-11-18 执行面自愈与锁内 I/O 复核收口（续轮二十二）**：事实——一轮落盘
+panic 会带走整条 `rrd-ctr-store`：在飞位留在 gate 上，reader 侧此后不再排新一轮，
+账本静默停写；"锁内 I/O 已清零"此前只有人工巡检，没有机器判据。处置——① 每轮
+`catch_unwind` 隔离，panic 时释放在飞位并续跑（panic 文案仍由 daemon 的 panic hook
+落日志）；② 复核 `daemon/boot.rs`、`supervisor.rs`、`supervisor/spawn.rs` 低电旗门
+（条件里的临时 guard 在 `if` 语句结束即释放，日志在语句之后）与全仓 `rr3_reg_fanout`/
+`rr3_reg_ctr_merge`/`rr3_reg_shadow` 生产调用点（逐点确认在 `rr3_reg_with` 闭包内），
+无锁内 I/O 残留；机器判据列为下一轮 P1（人工巡检不再重复）。判据——counters:: 12 测
+（新增"panic 后在飞位释放"）、`check.sh` + `metrics.py` 通过。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
