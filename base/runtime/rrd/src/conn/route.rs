@@ -43,26 +43,31 @@ pub(super) fn rr3_route_call(
 }
 
 /// 查表 + 构帧 + 投递在同一把锁内完成：避免"查到 callee、锁一放它就死了"的窗口里
-/// 构出一帧注定无处投递的转发。锁内 send 与 `rr3_reg_fanout` 同一口径（无界 mpsc 不阻塞）。
-/// `Ok(bool)` = 投递结果，`Err` = 拒法文案（无人在册 / 自呼）。
+/// 构出一帧注定无处投递的转发。锁内 send 与 `rr3_reg_fanout` 同一口径（有界队列
+/// `try_send` 不阻塞）。**点名日志放锁后打**：rr3.call 是模块间热路径，锁内落盘
+/// 会拖住全表（心跳/判死/扇出都等这把锁）。`Ok(bool)` = 投递结果，`Err` = 拒法文案。
 fn rr3_call_fwd(ctx: &Rr3ConnCtx, me: &Rr3Peer, topic: &str, body: &[u8]) -> Result<bool, String> {
-    let g = rr3_lock(&ctx.shared);
-    match g.rr3_reg_callee_for(topic) {
-        None => Err(format!(
-            "没有在册模块 exposes 主题 {topic}（被调方须在 manifest 的 [rpc].exposes 里声明）"
-        )),
-        Some((_, task)) if task == me.task => {
-            Err(format!("主题 {topic} 的唯一被调方就是调用方自己，拒绝自呼"))
+    let (name, task, sent) = {
+        let g = rr3_lock(&ctx.shared);
+        match g.rr3_reg_callee_for(topic) {
+            None => return Err(format!(
+                "没有在册模块 exposes 主题 {topic}（被调方须在 manifest 的 [rpc].exposes 里声明）"
+            )),
+            Some((_, task)) if task == me.task => {
+                return Err(format!("主题 {topic} 的唯一被调方就是调用方自己，拒绝自呼"))
+            }
+            Some((name, task)) => {
+                let frame = rr3_req_frame(me, task, body);
+                let sent = g.rr3_reg_send_to(task, &frame);
+                (name, task, sent)
+            }
         }
-        Some((name, task)) => {
-            let frame = rr3_req_frame(me, task, body);
-            rr3_log(&format!(
-                "rr3.call {topic}: {}(task={}) → {name}(task={task})",
-                me.name, me.task
-            ));
-            Ok(g.rr3_reg_send_to(task, &frame))
-        }
-    }
+    };
+    rr3_log(&format!(
+        "rr3.call {topic}: {}(task={}) → {name}(task={task})",
+        me.name, me.task
+    ));
+    Ok(sent)
 }
 
 /// 投递结果 → 调用方应答（拒法与投递前退场都回 Invalid 错误帧，不断连）。
@@ -164,7 +169,10 @@ fn rr3_resp_send(
     fwd: &Rr3Frame,
     body: &[u8],
 ) {
-    if !rr3_lock(&ctx.shared).rr3_reg_send_to(trace, fwd) {
+    // 投递结果先落局部变量：if 条件的临时 guard 会活到整个 if 体，失败分支的
+    // 应答（日志 + 写帧）就成了持 registry 锁做 I/O（续轮二十）。
+    let sent = rr3_lock(&ctx.shared).rr3_reg_send_to(trace, fwd);
+    if !sent {
         rr3_reply_err(
             out,
             me,
