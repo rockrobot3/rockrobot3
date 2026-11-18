@@ -253,6 +253,19 @@ pub(crate) fn rr3_chain_obs_up(
     Ok(obs_stream)
 }
 
+/// 取证后把观察者切成"持续排空"（续轮二十七实证）：夹具取证完就不再读帧，
+/// 广播积压在观察者连接上，rrd 的写线程 5s 写不动即判超时——稳态段就测到了
+/// 夹具自己制造的假故障（`fan_write_timeout=1`，dst=0 广播）。排空线程丢弃
+/// 后续帧直到连接关闭；它不参与任何判据，只保证"被测对象"是产品模块。
+pub(crate) fn rr3_obs_drain(stream: UnixStream) {
+    std::thread::spawn(move || {
+        use std::io::Read;
+        let mut s = stream;
+        let mut buf = [0u8; 8192];
+        while matches!(s.read(&mut buf), Ok(n) if n > 0) {}
+    });
+}
+
 /// 外部起 interact / brain / act（三真模块，各自日志进 workdir，复用共用起法）。
 pub(crate) fn rr3_chain_up_ext(
     ctx: &Rr3ChainCtx,
