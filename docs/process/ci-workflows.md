@@ -40,7 +40,7 @@ CI 单一事实源在 GitHub Actions（R30 裁定：atomgit 无流水线功能�
 
 **数值回传面（续轮二十八）**：job 日志匿名不可读（403 已实证），check-run
 annotation 是唯一无需凭据的取数通道。`sim-chain` 的稳态摘要（`since_max` /
-`peak_max` / `wd_min` / `wr` / `slow` / `log_max_us`）以 notice 注解回传
+`peak_max` / `wd_min` / `wr` / `slow` / `log_max_us` / `boot_max`）以 notice 注解回传
 （失败拍以 error + 失败拍摘要回传）；读法 = `GET /repos/{owner}/{repo}/
 check-runs/{id}/annotations`，无需 token。
 | `publish.yml`（3） | build ×2 / merge / firmware | 发布面：原生架构双腿构建 → merge 去重 → firmware 打包 |
