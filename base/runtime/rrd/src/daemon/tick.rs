@@ -134,7 +134,7 @@ fn rr3_expiry_fan(shared: &Arc<Mutex<RrdRegistry>>, sup: &Rr3Supervisor, ex: Rr3
     // 阶段名取自 `Rr3Phase::as_str()`，不写字面量 "failed"：那是第二个真值
     // （as_str 改了而广播没改，`rr3_read_state(.., "failed")` 会替我们抓到，
     // 但抓到的是一条本该不必存在的失败）。
-    let n = rr3_lock(shared).rr3_reg_fanout(&frame, ex.src_task);
+    let n = crate::registry::rr3_reg_with(shared, |g| g.rr3_reg_fanout(&frame, ex.src_task));
     rr3_log(&format!("watchdog 广播 failed 到 {n} 个连接"));
     // D-8 的落点（11b）：到期那一路的记账结果交给 supervisor。
     // `rr3_restart` 只做一次 send，绝不在这条线程里 spawn/睡眠。
@@ -155,10 +155,12 @@ fn rr3_fan_degraded(
     degraded: Vec<(String, u64)>,
 ) {
     for (dep, task) in degraded {
-        let n = rr3_lock(shared).rr3_reg_fanout(
-            &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
-            RR3_TASK_RRD,
-        );
+        let n = crate::registry::rr3_reg_with(shared, |g| {
+            g.rr3_reg_fanout(
+                &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
+                RR3_TASK_RRD,
+            )
+        });
         rr3_log(&format!(
             "{dep} 依赖断供 → degraded（提供者 {provider} 离开 Running）广播到 {n} 个连接"
         ));

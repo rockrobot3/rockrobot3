@@ -237,10 +237,12 @@ fn rr3_hs_admit(
         task,
         name: facts.name.clone(),
     };
-    let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
-        &rr3_state_frame(&peer.name, "registered", peer.task),
-        RR3_TASK_RRD,
-    );
+    let n = crate::registry::rr3_reg_with(&ctx.shared, |g| {
+        g.rr3_reg_fanout(
+            &rr3_state_frame(&peer.name, "registered", peer.task),
+            RR3_TASK_RRD,
+        )
+    });
     rr3_log(&format!("广播 registered 到 {n} 个连接"));
     // 后到者补发在册状态：只发转移不发快照的话，后起模块看不到先起模块上线过。
     // 这里只保证入队次序，不构成上线次序——读侧一律按类型/字段挑帧。

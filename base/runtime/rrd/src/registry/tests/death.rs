@@ -69,6 +69,14 @@ fn fanout_drops_frames_but_keeps_slow_consumer() {
         2,
         "health 行必须点名慢消费者（不能只有一个全局总数）"
     );
+    // 锁内只收集、放锁后落盘（续轮十七）：首次丢帧点名一行，取走即空
+    let logs = r.rr3_logs_take();
+    assert_eq!(logs.len(), 1, "每 64 帧点名一次：两次丢帧只应收集一行");
+    assert!(
+        logs[0].contains("广播积压丢帧 rr3-sima"),
+        "待打印行必须点名慢消费者: {logs:?}"
+    );
+    assert!(r.rr3_logs_take().is_empty(), "取走即清空，不得重复打印");
     assert!(rx.try_recv().is_ok(), "已入队的帧不丢");
     assert_eq!(
         r.rr3_reg_fanout(&frame, rr_bus::RR3_BROADCAST_DST_TASK),

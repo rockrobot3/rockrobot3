@@ -21,6 +21,7 @@ impl RrdRegistry {
             counters: BTreeMap::new(),
             ctr_cap_noted: false,
             fanout_last: BTreeMap::new(),
+            pending_logs: Vec::new(),
         }
     }
 
@@ -86,13 +87,14 @@ impl RrdRegistry {
         true
     }
 
-    /// 达上界只点一次名（后续拒新键不再刷屏）。
+    /// 达上界只点一次名（后续拒新键不再刷屏）。只入待打印列，落盘由
+    /// `rr3_reg_with` 放锁后做（registry 锁内零文件 I/O）。
     fn rr3_cap_note_once(&mut self, key: &str) {
         if self.ctr_cap_noted {
             return;
         }
         self.ctr_cap_noted = true;
-        rr3_log(&format!(
+        self.pending_logs.push(format!(
             "运维计数键数达上界 {RR3_CTR_KEY_CAP}，拒新键 {key}（既有键照常累加；查模块是否每拍换键）"
         ));
     }

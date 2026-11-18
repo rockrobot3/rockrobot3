@@ -20,7 +20,6 @@ use rr_ipc::Rr3Frame;
 use rr_registry::Rr3TopicSet;
 
 use crate::manifest::Rr3ManifestFacts;
-use crate::rr3_log;
 
 pub use model::*;
 
@@ -100,4 +99,27 @@ pub struct RrdRegistry {
     /// PCM 每帧一条"转发到 N 个连接"会冲垮日志环，只在连接数变化（含首次）时
     /// 留痕——拓扑变化才是运维要看的信号。
     fanout_last: BTreeMap<String, usize>,
+    /// 锁内待落盘日志（续轮十七）：扇出满队列点名、影子统计首见、计数键上界
+    /// 这些行在持锁方法内只入此列；`rr3_reg_with` 放锁后统一写日志——registry
+    /// 锁内零文件 I/O（`rr3_log` 的新实现每行一次 write，慢盘下仍是锁内阻塞）。
+    pending_logs: Vec<String>,
+}
+
+/// 带日志排空的注册表临界区（续轮十七）：锁内只做内存操作与日志收集，放锁后
+/// 统一落盘。**凡可能产生日志的注册表调用都走这里**（fanout / shadow /
+/// ctr_merge）；只读快照仍可直接 `rr3_lock`——它们不会往 `pending_logs` 里放行。
+/// 漏走本入口不会丢日志，但会把那行留到下一次排空（延迟），且把写文件带进锁内。
+pub fn rr3_reg_with<T>(
+    m: &std::sync::Mutex<RrdRegistry>,
+    f: impl FnOnce(&mut RrdRegistry) -> T,
+) -> T {
+    let (out, logs) = {
+        let mut g = crate::rr3_lock(m);
+        let out = f(&mut g);
+        (out, g.rr3_logs_take())
+    };
+    for line in logs {
+        crate::rr3_log(&line);
+    }
+    out
 }
