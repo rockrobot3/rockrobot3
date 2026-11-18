@@ -59,6 +59,11 @@ fn fanout_drops_frames_but_keeps_slow_consumer() {
         0,
         "仍满继续丢，但连接保留"
     );
+    assert_eq!(
+        r.rr3_reg_fan_dropped(),
+        2,
+        "积压丢帧总数必须可读（ctl.status 的 fan_dropped 列）"
+    );
     assert!(rx.try_recv().is_ok(), "已入队的帧不丢");
     assert_eq!(
         r.rr3_reg_fanout(&frame, rr_bus::RR3_BROADCAST_DST_TASK),

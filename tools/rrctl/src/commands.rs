@@ -230,7 +230,8 @@ fn format_status(envelope: &Value) -> Result<String, String> {
         .map(|m| vec![cell(m, "name"), cell(m, "task"), cell(m, "phase")])
         .collect();
     let mut out = render_table(&["NAME", "TASK", "PHASE"], &rows);
-    out.push_str(&rr3_denied_note(result));
+    out.push_str(&rr3_count_note(result, "denied_publish"));
+    out.push_str(&rr3_count_note(result, "fan_dropped"));
     Ok(out)
 }
 
@@ -256,12 +257,12 @@ fn rr3_ctl_result(envelope: &Value) -> Result<&Value, String> {
         .ok_or_else(|| "应答缺 result".to_string())
 }
 
-/// `denied_publish` 附加行（缺字段不渲染）。
-fn rr3_denied_note(result: &Value) -> String {
+/// 计数字段附加行（`denied_publish` / `fan_dropped`；缺字段不渲染）。
+fn rr3_count_note(result: &Value, key: &str) -> String {
     result
-        .get("denied_publish")
+        .get(key)
         .and_then(Value::as_u64)
-        .map_or(String::new(), |d| format!("denied_publish = {d}\n"))
+        .map_or(String::new(), |n| format!("{key} = {n}\n"))
 }
 
 fn format_health(envelope: &Value) -> Result<String, String> {

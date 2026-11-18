@@ -121,7 +121,7 @@ fn rr3_ctl_payload(req_id: u64, result: &Result<Value, (Rr3StatusCode, String)>)
 
 /// ctl.status 读面：在册模块快照 + 越权发布计数（锁内取数、锁外组 JSON）。
 fn rr3_ctl_status(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
-    let (modules, denied) = {
+    let (modules, denied, fan_dropped) = {
         let g = rr3_lock(&ctx.shared);
         (
             g.rr3_reg_snapshot()
@@ -131,11 +131,13 @@ fn rr3_ctl_status(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
                 })
                 .collect::<Vec<Value>>(),
             g.rr3_reg_denied(),
+            g.rr3_reg_fan_dropped(),
         )
     };
     Ok(json!({
         "modules": modules,
         "denied_publish": denied,
+        "fan_dropped": fan_dropped,
         "boot": crate::rr3_boot_summary_get(),
     }))
 }
