@@ -85,8 +85,13 @@ macaudio `ffi.rs`）已逐块核对：调用点 SAFETY 全覆盖（生产面审�
 **版本升级 = 显式改矩阵**，同一工作流两版 action 并存即红（首查抓到 ipct003 的
 qemu v3 残留并修复）。**触发与依赖图**：`push:` 必须收窄到 `branches`/`tags`
 （全分支推送会白烧 CI），`publish.yml` 必须由 tag 触发；job `needs` 不得指向
-不存在的 job、不得成环。`--self-test` 给好例 + 缺并发/缺超时/版本漂移/needs 悬空/
-needs 成环/push 无范围六条负例，gate 的 `scripts` job 先自检后执法。
+不存在的 job、不得成环。**新结构政策**（真源 = [ci-workflows.md](../../docs/process/ci-workflows.md)）：
+`dtolnay/rust-toolchain` 必须 `with.toolchain: "1.100.0"`；`Swatinem/rust-cache`
+必须带 `workspaces`，跨清单构建作业另须 `cache-all-crates: "true"`；每条 workflow
+job 定义 ≤10；integration/platforms 的 push/PR 必须 `paths-ignore` 含 `docs/**`
+与 `**.md`；publish 必须 `cancel-in-progress: false`。`--self-test` 给好例 +
+缺并发/缺超时/版本漂移/needs 悬空/needs 成环/push 无范围/工具链未钉版/缓存缺参/
+paths-ignore 缺失/publish 可取消/job 超限十一条负例，gate 的 `scripts` job 先自检后执法。
 
 ## 平台覆盖矩阵（2026-11-17 首立，按 workflow 事实源抄录）
 
