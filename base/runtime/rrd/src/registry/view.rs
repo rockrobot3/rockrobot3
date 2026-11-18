@@ -34,6 +34,12 @@ impl RrdRegistry {
     /// RPC 通道，连接看起来一直活着，于是模块会**永久失聪**直到因别的原因重启；
     /// 一次播放期积压就足以触发，属可用性缺陷。`Disconnected` 才是 writer 真亡，
     /// 才置 `tx=None`。
+    /// 广播积压丢帧总数（连接鲁棒性读面）：`ctl.status` 的 `fan_dropped` 列来源，
+    /// 事件总线的"尽力投递"必须可观测，不能只留在逐 64 帧一次的日志里。
+    pub fn rr3_reg_fan_dropped(&self) -> u64 {
+        self.modules.values().map(|e| e.fan_dropped).sum()
+    }
+
     pub fn rr3_reg_fanout(&mut self, frame: &Rr3Frame, exclude_task: u64) -> usize {
         let mut n = 0;
         for (name, e) in &mut self.modules {

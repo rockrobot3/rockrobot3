@@ -49,7 +49,7 @@ fn status_table_is_aligned_and_counts_denied_publish() {
     let env = json!({"result": {"modules": [
             {"name": "rr3-long-name", "task": 2, "phase": "running"},
             {"name": "rr3-a", "task": 3, "phase": "registered"}
-        ], "denied_publish": 7}});
+        ], "denied_publish": 7, "fan_dropped": 3}});
     let out = format_status(&env).unwrap();
     // 列宽由最长名字决定：短行必须被补齐到同一列位（NAME 列宽 13 = "rr3-long-name"）
     let lines: Vec<&str> = out.lines().collect();
@@ -57,6 +57,7 @@ fn status_table_is_aligned_and_counts_denied_publish() {
     assert_eq!(lines[1], "rr3-long-name  2     running");
     assert_eq!(lines[2], "rr3-a          3     registered");
     assert_eq!(lines[3], "denied_publish = 7");
+    assert_eq!(lines[4], "fan_dropped = 3", "广播积压丢帧必须可读");
 }
 
 #[test]

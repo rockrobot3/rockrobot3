@@ -3840,6 +3840,12 @@ macOS runner 时序更紧）。处置——`rr3_log` 改**落盘先于 stdout**�
 处置——审计扩到新政策六类（工具链钉版、缓存参数、触发过滤、job 上限、publish
 cancel 语义、needs 图沿用），自检负例由六条扩到十一条；全仓五条 workflow 通过。
 
+**2026-11-18 广播丢帧读面（续轮十一）**：事实——fanout 满队列策略是"丢当前帧、
+保留连接"，但只有逐 64 帧一次的日志，`ctl.status` 看不到累计；慢消费者期间"丢了多少"
+无法从运维面读出（连接鲁棒性/任务级可观测性缺口）。处置——registry 增
+`rr3_reg_fan_dropped()` 聚合，`ctl.status` 回 `fan_dropped`，`rr3-ctl status` 渲染同名行；
+单测钉"两次丢帧后聚合 = 2、续投后不回退"与 CLI 渲染；rrd-rpc/status 对表。
+
 **2026-11-18 publish 合并腿缺 checkout（main 首跑红）**：事实——远端结构治理后
 publish 吃 main 推送（edge 标签）；main 首跑 build 两腿绿、merge 腿 `exit 127`：
 合并腿直接 `bash tools/deploy/image-smoke.sh`，但该 job 没有 `actions/checkout`，

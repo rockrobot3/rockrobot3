@@ -76,7 +76,7 @@
 
 | `method` | 变体 | `params` 要求 | 成功 `result` 形状 | 出处 |
 |---|---|---|---|---|
-| `rr3.ctl.status` | `CtlStatus` | 无必填 | `{"modules":[{"name","task","phase"}], "denied_publish":<u64>, "boot":<string|null>}`——在册快照按 task 升序，与下行 state 的 phase 词表一致；`boot` 为启动摘要一行（`tier/chip/profile/modules/预降级/缺格/后端`），未定格为 `null` 不造假值 | `conn.rs` 的 `rr3_ctl_status` |
+| `rr3.ctl.status` | `CtlStatus` | 无必填 | `{"modules":[{"name","task","phase"}], "denied_publish":<u64>, "fan_dropped":<u64>, "boot":<string|null>}`——在册快照按 task 升序，与下行 state 的 phase 词表一致；`boot` 为启动摘要一行（`tier/chip/profile/modules/预降级/缺格/后端`），未定格为 `null` 不造假值 | `conn.rs` 的 `rr3_ctl_status` |
 | `rr3.ctl.health` | `CtlHealth` | 无必填 | `{"modules":[{"name","task","phase","heartbeat_ms","watchdog_ms","since_beat_ms","boot_ms"}], "degraded":[{"module","kind","detail"}]|null}`——`heartbeat_ms`/`watchdog_ms`/`since_beat_ms` 是**判定用的数回显**（条目自己的配置 + `now - last_beat`）；`boot_ms` 是注册完成距 daemon 起点的毫秒数（冷启动观测，基准未定格时为 `null`，不拿 0 冒充）；`degraded` 为降级原因（`kind` ∈ `missing_slot` / `assemble_broken`），未定格（`--manifest` 后门）为 `null` 不造假值 | `conn/ctl.rs` 的 `rr3_serve_ctl`、`registry.rs` 的 `rr3_reg_health` |
 | `rr3.ctl.logs` | `CtlLogs` | 可选 `prefix`（子串过滤）/ `tail`（尾行数，0 = 不限） | `{"lines":["rrd: …", …]}`——rrd 内存日志环（512 行环形，`rr3_log` 单点落环、不落盘）过滤后的尾部副本；缺省参数与旧行为逐字等价，坏形参数回 `Invalid`（不静默折默认） | `conn/ctl.rs` 的 `rr3_log_args`/`rr3_serve_ctl`、`lib.rs` 的 `rr3_log`/`rr3_log_query` |
 | `rr3.ctl.ota` | `CtlOta` | 无必填 | **无**——恒拒：`Permission`（-22，`AIRY_EPERM`）+ 文案点 M6（契约状态码是冻结集，不自造 `NotSupported`） | `conn/ctl.rs` 的 `rr3_serve_ctl` |
