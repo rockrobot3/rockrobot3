@@ -80,19 +80,48 @@ pub(super) fn rr3_spawn_watchdog(
 }
 
 /// 看门狗节拍本体：每 tick 判死一拍，逐条到期交广播/重启/降级。
+///
+/// 拍漂移观测（续轮十三）：本线程一旦被长动作或锁竞争拖慢，判死时刻就整体后移
+/// （watchdog 语义从"tick 粒度"退化成"tick + 拖慢量"），而 health 的
+/// `since_beat_ms` 只在扫描时刻采样，看不出一条"判死晚了"。这里在每拍起点量
+/// 距上一拍完成的间隔：超过 2×tick 即上一拍净占用已吃满一拍，点名一次（连续
+/// 漂移每 60 拍再点一次，不刷屏）。判死基准仍按实际扫描时刻算，不补跳。
 fn rr3_watchdog_loop(
     shared: &Arc<Mutex<RrdRegistry>>,
     t0: Instant,
     tick: Duration,
     sup: &Rr3Supervisor,
 ) {
+    let mut prev_done = Instant::now();
+    let mut late_streak: u32 = 0;
     loop {
         thread::sleep(tick);
+        let started = Instant::now();
+        if rr3_tick_late(prev_done, started, tick) {
+            if late_streak % 60 == 0 {
+                let lag = started.saturating_duration_since(prev_done).as_millis();
+                rr3_log(&format!(
+                    "watchdog 拍漂移：上一拍净占用约 {}ms（tick={}ms，本拍起点落后 {lag}ms）——判死按实际扫描时刻，不补跳",
+                    lag.saturating_sub(tick.as_millis()),
+                    tick.as_millis()
+                ));
+            }
+            late_streak = late_streak.saturating_add(1);
+        } else {
+            late_streak = 0;
+        }
         let expiries = rr3_lock(shared).rr3_reg_expire(rr3_now_ms(t0));
         for ex in expiries {
             rr3_expiry_fan(shared, sup, ex);
         }
+        prev_done = Instant::now();
     }
+}
+
+/// 拍漂移判据：本拍起点距上一拍完成超过 2×tick ⇒ 上一拍（扫描 + 广播 + 收尸
+/// 投递）净占用已超过一拍。等于 2×tick 不判（sleep 本身的正常粒度抖动）。
+fn rr3_tick_late(prev_done: Instant, started: Instant, tick: Duration) -> bool {
+    started.saturating_duration_since(prev_done) > tick * 2
 }
 
 /// 单条到期判死：点名、广播 failed、交重启计划、降级传播。
@@ -188,5 +217,27 @@ pub fn rr3_power_frame(reason: &str, percent: u64, voltage_mv: u64) -> Rr3Frame 
             payload_crc32: rr_ipc::rr3_crc32(&payload),
         },
         payload,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 拍漂移判据：>2×tick 才算迟到；恰好 2×tick（sleep 粒度抖动上界）不误报。
+    #[test]
+    fn tick_late_only_past_two_ticks() {
+        let tick = Duration::from_millis(200);
+        let base = Instant::now();
+        assert!(!rr3_tick_late(base, base + tick, tick), "单拍占用不判迟到");
+        assert!(
+            !rr3_tick_late(base, base + tick * 2, tick),
+            "恰 2×tick 不判（正常抖动上界）"
+        );
+        assert!(rr3_tick_late(
+            base,
+            base + tick * 2 + Duration::from_millis(1),
+            tick
+        ));
     }
 }
