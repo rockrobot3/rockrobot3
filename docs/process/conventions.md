@@ -3833,6 +3833,13 @@ macOS runner 时序更紧）。处置——`rr3_log` 改**落盘先于 stdout**�
 `lib.rs` 结构化拆到 `src/log.rs`（修序后 lib 触到 600 行门；纯移位，`lib.rs` re-export
 保持 `crate::rr3_log*` 路径零改动——lib 86 行 / log 532 行）。
 
+**2026-11-18 publish 合并腿缺 checkout（main 首跑红）**：事实——远端结构治理后
+publish 吃 main 推送（edge 标签）；main 首跑 build 两腿绿、merge 腿 `exit 127`：
+合并腿直接 `bash tools/deploy/image-smoke.sh`，但该 job 没有 `actions/checkout`，
+脚本根本不在工作区。处置——merge job 首步补 checkout（注释记根因）。教训——
+**只在 tag 触发的作业腿，main/PR 面从未执行**，"流水线里有这条腿"不等于跑过；
+新结构把 publish 扩到 main 后，这类零执行死角才暴露。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
