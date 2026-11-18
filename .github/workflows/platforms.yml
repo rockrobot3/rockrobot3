@@ -281,6 +281,21 @@ jobs:
       - name: workspace 编译面（Windows）
         working-directory: base/runtime
         run: cargo check --workspace
+      # 缺口④补腿（续轮十六）：独立工程（modules/tools/base/ota）不在 workspace 内，
+      # 此前 Windows 面零覆盖。先收**平台中性**子集（无 std::os::unix / libc 依赖，
+      # 传输面走 uart 而非 UDS）：任一编不过即红并点名工程根，不留"只看 workspace"的假绿。
+      - name: 独立工程编译面（Windows，④ 中性子集）
+        shell: pwsh
+        run: |
+          $roots = @("tools/mkmodule", "tools/rr3-codegen", "tools/rr3-sentinel-harness")
+          foreach ($r in $roots) {
+            Write-Output "== check $r"
+            cargo check --manifest-path "$r/Cargo.toml"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Output "::error title=windows-independent::独立工程 $r 在 Windows 编不过"
+              exit 1
+            }
+          }
       # ①b 同口径（workspace 全量测试）。Windows 的日志取不到（匿名 API 无 admin），
       # 所以失败必须自带注解：把 FAILED/error/panicked 行压成一条 ::error。
       - name: workspace 全量测试（Windows，①b 同口径）
