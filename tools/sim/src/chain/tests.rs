@@ -301,6 +301,7 @@ fn steady_tail_requires_zero_and_reads_peak() {
         "wr=0",
         "slow=0",
         "log_max_us=120",
+        "boot_max=?",
     ] {
         assert!(s.contains(needle), "摘要缺 {needle}: {s}");
     }
@@ -313,6 +314,18 @@ fn steady_feed_reads_peak_column() {
         .unwrap();
     assert_eq!(agg.mods["rr3-act"].max_peak_ms, 260, "第七列是续命峰值");
     assert_eq!(agg.mods["rr3-act"].max_since_ms, 150);
+    assert_eq!(agg.mods["rr3-act"].boot_ms, None, "boot 的 ? 不得当 0");
+    assert!(
+        agg.rr3_steady_summary().contains("boot_max=?"),
+        "未定格如实渲染 ?"
+    );
+    let mut b = Rr3SteadyAgg::default();
+    b.rr3_steady_feed("rr3-act  2  running  200  1000  150  260  55  0\n")
+        .unwrap();
+    assert!(
+        b.rr3_steady_summary().contains("boot_max=55"),
+        "冷启动基线取各模块最大"
+    );
 }
 
 #[test]
