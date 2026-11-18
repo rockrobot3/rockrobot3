@@ -3924,6 +3924,15 @@ CLI 子命令无非 Unix 分支）——"源码里 unix 引用都被 cfg 包着"
 Unix 可用；移除并把 root cause 与"不要凭印象加回"写进 workflow 注释与覆盖矩阵
 缺口④。判据——host-windows success（4 个工程逐个 `cargo check`，失败点名工程根）。
 
+**2026-11-18 锁内 I/O 收口与排拍栅格化（续轮十九）**：事实——① `rr3_write` 的
+`if let Err(..) = rr3_frame_write(&mut *rr3_lock(..))` 中临时 guard 活到整条语句
+结束，失败点名成了持出向锁写磁盘；② `rr3-ctl status` 丢弃 rrd 已回的 `boot`
+装配摘要；③ watchdog 用"睡眠 tick 后扫描"，实际周期 = tick + 扫描耗时，负载下
+逐拍累积后移。处置——① 结果先落局部变量、放锁后点名；② CLI 渲染 `boot = …`
+（null 显式 `?`）；③ 改固定栅格 `deadline + tick`，超拍从收尾时刻重排不补跳，
+单拍扫描 > tick 才点名。判据——rrd 316 单测 / rr3-ctl 26 测试 / clippy /
+check.sh / metrics 全绿，九腿 CI 覆盖。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
