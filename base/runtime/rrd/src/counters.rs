@@ -312,20 +312,43 @@ fn rr3_ctr_store_loop(
 ) {
     let mut run = Rr3CtrStoreRun { disarmed: false };
     for _ in rx.iter() {
-        let snap = crate::rr3_lock(shared).rr3_reg_counters();
-        match rr3_counters_store(path, &snap) {
-            Ok(()) => {
-                let now = t0.elapsed().as_millis() as u64;
-                crate::rr3_lock(gate).rr3_on_flushed(now);
-            }
-            Err(e) => {
-                crate::rr3_lock(gate).rr3_on_failed();
-                crate::rr3_log(&format!("counters 异步落盘失败（下一窗口自然重试）: {e}"));
-            }
-        }
+        rr3_ctr_round_guard(gate, || rr3_ctr_store_round(shared, gate, path, t0));
     }
     run.disarmed = true;
     rr3_ctr_store_mark(RR3_CTR_OFF);
+}
+
+/// 单轮隔离（续轮二十二）：一轮 panic 不许带走整个执行面。panic 文案由 daemon 的
+/// panic hook 落日志；这里只做恢复——释放在飞位（不释放的话 reader 侧永远不再排
+/// 新一轮，账本静默停写）并让线程续跑下一轮。
+#[cfg(unix)]
+fn rr3_ctr_round_guard<F: FnOnce()>(gate: &std::sync::Mutex<Rr3CountersGate>, round: F) {
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(round)).is_err() {
+        crate::rr3_lock(gate).rr3_on_failed();
+        crate::rr3_log("counters 落盘一轮 panic（已隔离，线程续跑；原因见 panic hook 行）");
+    }
+}
+
+/// 单轮落盘：取**当下**快照 → 原子写 → 回执 gate。快照克隆是短内存操作
+/// （≤16 模块 × 键数），fsync 在锁外——这正是把执行面搬出 reader 线程的意义。
+#[cfg(unix)]
+fn rr3_ctr_store_round(
+    shared: &std::sync::Mutex<crate::registry::RrdRegistry>,
+    gate: &std::sync::Mutex<Rr3CountersGate>,
+    path: &Path,
+    t0: std::time::Instant,
+) {
+    let snap = crate::rr3_lock(shared).rr3_reg_counters();
+    match rr3_counters_store(path, &snap) {
+        Ok(()) => {
+            let now = t0.elapsed().as_millis() as u64;
+            crate::rr3_lock(gate).rr3_on_flushed(now);
+        }
+        Err(e) => {
+            crate::rr3_lock(gate).rr3_on_failed();
+            crate::rr3_log(&format!("counters 异步落盘失败（下一窗口自然重试）: {e}"));
+        }
+    }
 }
 
 /// 落盘线程收场守卫：正常关停（通道 EOF，即全连接 ctx 已释放）由主体 disarm
