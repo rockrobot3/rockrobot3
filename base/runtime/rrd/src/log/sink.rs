@@ -7,14 +7,15 @@
 //! 文件里"的崩溃判据不变），轮转按进程内累计字节触发。`rr3_log_rotate` 保留给
 //! supervisor 的 per-unit 文件（那是每次打开/关闭的独立文件面）。
 //!
-//! 未定格（Windows / `--manifest` 前段）= 纯内存；写失败点名一次后置降级位，
-//! 之后静默退纯内存（与旧口径一致）。外部删除已打开文件时本进程继续写旧 inode
+//! 未定格（Windows / `--manifest` 前段）= 纯内存；写失败进入 10s 冷却重试
+//! （续轮二十三：瞬时故障不再永久关掉落盘，成功即回 `on`，只在转入/恢复时点名）。
+//! 外部删除已打开文件时本进程继续写旧 inode
 //! （句柄语义的已知边界）：轮转仍按累计字节发生，重启后回到新文件。
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 use super::rr3_line_bytes;
 use crate::rr3_lock;
@@ -50,9 +51,56 @@ pub(crate) fn rr3_log_dir_ensure(bus_path: &Path) -> std::io::Result<PathBuf> {
 /// = 纯内存，`rr3_log` 行为与笔1 之前一字不变。回填读口用它。
 static RR3_LOG_SINK: OnceLock<PathBuf> = OnceLock::new();
 
-/// 落盘写失败后的降级记账位：置位后本进程不再重试（磁盘故障不是每行日志都要
-/// 重新撞一遍的墙），点名一次交给运维，之后退纯内存。
-static RR3_LOG_SINK_DEAD: AtomicBool = AtomicBool::new(false);
+/// 落盘失败后的重试冷却（续轮二十三）：原口径"失败一次即本进程不再重试"会把
+/// 一次瞬时故障（写抖动 / 暂时 ENOSPC / 目录被短暂挪走）变成"崩溃取证面永久关闭，
+/// 只能重启恢复"。现改为有界重试：失败后冷却 10s，到点先重开句柄再试一行；
+/// 成功即回 `on`，失败顺延一个冷却窗（只在转入降级与恢复时各点名一次）。
+const RR3_SINK_RETRY_MS: u64 = 10_000;
+
+/// 冷却比较用的进程内单调时钟（懒定格；零点与 daemon 起点无关，只做间隔比较）。
+static RR3_SINK_T0: OnceLock<Instant> = OnceLock::new();
+
+fn rr3_sink_now_ms() -> u64 {
+    RR3_SINK_T0.get_or_init(Instant::now).elapsed().as_millis() as u64
+}
+
+/// 落盘可用性闸：`down_until_ms` = 0 健康；非 0 表示冷却到该时刻再试。
+#[derive(Debug, Default)]
+struct Rr3SinkGate {
+    down_until_ms: u64,
+}
+
+impl Rr3SinkGate {
+    fn due(&self, now_ms: u64) -> bool {
+        self.down_until_ms == 0 || now_ms >= self.down_until_ms
+    }
+
+    fn down(&self) -> bool {
+        self.down_until_ms != 0
+    }
+
+    /// 记一次失败；返回是否**首次**转入降级（点名口径：转入时打一行，冷却期内静默）。
+    fn on_fail(&mut self, now_ms: u64) -> bool {
+        let first = self.down_until_ms == 0;
+        self.down_until_ms = now_ms.saturating_add(RR3_SINK_RETRY_MS);
+        first
+    }
+
+    /// 记一次成功；返回是否从降级恢复。
+    fn on_ok(&mut self) -> bool {
+        let was = self.down_until_ms != 0;
+        self.down_until_ms = 0;
+        was
+    }
+
+    fn state(&self) -> &'static str {
+        if self.down_until_ms == 0 {
+            "on"
+        } else {
+            "dead"
+        }
+    }
+}
 
 /// 单日志文件体量上界（0.0.8c 审计 B-8）：SD 卡设备上 append 无界 = 磁盘耗尽
 /// 炸弹（错误循环模块 10KB/s ≈ 900MB/天，盘满后 journal/OTA/配置写全灭）。
@@ -68,6 +116,7 @@ struct Rr3LogSink {
     file: std::fs::File,
     path: PathBuf,
     written: u64,
+    gate: Rr3SinkGate,
 }
 
 impl Rr3LogSink {
@@ -83,7 +132,19 @@ impl Rr3LogSink {
             file,
             path,
             written,
+            gate: Rr3SinkGate::default(),
         })
+    }
+
+    /// 冷却到点的重开：写失败常见诱因是句柄坏 / 文件被挪走，重开一次比继续撞
+    /// 旧句柄更可能恢复；预算按重开后的实际大小重记。
+    fn rr3_reopen(&mut self) -> std::io::Result<()> {
+        self.file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
+        self.written = self.file.metadata().map(|m| m.len()).unwrap_or(0);
+        Ok(())
     }
 
     fn rr3_append(&mut self, line: &str) -> std::io::Result<()> {
@@ -141,44 +202,51 @@ pub(super) fn rr3_log_sink_path() -> Option<&'static Path> {
 }
 
 /// 落盘状态读口（`ctl.status.log_sink`，续轮十七）：`off` = 未定格（纯内存）、
-/// `on` = 句柄在位、`dead` = 写失败已降级。磁盘故障此前只有 stderr 一行，
-/// 运维面（rr3-ctl status/logs）看不到"崩溃取证面已经没了"。
+/// `on` = 句柄在位且最近一次写成功、`dead` = 处于冷却重试窗（续轮二十三：到点会
+/// 自动重开重试，成功即回 `on`——读到 dead 表示"此刻取证面不可用"，但不是终态）。
 pub fn rr3_log_sink_state() -> &'static str {
-    if RR3_LOG_SINK_FILE.get().is_none() {
-        "off"
-    } else if RR3_LOG_SINK_DEAD.load(Ordering::Relaxed) {
-        "dead"
-    } else {
-        "on"
-    }
+    let Some(sink) = RR3_LOG_SINK_FILE.get() else {
+        return "off";
+    };
+    rr3_lock(sink).gate.state()
 }
 
 /// `rr3_log` 的落盘臂：一行一次 `write_all`，不缓冲不批写——"崩溃前最后 N 行"的
-/// 判据要求打过的行当场就在文件里（无用户态缓冲，写即入内核）。打开或写失败 =
-/// 点名一次后置降级位，之后静默退纯内存。
+/// 判据要求打过的行当场就在文件里（无用户态缓冲，写即入内核）。写失败进入冷却：
+/// 冷却期内静默退纯内存（不逐行撞盘），到点先重开再试一行，成功即恢复。
 pub(super) fn rr3_log_sink_append(line: &str) {
-    if RR3_LOG_SINK_DEAD.load(Ordering::Relaxed) {
-        return;
-    }
     let Some(sink) = RR3_LOG_SINK_FILE.get() else {
         return;
     };
+    let now = rr3_sink_now_ms();
     let mut sink = rr3_lock(sink);
-    let Err(e) = sink.rr3_append(line) else {
+    if !sink.gate.due(now) {
         return;
-    };
-    let path = RR3_LOG_SINK
-        .get()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "?".to_string());
+    }
+    if sink.gate.down() {
+        let _ = sink.rr3_reopen();
+    }
+    let path = sink.path.display().to_string();
+    let mut note = None;
+    match sink.rr3_append(line) {
+        Ok(()) => {
+            if sink.gate.on_ok() {
+                note = Some(format!("日志落盘恢复（{path}）"));
+            }
+        }
+        Err(e) => {
+            if sink.gate.on_fail(now) {
+                // 先记账再点名：rr3_log 会再进本函数，此刻已在冷却窗内 → 只走
+                // stdout 与日志环，不会再碰出错的落盘路径（无递归、无重入锁）。
+                note = Some(format!(
+                    "日志落盘写失败（{path}）: {e} —— {RR3_SINK_RETRY_MS}ms 后重试，成功即恢复"
+                ));
+            }
+        }
+    }
     drop(sink);
-    if !RR3_LOG_SINK_DEAD.swap(true, Ordering::Relaxed) {
-        // 先置降级位再打日志：rr3_log 会再进本函数，DEAD 已置 → 只走 stdout 与
-        // 日志环，不会再碰出错的落盘路径（无递归、无重入锁）。这一行让
-        // `rr3-ctl logs` 与 stdout 都能看到"落盘已死"，不只埋在 stderr。
-        crate::rr3_log(&format!(
-            "日志落盘写失败（{path}）: {e} —— 运维留痕退纯内存，本进程不再重试"
-        ));
+    if let Some(n) = note {
+        crate::rr3_log(&n);
     }
 }
 
@@ -219,6 +287,23 @@ mod tests {
     #[test]
     fn sink_state_is_off_until_fixed() {
         assert_eq!(rr3_log_sink_state(), "off");
+    }
+
+    /// 落盘冷却闸（续轮二十三）：失败后一个冷却窗内不重试（不逐行撞盘），到点
+    /// 到期再试；成功即恢复；点名只在"首次转入降级"与"恢复"各一次。
+    #[test]
+    fn sink_gate_cools_down_then_recovers() {
+        let mut g = Rr3SinkGate::default();
+        assert!(g.due(0), "健康时随时可写");
+        assert!(!g.down());
+        assert!(g.on_fail(1_000), "首次失败要点名");
+        assert!(g.down() && g.state() == "dead");
+        assert!(!g.due(1_000 + RR3_SINK_RETRY_MS - 1), "冷却窗内不重试");
+        assert!(g.due(1_000 + RR3_SINK_RETRY_MS), "冷却到点再试");
+        assert!(!g.on_fail(2_000), "降级中的再次失败不再点名");
+        assert!(g.on_ok(), "成功要从降级恢复（点名一次）");
+        assert!(!g.down() && g.state() == "on");
+        assert!(!g.on_ok(), "健康时成功不点名");
     }
 
     /// 单代轮转（B-8，per-unit 面）：超上界 rename 到 `.1`（旧 `.1` 覆盖），未超界
