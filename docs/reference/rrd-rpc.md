@@ -26,7 +26,7 @@
 | 项 | 要求 | 出处 |
 |---|---|---|
 | 承载 | `Rr3Frame`：128B 定长头 + payload（`opcode` = `opcode::SEND`），payload 前 2 字节是 `Rr3PayloadType` 小端前缀 | `rr-ipc/src/protocol/body.rs`、`conn.rs` 的 `rr3_out_frame` |
-| payload 类型 | 上行 `Rr3PayloadType::Request` 走 RPC（§3：模块四方法 + 控制六方法 `rr3.ctl.*`）、`Rr3PayloadType::Event` 走发布面（`rr3_publish`，见 §7）、`Rr3PayloadType::Response` 走 `rr3.call` 应答回路（见 §8）；注册后其余类型（`Notification` 冒充上行）才回 `Rr3StatusCode::Invalid` **且连接不断**（`conn.rs` 的 `rr3_serve_frame`） | `rpc.rs` 模块头注、`conn.rs` 的 `rr3_serve_frame` |
+| payload 类型 | 上行 `Rr3PayloadType::Request` 走 RPC（§3：模块四方法 + 控制九方法 `rr3.ctl.*`）、`Rr3PayloadType::Event` 走发布面（`rr3_publish`，见 §7）、`Rr3PayloadType::Response` 走 `rr3.call` 应答回路（见 §8）；注册后其余类型（`Notification` 冒充上行）才回 `Rr3StatusCode::Invalid` **且连接不断**（`conn.rs` 的 `rr3_serve_frame`） | `rpc.rs` 模块头注、`conn.rs` 的 `rr3_serve_frame` |
 | `dst_task` | 必须是 `RR3_TASK_RRD`（值 `1`）。注册前违反 → 先回错误帧再断开；注册后违反 → 按协议违规收尾，**走死亡记账** | `conn/handshake.rs` 的 `rr3_handshake`、`conn.rs` 的 `rr3_serve_frame` |
 | `src_task` | 由 rrd 分配，用户态**不得自设**（AOS-STD-IPC-024）。注册帧里它还没被分配，rrd 只把对端自报值当作拒答的 `dst_task` 回显用；注册后 `src_task` 必须等于分配值，伪造者**那一帧被拒、连接不断**（应答带回原 `id` + `Invalid`） | `conn/handshake.rs` 的 `rr3_handshake`、`conn.rs` 的 `rr3_serve_frame` |
 | 应答寻址 | rrd 的应答是**点对点**：帧头 `dst_task` = 该连接的 task，`src_task` = `RR3_TASK_RRD`；`RR3_BROADCAST_DST_TASK`（值 `0`）只用于 rrd 的下行广播与发布转发 | `conn.rs` 的 `rr3_out_frame`、`daemon.rs` 的 `rr3_state_frame` |
@@ -34,18 +34,18 @@
 
 ## 2 JSON-RPC 信封约束
 
-`rr3_rpc_parse_request`（`rpc.rs`）的逐条门禁。违反任一条即
+`rr3_rpc_parse`（`rpc.rs`）的逐条门禁。违反任一条即
 `Err((Rr3StatusCode::Invalid as i32, 文案))`，**解析器不产别的码**，conn 层因此不重建第二套映射。
 
 | 约束 | 不满足时的文案（逐字模板） | 出处 |
 |---|---|---|
-| payload 必须是 UTF-8 | `payload 非 UTF-8: {e}` | `rpc.rs` 的 `rr3_rpc_parse_request` |
-| 必须是合法 JSON | `JSON-RPC 解析失败: {e}` | `rpc.rs` 的 `rr3_rpc_parse_request` |
-| `jsonrpc` 必须**等于字符串** `2.0` | `jsonrpc 必须等于 "2.0"` | `rpc.rs` 的 `rr3_rpc_parse_request` |
-| `id` 必须能按无符号整数取出（`as_u64`） | `缺 id（要求无符号整数）` | `rpc.rs` 的 `rr3_rpc_parse_request` |
-| `method` 必须是字符串 | `缺 method（要求字符串）` | `rpc.rs` 的 `rr3_rpc_parse_request` |
-| `method` 必须在十方法白名单内（模块四 + 控制 `rr3.ctl.*` 六，见 §3） | `未知方法 {method_str}`（**不许当 no-op 放行**） | `rpc.rs` 的 `rr3_rpc_parse_request` |
-| `params` 可缺省 | 缺省时为 `Value::Null`，不是错误；各方法自己校验 | `rpc.rs` 的 `rr3_rpc_parse_request` |
+| payload 必须是 UTF-8 | `payload 非 UTF-8: {e}` | `rpc.rs` 的 `rr3_rpc_parse` |
+| 必须是合法 JSON | `JSON-RPC 解析失败: {e}` | `rpc.rs` 的 `rr3_rpc_parse` |
+| `jsonrpc` 必须**等于字符串** `2.0` | `jsonrpc 必须等于 "2.0"` | `rpc.rs` 的 `rr3_rpc_parse` |
+| `id` 必须能按无符号整数取出（`as_u64`） | `缺 id（要求无符号整数）` | `rpc.rs` 的 `rr3_rpc_parse` |
+| `method` 必须是字符串 | `缺 method（要求字符串）` | `rpc.rs` 的 `rr3_rpc_parse` |
+| `method` 必须在十三方法白名单内（模块四 + 控制 `rr3.ctl.*` 九，见 §3） | `未知方法 {method_str}`（**不许当 no-op 放行**） | `rpc.rs` 的 `rr3_rpc_parse` |
+| `params` 可缺省 | 缺省时为 `Value::Null`，不是错误；各方法自己校验 | `rpc.rs` 的 `rr3_rpc_parse` |
 
 解析产物是 `Rr3RpcRequest { id, method, params }`（`rpc.rs`）。
 应答构造只有两个出口：`rr3_rpc_build_result`（`rpc.rs`）与
@@ -60,18 +60,18 @@
 `rr3_best_effort_id` 尽力取 JSON 的 `id`，取不到用 `0`（`conn.rs`）——
 **客户端判失败要看 `code`，别只看 `id`**。
 
-## 3 十个方法（白名单 = `rpc.rs` 的 `Rr3RpcMethod` 枚举）
+## 3 十三个方法（白名单 = `rpc.rs` 的 `Rr3RpcMethod` 枚举）
 
 **模块四方法**（已注册连接；各自语义见 §4/§6/§7/§8）：
 
 | `method` | 变体 | `params` 要求 | 成功 `result` 形状 | 出处 |
 |---|---|---|---|---|
 | `rr3.register` | `Register` | `params.manifest`：非空字符串（manifest **全文文本**，不是路径）；`params.name` **不被读取**，身份取自 manifest 里的 `[manifest].name` | `{"src_task":<分配到的 u64>}` | `rpc.rs` 的 `Rr3RpcMethod::Register` 变体、`conn/handshake.rs` 的 `rr3_handshake` |
-| `rr3.heartbeat` | `Heartbeat` | 无必填 `params`（`json!({})` 即可）；可选 `counters` 对象（`{字符串键: u64 值}`）——0.0.4 批B 起，模块把自报计数（如 `asr_ok`/`relay_on`）随心跳上行。**值 = 自上一拍以来的增量**（b3c 2026-10-21 钉死：客户端记已发水位每拍发差值，rrd 按 `模块名/键` 增量归并，`rr3.ctl.counters` 聚合表 = 生命周期累计；旧线上客户端曾发全量快照被当增量再收，计数二次方膨胀到 40 亿量级）。缺省 / 非对象 / 空对象都视为"不带"；非法值或空键**逐对静默跳过，不报错**（`rr3_rpc_heartbeat_counters`，`rpc.rs`）——心跳失败语义太重，脏计数不值一条拒绝 | `{"beat":"accepted"}` | `conn.rs` 的 `rr3_serve_request`（成功支；同一分支的失败面见 §5 `TimedOut` 行） |
+| `rr3.heartbeat` | `Heartbeat` | 无必填 `params`（`json!({})` 即可）；可选 `counters` 对象（`{字符串键: u64 值}`）——0.0.4 批B 起，模块把自报计数（如 `asr_ok`/`relay_on`）随心跳上行。**值 = 自上一拍以来的增量**（b3c 2026-10-21 钉死：客户端记已发水位每拍发差值，rrd 按 `模块名/键` 增量归并，`rr3.ctl.counters` 聚合表 = 生命周期累计；旧线上客户端曾发全量快照被当增量再收，计数二次方膨胀到 40 亿量级）。缺省 / 非对象 / 空对象都视为"不带"；非法值或空键**逐对静默跳过，不报错**（`rr3_rpc_counters`，`rpc.rs`）——心跳失败语义太重，脏计数不值一条拒绝 | `{"beat":"accepted"}` | `conn.rs` 的 `rr3_serve_request`（成功支；同一分支的失败面见 §5 `TimedOut` 行） |
 | `rr3.unregister` | `Unregister` | 无必填 `params` | `{"removed":<bool>}` | `conn.rs` 的 `rr3_serve_request` |
 | `rr3.call` | `Call` | `params.topic`：非空字符串（被调方须在 manifest `[rpc].exposes` 声明）；`params.args` 可缺省（缺省为 `Null`，被调方自己校验） | **不回 `result` 给调用方**——成功即转发，调用方的应答是被调方沿 trace_id 回路送回的 Response（见 §8） | `rpc.rs` 的 `rr3_rpc_call_params`、`conn.rs` 的 `rr3_serve_request`、`conn/route.rs` 的 `rr3_route_call` |
 
-**控制六方法 `rr3.ctl.*`**（F3 / [ADR-0010](../process/adr/ADR-0010-控制通道与查询面.md)，只对**未注册**
+**控制九方法 `rr3.ctl.*`**（F3 / [ADR-0010](../process/adr/ADR-0010-控制通道与查询面.md)，只对**未注册**
 的控制连接开放，`conn/ctl.rs` 的 `rr3_serve_ctl`）：
 
 | `method` | 变体 | `params` 要求 | 成功 `result` 形状 | 出处 |
@@ -84,6 +84,7 @@
 | `rr3.ctl.reboot` | `CtlReboot` | 无必填 | `{"reboot":true}`（重启命令已发起）——0.0.4 批C（Q3 裁定）：执行面**双重门**，`cfg(target_os = "linux")` **且** env `RR3_REBOOT_OK=1` 同时成立才真跑；执行面双轨——systemd 轨 `systemctl reboot`，Buildroot/BusyBox 轨回退 `/sbin/reboot`、`/bin/reboot`（解锁旋钮由装机单元/init 脚本注入）；任一不成立 → `Permission`（-22）+ 文案 `reboot 执行面未解锁（需 cfg(linux) 且 env RR3_REBOOT_OK=1，缺省恒拒）`——恒拒路径可测（单测钉拒绝面），解锁面留装机环境，CI 拿不到真重启能力 | `conn.rs` 的 `rr3_reboot_unlocked`/`rr3_reboot_run`/`rr3_ctl_reboot` |
 | `rr3.ctl.wiring` | `CtlWiring` | 无必填 | `{"available":<bool>, "pins":[…], "domains":[…], "wires":[…], "axis":[…], "roles":[…], "checks":[{"item","pass","reason"}]}`——装配快照读口（批N4 件九笔4，白名单六→七 ctl）：boot 装载链产物（[pins]×wiring 全交叉判据含 ⑦-c1 额定加总族，批N5 件五笔3 起）的 OnceLock 副本，判据真值单点在 `assembly.rs` 的 `rr3_assembly_cross_checks`，面板只透传不重判；`--manifest` 调试路径 `available:false` | `conn/ctl.rs` 的 `rr3_serve_ctl`、`assembly.rs` 的 `rr3_assembly_render` |
 | `rr3.ctl.contracts` | `CtlContracts` | 无必填 | `{"available":<bool>, "contracts":[{"file","sha256","bytes"}], "truth_set":[{"member","sha256","bytes"}], "checks":[{"item","pass","reason"}]}`——契约完整性审计读口（批N5 件五笔4，白名单七→八 ctl）：boot 装载链验收后契约四册（topics/slots/roles/devices）sha256 记账快照＋自检时点重读对比的"齐全且 sha 对"判果一应答给出（缺册＝齐全破、sha 漂＝sha 对破），判据真值单点在 `contracts.rs` 的 `rr3_contracts_checks`；`--manifest` 调试路径（快照未在册）如实 `available:false` | `conn/ctl.rs` 的 `rr3_serve_ctl`、`contracts.rs` 的 `rr3_contracts_json` |
+| `rr3.ctl.domain.set` | `CtlDomainSet` | `target`（`"domain"` / `"axis"`）、`name`（域名或轴 instance）、`key`（白名单：domain → `armed` / `severe_mv`；axis → `current_ceil_ma`）、`value`（布尔或正整数，0 拒）、`evidence`（armed=true / severe_mv / current_ceil_ma 必填，armed=false 可省）、`confirm`（必须 true，二次确认门） | `{"ok":true,"target","name","key","old","new","evidence","effective":"boot",…}`——装配侧策略量写口（批N22 件一，白名单八→九 ctl）：门序=confirm 门→证据四道核→键白名单→文本手术→装载链全量预核→原子落盘→契约记账重记，运行态不动、下次 rrd boot 生效；domain 目标回 `contracts_relogged`，axis 目标回 `echo`（轴档产线写入面回执）；`--manifest` 调试路径无装配单记账，恒拒 `Permission` | `conn/ctl.rs` 的 `rr3_serve_ctl`、`domain_write.rs` 的 `rr3_domain_write_run` |
 
 连接语义与模块四方法不同：ctl 连接**不注册、不进在册表、不受 watchdog 管**，
 一问一答即断（rrd 应答后直接收掉这条连接，握手旁支在 `rr3_handshake` 第 6 步**之前**分流，
@@ -109,7 +110,7 @@ EOF 同样算干净收尾（`conn.rs` 的 `rr3_serve_request`、`conn.rs` 的 `r
 （只断连不回码等于让客户端挂在超时上，`conn/handshake.rs` 的 `rr3_handshake` 自述）。注册前的失败
 **不做死亡记账、也不广播 state**（`conn.rs` 的 `rr3_conn_serve` 对 `rr3_handshake` 结果的 `?` 早返回，绕过 `rr3_conn_finish`）。
 
-> **F3 例外（§3 控制六方法）**：第 6 步之前有一处分流——首帧方法 ∈ `rr3.ctl.*` 时直接进
+> **F3 例外（§3 控制九方法）**：第 6 步之前有一处分流——首帧方法 ∈ `rr3.ctl.*` 时直接进
 > `rr3_serve_ctl`（`conn/handshake.rs` 的 `rr3_handshake`），不注册、即答即断，**不落进本表**。本表 1–5 步
 > （读取 / 前缀 / `dst_task` / 类型 / RPC 信封）对 ctl 帧同样有效。
 
