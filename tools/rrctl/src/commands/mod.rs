@@ -245,6 +245,7 @@ fn format_status(envelope: &Value) -> Result<String, String> {
     let mut out = render_table(&["NAME", "TASK", "PHASE"], &rows);
     out.push_str(&rr3_count_note(result, "denied_publish"));
     out.push_str(&rr3_count_note(result, "fan_dropped"));
+    out.push_str(&rr3_text_note(result, "log_sink"));
     Ok(out)
 }
 
@@ -276,6 +277,14 @@ fn rr3_count_note(result: &Value, key: &str) -> String {
         .get(key)
         .and_then(Value::as_u64)
         .map_or(String::new(), |n| format!("{key} = {n}\n"))
+}
+
+/// 文本字段附加行（`log_sink`：on/off/dead；缺字段不渲染）。
+fn rr3_text_note(result: &Value, key: &str) -> String {
+    result
+        .get(key)
+        .and_then(Value::as_str)
+        .map_or(String::new(), |s| format!("{key} = {s}\n"))
 }
 
 fn format_health(envelope: &Value) -> Result<String, String> {

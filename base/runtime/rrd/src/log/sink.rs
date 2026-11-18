@@ -140,6 +140,19 @@ pub(super) fn rr3_log_sink_path() -> Option<&'static Path> {
     RR3_LOG_SINK.get().map(PathBuf::as_path)
 }
 
+/// 落盘状态读口（`ctl.status.log_sink`，续轮十七）：`off` = 未定格（纯内存）、
+/// `on` = 句柄在位、`dead` = 写失败已降级。磁盘故障此前只有 stderr 一行，
+/// 运维面（rr3-ctl status/logs）看不到"崩溃取证面已经没了"。
+pub fn rr3_log_sink_state() -> &'static str {
+    if RR3_LOG_SINK_FILE.get().is_none() {
+        "off"
+    } else if RR3_LOG_SINK_DEAD.load(Ordering::Relaxed) {
+        "dead"
+    } else {
+        "on"
+    }
+}
+
 /// `rr3_log` 的落盘臂：一行一次 `write_all`，不缓冲不批写——"崩溃前最后 N 行"的
 /// 判据要求打过的行当场就在文件里（无用户态缓冲，写即入内核）。打开或写失败 =
 /// 点名一次后置降级位，之后静默退纯内存。
@@ -160,9 +173,12 @@ pub(super) fn rr3_log_sink_append(line: &str) {
         .unwrap_or_else(|| "?".to_string());
     drop(sink);
     if !RR3_LOG_SINK_DEAD.swap(true, Ordering::Relaxed) {
-        // eprintln 不走 rr3_log：降级说明本身不能再依赖降级中的通道（递归），
-        // 也绝不进 stdout 管道（测试的可观察面是"rrd 说过什么"，不许混入）
-        eprintln!("rrd: 落盘写失败（{path}）: {e} —— 运维留痕退纯内存，本进程不再重试");
+        // 先置降级位再打日志：rr3_log 会再进本函数，DEAD 已置 → 只走 stdout 与
+        // 日志环，不会再碰出错的落盘路径（无递归、无重入锁）。这一行让
+        // `rr3-ctl logs` 与 stdout 都能看到"落盘已死"，不只埋在 stderr。
+        crate::rr3_log(&format!(
+            "日志落盘写失败（{path}）: {e} —— 运维留痕退纯内存，本进程不再重试"
+        ));
     }
 }
 
@@ -197,6 +213,12 @@ mod tests {
         ));
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// 状态读口（续轮十七）：单测进程不定格 sink，必须是 off 而不是 on/dead。
+    #[test]
+    fn sink_state_is_off_until_fixed() {
+        assert_eq!(rr3_log_sink_state(), "off");
     }
 
     /// 单代轮转（B-8，per-unit 面）：超上界 rename 到 `.1`（旧 `.1` 覆盖），未超界

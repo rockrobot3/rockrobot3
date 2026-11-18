@@ -87,6 +87,13 @@ fn ctl_status_lists_registered_modules_and_does_not_register_itself() {
         "denied_publish 计数必须在场: {v}"
     );
     assert!(
+        matches!(
+            v["result"]["log_sink"].as_str(),
+            Some("on" | "off" | "dead")
+        ),
+        "log_sink 落盘状态必须可读（on/off/dead）: {v}"
+    );
+    assert!(
         v["result"]["boot"]
             .as_str()
             .is_some_and(|s| s.contains("启动摘要")),
