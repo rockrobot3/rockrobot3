@@ -246,6 +246,7 @@ fn format_status(envelope: &Value) -> Result<String, String> {
     out.push_str(&rr3_count_note(result, "denied_publish"));
     out.push_str(&rr3_count_note(result, "fan_dropped"));
     out.push_str(&rr3_text_note(result, "log_sink"));
+    out.push_str(&rr3_text_note(result, "ctr_store"));
     out.push_str(&rr3_boot_note(result));
     Ok(out)
 }

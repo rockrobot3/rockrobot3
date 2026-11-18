@@ -233,6 +233,7 @@ fn async_store_writes_snapshot_and_marks_gate() {
         std::time::Instant::now(),
     )
     .expect("落盘线程应起得来");
+    assert_eq!(rr3_ctr_store_state(), "on", "线程起得来即定格 on");
     tx.try_send(()).expect("首次投递应成功");
     crate::rr3_lock(&gate).rr3_mark_inflight();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -252,7 +253,16 @@ fn async_store_writes_snapshot_and_marks_gate() {
         );
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    // 发送端 drop → 通道 EOF → 线程退出（不 join：线程随通道自然收场）
+    // 发送端 drop → 通道 EOF → 线程退出（不 join：线程随通道自然收场）；
+    // 收场守卫 disarm 后置 off——正常关停不得被读成 dead（续轮二十一）。
     drop(tx);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while rr3_ctr_store_state() != "off" {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "通道 EOF 后线程应收场并置 off"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

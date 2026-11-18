@@ -94,6 +94,13 @@ fn ctl_status_lists_registered_modules_and_does_not_register_itself() {
         "log_sink 落盘状态必须可读（on/off/dead）: {v}"
     );
     assert!(
+        matches!(
+            v["result"]["ctr_store"].as_str(),
+            Some("on" | "off" | "dead")
+        ),
+        "ctr_store 计数落盘执行面状态必须可读（on/off/dead）: {v}"
+    );
+    assert!(
         v["result"]["boot"]
             .as_str()
             .is_some_and(|s| s.contains("启动摘要")),

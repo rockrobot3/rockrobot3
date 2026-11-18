@@ -139,6 +139,7 @@ fn rr3_ctl_status(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
         "denied_publish": denied,
         "fan_dropped": fan_dropped,
         "log_sink": crate::rr3_log_sink_state(),
+        "ctr_store": crate::counters::rr3_ctr_store_state(),
         "boot": crate::rr3_boot_summary_get(),
     }))
 }
