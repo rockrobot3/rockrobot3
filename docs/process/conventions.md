@@ -3282,7 +3282,9 @@ CI"往返，本地无法复跑。SKIP 纪律：仅 `RR3_SMOKE_ALLOW_SKIP=1` 时�
   变量展开截断门；② native 腿被 `rust-lld` 判红（gnu 目标须系统链接器）；③ musl
   cross 链路过宿主 `cc`（`collect2: ld returned`）→ 改 gnu 交叉链；④ riscv gnu 的
   std 未声明（`can't find crate for core`）——`rust-toolchain.toml` 的 `targets` 必须
-  与矩阵同批改，正是该文件注释预警过的形态。
+  与矩阵同批改，正是该文件注释预警过的形态（**现状订正**：该文件已于 2026-11-17
+  结构治理删除，工具链改各 workflow 显式钉版 `1.100.0`，矩阵扩容不再需要改共享
+  文件，判据见 [ci-workflows.md](ci-workflows.md)）。
 - **口径**：本轮起本地不承担编译/集成验证（本机算力与环境非标准），`check.sh` 的
   重编译步以 CI `gate` 的回执为权威；本地只做 YAML/脚本语法与 §2 静态门。本表每一腿
   的结论都有远端回执支撑。
