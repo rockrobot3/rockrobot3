@@ -81,47 +81,59 @@ pub(super) fn rr3_spawn_watchdog(
 
 /// 看门狗节拍本体：每 tick 判死一拍，逐条到期交广播/重启/降级。
 ///
-/// 拍漂移观测（续轮十三）：本线程一旦被长动作或锁竞争拖慢，判死时刻就整体后移
-/// （watchdog 语义从"tick 粒度"退化成"tick + 拖慢量"），而 health 的
-/// `since_beat_ms` 只在扫描时刻采样，看不出一条"判死晚了"。这里在每拍起点量
-/// 距上一拍完成的间隔：超过 2×tick 即上一拍净占用已吃满一拍，点名一次（连续
-/// 漂移每 60 拍再点一次，不刷屏）。判死基准仍按实际扫描时刻算，不补跳。
+/// 拍漂移观测（续轮十三，续轮十九改固定栅格）：本线程一旦被长动作或锁竞争
+/// 拖慢，判死时刻就整体后移（watchdog 语义从"tick 粒度"退化成"tick + 拖慢量"），
+/// 而 health 的 `since_beat_ms` 只在扫描时刻采样，看不出一条"判死晚了"。
+/// 现在按**固定栅格**排下一拍（`deadline + tick`），扫描耗时不再逐拍累加进周期；
+/// 单拍扫描超过 tick 时点名一次（连续超时每 60 拍再点，不刷屏）。判死基准仍按
+/// 实际扫描时刻算，不补跳积压的拍——补跳只会把扫描风暴带进来。
 fn rr3_watchdog_loop(
     shared: &Arc<Mutex<RrdRegistry>>,
     t0: Instant,
     tick: Duration,
     sup: &Rr3Supervisor,
 ) {
-    let mut prev_done = Instant::now();
-    let mut late_streak: u32 = 0;
+    let mut deadline = Instant::now() + tick;
+    let mut over_streak: u32 = 0;
     loop {
-        thread::sleep(tick);
+        // 固定栅格：到点即醒；已过点则立即开扫（不补跑中间错过的拍）
+        thread::sleep(deadline.saturating_duration_since(Instant::now()));
         let started = Instant::now();
-        if rr3_tick_late(prev_done, started, tick) {
-            if late_streak % 60 == 0 {
-                let lag = started.saturating_duration_since(prev_done).as_millis();
-                rr3_log(&format!(
-                    "watchdog 拍漂移：上一拍净占用约 {}ms（tick={}ms，本拍起点落后 {lag}ms）——判死按实际扫描时刻，不补跳",
-                    lag.saturating_sub(tick.as_millis()),
-                    tick.as_millis()
-                ));
-            }
-            late_streak = late_streak.saturating_add(1);
-        } else {
-            late_streak = 0;
-        }
         let expiries = rr3_lock(shared).rr3_reg_expire(rr3_now_ms(t0));
         for ex in expiries {
             rr3_expiry_fan(shared, sup, ex);
         }
-        prev_done = Instant::now();
+        let done = Instant::now();
+        if rr3_tick_over(started, done, tick) {
+            if over_streak % 60 == 0 {
+                rr3_log(&format!(
+                    "watchdog 拍超时：本拍扫描耗时 {}ms > tick={}ms——判死按实际扫描时刻，下一拍按固定栅格重排",
+                    done.saturating_duration_since(started).as_millis(),
+                    tick.as_millis()
+                ));
+            }
+            over_streak = over_streak.saturating_add(1);
+        } else {
+            over_streak = 0;
+        }
+        deadline = rr3_next_deadline(deadline, done, tick);
     }
 }
 
-/// 拍漂移判据：本拍起点距上一拍完成超过 2×tick ⇒ 上一拍（扫描 + 广播 + 收尸
-/// 投递）净占用已超过一拍。等于 2×tick 不判（sleep 本身的正常粒度抖动）。
-fn rr3_tick_late(prev_done: Instant, started: Instant, tick: Duration) -> bool {
-    started.saturating_duration_since(prev_done) > tick * 2
+/// 单拍扫描是否超过一个 tick（判死周期被本拍吃穿）。
+fn rr3_tick_over(started: Instant, done: Instant, tick: Duration) -> bool {
+    done.saturating_duration_since(started) > tick
+}
+
+/// 下一拍死线：按固定栅格推进（`deadline + tick`）；本拍收尾已越过下一拍
+/// （扫描超时/被抢占）则从收尾时刻重新起算 `done + tick`——不补跳已错过的拍。
+fn rr3_next_deadline(deadline: Instant, done: Instant, tick: Duration) -> Instant {
+    let next = deadline + tick;
+    if next <= done {
+        done + tick
+    } else {
+        next
+    }
 }
 
 /// 单条到期判死：点名、广播 failed、交重启计划、降级传播。
@@ -226,20 +238,35 @@ pub fn rr3_power_frame(reason: &str, percent: u64, voltage_mv: u64) -> Rr3Frame 
 mod tests {
     use super::*;
 
-    /// 拍漂移判据：>2×tick 才算迟到；恰好 2×tick（sleep 粒度抖动上界）不误报。
+    /// 单拍扫描判据：恰一个 tick 不算超时，超过 1ms 即点名；扫描耗时不含等待。
     #[test]
-    fn tick_late_only_past_two_ticks() {
+    fn tick_over_only_past_one_tick() {
         let tick = Duration::from_millis(200);
         let base = Instant::now();
-        assert!(!rr3_tick_late(base, base + tick, tick), "单拍占用不判迟到");
-        assert!(
-            !rr3_tick_late(base, base + tick * 2, tick),
-            "恰 2×tick 不判（正常抖动上界）"
-        );
-        assert!(rr3_tick_late(
+        assert!(!rr3_tick_over(base, base + tick, tick), "恰 tick 不算超时");
+        assert!(rr3_tick_over(
             base,
-            base + tick * 2 + Duration::from_millis(1),
+            base + tick + Duration::from_millis(1),
             tick
         ));
+    }
+
+    /// 固定栅格：不超时按 deadline 推进（周期不随扫描耗时累加）；已越过下一拍
+    /// 则从收尾时刻重排，不补跑积压的拍。
+    #[test]
+    fn next_deadline_keeps_grid_or_rebases_after_overrun() {
+        let tick = Duration::from_millis(200);
+        let base = Instant::now();
+        let deadline = base + tick;
+        assert_eq!(
+            rr3_next_deadline(deadline, base + tick / 2, tick),
+            deadline + tick,
+            "按栅格推进：扫描耗时 100ms 不再叠加进下一拍"
+        );
+        assert_eq!(
+            rr3_next_deadline(deadline, deadline + tick, tick),
+            deadline + tick + tick,
+            "收尾已越过下一拍：从 done 重排，不补跳"
+        );
     }
 }
