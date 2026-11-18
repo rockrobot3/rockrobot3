@@ -24,6 +24,9 @@ impl RrdRegistry {
             Rr3Phase::Failed => Rr3Beat::Rejected,
             // degraded 只续命不升级（本轮 degraded 尚无 setter，此支为 11b 之后兜底）
             Rr3Phase::Running | Rr3Phase::Degraded => {
+                // 只在续命拍记间隔峰值：首拍（Registered→Running）的间隔是启动
+                // 延迟，boot_ms 已记，混进来会假报实时性长尾。
+                e.beat_peak_ms = e.beat_peak_ms.max(now_ms.saturating_sub(e.last_beat_ms));
                 e.last_beat_ms = now_ms;
                 Rr3Beat::Kept
             }

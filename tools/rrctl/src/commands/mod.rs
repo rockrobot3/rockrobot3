@@ -323,6 +323,7 @@ fn format_health(envelope: &Value) -> Result<String, String> {
                 cell(m, "heartbeat_ms"),
                 cell(m, "watchdog_ms"),
                 cell(m, "since_beat_ms"),
+                cell(m, "beat_peak_ms"),
                 cell(m, "boot_ms"),
                 cell(m, "fan_dropped"),
             ]
@@ -336,6 +337,7 @@ fn format_health(envelope: &Value) -> Result<String, String> {
             "HB_MS",
             "WD_MS",
             "SINCE_BEAT_MS",
+            "PEAK_MS",
             "BOOT_MS",
             "FAN_DROP",
         ],

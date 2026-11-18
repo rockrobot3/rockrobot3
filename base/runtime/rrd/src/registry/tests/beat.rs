@@ -18,6 +18,28 @@ fn heartbeat_promotes_registered_to_running() {
     );
 }
 
+/// 稳态心跳间隔峰值（续轮二十五）：只统计续命拍；首拍间隔是启动延迟不计；
+/// 峰值只升不降（点读 `since_beat_ms` 会错过两次采样之间的抖动）。
+#[test]
+fn beat_peak_tracks_steady_interval_only() {
+    let mut r = RrdRegistry::new(1000);
+    let t = r
+        .rr3_reg_add(&facts("rr3-sima", 200, 1000, "always"), chan().0, 0)
+        .unwrap();
+    assert_eq!(r.rr3_reg_beat(t, 700), Rr3Beat::Promoted);
+    assert_eq!(r.rr3_reg_health(700)[0].beat_peak_ms, 0, "首拍不计峰值");
+    assert_eq!(r.rr3_reg_beat(t, 910), Rr3Beat::Kept);
+    assert_eq!(r.rr3_reg_health(910)[0].beat_peak_ms, 210, "续命拍间隔入峰");
+    assert_eq!(r.rr3_reg_beat(t, 1100), Rr3Beat::Kept);
+    assert_eq!(r.rr3_reg_health(1100)[0].beat_peak_ms, 210, "峰值不回落");
+    assert_eq!(r.rr3_reg_beat(t, 1500), Rr3Beat::Kept);
+    assert_eq!(
+        r.rr3_reg_health(1500)[0].beat_peak_ms,
+        400,
+        "更大间隔刷新峰值"
+    );
+}
+
 /// 到期完全由显式毫秒驱动：窗口内不判死，超窗口判死转 failed，此后喂狗无效
 #[test]
 fn expire_uses_explicit_monotonic_millis() {

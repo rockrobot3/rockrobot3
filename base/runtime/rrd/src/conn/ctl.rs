@@ -160,6 +160,7 @@ fn rr3_ctl_health(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
                     "name": r.name, "task": r.src_task, "phase": r.phase.as_str(),
                     "heartbeat_ms": r.heartbeat_ms, "watchdog_ms": r.watchdog_ms,
                     "since_beat_ms": r.since_beat_ms, "boot_ms": r.boot_ms,
+                    "beat_peak_ms": r.beat_peak_ms,
                     "fan_dropped": r.fan_dropped,
                 })
             })

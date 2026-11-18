@@ -115,14 +115,16 @@ fn health_table_carries_the_three_heartbeat_numbers() {
     let env = json!({"result": {"modules": [
         {"name": "rr3-sima", "task": 2, "phase": "running",
          "heartbeat_ms": 200, "watchdog_ms": 1000, "since_beat_ms": 501,
-         "boot_ms": 811, "fan_dropped": 4}
+         "beat_peak_ms": 640, "boot_ms": 811, "fan_dropped": 4}
     ]}});
     let out = format_health(&env).unwrap();
     let line = out.lines().nth(1).unwrap();
-    for needle in ["rr3-sima", "running", "200", "1000", "501", "811", "4"] {
+    for needle in [
+        "rr3-sima", "running", "200", "1000", "501", "640", "811", "4",
+    ] {
         assert!(line.contains(needle), "健康行缺 {needle}: {line}");
     }
-    for head in ["BOOT_MS", "FAN_DROP"] {
+    for head in ["PEAK_MS", "BOOT_MS", "FAN_DROP"] {
         assert!(out.contains(head), "健康表头缺 {head}: {out}");
     }
 }
