@@ -3883,6 +3883,14 @@ registry 锁内、watchdog 判死也逐行落盘——锁内系统调用越少�
 文件首行即轮转）；`rr3_log_rotate` 保留给 supervisor 的 per-unit 文件。判据——
 行内系统调用 4→1；单测钉按字节预算轮转与既有大小计入；重启回填 e2e 同批复核。
 
+**2026-11-18 rr3-ctl 补只读子命令（续轮十五）**：事实——`rr3.ctl.wiring` /
+`rr3.ctl.contracts` 早已实装，但 rr3-ctl 只有六子命令，运维面读不到装配快照与
+契约审计（功能欠账）。处置——命令面 6→8，wiring 六段表、contracts 三段表；空段
+"（无）"、`available:false` 报不可得、判果 `ok/FAIL/?`；渲染臂拆
+`commands/surface.rs`（mod 398 / surface 305 行，原单文件 697 行触 600 门）。
+判据——rr3-ctl 单测 21→25（wiring 渲染/不可得/contracts 渲染/fake-rrd 往返），
+clippy 干净；文档门抓出 `0.0.5 方案` 指向旧 `commands.rs` 的断链并同批修复。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
