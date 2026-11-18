@@ -16,7 +16,8 @@ CLI 与 ctl 白名单逐一同名对齐，`domain.set` 写口按安全链评审�
 
 连接语义（ADR-0010 裁定 2/3）：每个子命令是一次**一次性控制连接**——同一套接字、
 同一 ADR-0006 线格式，但**不注册、不进在册表、不受 watchdog 管**，一问一答即断。
-`status` 列在册模块（NAME/TASK/PHASE + 拒发布与广播丢帧计数）、`health` 加心跳与
+`status` 列在册模块（NAME/TASK/PHASE + 拒发布与广播丢帧计数 + 落盘状态
+`log_sink` + 装配摘要 `boot`）、`health` 加心跳与
 冷启动列（间隔 / 看门狗超时 / 距上次心跳 / boot_ms / 慢消费者丢帧）、`logs` 取 rrd
 内存日志环（512 行；落盘与重启回填见 rrd-cli.md）、`counters` 读运维计数全表
 （health 回答"活没活"，counters 回答"机器慢先看数字"：`模块名/键` 按模块前缀分组
