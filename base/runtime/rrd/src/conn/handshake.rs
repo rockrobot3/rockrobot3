@@ -10,6 +10,8 @@ use std::os::unix::net::UnixStream;
 use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Mutex};
 
+use rr_ipc::{rr3_frame_read_cap, RR3_FRAMING_PLEN_CAP_DEFAULT};
+
 use super::*;
 
 /// 注册握手的唯一入口：读首帧 → 过门 → 入册，失败一律回错误帧并回原因。
