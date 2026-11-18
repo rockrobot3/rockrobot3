@@ -50,7 +50,16 @@ with 入参），不依赖 runner 镜像预装版本；交叉 job 同时显式�
 
 本文件的**结构判据**由 [`tools/ci/workflows_audit.py`](../../tools/ci/workflows_audit.py)
 在 gate `scripts` job 执法（工具链钉版 / 缓存参数 / 触发过滤 / 作业上限 / needs 图 /
-并发语义），政策变更须同批改脚本与自检夹具。
+并发语义 / 权限面 / 失败显形），政策变更须同批改脚本与自检夹具。
+
+**权限与失败显形（2026-11-18 续轮十六）**：
+
+- 每个 workflow 必须有顶层 `permissions:`，至少 `contents: read`，不得
+  `write-all`；publish 需要 `packages: write` 的按需声明，job 级额外授权
+  （如 release 写）写在 job 上，不放大到整个 workflow。
+- 任何 `continue-on-error` 非 `false` 即红：漂红巡检与门禁都读退出码，掩码
+  等于把治理面掏空；需要"允许失败"的探针应显式落 `|| true` 并自行点名，不走
+  `continue-on-error`。
 
 **门禁的确定性执行入口始终是本地 `bash tools/ci/check.sh`**——合入前必须
 本地跑绿，不依赖远端流水线。
