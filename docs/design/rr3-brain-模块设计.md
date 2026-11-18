@@ -1,122 +1,144 @@
-# rr3-brain 模块设计（框架 v1.3）
+# rr3-brain 模块设计（Rust 实现）
 
-> **文档状态（2026-11-18）**：本篇是 ADR-0016 迁移**前**的 Python 实现设计，
-> 保留作历史依据（字段口径与沿革仍有效）；当前实现是 Rust
-> （`modules/rr3-brain/src/`，`module.toml` 的 `lang = "rust"`），结构与行为以
-> 代码与 `contracts/` 为真值。整篇按 Rust 重写列在 0.0.8 续轮计划（文档旧结构
-> 引用巡检的后续项）。
+> **真值声明（2026-11-18 重写）**：本篇按 ADR-0016 迁移后的 Rust 实现重写，代码是唯一
+> 真值（`modules/rr3-brain/`，`module.toml` 的 `lang = "rust"`，entry 与其余模块同形）。
+> 迁移前的 Python 工单与对表原文保留在 §11 附录（编号沿用旧文，**不是**本文 §0–§10 的续号），
+> 只作追溯：已结/未结状态以该附录最后一次对表为准。
 
 ## §0 单元身份证
 
 | 项 | 值 | 来源 |
 |---|---|---|
-| 执行单元 | 独立进程，`type = brain`、`lang = python`（装机 shim 语义，ADR-0014）；`start_priority = 80`、`mem_limit_mb = 256`、`restart_policy = "on-failure"` | `module.toml` |
-| 格 | `cognition.dialog` · `cognition.asr` · `cognition.llm` · `cognition.tts` | `contracts/slots.toml` |
-| 件 | 四件为**两件式 manifest**（`atom.toml` + `assemble.toml`），机制本体 `.py` 原位；**`intent.py` / `bus.py` 不是件**，属组合件机制壳 | `atoms/*/`、`rr3_brain/` |
-| 主题 | 发布 `intent/result` + `rr3-brain/audio/tts_pcm`（MC-1 下行载荷流，2026-10-13 申报随实现补齐）；订阅 `sense/audio/pcm` + `sense/audio/vad_start`（B-1 已申报）；RPC `llm/completion` | `module.toml` 与 `composite.py`（`TOPIC_PCM`/`TOPIC_VAD`/`TOPIC_TTS_PCM`） |
-| 句柄 | 无能力面句柄（云 HTTP；**配置读自 `config.toml` 的 `[rr3-brain.cloud]`，只有 API key 走 env**） | `cloud/*.py`、`composite.py` |
-| 参数 | `base_url`、`asr_model`、`llm_model`、`tts_model`、`timeout_s=20`、`max_utterance_ms=8000` **有读者**；`silence_tail_ms=700`、`max_turn_chars=800` **在册无读者**（B-2/B-8）；另有一个不在 config 里的硬编码上界 `RR3_CALL_TIMEOUT_S = 30`（点名 interact 的等待）**2026-10-20 对表（批N4 件六一笔 B-13①）：该常量已退役**——总线 RPC 超时数据化为 `[rr3-brain.bus].call_timeout_s/connect_timeout_s`（缺键回落 `RR3_BUS_CALL_TIMEOUT_DEFAULT_S`；`connect_timeout_s` 后随批N32 迁移退役删除，见 §4 B-13① 注记），见 §13 `composite.py` 行与 B-13 对表 | `config.toml`、`composite.py` |
-| 健康 | 心跳 2000 / 看门狗 10000 ms；`[depends].required = [bus.subscribe, bus.rpc, net.online]`，`optional = [power.battery]` | `module.toml` |
+| 执行单元 | 独立进程，`type = brain`、`lang = rust`、`entry = rr3-brain`（与其余模块同形） | `module.toml` |
+| 格 | `cognition.dialog` · `cognition.asr` · `cognition.llm` · `cognition.tts` | `[provides].capabilities` |
+| 件 | 四原子件 `dialog` / `asr` / `llm` / `tts`，每件五件套（`atom.toml` + `assemble.toml` + `mech.rs` + 件入口 + `private.rs`）；`bus` 是组合件机制壳，不是件 | `atoms/*/`、`composite.toml` |
+| 主题 | 发布 `rr3-brain/intent/result`、`rr3-brain/audio/tts_pcm`；订阅 `rr3-sense/audio/pcm`、`rr3-sense/audio/vad_start` | `[events]` |
+| RPC | exposes 六条：`llm/completion`、`ops/list`、`ops/set`、`model/list`、`model/set`、`model/test`（全部带 `rr3-brain/` 前缀） | `[rpc].exposes` |
+| 句柄 | 无能力面句柄（`handles = []`、`ops = []`、`no_injection = true`） | `composite.toml` |
+| 依赖 | required `bus.subscribe` / `bus.rpc` / `net.online`；optional `power.battery` | `[depends]` |
+| 资源 | `restart_policy = "on-failure"`、`mem_limit_mb = 256`、`start_priority = 80` | `[resources]` |
+| 健康 | 心跳 2000 ms / 看门狗 10000 ms | `[health]` |
 
-## §1 件契约表（Python 面按模块边界写，不虚构 Rust 签名）
+## §1 件与装配
 
-| 件 / 成分 | 公开函数（现状） | 输入 → 输出 | 状态 | 失败语义 |
-|---|---|---|---|---|
-| dialog | `Rr3Dialog.rr3_feed_pcm(body)` / `rr3_feed_vad(body)`（旧版写的 `on_pcm`/`on_vad` 不存在） | pcm 样点与 vad 边沿 → 轮次边界（起轮 / 封轮） | `_active`、`_started_ms`（`time.monotonic()*1000`） | 无异常上抛（吞帧继续） |
-| asr | `cloud/asr.py` HTTP `v1/audio/transcriptions`（multipart，`model` 字段） | 整段 WAV → 文本 | 无 | 超时/非 2xx → 记错、本轮降级 |
-| llm | `cloud/llm.py` HTTP `v1/chat/completions`（`SYSTEM_PROMPT` + 历史 `LLM_HISTORY_ROUNDS` + `LLM_MAX_TOKENS=150`） | 文本 → 回复 | 多轮历史 | 同上 |
-| tts | `cloud/tts.py` HTTP `v1/audio/speech` → PCM | 文本 → PCM | 无 | 同上 |
-| intent（壳） | `rr3_extract_actions(...)` + `_SERVO_ANGLE_LEFT/CENTER/RIGHT = 45/90/135` + 关键词表 → `actions[]` | **用户原话（user_text）**→ 意图载荷；`composite.py` 调的是 `rr3_extract_actions(user_text)`，且 `contracts/events/brain-intent-result.schema.json` 与 `intent.py` 的 docstring 都明写**不得拿回复文本匹配**（旧版"回复文本 →"是反的） | 无 | 不匹配 → 无动作 |
-| bus（壳） | 注册 / 心跳 / poll / call | — | task | 传输性失败 → 进程退出交监督 |
+四件在 `src/main.rs` 以 `#[path]` 原位挂载（执行单元进程内函数调用，`rr3-sense` 同形；
+`composite.toml` 的 `[assemble].atoms` 与依赖闭包门 ⑧-b 同源）：
 
-**目标**：Rust 化随 ADR-0016；在那之前本单元**不适用**件级两腿对拍门与依赖闭包门（登记豁免，不是达标）。
+| 件 | 机制面 | 职责 |
+|---|---|---|
+| `dialog` | `atoms/dialog/mech.rs` | 轮次状态机：pcm 预滚、onset 起轮、offset 判停、`max_utterance_ms` 封轮 |
+| `asr` | `atoms/asr/mech.rs` | 整段 WAV → 文本（云 HTTP，OpenAI 兼容 multipart） |
+| `llm` | `atoms/llm/mech.rs` | system 恒守首位 + 最近 4 轮历史 → 回复；对外只暴露历史预算常量 |
+| `tts` | `atoms/tts/mech.rs` | 文本 → s16le/16k/mono PCM（云 HTTP 或宿主兜底后端） |
+
+装配面不注入句柄与参数槽（`no_injection = true`）：模型行、超时与唤醒参数全部走
+`config.toml` 与 RPC 面，装配层只负责把四件串成一条流水。
 
 ## §2 状态机（dialog 轮次）
 
-不变式（按代码实况，含两条"设计有、代码无"的缺口）：`Onset` 边沿起轮；**判停不靠本单元**——`dialog.py`
-只认 sense 发来的 `Offset` 边沿，它自己的 `silence_tail_ms` 键**没有任何读者**（B-2 因此从"归一重复声明"
-改判为"删除死参数"）；超过 `max_utterance_ms = 8000` 由 `rr3_utt_expired` 强制封轮；
-一轮至多一次 asr→llm→tts 流水；**"链路 down 不起新轮"今天只是设计主张**——`SUBSCRIBES` 列了
-`rr3-connect/net/link`，但 `composite.py` 的事件分支只处理 pcm/vad，链路状态既没被记录也没被问过（B-7）。
-非法输入收敛方向：云面失败 → 本轮回"无意图"（不发假 intent），而不是重试排队。
+- **起轮**：`vad_start` 的 onset 边沿；onset 前的 pcm 进预滚缓冲（起轮时回放，避免吞字）。
+- **判停**：`vad_start` 的 offset 边沿（判停归 sense，本单元不自判静音尾）。
+- **封轮兜底**：`on_tick` 的 `utterance_expired` 按 `max_utterance_ms = 8000` 强制封轮
+  （两路封轮共用同一个 `rr3_finish_turn`，ADR-0016 增补裁定 2）。
+- **一轮至多一次流水**：ASR → LLM → TTS 串行；云面失败即弃轮，不排队重放。
+- **唤醒门**（`[rr3-brain.wake]`，可选段，缺段 = 关闭且行为与旧版逐点等价）：ASR 文本先过
+  `rr3_wake_decide`——短语表精确剥前缀；未中再走"你好"兜底（"你好"后 ≤2 字视为名字/误识
+  尾巴 → 回 Ack，更长 → 去前缀进 LLM）；`followup_ms` 窗内免唤醒，窗外未命中静默丢弃
+  （不 LLM、不 TTS）。Ack 的 PCM 在装配段预热缓存，命中即直发不重复合成。
 
 ## §3 注入面
 
 | 面 | 内容 |
 |---|---|
-| `handles` | 无能力面句柄（HTTP + 总线）；四件 `assemble.toml` 只报 ops（批M MC-10 L-5，2026-10-13 已结） |
-| `ops`（策略，落位正确） | 模型名与 `base_url`（**读自 `config.toml` 的 `[rr3-brain.cloud]`**，不是 env；只有 `RR3_CLOUD_API_KEY` 走 env——通用键名，MC-8② 已结）、`SYSTEM_PROMPT`、`LLM_MAX_TOKENS=150`、`LLM_HISTORY_ROUNDS=4`、`timeout_s`、`max_utterance_ms`、舵机角 45/90/135、关键词表；⚠️ `max_turn_chars` 在 `config.toml` 里在册但**无读者**（B-8：实装或删除）；⚠️ `silence_tail_ms` 同为无读者的死参数（B-2） |
-| 契约面（本册要改的） | `subscribes` 必须**只增**补齐为实然集（`sense/audio/pcm`、`sense/audio/vad_start`），`interact/asr/text` 走 retired |
-
-**为什么策略在这里是对的**：ADR-0019 裁定 5 的 L4 就是 brain；把这些外移反而违反分层。本单元唯一
-不合规的是**申报面**，不是策略内容。
+| `handles` | 无（云 HTTP 与总线都不是能力面句柄） |
+| `ops` | 空（`no_injection = true`）；模型行与槽值经 `model/*`、`ops/*` RPC 面读写 |
+| 凭据 | `api_key_ref` 双源：`env:<名>` 读环境变量，裸名读面板维护的仓外 secrets 文件（0600）；密钥永不进 `config.toml`、不进应答（`ops/list` 白名单组体） |
 
 ## §4 主循环与时序预算
 
-单循环：`poll` 收帧 → pcm/vad 喂 dialog → 起轮后**串行**跑 asr→llm→tts → `rr3_finish_turn` 把 TTS 产出的 PCM 按 20ms/640B 分帧发布 `rr3-brain/audio/tts_pcm`（seq 模块级单调不随轮次复位、`ms` 由样点数导出，MC-1）→ 调 `interact/tts/text`（点名，args 携 `text` + `pcm_bytes` 字节总数作收流完整性判据）→ 发 `intent/result`。真实量：云 `timeout_s = 20`/段，三段 = 60 s，**再加一段同轮内的点名等待**
-`RR3_CALL_TIMEOUT_S = 30`（调 `interact/tts/text`）→ 一轮最坏 **≈ 90 s**（旧版写 60 s 漏了这段）
-**2026-10-20 对表（批N4 件六一笔 B-13①）：该等待数据化为 `[rr3-brain.bus].call_timeout_s`
-（缺省 30，回落常量改名 `RR3_BUS_CALL_TIMEOUT_DEFAULT_S`；`connect_timeout_s=5` 新增）——
-一轮最坏 ≈ 90 s 的预算形状不变，读数从 config 取**；
-**2026-10-24 对表（批N32 件二，增补评审裁定 4）：`connect_timeout_s` 随迁移退役删除**——
-Rust 迁移件遵 rr3mod bootstrap 固定序，注册帧等待上界由 rr-bus-api 内部承载，键无消费点
-即死键（批I B-2 先例）；`call_timeout_s` 保留（`BusHandle::call` timeout 显式实参消费点），
-而 `max_utterance_ms = 8000` 只管"起轮到封轮"的采集段，管不到云段——两者关系仍无人定义（工单 B-3）；
-心跳 2000 ms 独立线程，故"卡在云上 90 s"期间心跳仍续 →
-面板/健康看不出异常（同全系统"活着但不动"类别）。
+`rr3mod` 的 `Dispatcher` 回调即主循环（单线程）：
 
-| 量 | 名义 | 实测 |
-|---|---|---|
-| 起轮 → 判停 | 700 ms 静音尾（+20 ms 拍） | 无 |
-| 判停 → intent 落执行 | asr RTT + llm RTT + tts RTT + 点名 | 无（mock 云不代表时延） |
-| 饿死可见性 | 需要 counters（本轮起轮数、云失败数） | 未做 |
+- `on_event` 两臂：`pcm` → dialog 积累/预滚；`vad_start` → 起轮/判停触发整轮；
+- `on_tick` 一臂：`utterance_expired` 时长判停（与 offset 臂共用 finish）；
+- `on_rpc` 六臂：`llm/completion` 真调；`ops/list` 快照；`ops/set` 写槽（live 生效不落盘，
+  应答 `persisted:false`）；`model/list|set|test` 模型行 CRUD（set 落盘 `.bak` + 原子写并重建
+  客户端，test 按名探测一次）。
+
+一轮的固定次序：ASR → LLM → TTS → 按 20 ms/640 B 分帧发布 `rr3-brain/audio/tts_pcm`
+（`seq` 模块级单调、`ms` 由样点数导出）→ 点名 `rr3-interact/tts/text`（args 携 `text` 与
+`pcm_bytes` 作收流完整性唯一判据）→ 发布 `rr3-brain/intent/result`。
+
+预算：`[rr3-brain.cloud].timeout_s = 8`（429/5xx/传输层瞬时失败最多重试一次，其余不重试）；
+点名等待 `[rr3-brain.bus].call_timeout_s = 30`（缺键回落 30）。一轮最坏 ≈ 3×8 + 30 ≈ 54 s；
+三段各命中一次瞬时重试再加 ≤24 s（≈78 s）。`max_utterance_ms` 只管采集段、管不到云段——两者的关系仍是未决工单
+（见附录 B-3）。心跳 2000 ms 由骨架独立线程续命，故"卡在云上"期间健康面看不出异常；
+轮次与失败计数（§8）是这类"活着但不动"的唯一可读证据。
 
 ## §5 主题面契约
 
-| 主题 | kind | 触发 | 载荷 | 申报与实现 |
-|---|---|---|---|---|
-| `audio/pcm` | stream | 消费 | `seq, pcm_b64, ms` | **已申报**（B-1 只增补齐） |
-| `audio/vad_start` | event | 消费 | `seq, edge, doa?` | **已申报**（B-1） |
-| `net/link` | event | **申报消费、代码无处理**（`SUBSCRIBES` 里有，事件分支里没有） | up/ssid/rssi_dbm/mode | **申报超前**（B-7） |
-| `asr/text` | event | 申报消费 | 在册 | 生产侧不存在 → retired |
-| `intent/result` | event | 发布 | `actions[]: {topic,args}` | 一致 |
-| `rr3-brain/audio/tts_pcm`（发） | event stream | 发布（MC-1，每轮 TTS 完成后） | `{seq, format:"s16le", rate:16000, channels:1, ms, pcm_b64}`，20ms/640B 分帧，seq 模块级单调 | 申报随实现落地（2026-10-13）；逐字段复用上行 `rr3-sense/audio/pcm` 形状（MCP-1） |
-| `llm/completion` | RPC | 点名 | 文本 → 回复 | 一致 |
-| `interact/tts/text` | RPC（调用方） | 点名 | `{text, pcm_bytes}`（MC-1：字节总数 = 收流完整性唯一判据） | 不占订阅面（点名形状） |
+| 主题 | kind | 方向 | 载荷 / 语义 |
+|---|---|---|---|
+| `rr3-sense/audio/pcm` | stream | 消费 | `seq, pcm_b64, ms`（s16le/16k/mono） |
+| `rr3-sense/audio/vad_start` | event | 消费 | `seq, edge, doa?`（onset / offset 判停） |
+| `rr3-brain/intent/result` | event | 发布 | `actions[]: {topic, args}`；topic 只许 `rr3-act/relay/set`、`rr3-act/servo/command` |
+| `rr3-brain/audio/tts_pcm` | stream | 发布 | `{seq, format:"s16le", rate:16000, channels:1, ms, pcm_b64}`，20 ms/640 B 分帧 |
+| `rr3-brain/llm/completion` | RPC | 暴露 | 文本 → 回复（mock 档回显，real 档带历史真调） |
+| `rr3-brain/ops/list` · `ops/set` | RPC | 暴露 | 槽值快照 / 写槽（白名单六槽，密钥不进应答） |
+| `rr3-brain/model/list` · `set` · `test` | RPC | 暴露 | 模型行 CRUD 与单次探测（ADR-0023） |
+
+`net/link` 与 `asr/text` 的申报已在 C14 评审撤下（历史见附录 B-7/B-2）。
 
 ## §6 降级矩阵
 
-| 格 | 缺格 / 不可用 | 设计行为 |
-|---|---|---|
-| `cognition.asr` | 云不可达 | 退化为"文本输入"（`llm/completion` 点名面仍在），**须显式标注**不得静默 |
-| `cognition.llm` | 云不可达 | 本轮无回复、无动作；本地链（sense/act/power）不受影响 |
-| `cognition.tts` | 无音频回放形态 | PCM 产出丢弃，**intent 仍要发**（意图与声音解耦） |
-| `cognition.dialog` | 缺 pcm/vad 上游 | 不起轮；不得排队重放旧轮 |
-| 四格全缺（无网形态） | 常见裁剪 | 期望：**其余单元全本地闭环照常**（这是 §7.3 兜底设计的验收点） |
-| mock 云（R4） | 测试注入点 | **不是在位证据**，契约面不得据此声明 cognition 可用 |
+| 场景 | 设计行为 |
+|---|---|
+| 云不可达 / 非 2xx | 计 `asr_fail`/`llm_fail`/`tts_fail` 并弃轮；不排队、不发假 intent |
+| TTS 失败 | PCM 无产出，但 `intent/result` 照发（意图与声音解耦） |
+| 唤醒门关闭 | 与迁移前逐点等价：每轮都进对话 |
+| 唤醒窗外语义 | 未命中静默丢弃（用户听不到回声） |
+| `RR3_BRAIN_CLOUD=mock` | 测试注入位，**不是在位证据**；契约面不得据此声明认知可用 |
+| 无网形态（四格全缺） | 其余单元本地闭环照常（认知层是"有 OS/云才叠加"的那一层） |
 
 ## §7 安全核接入
 
-无（且**不得有**）：兜底链不能依赖云端在场。本单元原本主张的"链路 down 时不起新轮"今天**没有实现**
-（B-7），所以它连节流都算不上——现状是无链路状态判断，照样起轮、照样把三段云请求挂到超时。
-补上之后它的定位仍是节流，不是安全核。
+无，且不得有：兜底链不能依赖云端在场。唤醒门只做节流（决定"这一轮进不进对话"），
+不是安全核；任何安全动作都不得以 ASR/LLM 结果为前提。
 
-## §8 两腿对拍用例设计（Python 面的等价形式）
+## §8 可观测面
 
-| 面 | 输入序列 | 期望值来源 | 边界集 | 现状 |
-|---|---|---|---|---|
-| dialog 轮次 | vad/pcm 时间戳序列（起音→静音→超时） | 裁定语义（**判停归 sense**、8000 ms 封轮、一轮一流水） | 封轮 / 尾长差 1 拍 / 连续两轮 / 云 RTT 与封轮的关系 | ⚠️ 实况打折：`tests/test_dialog.py` 有 7 条，但封轮那条把 `max_utterance_ms` **设成 0** 来触发（没有测 8000 这个名义边界）；无尾长差 1 拍用例；"连续两轮"只测了缓冲重置；云 RTT 与封轮的关系**零覆盖**（B-3）。且这些用例**在门禁步序外**——`check.sh` 不含 Python，`.github/workflows/ci.yml` 虽有 `brain-unittest` 双矩阵 job，远端首跑回执待取（R30：atomgit 无流水线功能，CI 改走 GitHub Actions，GitHub 仓库待建） |
-| intent 映射 | 关键词集 + 空文本 | 舵机角常量表（45/90/135） | 不匹配 / 多关键词 | 有 |
-| 载荷两腿 | `intent/result` 构造 | `contracts/topics.toml` + act 侧执行器对 `actions[]` 的接受形状 | 越权 topic（act 必须拒） | ⚠️ 跨单元断言缺 |
+- 计数（心跳上报，rrd 聚合后 `ctl.status`/`ctl.health` 可读）：`rounds_replied`（完成回复的
+  轮数）、`rounds_audible`（真正点名播放成功的轮数）、`asr_ok`、`asr_fail`、`llm_fail`、
+  `tts_fail`——"完成一轮"与"用户听见"分两本账（附录 B-16 ①）。
+- 轮次日志一行：`对话轮完成: trace=… user='…' reply='…' asr_ms=… llm_ms=… tts_cost_ms=…
+  ready_ms=… tts_pcm_ms=… actions=…`——卡住时先看这一行缺哪一段。
 
 ## §9 不变量与红线断言
 
-- 断言：`intent/result` 的 `actions[]` 只含**已申报 exposes** 的主题；越权由 act 拒（两道归属门），本单元不得"猜"可执行面。
-- 断言：云凭据不落盘、不进仓。
-- 断言：一轮至多一次流水，且 `max_utterance_ms` 到点必封轮（防挂死轮次）。
-- 断言：`type = brain` / `lang = python` 的装机 shim 语义零改动。
+- `intent/result` 的 `actions[]` 只含本单元自限的两个主题；执行侧 exposes 门是第二道归属门。
+- 云凭据不落盘、不进仓、不进应答；secrets 文件在仓外且 0600。
+- 一轮至多一次流水；offset 与 `utterance_expired` 两路封轮共用同一 finish（不重入）。
+- 唤醒门关闭时行为与迁移前逐点等价（配置缺段不得改变现有语义）。
 
-## §10 改造工单
+## §10 跨档动作（host / rtos / bare）
+
+单元级判定先行：brain 属主承载层（ADR-0018 裁定 3/修订 1）。三档里 brain 的位置：
+
+| 档 | brain 在哪 | 跨档动作 | 理由与代价 |
+|---|---|---|---|
+| host 全承载 | 本机进程（现状） | 不适用 | 认知四格跑 std Rust |
+| rtos 轻承载（ESP32 类经桥） | **仍在 host 侧**，板只经桥上灌 pcm/vad、下领 intent | 板侧无 brain 件；动作全在桥语义面 | 云 RTT 进闭环（§4 的一轮预算就是这个代价） |
+| bare 无承载 | 不存在 | 无；不起对话轮是设计事实，不是降级 | 描述符里不得挂 `cognition.*` 格 |
+
+`dialog` 是唯一可能跨档的认知件（只吃时间戳与边沿，纯 `core` 可达）；`asr`/`llm`/`tts`
+绑云，依赖闭包里的 HTTP/TLS 是主承载层专属，rtos/bare 档按发布权判据**不启用**而非
+"改造后可用"。
+
+## §11 附录：Python 时代工单与对表（历史，迁移前口径）
+
+> 以下小节编号（§10–§14）沿用迁移前原文，**不是**本文 §0–§10 的续号；内容逐字保留，
+> 只作追溯。代码已迁移到 Rust，凡与本文正文冲突处一律以正文与代码为准。
+
+### §10 改造工单
 
 | # | 动作 | 归属 | 前置 |
 |---|---|---|---|
@@ -137,14 +159,14 @@ Rust 迁移件遵 rr3mod bootstrap 固定序，注册帧等待上界由 rr-bus-a
 | B-15 | **证据号命名空间不存在，于是 D11 的界面门不可执行**（2026-10-15 证伪审查，全案 §18 F-24/§12 D11）：D11 裁"`armed=true` 不许面板单步置位——必须引用一条**真板对拍证据的编号**"，这条把"无真板对拍不接闸"从口头规矩做成界面门，方向是对的；但实测 `docs/evidence/` 与 `evidence/` **都不存在**，仓内也没有任何证据编号规则（`conventions.md` 只有"每行带证据路径"的散文，`contracts/golden/` 是 IPC 字节向量、不是板上对拍记录）。**没有可引用的编号，这条门就只能靠人肉判**——这正是本册反复批评的"承诺有名字、没有身体"在流程面的复现。本单三件事：① 立命名空间 `docs/evidence/<形态>/<编号>.md`（编号规则、必填字段：形态 / 格或角色 / 观测方法 / 结论 / 日期 / 取证人；**一次对拍一份文件，编号不复用**）；② 面板写面与装载期都**校验所引编号存在且形态匹配**，引用不存在的号即拒（fail-closed，与"缺键即红"同一列语义）；③ `armed=true` 之外的两个安全写（`severe_mv`、`current_ceil_ma`）同样要求引用证据号，**不得只带二次确认**。**归 brain 册的理由**：本册 §13 已立"mock 不得作为在位证据"（G-4）——"什么叫一条证据"是这个问题的正面答案，六册共引这一处命名空间。**注意不做的事**：本单不代替验证窗产出任何板上结论，它只规定"结论长什么样、住哪儿、怎么被引用" | **批N4 的前置**（命名空间与校验规则先行；实际证据随 0.0.6/0.0.7 与批N2 对拍产） | D11；G-4；B-13；全案 §12 D11/§18 F-24 |
 | B-16 | **一轮对话"完成"与"用户听见"解耦，且云失败有两种结局**（2026-10-15 第六轮追流核实，全案 §20.6，索引 **L-27**）：① `composite.py:265-277` 里播放点名失败被 `except RuntimeError` 接住**只 print 一行**，随后照常 `publish intent` → `rr3_record` → **`chat_rounds + 1`**（`:288-291`）⇒ 计数器意义上的"完成一轮"与是否出声**完全无关**，而这本是最该被产线信任的一格数。裁定：**不许用一个词盖两件事**——要么点名失败即弃轮（不计 `chat_rounds`），要么把计数拆成 `rounds_replied` / `rounds_audible` 两本账，面板与 `/api/status` 同时展示。② 云调用异常**分两类两种结局**：`RuntimeError`（HTTP 非 200、缺 `text`）→ 计 `asr_fail`/`llm_fail`/`tts_fail` + 弃轮（`:238-241`）；而 `URLError`／超时／`asr.py:56` 那个**在 try 之外**的 `json.loads`（`JSONDecodeError`）不是 `RuntimeError` ⇒ **逃逸到进程退出**。同一类故障（云不可用）一半静默弃轮、一半掀进程，不可接受。修法：云面异常收敛到一个类型 + 一个处置点，`json.loads` 进护栏；结局只有两种且**都要计数**。③ 密钥缺失今天"当场可见但只折日志"（`cloud/__init__.py:48-53` → `asr_fail` + 一行 print，**不回错给对话方、无告警面**），且 `RR3_BRAIN_CLOUD=mock` 使 `*_fail` 与缺 key 分支**永不可达**（3 处代码分支 + 3 处 spawn）⇒ **sim 绿的语音链没有覆盖过任何一条云失败路径**，须写进可达终点表而不是当成就。**同族既有项**：D7/B-13 的 `RR3_CALL_TIMEOUT_S` 仍住码内（30 s），封轮上限与云预算解耦那条不变 **2026-10-20 对表（批N4 件六一笔，①② 结清）**：① 计数拆账兑现——`chat_rounds` 退役、改 `rounds_replied`/`rounds_audible` 两本账；② 云面异常收敛一个处置点＋`json.loads` 进护栏；③ 密钥缺失可见性随 mock 档拆分推进（`RR3_BRAIN_CLOUD=real` 已上线）。同族项：`RR3_CALL_TIMEOUT_S` 已随 B-13① 数据化退役 | **①② 已结（批N4 件六一笔）**；③ 留敞口 | B-9；B-13；B-15；I-21；全案 §20.6/§20.7；索引 L-27 |
 
-## §11 待证与敞口
+### §11 待证与敞口
 
 1. 真云从未联调；端到端时延无实测；`SYSTEM_PROMPT`/`LLM_MAX_TOKENS` 是 legacy 移植值（来源在案）。
 2. 本册 §8 的用例存在性依据是 conventions 登记的 brain-unittest 双矩阵 job —— **该 job 在远端从未执行过**，
    所以"有测试"与"测试跑过"是两件事（与全仓敞口第 1 条同源）。
 3. `intent.py` / `bus.py` 未登件（本册 §0 已写明它们是壳）——避免被误读为"漏登记的五件套"。
 
-## §12 跨档动作（host / rtos / bare 逐件）
+### §12 跨档动作（host / rtos / bare 逐件）
 
 单元级判定先行：**brain 属于主承载层**（ADR-0018 裁定 3/修订 1——认知与云是"有 OS 才叠加"的那一层）。
 所以本册的跨档表不写"怎么把 Python 塞进 MCU"，而写**三档里 brain 的位置怎么摆**：
@@ -159,7 +181,7 @@ Rust 迁移件遵 rr3mod bootstrap 固定序，注册帧等待上界由 rr-bus-a
 纯 `core` 可达），`asr`/`llm`/`tts` 三件永远绑云 ⇒ 它们的依赖闭包里 `reqwest`/TLS 是**主承载层专属**，
 按 ADR-0019 修订 4 的发布权判据，这三件在 rtos/bare 档直接不启用，而不是"改造后可用"。
 
-## §13 策略字面量清单
+### §13 策略字面量清单
 
 | 文件 : 符号 | 字面量 | 语义 | 读者 | 去处 |
 |---|---|---|---|---|
@@ -174,7 +196,7 @@ Rust 迁移件遵 rr3mod bootstrap 固定序，注册帧等待上界由 rr-bus-a
 | `session/测试面` | `RR3_BRAIN_CLOUD=mock`、`tests/` 内假响应 | 注入点 | 有 | ✅ 正确（mock 在测试注入位）；§6 已钉"mock 不是在位证据" |
 | 硬编码在件里的形态参数 | 心跳 2000 ms 拍点、`poll` 超时等 | 机制参数 | 有 | 与五册同纪律：进 ops/config，别停在 `.py` 常量 |
 
-## §14 基线对表（代码 `22783ea`，2026-10-10）
+### §14 基线对表（代码 `22783ea`，2026-10-10）
 
 - **契约面（B-1 / R-3）已结**：`rr3-brain/module.toml` 现 `subscribes = ["rr3-sense/audio/pcm",
   "rr3-sense/audio/vad_start"]`、`publishes = ["rr3-brain/intent/result"]`——申报面第一次等于实现面。
@@ -189,7 +211,7 @@ Rust 迁移件遵 rr3mod bootstrap 固定序，注册帧等待上界由 rr-bus-a
 - **§12 的三档表不受影响**：brain 属主承载层，rtos/bare 档不启用认知格——`esp32-mini.toml` 的
   `[enabled_slots]` 不列 `cognition.*`，正是本册 §12 那行的实现证据。
 
-### §14.1 增量对表（2026-10-12，代码基线 `78625ae`；全仓总表见 [索引 §13.4](模块设计索引.md)）
+#### §14.1 增量对表（2026-10-12，代码基线 `78625ae`；全仓总表见 [索引 §13.4](模块设计索引.md)）
 
 | 项 | 复验实况（符号） | 判定 / 新落点 |
 |---|---|---|
