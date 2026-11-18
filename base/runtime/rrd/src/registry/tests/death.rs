@@ -64,6 +64,11 @@ fn fanout_drops_frames_but_keeps_slow_consumer() {
         2,
         "积压丢帧总数必须可读（ctl.status 的 fan_dropped 列）"
     );
+    assert_eq!(
+        r.rr3_reg_health(0)[0].fan_dropped,
+        2,
+        "health 行必须点名慢消费者（不能只有一个全局总数）"
+    );
     assert!(rx.try_recv().is_ok(), "已入队的帧不丢");
     assert_eq!(
         r.rr3_reg_fanout(&frame, rr_bus::RR3_BROADCAST_DST_TASK),
