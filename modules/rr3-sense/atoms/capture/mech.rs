@@ -327,5 +327,51 @@ fn rr3_doa_argmax(cc: &[i64], lag_max: usize, half: usize) -> (i64, i64) {
     (best, bv)
 }
 
+// 两腿对拍用例（0.0.5 批K H1，architecture §4.0.3 判据②）：机器锚必须留在
+// 机制源文件内（⑧-a 门按内容执法）；其余单测在 `tests.rs`。
+#[cfg(test)]
+mod parity {
+    use super::tests::{delayed_stereo, doa_cfg};
+    use super::*;
+
+    // ---------- 两腿对拍用例（0.0.5 批K H1，architecture §4.0.3 判据②） ----------
+
+    #[test]
+    fn parity_leg1_capture_output_train_is_deterministic() {
+        // 腿一·确定性：同一延迟立体声序列两跑，(下混流, 判向序列) 逐帧相等
+        fn run() -> (Vec<i16>, Vec<Option<Rr3DoaFix>>) {
+            let cfg = doa_cfg();
+            let seq: Vec<Vec<i16>> = [(-4i32, 800usize), (0, 800), (5, 800)]
+                .iter()
+                .map(|&(tau, n)| delayed_stereo(tau, n, 3000))
+                .collect();
+            let mixed: Vec<i16> = seq
+                .iter()
+                .flat_map(|s| rr3_pcm_best_channel(s, 2))
+                .collect();
+            let fixes: Vec<Option<Rr3DoaFix>> =
+                seq.iter().map(|s| rr3_doa_fix(s, 2, &cfg)).collect();
+            (mixed, fixes)
+        }
+        assert_eq!(run(), run(), "同输入序列两跑逐帧相等（腿一·确定性）");
+    }
+
+    #[test]
+    fn parity_leg2_capture_matches_ruling_semantics() {
+        // 腿二·正确性：分档等号边界独立重写（|deg| ≤ 30° 含等号落中档）；
+        // 零值输入不产帧循环（0 帧换算、空样本安全返回）
+        for (tau, want_bin) in [(-4, Rr3DoaBin::Left), (4, Rr3DoaBin::Right)] {
+            let fix = rr3_doa_fix(&delayed_stereo(tau, 3200, 3000), 2, &doa_cfg()).unwrap();
+            assert_eq!(fix.bin, want_bin, "tau={tau} 档位");
+        }
+        // 零值：0ms 节拍与 0Hz 采样都换算出 0 帧（调用方不得拿 0 帧当 buf 死循环）
+        assert_eq!(rr3_frames_per_tick(16000, 0), 0, "(16000, 0) → 0 帧");
+        assert_eq!(rr3_frames_per_tick(0, 20), 0, "(0, 20) → 0 帧");
+        // 零样本单声道化/判向安全返回（空进空出，不 panic 不产帧）
+        assert!(rr3_pcm_best_channel(&[], 2).is_empty());
+        assert_eq!(rr3_doa_fix(&[], 2, &doa_cfg()), None, "空窗无方向可判");
+    }
+}
+
 #[cfg(test)]
 mod tests;
