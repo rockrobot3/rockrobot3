@@ -1,5 +1,6 @@
-//! 子命令实现（F3 / ADR-0010；0.0.4 批B 起 CLI 六子命令与 ctl 白名单对齐）：
-//! 六个 `rr3.ctl.*` 查询经 UDS 送达 rrd 的事务面。
+//! 子命令实现（F3 / ADR-0010；0.0.4 批B 起 CLI 与 ctl 白名单对齐）：
+//! 八个 `rr3.ctl.*` 查询经 UDS 送达 rrd 的事务面（续轮十五补 `wiring` / `contracts`
+//! 两个只读面——RPC 早已实装，运维面此前读不到）。
 //!
 //! 每个子命令是一次**一次性控制连接**（ADR-0010 裁定 2）：连接 → 发一帧 `Request`
 //! （dst=rrd、方法 `rr3.ctl.*`、src_task 按契约填 0）→ 收一帧 `Response` → 渲染成人读
@@ -8,14 +9,24 @@
 //! JSON 形状是 rrd ↔ rr3-ctl 的内部协议契约，**不**作为 CLI 的输出格式承诺
 //! （ADR-0010 裁定 6）：`format_*` 系列把应答渲染成对齐的文本表，是人读的。
 //!
-//! `reboot` 是六方法里唯一的写侧：CLI **不加本地门**——rrd 执行面的双重门
+//! `reboot` 是八方法里唯一的写侧：CLI **不加本地门**——rrd 执行面的双重门
 //! （cfg(linux) 且 env `RR3_REBOOT_OK=1`）是唯一真值点，CLI 加门即第二真值；
 //! 被拒时回显 rrd 文案并以非 0 退出（错误信封统一走 `Err`）。
 
 use serde_json::{json, Value};
 
-/// 命令面与 rrd 的 ctl 白名单六方法逐一同名对齐（`rr3.ctl.<cmd>`）
-pub const COMMANDS: [&str; 6] = ["status", "health", "logs", "ota", "counters", "reboot"];
+/// 命令面与 rrd 的 ctl 白名单逐一同名对齐（`rr3.ctl.<cmd>`）；`domain.set` 是
+/// 写口，按安全链评审单列，不在本 CLI 面
+pub const COMMANDS: [&str; 8] = [
+    "status",
+    "health",
+    "logs",
+    "ota",
+    "counters",
+    "reboot",
+    "wiring",
+    "contracts",
+];
 
 /// 一次查询的读超时：rrd 不回就报错退出，不挂死运维的 shell
 const RR3_CTL_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -76,18 +87,20 @@ fn rr3_ctl_ensure(cmd: &str, envelope: &Value) -> Result<(), String> {
 type Renderer = fn(&Value) -> Result<String, String>;
 
 /// 命令 → 渲染器（表驱动，与 COMMANDS 白名单同名）。
-const RENDERERS: [(&str, Renderer); 5] = [
+const RENDERERS: [(&str, Renderer); 7] = [
     ("status", format_status),
     ("health", format_health),
     ("logs", format_logs),
     ("counters", format_counters),
     ("reboot", format_reboot),
+    ("wiring", format_wiring),
+    ("contracts", format_contracts),
 ];
 
 /// 成功信封按命令分派到各自的渲染器。
 fn rr3_ctl_render(cmd: &str, envelope: &Value) -> Result<String, String> {
     RENDERERS.iter().find(|(name, _)| *name == cmd).map_or_else(
-        // COMMANDS 白名单已把 cmd 限定在六者之内；其余到这里必有 result（不会发生）
+        // COMMANDS 白名单已把 cmd 限定在八者之内；其余到这里必有 result（不会发生）
         || Err(format!("{cmd}: 应答形状意外（无 result 也无 error）")),
         |(_, render)| render(envelope),
     )
@@ -381,6 +394,9 @@ fn format_reboot(envelope: &Value) -> Result<String, String> {
     }
     Err("reboot 应答缺 result.reboot 或非 true".to_string())
 }
+
+mod surface;
+use surface::{format_contracts, format_wiring};
 
 #[cfg(test)]
 mod tests;
