@@ -59,6 +59,7 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | [`status.md`](status.md) | 能力实况 · 里程碑进度 · 本机无法收口的项 · 在制品 |
 | [`status-history.md`](status-history.md) | 在制品历史台账（0.0.5–0.0.8 批次全景与历次锚点原文；查现状不看这本） |
 | [`process/conventions.md`](process/conventions.md) | §1 分支与提交 · **§2 机器可检查项**（门禁步序与条数的唯一落点）· §3 结构纪律 · §4 DoD · §5 文档纪律 |
+| [`process/conventions-receipts.md`](process/conventions-receipts.md) | 规约 §2 的日期回执存档（事实—处置—判据，纯移位迁出）：判据看 `conventions.md`，追溯演化看这里 |
 | [`process/naming.md`](process/naming.md) | 命名矩阵与模块目录四件套的结构角色——对不上名字时 |
 | [`reference/rrd-cli.md`](reference/rrd-cli.md) | §1 用法串 · §2 参数表 · §3 fail-closed 门禁文案 · §4 两条路径绝对化的分工 · §5 启动序列、输出流与退出码 |
 | [`reference/rrd-rpc.md`](reference/rrd-rpc.md) | §1 帧层前提 · §2 JSON-RPC 信封约束 · §3 方法白名单 · §4 握手额外门禁 · **§5 错误码映射表** · §6 心跳方向 · §7 发布面 |

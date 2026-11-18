@@ -35,6 +35,8 @@
 # docs/process 顶层文档逐项登记：新增文档先来此登记再入库
 !docs/process/ci-workflows.md
 !docs/process/conventions.md
+# 规约 §2 的日期回执存档（2026-11-18 纯移位迁出）
+!docs/process/conventions-receipts.md
 !docs/process/decisions.md
 !docs/process/legacy-digest.md
 !docs/process/naming.md
