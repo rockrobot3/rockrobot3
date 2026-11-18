@@ -14,8 +14,8 @@ use crate::drill::{
 use super::{
     rr3_chain_act, rr3_chain_baseline, rr3_chain_bins, rr3_chain_finish, rr3_chain_fix,
     rr3_chain_judge, rr3_chain_manifests, rr3_chain_obs_up, rr3_chain_status, rr3_chain_tts,
-    rr3_chain_turn, rr3_chain_up_ext, rr3_chain_up_rrd, rr3_obs_collect, Rr3ChainBins, Rr3ChainFix,
-    Rr3SteadyAgg, RR3_CHAIN_READY_DEADLINE, RR3_SIM_MODULE_ACT,
+    rr3_chain_turn, rr3_chain_up_ext, rr3_chain_up_rrd, rr3_obs_collect, rr3_obs_drain,
+    Rr3ChainBins, Rr3ChainFix, Rr3SteadyAgg, RR3_CHAIN_READY_DEADLINE, RR3_SIM_MODULE_ACT,
 };
 
 /// 稳态段采样间隔（hold 期间逐拍读 health；500ms 对 200ms 心跳足够密）。
@@ -52,6 +52,9 @@ fn rr3_chain_run(
     let mut obs_stream = rr3_chain_boot(ctx, children, report)?;
     rr3_chain_up_exts(ctx, children, report)?;
     rr3_chain_evidence(ctx, &mut obs_stream, report)?;
+    // 取证完把观察者切成排空：夹具不读帧会被 rrd 判写超时，稳态段就测到了
+    // 夹具自己的假故障（续轮二十七实证）。
+    rr3_obs_drain(obs_stream);
     rr3_chain_steady(ctx, report)?;
     rr3_chain_status(ctx, report)
 }
@@ -70,6 +73,7 @@ fn rr3_chain_steady(ctx: &Rr3ChainCtx, report: &mut String) -> Result<(), String
         let left = hold.saturating_sub(start.elapsed());
         std::thread::sleep(RR3_STEADY_STEP.min(left));
     }
+    agg.rr3_steady_tail(&rr3_ctl_out(&ctx.bins.rrctl, &ctx.fix.socket, "status")?)?;
     agg.rr3_steady_check()?;
     report.push_str(rr3_section(format!("稳态段（hold {hold_ms}ms）").as_str()).as_str());
     report.push_str(&agg.rr3_steady_text(hold_ms));
