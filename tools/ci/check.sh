@@ -1530,7 +1530,8 @@ fi
 # ⑬ 仓面卫生门（规则 7-b 的机制化）：追踪面不得含本机开发绝对路径，不得追踪
 # 构建目录。白名单策略（.gitignore 默认忽略所有）防的是"无意收进产物"，本门防
 # 的是"产物/本机路径已被收进"——两者一前一后，缺一就有漏面。
-# 自身与文档中作为反例引用的路径不参与（本脚本被 git grep 扫到会自指）。
+# 自身与文档中作为反例引用的路径不参与（本脚本被 git grep 扫到会自指；
+# 规约正文与回执存档必须能引用被禁模式来描述规则——续轮二十四迁出后两处同源）。
 printf '\n=== ⑬ 仓面卫生门（追踪文件本机路径 / 构建目录） ===\n'
 hyg_fail=0
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -1539,6 +1540,7 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     -e 'trae_projects' \
     -e 'C:\\\\Users\\\\' \
     -- . ':(exclude)tools/ci/check.sh' ':(exclude)docs/process/conventions.md' \
+        ':(exclude)docs/process/conventions-receipts.md' \
     2>&1)"
   hy_rc=$?
   case "$hy_rc" in
