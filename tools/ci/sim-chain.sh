@@ -29,4 +29,19 @@ if [ "$hold_ms" != "0" ]; then
 fi
 # 产物落点随仓根 target-dir（源码区外）：cargo run 复用同一 target-dir，
 # 不写死 `<crate>/target`（写死会因产物不在源码区而误报缺件）。
-exec cargo run -q --manifest-path tools/sim/Cargo.toml -- "${args[@]}"
+#
+# 稳态数值回传（续轮二十八）：job 日志匿名 403，check-run annotation 是唯一
+# 无需凭据的取数通道——把 `稳态摘要：` 那行打成 notice/error 注解，CI 的
+# since/峰值/写超时/慢写/落盘峰值从此可匿名读取；本地跑同样输出该行，无副作用。
+log="${TMPDIR:-/tmp}/rr3-sim-chain.log"
+rc=0
+cargo run -q --manifest-path tools/sim/Cargo.toml -- "${args[@]}" 2>&1 | tee "$log" || rc=$?
+summary=$(grep '^稳态摘要：' "$log" | tail -1 || true)
+if [ "$rc" -ne 0 ]; then
+        reason=$(grep -E '^(rr3-sim|rr3-sim --chain)' "$log" | tail -1 || true)
+        echo "::error title=sim-chain::${reason:-退出码 ${rc}（详见日志）}"
+        [ -n "$summary" ] && echo "::notice title=sim-chain 稳态（失败拍）::${summary}"
+        exit "$rc"
+fi
+[ -n "$summary" ] && echo "::notice title=sim-chain 稳态::${summary}"
+exit 0
