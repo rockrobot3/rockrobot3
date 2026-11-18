@@ -22,7 +22,10 @@ CI 单一事实源在 GitHub Actions（R30 裁定：atomgit 无流水线功能�
   `.github/actions/esp-toolchain` 内三处，单点维护。
 - **矩阵并行**：跨平台按芯片/架构拆腿（cross ×3、esp 按芯片 ×2、publish
   原生架构 ×2），fail-fast: false 保证单腿红不掩盖其余腿结论；host-macos
-  拆 workspace／独立工程两腿并行（macOS runner 慢，串行曾是平台面最长尾）。
+  **合并为单腿**（workspace + 独立工程串行，续轮二十五）——托管 macOS arm64
+  执行位长期紧张，第二腿反复以 "The job was not acquired by Runner of type
+  hosted" 被取消并把整个 run 判红；一个 job 只发一次执行位请求，覆盖不变，
+  代价是该腿墙钟变长（超时上调到 75min）。
 - **并发组**：五条流水线顶层 concurrency 同 ref 互踩即取消；publish 例外
   （cancel-in-progress: false，发布不可中断）。
 - **死重不留**：构建不经过宿主侧的作业不装宿主工具链、不挂缓存
@@ -32,7 +35,7 @@ CI 单一事实源在 GitHub Actions（R30 裁定：atomgit 无流水线功能�
 | 工作流 | 作业 | 职责 |
 |---|---|---|
 | `gate.yml`（6） | conventions / lint / supply / alsa / ota-bundle / scripts | 门禁主线（与本地 `tools/ci/check.sh` 同一入口）：规约全步（含质量度量与仓面卫生）、rustfmt＋clippy 全工程、supply 供应链审计（cargo-deny --strict，周程定时复核公告）、ALSA 真后端编译门、OTA bundle 装配门、脚本卫生三自检 |
-| `platforms.yml`（6） | cross-artifacts ×3 / esp32-gates ×2 / ipct003 / host-windows / host-macos / host-macos-independent | 跨平台与跨架构面：交叉编译矩阵、ESP32 专用门、ipct003 跨架构对拍（--strict）、宿主等价面（Windows＋macOS 双腿） |
+| `platforms.yml`（6） | cross-artifacts ×3 / esp32-gates ×2 / ipct003 / host-windows / host-macos | 跨平台与跨架构面：交叉编译矩阵、ESP32 专用门、ipct003 跨架构对拍（--strict）、宿主等价面（Windows＋macOS；macOS 单腿含 workspace 与独立工程串行） |
 | `integration.yml`（7） | distro-smoke / ota-sign / rk3566-onboard / buildroot-assembly / sim-assemble / sim-chain / matrix | 集成面：deb 装机冒烟、OTA 签名链、板面装配断言、装配与全链闭环演练、点验矩阵出数 |
 | `publish.yml`（3） | build ×2 / merge / firmware | 发布面：原生架构双腿构建 → merge 去重 → firmware 打包 |
 | `buildroot.yml`（3） | dtb-backport / image / release | Buildroot 装配轨：交叉工具链与装配冒烟、出厂镜像轨 |

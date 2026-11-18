@@ -129,7 +129,7 @@ job 定义 ≤10；integration/platforms 的 push/PR 必须 `paths-ignore` 含 `
 | ESP32（classic） | `esp32-gates`：periph-base / uart-echo / espidf-std / sentinel / act-sense | **无运行腿**（xtensa 无 qemu，运行归真板） | 编译期 const + `ipct003` 第④路 | tag release 固件 ELF（`firmware` job） | 真板运行证据不在 CI |
 | ESP32-S3 | `esp32-gates`：periph-base S3 / act-sense S3 | **无运行腿** | xtensa 编译期 | **无**（firmware 仅 classic） | 真板运行与发布面缺 |
 | 宿主 Windows x86_64 | `host-windows`：workspace check + test；独立工程中性子集（`mkmodule` / `rr3-codegen` / `rrctl` / `rr3-pack`） | 原生 | 由测试面覆盖 | — | 依赖 UDS/termios/HAL 实现面的独立工程按平台缺省排除（理由在缺口④） |
-| 宿主 macOS | `host-macos`：workspace 全量测试；`host-macos-independent`：独立工程测试（两腿并行） | 原生 | 由测试面覆盖 | — | esp 条件工程按门禁口径排除 |
+| 宿主 macOS | `host-macos`：workspace 全量测试 + 独立工程测试（单腿串行，续轮二十五合并——托管 macOS 执行位紧张时第二腿会被取消并染红整个 run） | 原生 | 由测试面覆盖 | — | esp 条件工程按门禁口径排除 |
 
 **已知缺口四条**（下一轮补腿对象，不冒充已覆盖）：① riscv64 无发布镜像；
 ② S3 无固件 release 资产；③ 三块真板（esp32 / rock3 / spacemit）的运行证据不属 CI
