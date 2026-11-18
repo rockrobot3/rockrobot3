@@ -336,9 +336,14 @@ jobs:
   # （2026-11-17 治理：串行集中曾是平台面最长尾，macOS runner 又慢）——
   # 不替代 ubuntu 上的门禁，只回答"换宿主后行为是否一致"。esp 条件工程
   #（xtensa/espidf）按门禁同口径排除。
+  # macOS 宿主腿：workspace 全量测试 + 独立工程测试**同一 job 串行**（续轮二十五）。
+  # 原先拆两腿并行，是为了缩短墙钟；但托管 macOS arm64 执行位长期紧张，
+  # 第二腿反复出现 "The job was not acquired by Runner of type hosted"（runner 取不到
+  # 即 job cancelled → 整个 run 判 failure，连续两拍把平台面染红）。一个 job 只发一次
+  # 执行位请求，覆盖不变；代价是该腿墙钟变长，故超时上调。
   host-macos:
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -346,7 +351,10 @@ jobs:
           toolchain: "1.100.0"
       - uses: Swatinem/rust-cache@v2
         with:
+          # 独立工程清单共写仓根 target-dir（/tmp/rr3-build）：cache-all-crates
+          # 把共享依赖一并缓存，否则模块依赖每拍冷编。
           workspaces: base/runtime
+          cache-all-crates: "true"
       - name: workspace 全量测试（macOS 宿主）
         working-directory: base/runtime
         run: |
@@ -362,21 +370,6 @@ jobs:
             done < <(tail -12 /tmp/mac.log)
             exit 1
           fi
-
-  host-macos-independent:
-    runs-on: macos-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.100.0"
-      - uses: Swatinem/rust-cache@v2
-        with:
-          # 独立工程清单共写仓根 target-dir（/tmp/rr3-build，见 .cargo/config.toml）：
-          # cache-all-crates 把共享依赖一并缓存，否则模块依赖每拍冷编。
-          workspaces: base/runtime
-          cache-all-crates: "true"
       - name: 独立工程测试（门禁 ④/⑥ 同口径；esp 条件工程除外）
         run: |
           set -o pipefail
