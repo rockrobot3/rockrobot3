@@ -27,11 +27,13 @@ pub(crate) const RR3_STEADY_MODS: [&str; 4] = [
     RR3_SIM_MODULE_ACT,
 ];
 
-/// 单模块聚合：心跳间隔峰值（点读 + 续命拍峰值）、配置心跳/看门狗、末拍相位。
+/// 单模块聚合：心跳间隔峰值（点读 + 续命拍峰值）、冷启动基线、配置心跳/看门狗、末拍相位。
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct Rr3SteadyMod {
     pub(crate) max_since_ms: u64,
     pub(crate) max_peak_ms: u64,
+    /// 注册完成距 daemon 起点的毫秒数（`?` = 基准未定格）
+    pub(crate) boot_ms: Option<u64>,
     pub(crate) heartbeat_ms: u64,
     pub(crate) watchdog_ms: u64,
     pub(crate) phase: String,
@@ -48,6 +50,8 @@ pub(crate) struct Rr3SteadyAgg {
     pub(crate) log_slow: Option<u64>,
     /// 单次落盘耗时峰值（us，全程）
     pub(crate) log_max_us: Option<u64>,
+    /// 冷启动基线峰值（ms；全模块 `?` 时 None）
+    pub(crate) max_boot_ms: Option<u64>,
 }
 
 impl Rr3SteadyAgg {
@@ -65,6 +69,9 @@ impl Rr3SteadyAgg {
             e.heartbeat_ms = r.heartbeat_ms;
             e.watchdog_ms = r.watchdog_ms;
             e.phase = r.phase;
+            if let Some(b) = r.boot_ms {
+                self.max_boot_ms = Some(self.max_boot_ms.unwrap_or(0).max(b));
+            }
             rows += 1;
         }
         if rows == 0 {
@@ -147,11 +154,12 @@ impl Rr3SteadyAgg {
             wd = wd.min(e.watchdog_ms);
         }
         format!(
-            "since_max={since}ms peak_max={peak}ms wd_min={}ms wr={} slow={} log_max_us={}",
+            "since_max={since}ms peak_max={peak}ms wd_min={}ms wr={} slow={} log_max_us={} boot_max={}",
             if wd == u64::MAX { 0 } else { wd },
             rr3_steady_opt(self.fan_wr_timeout),
             rr3_steady_opt(self.log_slow),
             rr3_steady_opt(self.log_max_us),
+            rr3_steady_opt(self.max_boot_ms),
         )
     }
 }
@@ -204,6 +212,7 @@ struct Rr3SteadyRow {
     watchdog_ms: u64,
     since_ms: u64,
     peak_ms: u64,
+    boot_ms: Option<u64>,
 }
 
 /// 解析一行 health；`beat_peak_ms` 列缺位按 0（旧格式兼容，不静默当健康）。
@@ -218,10 +227,8 @@ fn rr3_steady_row(line: &str) -> Result<Option<Rr3SteadyRow>, String> {
     if f[0] == RR3_CHAIN_OBS {
         return Ok(None);
     }
-    let peak_ms = match f.get(6) {
-        Some(v) => rr3_steady_num(v, line, "beat_peak_ms")?,
-        None => 0,
-    };
+    let peak_ms = rr3_steady_opt_num(&f, 6, line, "beat_peak_ms")?.unwrap_or(0);
+    let boot_ms = rr3_steady_opt_num(&f, 7, line, "boot_ms")?;
     Ok(Some(Rr3SteadyRow {
         name: f[0].to_string(),
         phase: f[2].to_string(),
@@ -229,7 +236,21 @@ fn rr3_steady_row(line: &str) -> Result<Option<Rr3SteadyRow>, String> {
         watchdog_ms: rr3_steady_num(f[4], line, "watchdog_ms")?,
         since_ms: rr3_steady_num(f[5], line, "since_beat_ms")?,
         peak_ms,
+        boot_ms,
     }))
+}
+
+/// 可缺列（`?` = 未定格）的解析：缺列与 `?` 都回 None，其余必须是数字。
+fn rr3_steady_opt_num(
+    f: &[&str],
+    at: usize,
+    line: &str,
+    field: &str,
+) -> Result<Option<u64>, String> {
+    match f.get(at) {
+        Some(&"?") | None => Ok(None),
+        Some(v) => Ok(Some(rr3_steady_num(v, line, field)?)),
+    }
 }
 
 /// 六列里的数字列：非数字即点名（`?` 占位不许静默当 0）。
