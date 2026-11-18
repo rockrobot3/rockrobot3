@@ -112,6 +112,11 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
         crate::counters::rr3_flush_ms(),
         crate::counters::rr3_flush_max(),
     )));
+    // 续轮十三：落盘执行面单线程（快照 + fsync + 回执 gate），心跳 reader 只投
+    // 非阻塞信号。未启用持久化 = None；线程起不来也回 None 并点名（不回落同步写）。
+    let ctr_store = counters_path.clone().and_then(|p| {
+        crate::counters::rr3_ctr_store_spawn(shared.clone(), counters_gate.clone(), p, t0)
+    });
     rr3_flush_on_term(shared.clone(), counters_path.clone());
 
     // `Rr3Supervisor` 是 `Sender` 的一层薄壳（可 clone）：一份进 conn 收尾、一份进 watchdog，
@@ -145,7 +150,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             t0,
             pre_register_timeout_ms: cfg.pre_register_timeout_ms,
             sup,
-            counters_path,
+            ctr_store,
             counters_gate,
         },
     )

@@ -75,10 +75,11 @@ pub struct Rr3ConnCtx {
     /// 重启计划的**唯一去路**（`supervisor.rs`）。conn 只负责"要不要投"，
     /// "起不起得来"由 supervisor 按所有权裁定（E-1）——收尾这一路绝不自己 `Command::spawn`。
     pub sup: Rr3Supervisor,
-    /// 运维计数持久化路径（0.0.4 批B，Q2 裁定）：daemon 启动判定一次，`None` =
-    /// 不持久化（心跳聚合照常进内存账，只是断电不保）。conn 心跳归并后按
-    /// R26 合并写节流落盘（0.0.5 增补轮四 批W3 改判，闸门在 counters.rs）。
-    pub counters_path: Option<std::path::PathBuf>,
+    /// 运维计数落盘投递端（0.0.4 批B Q2；续轮十三改为执行面分离）：daemon 启动
+    /// 判定一次，`None` = 未启用持久化或落盘线程起不来（心跳聚合照常进内存账，
+    /// 只是断电不保）。心跳归并后按 R26 闸门**只投非阻塞信号**，快照与 fsync
+    /// 在 `rrd-ctr-store` 线程——reader 线程不再被磁盘抖动阻塞。
+    pub ctr_store: Option<std::sync::mpsc::SyncSender<()>>,
     /// 运维计数合并写闸门（R26，批W3）：daemon 造一份、全连接共享（`Arc`）——
     /// 每条连接各持一份等于把 M 窗口放大 N 连接倍。
     pub counters_gate: Arc<Mutex<crate::counters::Rr3CountersGate>>,

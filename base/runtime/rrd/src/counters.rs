@@ -9,6 +9,12 @@
 //!   N 拍兜底 + SIGTERM/优雅关停强制 flush（`daemon.rs` 的 term 路径）。落盘仍走
 //!   同一条原子写序，数据面零改动，只改 flush 时机；代价 = 断电丢 ≤M 秒运维账
 //!   （计数是运维账不是账本事实，裁定接受该窗口）。
+//! - 0.0.8 续轮十三：R26 的**执行面**也搬出心跳 reader 线程。原实现里窗口到点
+//!   的心跳自己持全连接共享的 gate 锁做 tmp+fsync+rename——一次 eMMC/SD 抖动就把
+//!   其余模块的心跳处理（含 `rr3_reg_beat` 判活记账）排在磁盘后面，慢过看门狗即
+//!   误判死。现改为 reader 只投递"该落盘了"（`try_send` 非阻塞），快照与 fsync
+//!   全在 `rrd-ctr-store` 单线程；`Rr3CountersGate` 增 `in_flight` 防重复排程，
+//!   判活记账先于计数归并（心跳核心语义不被运维账推迟）。
 //!
 //! 旋钮（env，parse-or-default 口径同 rr-hal env 键——运维账旋钮不走 CLI fail-closed）：
 //! - `RR3_COUNTERS_FLUSH_MS`：合并写窗口毫秒数（缺省 10_000——1s 心跳拍下落盘
@@ -169,12 +175,18 @@ pub fn rr3_flush_max() -> u32 {
 /// `RrdRegistry`，落盘仍走同一条 [`rr3_counters_store`] 原子写序）。
 /// 挂在 `Rr3ConnCtx` 里 `Arc<Mutex<_>>` **全连接共享**——每条连接各持一份
 /// 等于把窗口放大 N 连接倍。时钟单位与在册表同源（进程起点相对毫秒）。
+///
+/// 续轮十三起多一个 `in_flight`：落盘执行面搬到 `rrd-ctr-store` 线程后，
+/// reader 侧的窗口判定与执行完成之间存在时间差；没有在飞位，落盘期间到达的
+/// 每一拍都会再投一次"该落盘了"，连续 fsync 把节流打回逐拍写。
 #[derive(Debug)]
 pub struct Rr3CountersGate {
     interval_ms: u64,
     max_pending: u32,
     last_flush_ms: Option<u64>,
     pending: u32,
+    /// 已投递、尚未回执（成功/失败）的一轮；在飞期间不再排新的一轮
+    in_flight: bool,
 }
 
 impl Rr3CountersGate {
@@ -185,16 +197,22 @@ impl Rr3CountersGate {
             max_pending,
             last_flush_ms: None,
             pending: 0,
+            in_flight: false,
         }
     }
 
-    /// 归并**有变化**的一拍调用：登记待落盘，回"此刻是否 flush"。
+    /// 归并**有变化**的一拍调用：登记待落盘，回"此刻是否该排一轮落盘"。
     /// 规则（R26）：①首拍即刷（冷启动第一笔变化不等窗口——既有 e2e
     /// "第一拍心跳落盘"的观测面由此保持）；②距上次落盘 ≥ 窗口即刷；
-    /// ③待落盘拍数 ≥ 兜底即刷。
+    /// ③待落盘拍数 ≥ 兜底即刷。在飞的一轮没回执前一律不排（合并进同一轮）。
     pub fn rr3_on_change(&mut self, now_ms: u64) -> bool {
         self.pending = self.pending.saturating_add(1);
-        self.rr3_flush_due(now_ms)
+        !self.in_flight && self.rr3_flush_due(now_ms)
+    }
+
+    /// 投递成功后的排程记账：从此刻起至回执前不再排新的一轮。
+    pub fn rr3_mark_inflight(&mut self) {
+        self.in_flight = true;
     }
 
     /// flush 判据（R26 ②③）：首拍即刷，否则距上次落盘满窗口或兜底拍数到点。
@@ -211,6 +229,66 @@ impl Rr3CountersGate {
     pub fn rr3_on_flushed(&mut self, now_ms: u64) {
         self.last_flush_ms = Some(now_ms);
         self.pending = 0;
+        self.in_flight = false;
+    }
+
+    /// 落盘失败回执：清在飞位但**不**推进窗口（下一拍重试），pending 保留
+    /// （兜底拍数已攒够的语义不因一次失败回退）。
+    pub fn rr3_on_failed(&mut self) {
+        self.in_flight = false;
+    }
+}
+
+/// 异步落盘执行面的入口（续轮十三）：返回投递端；未启用持久化时回 None
+/// （不落盘也就不需要线程）。线程起不来同样回 None 并点名——reader 侧不做
+/// 任何伪装的同步写回退（那正是本轮要拆掉的阻塞面），关停路径的 SIGTERM
+/// flush 仍在，持久化窗口退化为"关停一次"，点名让运维看得见。
+#[cfg(unix)]
+pub fn rr3_ctr_store_spawn(
+    shared: std::sync::Arc<std::sync::Mutex<crate::registry::RrdRegistry>>,
+    gate: std::sync::Arc<std::sync::Mutex<Rr3CountersGate>>,
+    path: PathBuf,
+    t0: std::time::Instant,
+) -> Option<std::sync::mpsc::SyncSender<()>> {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
+    let spawned = std::thread::Builder::new()
+        .name("rrd-ctr-store".into())
+        .spawn(move || rr3_ctr_store_loop(rx, &shared, &gate, &path, t0));
+    match spawned {
+        Ok(_) => Some(tx),
+        Err(e) => {
+            crate::rr3_log(&format!(
+                "counters 异步落盘线程起不来（{e}）——本次仅内存账，关停 flush 仍兜底"
+            ));
+            None
+        }
+    }
+}
+
+/// 落盘线程主体：收到一次"该落盘了" → 取**当下**快照 → 原子写 → 回执 gate。
+/// 快照克隆是短内存操作（≤16 模块 × 键数），fsync 在锁外——这正是把执行面
+/// 搬出 reader 线程的意义。通道容量 1 + 发送侧 `try_send`：落盘期间到达的
+/// 变化合并成一轮，不排队、不堆积。
+#[cfg(unix)]
+fn rr3_ctr_store_loop(
+    rx: std::sync::mpsc::Receiver<()>,
+    shared: &std::sync::Mutex<crate::registry::RrdRegistry>,
+    gate: &std::sync::Mutex<Rr3CountersGate>,
+    path: &Path,
+    t0: std::time::Instant,
+) {
+    for _ in rx.iter() {
+        let snap = crate::rr3_lock(shared).rr3_reg_counters();
+        match rr3_counters_store(path, &snap) {
+            Ok(()) => {
+                let now = t0.elapsed().as_millis() as u64;
+                crate::rr3_lock(gate).rr3_on_flushed(now);
+            }
+            Err(e) => {
+                crate::rr3_lock(gate).rr3_on_failed();
+                crate::rr3_log(&format!("counters 异步落盘失败（下一窗口自然重试）: {e}"));
+            }
+        }
     }
 }
 
@@ -402,6 +480,71 @@ mod tests {
         let (t, note) = rr3_counters_load(&path);
         assert!(note.is_none(), "落盘必须是可解析的完整 JSON: {note:?}");
         assert_eq!(t.len(), 1, "整表覆盖，最后写胜出: {t:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 在飞位（续轮十三）：投递与回执之间不排新的一轮——否则落盘期间到达的
+    /// 每一拍都会再触发一次 fsync，R26 的窗口节流被打回逐拍写。
+    #[test]
+    fn gate_inflight_coalesces_until_receipt() {
+        let mut g = Rr3CountersGate::rr3_new(10_000, 64);
+        assert!(g.rr3_on_change(0), "首拍该排一轮");
+        g.rr3_mark_inflight();
+        assert!(!g.rr3_on_change(1), "在飞未回执时不排新的一轮");
+        assert!(!g.rr3_on_change(10_000), "窗口到点也由在飞的一轮覆盖");
+        g.rr3_on_flushed(10_000);
+        assert!(g.rr3_on_change(20_000), "回执后窗口已过，下一拍照排");
+    }
+
+    /// 失败回执：清在飞位但不推进窗口——下一拍立即重试，不白等一个窗口
+    #[test]
+    fn gate_failed_receipt_releases_inflight_without_advancing_window() {
+        let mut g = Rr3CountersGate::rr3_new(10_000, 64);
+        assert!(g.rr3_on_change(0));
+        g.rr3_mark_inflight();
+        g.rr3_on_failed();
+        assert!(g.rr3_on_change(50), "失败后下一拍立即重试");
+    }
+
+    /// 异步落盘线程（续轮十三）：一次投递 → 盘上出现当下快照 → gate 收到成功
+    /// 回执。快照在投递之后取，故落的是最新表而不是投递时刻的副本。
+    #[cfg(unix)]
+    #[test]
+    fn async_store_writes_snapshot_and_marks_gate() {
+        use std::sync::{Arc, Mutex};
+        let dir = tmpdir("async");
+        let path = dir.join(COUNTERS_FILE);
+        let shared = Arc::new(Mutex::new(crate::registry::RrdRegistry::new(100)));
+        crate::rr3_lock(&shared).rr3_reg_ctr_bump("k", 7);
+        let gate = Arc::new(Mutex::new(Rr3CountersGate::rr3_new(10_000, 64)));
+        let tx = rr3_ctr_store_spawn(
+            shared.clone(),
+            gate.clone(),
+            path.clone(),
+            std::time::Instant::now(),
+        )
+        .expect("落盘线程应起得来");
+        tx.try_send(()).expect("首次投递应成功");
+        crate::rr3_lock(&gate).rr3_mark_inflight();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let ok = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                .map(|v| v["k"] == 7)
+                .unwrap_or(false);
+            let receipt = !crate::rr3_lock(&gate).in_flight;
+            if ok && receipt {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "异步落盘或 gate 回执未在期限内完成"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        // 发送端 drop → 通道 EOF → 线程退出（不 join：线程随通道自然收场）
+        drop(tx);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
