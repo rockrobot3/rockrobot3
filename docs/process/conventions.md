@@ -3941,6 +3941,16 @@ check.sh / metrics 全绿，九腿 CI 覆盖。
 `module_call` 4 用例（路由/三种拒法）全绿；首次 check.sh 的 fmt 步抓出格式漂移，
 同批 `cargo fmt --all` 收口。
 
+**2026-11-18 计数落盘执行面存亡可读（续轮二十一）**：事实——`rrd-ctr-store`
+线程 panic 展开后只有 panic hook 一行 stderr：gate 的 `in_flight` 永不回执，此后
+所有窗口都不再排落盘，而 `ctl.status` 与"正常"没有差别。处置——执行面存亡定格
+三态（`off` 未启用或已随关停收场 / `on` 线程在位 / `dead` 启用后异常消失），
+收场守卫在展开中只置位、不做 I/O（避免二次 panic），线程起不来同样记 `dead`；
+`ctl.status` 与 `rr3-ctl status` 同名可读。同批把 counters 单测移到
+`counters/tests.rs`（纯移位，生产文件 550→347 行，先腾出 600 行门余量）。判据——
+counters:: 11 测（含 `on`→`off` 收场断言）、e2e `ctl-status`、rrctl 26 测全绿；
+`check.sh` + `metrics.py` 通过。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
