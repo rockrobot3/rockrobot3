@@ -3933,6 +3933,14 @@ Unix 可用；移除并把 root cause 与"不要凭印象加回"写进 workflow 
 单拍扫描 > tick 才点名。判据——rrd 316 单测 / rr3-ctl 26 测试 / clippy /
 check.sh / metrics 全绿，九腿 CI 覆盖。
 
+**2026-11-18 模块间热路径锁内 I/O 收口（续轮二十）**：事实——`rr3.call` 转发
+`rr3_call_fwd` 在持 registry 锁时打点名日志（每次模块间调用一次磁盘 write），
+心跳记账、watchdog 扫描与扇出都在等这把锁；应答回路 `rr3_resp_send` 的失败
+分支也因 if 条件临时 guard 延寿而在锁内回错误帧。处置——锁内只做查表/构帧/
+`try_send`，点名与错误应答放锁后；投递结果先落局部变量再判。判据——316 单测 +
+`module_call` 4 用例（路由/三种拒法）全绿；首次 check.sh 的 fmt 步抓出格式漂移，
+同批 `cargo fmt --all` 收口。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
