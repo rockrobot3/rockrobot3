@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""GitHub 流水线结构审计：并发组 / job 超时 / action 版本矩阵。
+"""GitHub 流水线结构审计：并发组 / job 超时 / action 版本矩阵 / 权限与失败显形。
 
 判据（文本扫描，不做 YAML 解析——workflow 由本仓独占维护，形状稳定）：
 - 每个 workflow 必须有顶层 `concurrency:`（同 ref 重复跑互相踩是历史事故源）；
 - 每个 job 必须有 `timeout-minutes:`（挂死不能烧满 6 小时默认额度）；
 - `uses:` 的第三方 action 必须落在 ACTION_MATRIX 登记的引用上——版本升级
   走显式提交改本表，与 rust-toolchain 钉版同一纪律；本地 action（`./`）不查。
+- 每个 workflow 必须有顶层 `permissions:`（最小权限显式化）：含
+  `contents: read`，不得 `write-all`；job 级额外授权另写，不在本门范围。
+- 任何 `continue-on-error` 非 false 即红：失败必须显形，不能把红掩成绿
+  （漂红巡检与门禁都靠退出码，掩码等于把治理面掏空）。
 
 用法：
     workflows_audit.py [--root <仓根>]
@@ -221,6 +225,45 @@ def graph_problems(rel, jobs):
     return bad
 
 
+CONTINUE_ON_ERROR = re.compile(r"^\s*continue-on-error:\s*(.*)$")
+
+
+def top_block(lines, key):
+    """顶层键（缩进 0）之后的子块。"""
+    idx = next((i for i, l in enumerate(lines) if l.rstrip() == f"{key}:"), None)
+    if idx is None:
+        return []
+    out = []
+    for line in lines[idx + 1 :]:
+        if line.strip() and not line.startswith("  "):
+            break
+        out.append(line)
+    return out
+
+
+def policy_problems(text, rel):
+    """权限与失败显形：最小权限面 + 不得掩码失败。"""
+    bad = []
+    for i, line in enumerate(text.splitlines(), 1):
+        m = CONTINUE_ON_ERROR.match(line)
+        if not m:
+            continue
+        value = m.group(1).strip().strip('"').strip("'").lower()
+        if value != "false":
+            bad.append(
+                f"{rel}:{i} continue-on-error 掩盖失败（{m.group(1).strip() or '空值'}）——红必须显形"
+            )
+    if not re.search(r"^permissions:\s*$", text, re.M):
+        bad.append(f"{rel} 缺顶层 permissions（最小权限面必须显式）")
+        return bad
+    joined = "\n".join(top_block(text.splitlines(), "permissions"))
+    if "write-all" in joined:
+        bad.append(f"{rel} permissions 不得 write-all（按需最小授权）")
+    if not re.search(r"^\s+contents:\s*read\s*$", joined, re.M):
+        bad.append(f"{rel} permissions 缺 contents: read（checkout 最小面）")
+    return bad
+
+
 def graph_cycle(graph):
     state, stack = {}, []
 
@@ -264,6 +307,7 @@ def workflow_problems(path, root):
             bad.append(f"{rel} job {name} 缺 timeout-minutes")
     bad.extend(step_problems(rel, jobs))
     bad.extend(graph_problems(rel, jobs))
+    bad.extend(policy_problems(text, rel))
     return bad
 
 
@@ -289,6 +333,7 @@ def self_test():
         wf.mkdir(parents=True)
         (wf / "good.yml").write_text(
             "name: good\non:\n  push:\n    branches: [main]\n"
+            "permissions:\n  contents: read\n"
             "concurrency:\n  group: g\njobs:\n"
             "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
             "    steps:\n      - uses: actions/checkout@v7\n"
@@ -303,7 +348,15 @@ def self_test():
             "    needs: [nope]\n"
             "    steps:\n      - uses: actions/checkout@v5\n"
             "      - uses: dtolnay/rust-toolchain@stable\n"
-            "      - uses: Swatinem/rust-cache@v2\n",
+            "      - uses: Swatinem/rust-cache@v2\n"
+            "      - run: echo hi\n        continue-on-error: true\n",
+            encoding="utf-8",
+        )
+        (wf / "noperm.yml").write_text(
+            "name: noperm\non:\n  push:\n    branches: [main]\n"
+            "concurrency:\n  group: n\njobs:\n"
+            "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    steps:\n      - uses: actions/checkout@v7\n",
             encoding="utf-8",
         )
         (wf / "integration.yml").write_text(
@@ -350,6 +403,8 @@ def self_test():
         ("paths-ignore 缺失被抓", any("paths-ignore" in b for b in bad)),
         ("publish 可取消被抓", any("cancel-in-progress: false" in b for b in bad)),
         ("job 超限被抓", any("> 上限" in b for b in bad)),
+        ("continue-on-error 被抓", any("continue-on-error" in b for b in bad)),
+        ("缺 permissions 被抓", any("缺顶层 permissions" in b for b in bad)),
         ("好例零误报", not any("good.yml" in b for b in bad)),
     ]
     for name, ok in cases:
@@ -370,7 +425,7 @@ def main():
     if bad:
         print(f"FAIL  流水线结构缺口 {len(bad)} 处（修法见 tools/ci/README.md）")
         return 1
-    print("PASS  流水线结构审计通过（并发组 / job 超时 / action 版本矩阵）")
+    print("PASS  流水线结构审计通过（并发组 / job 超时 / action 版本矩阵 / 权限与失败显形）")
     return 0
 
 

@@ -98,9 +98,12 @@ qemu v3 残留并修复）。**触发与依赖图**：`push:` 必须收窄到 `b
 `dtolnay/rust-toolchain` 必须 `with.toolchain: "1.100.0"`；`Swatinem/rust-cache`
 必须带 `workspaces`，跨清单构建作业另须 `cache-all-crates: "true"`；每条 workflow
 job 定义 ≤10；integration/platforms 的 push/PR 必须 `paths-ignore` 含 `docs/**`
-与 `**.md`；publish 必须 `cancel-in-progress: false`。`--self-test` 给好例 +
-缺并发/缺超时/版本漂移/needs 悬空/needs 成环/push 无范围/工具链未钉版/缓存缺参/
-paths-ignore 缺失/publish 可取消/job 超限十一条负例，gate 的 `scripts` job 先自检后执法。
+与 `**.md`；publish 必须 `cancel-in-progress: false`。**权限与失败显形**：顶层
+`permissions:` 必须存在、含 `contents: read`、不得 `write-all`；任何
+`continue-on-error` 非 `false` 即红（掩码会把漂红巡检变成假绿）。`--self-test` 给
+好例 + 缺并发/缺超时/版本漂移/needs 悬空/needs 成环/push 无范围/工具链未钉版/
+缓存缺参/paths-ignore 缺失/publish 可取消/job 超限/continue-on-error/缺 permissions
+十三条负例，gate 的 `scripts` job 先自检后执法。
 
 ## 平台覆盖矩阵（2026-11-17 首立，按 workflow 事实源抄录）
 
