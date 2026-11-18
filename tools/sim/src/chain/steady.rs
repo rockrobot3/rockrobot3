@@ -131,7 +131,28 @@ impl Rr3SteadyAgg {
             rr3_steady_opt(self.log_slow),
             rr3_steady_opt(self.log_max_us)
         ));
+        out.push_str(&format!("稳态摘要：{}\n", self.rr3_steady_summary()));
         out
+    }
+
+    /// CI 可读摘要（单行，机器可 grep）：`sim-chain.sh` 把它打成 check-run
+    /// annotation——job 日志匿名 403，注解是唯一无需凭据的取数通道。
+    pub(crate) fn rr3_steady_summary(&self) -> String {
+        let mut since = 0u64;
+        let mut peak = 0u64;
+        let mut wd = u64::MAX;
+        for e in self.mods.values() {
+            since = since.max(e.max_since_ms);
+            peak = peak.max(e.max_peak_ms);
+            wd = wd.min(e.watchdog_ms);
+        }
+        format!(
+            "since_max={since}ms peak_max={peak}ms wd_min={}ms wr={} slow={} log_max_us={}",
+            if wd == u64::MAX { 0 } else { wd },
+            rr3_steady_opt(self.fan_wr_timeout),
+            rr3_steady_opt(self.log_slow),
+            rr3_steady_opt(self.log_max_us),
+        )
     }
 }
 

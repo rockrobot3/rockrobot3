@@ -294,6 +294,25 @@ fn steady_tail_requires_zero_and_reads_peak() {
     agg.rr3_steady_tail("fan_write_timeout = 0\nlog_write = max_us=120 slow=0\n")
         .unwrap();
     agg.rr3_steady_check().unwrap();
+    let s = agg.rr3_steady_summary();
+    for needle in [
+        "since_max=80",
+        "wd_min=1000",
+        "wr=0",
+        "slow=0",
+        "log_max_us=120",
+    ] {
+        assert!(s.contains(needle), "摘要缺 {needle}: {s}");
+    }
+}
+
+#[test]
+fn steady_feed_reads_peak_column() {
+    let mut agg = Rr3SteadyAgg::default();
+    agg.rr3_steady_feed("rr3-act  2  running  200  1000  150  260  ?  0\n")
+        .unwrap();
+    assert_eq!(agg.mods["rr3-act"].max_peak_ms, 260, "第七列是续命峰值");
+    assert_eq!(agg.mods["rr3-act"].max_since_ms, 150);
 }
 
 #[test]
