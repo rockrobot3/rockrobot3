@@ -9,6 +9,7 @@ use super::*;
 
 mod boot;
 mod budget;
+mod drills;
 mod parse;
 mod surgery;
 mod surgery_gates;
