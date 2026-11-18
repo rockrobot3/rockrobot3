@@ -3891,6 +3891,21 @@ registry 锁内、watchdog 判死也逐行落盘——锁内系统调用越少�
 判据——rr3-ctl 单测 21→25（wiring 渲染/不可得/contracts 渲染/fake-rrd 往返），
 clippy 干净；文档门抓出 `0.0.5 方案` 指向旧 `commands.rs` 的断链并同批修复。
 
+**2026-11-18 Windows 独立工程门补腿（续轮十六）**：事实——`host-windows` 只跑
+workspace，独立工程（`modules/*`、`tools/*`、`base/ota/*`）在 Windows 面零覆盖
+（覆盖矩阵缺口④）。处置——先收平台中性子集编译步（`tools/mkmodule` /
+`tools/rr3-codegen`）；**首跑红**：`rr3-sentinel-harness` 依赖
+`rr_ipc::transport::uart`（模块按 `linux/macos` 门控，raw termios），Windows 无
+该模块——子集移除并在矩阵登记理由，workflow 注释记根因。判据——host-windows
+新步 success；矩阵缺口④由"未覆盖"改"部分收口（2 个中性工程）"。
+
+**2026-11-18 审计增权限面与失败显形（续轮十六）**：事实——五条 workflow 都有
+顶层 `permissions:` 且无 `continue-on-error`，但这两条**没有门在管**，删除或加
+掩码不会有人发现（掩码会把漂红巡检变成假绿）。处置——
+`workflows_audit.py` 增两条判据：顶层 `permissions:` 必须存在、含
+`contents: read`、不得 `write-all`；`continue-on-error` 非 false 即红。自检负例
+11→13，政策真源 [ci-workflows.md](ci-workflows.md) 与 `tools/ci/README` 同批登记。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
