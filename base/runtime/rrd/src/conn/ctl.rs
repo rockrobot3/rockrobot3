@@ -139,6 +139,7 @@ fn rr3_ctl_status(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
         "modules": modules,
         "denied_publish": denied,
         "fan_dropped": fan_dropped,
+        "fan_write_timeout": super::rr3_wr_timeouts(),
         "log_sink": sink.state,
         "log_sink_max_us": sink.max_us,
         "log_sink_slow": sink.slow,

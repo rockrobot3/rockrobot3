@@ -105,6 +105,10 @@ fn ctl_status_lists_registered_modules_and_does_not_register_itself() {
         "落盘写阻塞窗（峰值 us / 慢写计数）必须在场: {v}"
     );
     assert!(
+        v["result"]["fan_write_timeout"].is_u64(),
+        "fanout 写超时累计必须在场（慢消费者点名）: {v}"
+    );
+    assert!(
         v["result"]["boot"]
             .as_str()
             .is_some_and(|s| s.contains("启动摘要")),

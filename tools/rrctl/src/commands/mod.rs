@@ -245,6 +245,7 @@ fn format_status(envelope: &Value) -> Result<String, String> {
     let mut out = render_table(&["NAME", "TASK", "PHASE"], &rows);
     out.push_str(&rr3_count_note(result, "denied_publish"));
     out.push_str(&rr3_count_note(result, "fan_dropped"));
+    out.push_str(&rr3_count_note(result, "fan_write_timeout"));
     out.push_str(&rr3_text_note(result, "log_sink"));
     out.push_str(&rr3_log_write_note(result));
     out.push_str(&rr3_text_note(result, "ctr_store"));

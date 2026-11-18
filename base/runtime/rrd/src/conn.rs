@@ -24,7 +24,9 @@
 //! `try_clone` 句柄、共用一把 `Mutex<UnixStream>`、且一帧一次 `write_all` → **整帧原子**；
 //! 但同一 socket 上"应答 vs 广播"的**相对顺序不保证**，所以测试按类型/字段挑帧，不按序号。
 
+use std::io::{ErrorKind, Write};
 use std::os::unix::net::UnixStream;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -32,8 +34,8 @@ use std::time::{Duration, Instant};
 
 use rr_bus::RR3_TASK_RRD;
 use rr_ipc::{
-    opcode, rr3_body_encode, rr3_body_split, rr3_frame_read_cap, rr3_frame_write, Rr3Frame,
-    Rr3FrameError, Rr3Header, Rr3PayloadType, Rr3StatusCode, RR3_FRAMING_PLEN_CAP_DEFAULT,
+    opcode, rr3_body_encode, rr3_body_split, rr3_frame_read_cap, Rr3Frame, Rr3FrameError,
+    Rr3Header, Rr3PayloadType, Rr3StatusCode, RR3_FRAMING_PLEN_CAP_DEFAULT,
 };
 use rr_registry::{rr3_manifest_chk, Rr3TopicSet};
 use serde_json::{json, Value};
@@ -91,6 +93,15 @@ impl Rr3ConnCtx {
     }
 }
 
+/// 写超时（对端 5s 不收）累计：慢消费者点名的一半——满队列丢帧记 `fan_dropped`，
+/// 写不动记这里。两者都在稳态下应为 0（续轮二十五判据）。
+static RR3_WRITE_TIMEOUTS: AtomicU64 = AtomicU64::new(0);
+
+/// 写超时累计读口（`ctl.status.fan_write_timeout`）
+pub fn rr3_wr_timeouts() -> u64 {
+    RR3_WRITE_TIMEOUTS.load(Ordering::Relaxed)
+}
+
 /// 唯一的写出口：锁覆盖整帧 → 与并发 writer 的字节永不交错。
 /// 写一帧到 `out`（持锁写，帧级原子）。返回 false = 写失败（含写超时）：
 /// writer 线程据此收摊退出（对端不收 = 这条连接写向已死），应答路径忽略返回值
@@ -99,11 +110,38 @@ fn rr3_write(out: &Arc<Mutex<UnixStream>>, frame: &Rr3Frame) -> bool {
     // 结果先落到局部变量：`if let Err(..) = rr3_frame_write(&mut *rr3_lock(..))`
     // 的临时 guard 会活到整个 if-let 结束，点名日志就成了**持出向锁写磁盘**
     // （续轮十九：锁内零文件 I/O）。先结束语句放锁，再落日志。
-    let res = rr3_frame_write(&mut *rr3_lock(out), frame);
+    //
+    // 这里自己走 `to_bytes + write_all + flush`（与 `rr3_frame_write` 同序）而不是
+    // 直接调它：那条路径把 io::Error 折成字符串，写超时（EAGAIN）与真错分不开——
+    // "对端不收"必须能单独点名与计数（续轮二十五）。
+    let (res, timed_out) = {
+        let mut guard = rr3_lock(out);
+        match rr_ipc::rr3_frame_to_bytes(frame) {
+            Err(e) => (Err(format!("{e:?}")), false),
+            Ok(bytes) => match guard.write_all(&bytes).and_then(|_| guard.flush()) {
+                Ok(()) => (Ok(()), false),
+                Err(e) => (
+                    Err(e.to_string()),
+                    matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut),
+                ),
+            },
+        }
+    };
     match res {
         Ok(()) => true,
         Err(e) => {
-            rr3_log(&format!("写帧失败 dst={}: {e:?}", frame.header.dst_task));
+            // 超时与普通写错分流：超时是"对端不收"，普通错是"通道坏了"——运维
+            // 处置不同（前者查慢消费者，后者查进程/句柄），日志与计数都要分开。
+            if timed_out {
+                RR3_WRITE_TIMEOUTS.fetch_add(1, Ordering::Relaxed);
+                rr3_log(&format!(
+                    "写帧超时 dst={}：对端 {}s 不收，writer 收摊；连接交 reader 回收（{e}）",
+                    frame.header.dst_task,
+                    RR3_FAN_WRITE_TIMEOUT.as_secs()
+                ));
+            } else {
+                rr3_log(&format!("写帧失败 dst={}: {e}", frame.header.dst_task));
+            }
             false
         }
     }
@@ -552,3 +590,6 @@ pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String>
     let _ = reader.shutdown(std::net::Shutdown::Both);
     outcome.map(|_| ())
 }
+
+#[cfg(test)]
+mod tests;
