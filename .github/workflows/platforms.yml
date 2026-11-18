@@ -285,6 +285,8 @@ jobs:
       # workspace 内，此前 Windows 面零覆盖。子集判据：不依赖仅 linux/macos 编译的
       # 模块（如 rr_ipc::transport::uart，raw termios），Unix 专属动作各自 cfg 门控
       # （rrctl 的 UDS 查询在非 Unix 返回"仅 Unix 可用"，编译面仍成立）。
+      # 首跑红教训：rr3-ota-ctl 依赖 rr-ota::bootenv（实现按 cfg(unix) 收口、CLI 无
+      # 非 Unix 分支），不要凭"源码里 unix 引用都被 cfg 包着"就把它加回来。
       # 任一编不过即红并点名工程根，不留"只看 workspace"的假绿。
       - name: 独立工程编译面（Windows，④ 中性子集）
         shell: pwsh
@@ -293,8 +295,7 @@ jobs:
             "tools/mkmodule",
             "tools/rr3-codegen",
             "tools/rrctl",
-            "tools/rr3-pack",
-            "base/ota/rr3-ota-ctl"
+            "tools/rr3-pack"
           )
           foreach ($r in $roots) {
             Write-Output "== check $r"
