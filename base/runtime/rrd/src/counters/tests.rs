@@ -215,6 +215,22 @@ fn gate_failed_receipt_releases_inflight_without_advancing_window() {
     assert!(g.rr3_on_change(50), "失败后下一拍立即重试");
 }
 
+/// 单轮 panic 隔离（续轮二十二）：在飞位必须释放、线程续跑——否则 reader 侧
+/// 永远不再排新一轮，账本静默停写（panic 文案由 daemon 的 panic hook 负责）。
+#[cfg(unix)]
+#[test]
+fn round_panic_releases_inflight_and_keeps_thread_alive() {
+    let mut g = Rr3CountersGate::rr3_new(10_000, 64);
+    assert!(g.rr3_on_change(0), "首拍该排一轮");
+    g.rr3_mark_inflight();
+    let gate = std::sync::Mutex::new(g);
+    rr3_ctr_round_guard(&gate, || panic!("注入：单轮炸"));
+    assert!(
+        crate::rr3_lock(&gate).rr3_on_change(1),
+        "在飞位必须释放，下一拍才能再排"
+    );
+}
+
 /// 异步落盘线程（续轮十三）：一次投递 → 盘上出现当下快照 → gate 收到成功
 /// 回执。快照在投递之后取，故落的是最新表而不是投递时刻的副本。
 #[cfg(unix)]
