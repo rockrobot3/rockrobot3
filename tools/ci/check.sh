@@ -1704,6 +1704,18 @@ else
   fi
 fi
 
+# ⑮ 锁内 I/O 门（续轮二十二）：人工巡检三轮归零后改为机器判据——拦三类已实证
+# 回潮：lock 与 log 同行 / 条件位临时 guard 延寿到块体 / 直调会写待落盘日志的
+# registry 方法；扫面打空即门禁失效（fail-closed）。
+printf '\n=== ⑮ 锁内 I/O 门（lock·log 同行 / 条件位临时 guard / 直调 reg 日志方法） ===\n'
+if command -v python3 >/dev/null 2>&1; then
+  if ! python3 tools/ci/lockio_audit.py; then
+    fail=1
+  fi
+else
+  printf 'SKIP  ⑮ python3 缺位——锁内 I/O 门不执行（CI runner 自带 python3）\n'
+fi
+
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then
   echo "所有规约检查通过"

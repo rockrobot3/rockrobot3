@@ -24,7 +24,7 @@
 - 验收实录数据（wav/日志）结论摘要进 `docs/status.md` 与 `docs/evidence/`，
   原始文件属会话产物，不追库
 
-## 2 机器可检查项（CI 门禁十步，见 `tools/ci/check.sh`）
+## 2 机器可检查项（CI 门禁步，见 `tools/ci/check.sh`）
 
 | 步 | 检查 | 命令 |
 |---|---|---|
@@ -41,6 +41,13 @@
 | ⑥ | **格格双达标·独立工程测试接线**（architecture §13；0.0.5 批E 起，批E' 扩全量口径） | 逐工程 `cargo test -q --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/`，排除 `base/runtime/*` 与 esp 条件工程 `tools/esp32-uart-echo`/`tools/espidf-std-hello`/`tools/espidf-sentinel`/`tools/esp32-periph-base`）；PASS 计数；`find` 打空即整步 FAIL（"接线了但没测"在此红，不以 SKIP 充数） |
 | ⑦ | **§13 静态断言五件**（全 fail-closed，逐条点名） | ⑦-a 机制核与件面零策略载荷（禁词扫 `rr-mech/src/*.rs`（0.0.5 批M 控制原语叶子件下沉，MC-10 L-4 补）+ `rr-core/src/*.rs` + `rr-hal-api/src/*.rs`（0.0.5 批I C8 起）+ `rr-ipc/src/protocol/*.rs` + `transport/mod.rs`，**0.0.5 批K H2 起再加 `modules/*/atoms/*/*.rs`**——件声明面同样不许带厂商/芯片/器件名，行注释先剥离）· ⑦-b `F⊗F`/装配成员存在性（每份 `composite.toml` 的 `atoms` 行须解析到本模块 `atoms/<名>/atom.toml`）· ⑦-c 五件套计数（件形按 `module.toml` 的 `lang` 数据位选：rust 五件 / python 两件式 / 组合件实体按 lang 推导——零件名零硬编码，批M MC-10 L-2）· ⑦-d 入口体量 ≤80 行（入口路径亦按 `lang` 推导）· ⑦-e 门禁清单自指判等（⑦-a 扫面名集 A 逐名须在 §2 本行与 `tools/ci/README.md` 的 ⑦ 行齐 + `tools/ci/rr-core-xtensa-check.sh` 的 `-p` 目标集 ⊆ A；代码为唯一真值、文档向代码看齐；0.0.5 批M MC-10 L-4）。**"每格一件·不留空格"的反向断言不在本步**，在 ② 的 rr-registry 仓扫描测试（`repo_atoms_compliant_and_every_slot_uniquely_covered`） |
 | ⑧ | **件级判据三门**（0.0.5 批K H2 接入；全 fail-closed，上线即全绿） | ⑧-a 两腿对拍计数门：格两轴读 `contracts/slots.toml`——`status` 判分母（C9 门只读这一处）+ `tier_scope` 记档位适用并校验非空/档名在册（批M MC-10 L-2 扩读，收 R-8）——normal 格落点件须 mech.rs + 模块 composite.rs/dispatch.rs/rpc.rs（含其 `tests/` 子目录）两腿各 ≥1（腿一 `fn parity_leg1_*`、腿二 `fn parity_leg2_*`，命名即机器锚），只有腿一记未达标；placeholder 记"不适用"、retired 退出分母；件形按 `module.toml` 的 `lang` 判（lang=python 两件式记不适用，不再用 `[ ! -f mech.rs ]` 存在性启发式）；C10 stub 反例自证内置（须由**对拍计数**拦下，拦不住空件则门自身 FAIL）· ⑧-b 依赖闭包 grep 门（C7 分级执法）：扫 `modules/*/atoms/*/*.rs` 非 test 面（行注释与 `#[cfg(test)]` 块先剥）——L0 = `std::`（含 `use std::`/`extern crate std`/全限定内联），L1 = L0 + `serde_json` · ⑧-c 注入面校验门：rr-registry contract 的 injection 用例**显式过滤器**，打空即红（run_tests ≥1 断言），封"用例被改名/删除"的 fail-open；形状级含 **L-5 空面规则**（`handles`/`ops` 两数组**均空**须明写 `no_injection = true`，否则与"漏填"不可区分判红——0.0.5 批M MC-10 L-5） |
+
+**⑩ 起的续增步（步号全集以 `check.sh` 的 `step` 行为准）**：⑨-a…⑨-z 各门、
+⑩ 面板覆盖率、⑫ 质量度量、⑬ 仓面卫生、⑭ 源文件行数、⑮ 锁内 I/O。⑮ 的度量核是
+`tools/ci/lockio_audit.py`（续轮二十二）：拦 `lock·log` 同行、条件位临时 guard
+延寿到块体、直调会写待落盘日志的 registry 方法三类已实证回潮；`--self-test` 三负例
+先自证后执法，扫面打空即门禁失效；gate `scripts` job 与本地 `check.sh` 同一脚本。
+表体仍按 ①–⑨ 逐行登记（⑩ 起是后续批次续增，完整清单以脚本 `step` 行为唯一真值）。
 
 **2026-11-02 批N43 对表**：新增独立 std 工程 `tools/pi-periph-base`（W4/P0-C Pi 板侧
 五端口后端）**进 ④/⑥ 扫面**（非 esp 条件工程，不 SKIP；⑥ 跑 24 测）；前置条件 =
