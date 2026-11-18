@@ -3916,6 +3916,14 @@ workspace，独立工程（`modules/*`、`tools/*`、`base/ota/*`）在 Windows 
 全部改走该入口。判据——单测钉"收集一行、取走即空"与状态读口，e2e 钉字段可读；
 rrd 315 单测 / rr3-ctl 25 测试 / clippy / check.sh / metrics 全绿。
 
+**2026-11-18 Windows 独立工程覆盖扩面（续轮十八）**：事实——`host-windows` 的
+独立工程子集只有 mkmodule / codegen，`rrctl`（UDS 查询已有非 Unix 返回路径）与
+`rr3-pack`（权限位已 cfg 门控）实际可跨平台编译却零覆盖。处置——子集扩到 4 个；
+**首跑红**：`rr3-ota-ctl` 依赖 `rr-ota::bootenv`（实现按 `cfg(unix)` 收口、
+CLI 子命令无非 Unix 分支）——"源码里 unix 引用都被 cfg 包着"不等于模块面在非
+Unix 可用；移除并把 root cause 与"不要凭印象加回"写进 workflow 注释与覆盖矩阵
+缺口④。判据——host-windows success（4 个工程逐个 `cargo check`，失败点名工程根）。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
