@@ -36,8 +36,15 @@ impl RrdRegistry {
     /// 才置 `tx=None`。
     /// 广播积压丢帧总数（连接鲁棒性读面）：`ctl.status` 的 `fan_dropped` 列来源，
     /// 事件总线的"尽力投递"必须可观测，不能只留在逐 64 帧一次的日志里。
+    /// 点名行在锁内只进 `pending_logs`，由 [`super::rr3_reg_with`] 放锁后落盘。
     pub fn rr3_reg_fan_dropped(&self) -> u64 {
         self.modules.values().map(|e| e.fan_dropped).sum()
+    }
+
+    /// 取走锁内收集的待打印行（续轮十七）：由 [`super::rr3_reg_with`] 在放锁后
+    /// 逐行落盘。取走即清空——同一行不会被两次临界区重复打印。
+    pub fn rr3_logs_take(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_logs)
     }
 
     pub fn rr3_reg_fanout(&mut self, frame: &Rr3Frame, exclude_task: u64) -> usize {
@@ -54,9 +61,10 @@ impl RrdRegistry {
                 Err(TrySendError::Disconnected(_)) => e.tx = None,
                 Err(TrySendError::Full(_)) => {
                     e.fan_dropped = e.fan_dropped.saturating_add(1);
-                    // 每 64 帧点名一次：满队列期间不刷屏，又不把丢帧静默掉
+                    // 每 64 帧点名一次：满队列期间不刷屏，又不把丢帧静默掉。
+                    // 只入待打印列，落盘在 `rr3_reg_with` 放锁后做（锁内零文件 I/O）。
                     if e.fan_dropped % 64 == 1 {
-                        rr3_log(&format!(
+                        self.pending_logs.push(format!(
                             "广播积压丢帧 {name}：收件队列满（{RR3_FAN_CAP} 帧上界），已丢 {} 帧——保留连接，主循环恢复读取后自动续投",
                             e.fan_dropped
                         ));
@@ -92,7 +100,7 @@ impl RrdRegistry {
         let first = !self.counters.contains_key(&key);
         self.rr3_reg_ctr_bump(&key, n);
         if first {
-            rr3_log(&format!(
+            self.pending_logs.push(format!(
                 "影子统计（subscribes 过滤预演，不改投递）：{topic} 本应过滤 {n} 个连接；全量扇出照旧"
             ));
         }

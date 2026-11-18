@@ -344,8 +344,9 @@ fn rr3_conn_finish(ctx: &Rr3ConnCtx, me: &Rr3Peer, clean_exit: bool, reason: &st
             // E-9：这里排 `RR3_TASK_RRD` 等于不排除（发起者自己也收到关于自己的终态）；
             // supervisor 收尸那一路排的是 `crashed.src_task`。两种口径是**已知**的第三/第四种
             // 口径，归 Task 13 的 A-3 文档化，本任务不"统一"——统一成哪一种都没有判据支持。
-            let n = rr3_lock(&ctx.shared)
-                .rr3_reg_fanout(&rr3_state_frame(&me.name, phase, me.task), RR3_TASK_RRD);
+            let n = crate::registry::rr3_reg_with(&ctx.shared, |g| {
+                g.rr3_reg_fanout(&rr3_state_frame(&me.name, phase, me.task), RR3_TASK_RRD)
+            });
             match plan {
                 Some(p) => {
                     rr3_log(&format!(
@@ -369,10 +370,12 @@ fn rr3_conn_finish(ctx: &Rr3ConnCtx, me: &Rr3Peer, clean_exit: bool, reason: &st
             // 落点负责各自的传播，一次死亡恰好传播一次。
             let degraded = rr3_lock(&ctx.shared).rr3_reg_degrade(&me.name);
             for (dep, task) in degraded {
-                let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
-                    &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
-                    task,
-                );
+                let n = crate::registry::rr3_reg_with(&ctx.shared, |g| {
+                    g.rr3_reg_fanout(
+                        &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
+                        task,
+                    )
+                });
                 rr3_log(&format!(
                     "{dep} 依赖断供 → degraded（提供者 {} 离开 Running）广播到 {n} 个连接",
                     me.name

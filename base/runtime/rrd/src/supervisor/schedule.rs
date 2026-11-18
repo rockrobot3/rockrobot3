@@ -53,8 +53,9 @@ pub(super) fn rr3_absorb_exit(
             // 与 expire 那一路同形）；conn 收尾那一路排的是 `RR3_TASK_RRD`（等于不排除）。
             // 两种口径是**已知**的第三/第四种口径，归 Task 13 的 A-3 文档化，此处不"统一"——
             // 统一成哪一种都没有判据支持。
-            let n =
-                rr3_lock(shared).rr3_reg_fanout(&rr3_state_frame(name, phase, src_task), src_task);
+            let n = crate::registry::rr3_reg_with(shared, |g| {
+                g.rr3_reg_fanout(&rr3_state_frame(name, phase, src_task), src_task)
+            });
             rr3_log(&format!(
                 "{name} 子进程退出 status={status} → 广播 {phase} 到 {n} 个连接"
             ));
@@ -96,10 +97,12 @@ pub(super) fn rr3_absorb_exit(
 /// 降级传播广播：逐个依赖者点名并记数（排除项 `RR3_TASK_RRD`，E-9 同一理据）。
 fn rr3_degrade_fanout(shared: &Arc<Mutex<RrdRegistry>>, name: &str, degraded: Vec<(String, u64)>) {
     for (dep, task) in degraded {
-        let n = rr3_lock(shared).rr3_reg_fanout(
-            &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
-            rr_bus::RR3_TASK_RRD,
-        );
+        let n = crate::registry::rr3_reg_with(shared, |g| {
+            g.rr3_reg_fanout(
+                &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
+                rr_bus::RR3_TASK_RRD,
+            )
+        });
         rr3_log(&format!(
             "{dep} 依赖断供 → degraded（提供者 {name} 离开 Running）广播到 {n} 个连接"
         ));

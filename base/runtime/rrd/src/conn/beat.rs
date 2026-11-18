@@ -65,7 +65,8 @@ fn rr3_beat_counters(ctx: &Rr3ConnCtx, me: &Rr3Peer, params: &Value) {
     let Some(counters) = rr3_rpc_counters(params) else {
         return;
     };
-    let changed = rr3_lock(&ctx.shared).rr3_reg_ctr_merge(&me.name, &counters);
+    let changed =
+        crate::registry::rr3_reg_with(&ctx.shared, |g| g.rr3_reg_ctr_merge(&me.name, &counters));
     if !changed {
         return;
     }
@@ -84,16 +85,18 @@ fn rr3_beat_counters(ctx: &Rr3ConnCtx, me: &Rr3Peer, params: &Value) {
 /// 排除项 `RR3_TASK_RRD` = 不排除——发起者自己也要收到关于自己的升级。
 fn rr3_beat_promote(ctx: &Rr3ConnCtx, me: &Rr3Peer) {
     let frame = rr3_state_frame(&me.name, Rr3Phase::Running.as_str(), me.task);
-    let n = rr3_lock(&ctx.shared).rr3_reg_fanout(&frame, RR3_TASK_RRD);
+    let n = crate::registry::rr3_reg_with(&ctx.shared, |g| g.rr3_reg_fanout(&frame, RR3_TASK_RRD));
     rr3_log(&format!("{} → running（广播到 {n} 个连接）", me.name));
     // ADR-0009 裁定 3 恢复半边：提供者回到 Running → 依赖者逐个重算，全部
     // required 就位才回 Running。谁记的账谁传播。
     let recovered = rr3_lock(&ctx.shared).rr3_reg_undegrade(&me.name);
     for (dep, task) in recovered {
-        let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
-            &rr3_state_frame(&dep, Rr3Phase::Running.as_str(), task),
-            RR3_TASK_RRD,
-        );
+        let n = crate::registry::rr3_reg_with(&ctx.shared, |g| {
+            g.rr3_reg_fanout(
+                &rr3_state_frame(&dep, Rr3Phase::Running.as_str(), task),
+                RR3_TASK_RRD,
+            )
+        });
         rr3_log(&format!(
             "{dep} 依赖恢复 → running（提供者 {} 回到 Running）广播到 {n} 个连接",
             me.name
