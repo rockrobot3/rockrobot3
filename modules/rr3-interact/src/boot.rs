@@ -1,0 +1,426 @@
+//! rr3-interact 接入层（0.0.8 W-A 批4 拆分，ADR-0017 五层表接入层）。
+//!
+//! config schema 解析（自原 composite.rs 迁入：MC-10 I-11 起四段活值面——
+//! player/face/panel/selftest；缺段/缺键回落默认、类型错/负数/越界/在册外值
+//! 逐键点名拒 boot（fail-closed），文案是装配观测面逐字不变）＋ 播放面/显示面
+//! 选择与开机探活编排（打开/探活失败 Err 上抛——fail-closed 显式回错，不静默
+//! 带病常驻也不给"没有显示面还常驻"的假活）。config 路径解析
+//! （RR3_INTERACT_CONFIG_ENV 覆盖 + manifest 同目录缺省）已随批0 并入 rr3mod
+//! `load_config_text` 单点，本层不再持有路径段（批N28 单点收口同款）。
+//!
+//! rr3_hal 直依仅 backend 装配两函数（⑨-w 白名单 backend 装配类，sense
+//! `rr3_sense_probe` 同款）；契约类型（Rr3AudioSink/Rr3Display）与采样规格
+//! 常量走 rr_hal_api 直依（⑨-w 模块单元契约面纪律）。
+
+use rr_hal::backend::{
+    rr3_backend_resolve, rr3_hal_audio_sink, rr3_hal_display, RR3_BACKEND_PLACEHOLDER,
+};
+use rr_hal_api::{Rr3AudioSink, Rr3Display, RR3_AUDIO_CFG_16K_MONO16};
+
+use crate::face::{rr3_face_expr_lookup, RR3_FACE_EXPRESSIONS_JOINED};
+use crate::panel::server::{
+    Rr3SelftestExpect, RR3_SELFTEST_CONTRACTS_EXPECTS, RR3_SELFTEST_LEG_STATES,
+    RR3_SELFTEST_WIRING_EXPECTS,
+};
+
+/// 播放面 + 显示面句柄对（探活返回的观测面句柄）
+pub(crate) type Rr3PlayDispDevs = (Box<dyn Rr3AudioSink>, Box<dyn Rr3Display>);
+
+/// 播放面 + 显示面选择与开机探活编排：[`rr3_hal_audio_sink`] 选择＋ open 探活
+/// （打开失败 Err 上抛）＋「播放面就绪」回显 → [`rr3_hal_display`] 选择＋ frame()
+/// 探活（失败 Err，R11③ 显式回错不静默退化——真件档板显式 linux 时 MAX7219
+/// 后端未实装，探活 exit(1) 是预期语义）＋「显示面就绪」回显。返回两元句柄，
+/// backend 名回显后丢弃（回显已尽的观测面不随行）。
+pub(crate) fn rr3_interact_probe() -> Result<Rr3PlayDispDevs, String> {
+    let (mut sink, backend) = rr3_hal_audio_sink();
+    sink.open(RR3_AUDIO_CFG_16K_MONO16)
+        .map_err(|e| format!("打开播放面({backend})失败: {e}"))?;
+    eprintln!("播放面就绪: backend={backend} rate=16000 ch=1");
+
+    // 显示面选择 + 开机探活：读回当前帧，Unsupported 即致命——sim 档走虚拟点阵
+    // 内存记录，主循环出帧全链可见
+    let (display, display_backend) = rr3_hal_display();
+    display
+        .frame()
+        .map_err(|e| format!("显示面探活失败({display_backend}): {e}"))?;
+    eprintln!("显示面就绪: backend={display_backend} 8x8");
+    // 面选择摘要（可定位一行）：全局 hal 档 + 播放/显示两面后端 + 承载形状
+    eprintln!(
+        "面选择: hal={} sink={backend} display={display_backend} shape=16000Hz/1ch/8x8",
+        rr3_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER)
+    );
+    Ok((sink, display))
+}
+
+/// 本模块 config 的汇总形状（自原 composite.rs 迁入，逐字）
+#[derive(Debug, Clone)]
+pub struct Rr3InteractCfg {
+    pub player: Rr3PlayerCfg,
+    pub face: Rr3FaceCfg,
+    pub panel: Rr3PanelCfg,
+    pub selftest: Rr3SelftestCfg,
+}
+
+/// config `[rr3-interact.player]` 的形状（MC-2）：起播水位与播放增益。
+/// 缺键/缺段回落默认（同 sense S-5 口径：代码默认是文件缺键的回落）；
+/// 类型错/负数/越界显式拒（fail-closed，不静默吞）。
+#[derive(Debug, Clone)]
+pub struct Rr3PlayerCfg {
+    pub prebuffer_ms: u64,
+    pub volume_pct: u32,
+}
+
+impl Default for Rr3PlayerCfg {
+    fn default() -> Self {
+        // legacy 0cf029e 调优值（0.5s 预缓冲抗抖动、70% 音量）——一个事实
+        // 一个真值点：默认值只在此处与 config.toml 注释对表
+        Self {
+            prebuffer_ms: 500,
+            volume_pct: 70,
+        }
+    }
+}
+
+/// config `[rr3-interact.face]` 的形状（`non_pointable` = 本形态不可点名集，I-11）。
+/// 值取 `&'static str`（经白名单对账），件面判定直接吃 `&[&str]`。批N4 件五
+/// I-17/M-2/M-3：`face_tick_ms` = 表情节拍（组合件主循环节步频）与
+/// `default_expr` = 兜底表情（mech 状态机各回落点）数据化——节拍与人格取向
+/// 都是策略，缺键回落 legacy 值。
+#[derive(Debug, Clone)]
+pub struct Rr3FaceCfg {
+    pub non_pointable: Vec<&'static str>,
+    pub face_tick_ms: u64,
+    pub default_expr: &'static str,
+}
+
+/// config `[rr3-interact.panel]` 的形状（批N4 件五 I-18②）：面板五限额/超时
+/// 数据化——面板是"覆盖率门缺失"的活证（I-15 分子分母数不到它们），本批补齐。
+/// 缺段/缺键回落默认（legacy 常量值，S-5 口径）；类型错/负数/越界点名拒 boot。
+#[derive(Debug, Clone)]
+pub struct Rr3PanelCfg {
+    pub max_conns: u64,
+    pub read_timeout_ms: u64,
+    pub header_limit: u64,
+    pub body_limit: u64,
+    pub call_timeout_ms: u64,
+}
+
+impl Default for Rr3PanelCfg {
+    fn default() -> Self {
+        // legacy 常量值（server.rs 原 RR3_PANEL_* 常量）——一个事实一个真值点：
+        // 默认值只在此处与 config.toml 注释对表
+        Self {
+            max_conns: 8,
+            read_timeout_ms: 5000,
+            header_limit: 8 * 1024,
+            body_limit: 4 * 1024,
+            call_timeout_ms: 5000,
+        }
+    }
+}
+
+/// config `[rr3-interact.selftest]` 的形状（批N4 件五 I-17/M-10）：自检期望
+/// 表情是产线取向，可按形态改数据。值必须在册（白名单对账）。批N5 件五
+/// F-31 扩预期表 `expect`：固定腿逐名期望三态 + wiring 组预期——verdict =
+/// 结果集与预期集等值，判据数据化（值域闭集与机制面同住在 panel server）。
+#[derive(Debug, Clone)]
+pub struct Rr3SelftestCfg {
+    pub face_expect: &'static str,
+    pub expect: Rr3SelftestExpect,
+}
+
+impl Default for Rr3SelftestCfg {
+    fn default() -> Self {
+        Self {
+            face_expect: "happy",
+            expect: Rr3SelftestExpect::default(),
+        }
+    }
+}
+
+/// TOML 文本 → Rr3InteractCfg（bootstrap 的 parse_config 入口）。手工下钻不引
+/// serde derive：字段个位数，点名缺字段的文案比派生宏的默认报错可读。
+/// 段解析按 player → panel → selftest → face 顺序求值：与拆分前逐段顺序一致，
+/// 多段同时坏时的首个错误不变。
+pub(crate) fn rr3_itact_cfg_parse(text: &str) -> Result<Rr3InteractCfg, String> {
+    let v: toml::Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
+    let player = rr3_itact_player(&v)?;
+    let panel = rr3_itact_panel(&v)?;
+    let selftest = rr3_itact_selftest(&v)?;
+    let face = rr3_itact_face(&v)?;
+    Ok(Rr3InteractCfg {
+        player,
+        face,
+        panel,
+        selftest,
+    })
+}
+
+/// `[rr3-interact.<段>]` 下钻（段缺 = None，调用方按各段口径回落/点名）。
+fn rr3_itact_sect<'a>(v: &'a toml::Value, name: &str) -> Option<&'a toml::Value> {
+    v.get("rr3-interact").and_then(|s| s.get(name))
+}
+
+/// player 段（MC-2）：段/键缺省回落默认（S-5 口径）；类型错或越界逐键点名
+/// 拒 boot（fail-closed）。volume_pct 值域 0..=1000（10 倍封顶防呆，>100
+/// 为放大、样点饱和由机制面夹断）。
+fn rr3_itact_player(v: &toml::Value) -> Result<Rr3PlayerCfg, String> {
+    let mut player = Rr3PlayerCfg::default();
+    if let Some(p) = rr3_itact_sect(v, "player") {
+        rr3_player_keys(p, &mut player)?;
+    }
+    Ok(player)
+}
+
+/// player 段两键落位（缺键保留默认；类型错/越界逐键点名）。
+fn rr3_player_keys(p: &toml::Value, player: &mut Rr3PlayerCfg) -> Result<(), String> {
+    let mut t = player.prebuffer_ms;
+    rr3_cfg_u64(p, "prebuffer_ms", "player", &mut t)?;
+    player.prebuffer_ms = t;
+    player.volume_pct = rr3_itact_volume(p, player.volume_pct)?;
+    Ok(())
+}
+
+/// volume_pct 值域 0..=1000（10 倍封顶防呆）。
+fn rr3_itact_volume(p: &toml::Value, cur: u32) -> Result<u32, String> {
+    let mut t = cur as u64;
+    rr3_cfg_u64(p, "volume_pct", "player", &mut t)?;
+    u32::try_from(t)
+        .ok()
+        .filter(|pct| *pct <= 1000)
+        .ok_or_else(|| format!("[rr3-interact.player] volume_pct 越界（值域 0..=1000）: {t}"))
+}
+
+/// panel 段（批N4 件五 I-18②）：段/键缺省回落 legacy 常量值（S-5 口径）；
+/// 类型错/负数点名拒。四值下界：max_conns ≥1、read_timeout_ms ≥1、
+/// header/body_limit ≥1（0 = 面板自残，不当合法配置放行）。
+fn rr3_itact_panel(v: &toml::Value) -> Result<Rr3PanelCfg, String> {
+    let mut panel = Rr3PanelCfg::default();
+    if let Some(p) = rr3_itact_sect(v, "panel") {
+        let fields: [(&str, &mut u64); 5] = [
+            ("max_conns", &mut panel.max_conns),
+            ("read_timeout_ms", &mut panel.read_timeout_ms),
+            ("header_limit", &mut panel.header_limit),
+            ("body_limit", &mut panel.body_limit),
+            ("call_timeout_ms", &mut panel.call_timeout_ms),
+        ];
+        for (key, slot) in fields {
+            rr3_cfg_u64(p, key, "panel", slot)?;
+            *slot = (*slot).max(1);
+        }
+    }
+    Ok(panel)
+}
+
+/// selftest 段（批N4 件五 I-17/M-10）：段缺省回落 legacy 期望（"happy"）；
+/// 值必须在册（同 non_pointable 白名单对账口径），在册外点名拒 boot。
+fn rr3_itact_selftest(v: &toml::Value) -> Result<Rr3SelftestCfg, String> {
+    let mut selftest = Rr3SelftestCfg::default();
+    let Some(s) = rr3_itact_sect(v, "selftest") else {
+        return Ok(selftest);
+    };
+    if let Some(name) = s.get("face_expect").and_then(toml::Value::as_str) {
+        selftest.face_expect = rr3_face_expect(name)?;
+    }
+    if let Some(e) = s.get("expect") {
+        selftest.expect = rr3_itact_expect(e)?;
+    }
+    Ok(selftest)
+}
+
+/// 兜底表情预期（在册表情白名单对账，越界点名拒 boot）。
+fn rr3_face_expect(name: &str) -> Result<&'static str, String> {
+    rr3_face_expr_lookup(name).ok_or_else(|| {
+        format!(
+            "config [rr3-interact.selftest] face_expect 非在册表情 {name:?}（在册值 {}）",
+            RR3_FACE_EXPRESSIONS_JOINED
+        )
+    })
+}
+
+/// selftest 预期表（批N5 件五 F-31）：段/键缺省回落默认（固定腿全 pass +
+/// wiring 组零 fail）；三态值域闭集与腿名册逐键对账，未知腿名/在册外值
+/// 点名拒 boot（fail-closed——预期表错一个字就改判红绿，不容静默）。
+fn rr3_itact_expect(e: &toml::Value) -> Result<Rr3SelftestExpect, String> {
+    let mut expect = Rr3SelftestExpect::default();
+    let table = e
+        .as_table()
+        .ok_or_else(|| format!("config [rr3-interact.selftest] expect 段必须是表，收到 {e}"))?;
+    for (k, val) in table {
+        let sval = val.as_str().ok_or_else(|| {
+            format!("config [rr3-interact.selftest.expect] {k} 必须是字符串，收到 {val}")
+        })?;
+        rr3_expect_set(&mut expect, k, sval)?;
+    }
+    Ok(expect)
+}
+
+/// wiring 组闭集对账（词表外点名拒 boot）。
+fn expect_wiring(sval: &str) -> Result<&'static str, String> {
+    Rr3SelftestExpect::rr3_wiring_lookup(sval).ok_or_else(|| {
+        format!(
+            "config [rr3-interact.selftest.expect] wiring 非在册组预期 {sval:?}（在册值 {}）",
+            RR3_SELFTEST_WIRING_EXPECTS.join("/")
+        )
+    })
+}
+
+/// contracts 组闭集对账（批N5 件五笔4，Z-4：同 wiring 组口径）。
+fn expect_contr(sval: &str) -> Result<&'static str, String> {
+    Rr3SelftestExpect::rr3_contracts_lookup(sval).ok_or_else(|| {
+        format!(
+            "config [rr3-interact.selftest.expect] contracts 非在册组预期 {sval:?}（在册值 {}）",
+            RR3_SELFTEST_CONTRACTS_EXPECTS.join("/")
+        )
+    })
+}
+
+/// 固定腿三态落位（`leg` 已由调用方守卫限定在册）。
+fn expect_leg(expect: &mut Rr3SelftestExpect, leg: &str, sval: &str) -> Result<(), String> {
+    let st = rr3_leg_state(leg, sval)?;
+    rr3_leg_put(expect, leg, st);
+    Ok(())
+}
+
+/// 固定腿三态落位（`leg` 已由调用方守卫限定在册）。
+fn rr3_leg_put(expect: &mut Rr3SelftestExpect, leg: &str, st: &'static str) {
+    if leg == "speaker" {
+        expect.speaker = st;
+    } else if leg == "relay" {
+        expect.relay = st;
+    } else {
+        expect.face = st;
+    }
+}
+
+/// 固定腿三态取值（在册词表对账，越界点名）。
+fn rr3_leg_state(leg: &str, sval: &str) -> Result<&'static str, String> {
+    Rr3SelftestExpect::rr3_state_lookup(sval).ok_or_else(|| {
+        format!(
+            "config [rr3-interact.selftest.expect] {leg} 非在册三态 {sval:?}（在册值 {}）",
+            RR3_SELFTEST_LEG_STATES.join("/")
+        )
+    })
+}
+
+/// 单腿预期落位（腿名册与三态闭集逐键对账；未知腿名/在册外值点名拒）。
+fn rr3_expect_set(expect: &mut Rr3SelftestExpect, k: &str, sval: &str) -> Result<(), String> {
+    if k == "wiring" {
+        expect.wiring = expect_wiring(sval)?;
+    } else if k == "contracts" {
+        expect.contracts = expect_contr(sval)?;
+    } else {
+        return rr3_expect_leg_key(expect, k, sval);
+    }
+    Ok(())
+}
+
+/// 固定腿三态键（腿名册外点名拒）。
+fn rr3_expect_leg_key(expect: &mut Rr3SelftestExpect, k: &str, sval: &str) -> Result<(), String> {
+    match k {
+        "speaker" | "relay" | "face" => expect_leg(expect, k, sval),
+        other => Err(format!(
+            "config [rr3-interact.selftest.expect] 未知腿名 {other:?}（在册腿 speaker/relay/face/wiring/contracts）"
+        )),
+    }
+}
+
+/// face 段：non_pointable 必填（在册表情白名单逐条对账）、节拍与兜底表情
+/// 缺省回落 legacy 值；default_expression 必须在册。
+fn rr3_itact_face(v: &toml::Value) -> Result<Rr3FaceCfg, String> {
+    let face_sect = rr3_itact_sect(v, "face").ok_or("config 缺 [rr3-interact.face] 段")?;
+    let non_pointable = rr3_face_nonpt(face_sect)?;
+    // 表情节拍与兜底表情（批N4 件五 I-17/M-2/M-3）：缺键回落 legacy 值；
+    // default_expression 必须在册（同 non_pointable 白名单对账）
+    let mut face_tick_ms = 250u64;
+    rr3_cfg_u64(face_sect, "face_tick_ms", "face", &mut face_tick_ms)?;
+    let face_tick_ms = face_tick_ms.max(1);
+    let default_expr = rr3_face_default(face_sect)?;
+    Ok(Rr3FaceCfg {
+        non_pointable,
+        face_tick_ms,
+        default_expr,
+    })
+}
+
+/// 不可点名集（I-11）：数组逐元素必须是**在册契约值**，非在册名或非字符串
+/// 逐条点名拒 boot（fail-closed）；键在而数组为空 = 本形态不排除任何表情点名（合法）
+fn rr3_face_nonpt(face_sect: &toml::Value) -> Result<Vec<&'static str>, String> {
+    let arr = rr3_face_arr(face_sect)?;
+    let mut non_pointable = Vec::with_capacity(arr.len());
+    for (i, e) in arr.iter().enumerate() {
+        non_pointable.push(rr3_face_at(i, e)?);
+    }
+    Ok(non_pointable)
+}
+
+/// 不可点名数组键取址（缺键点名拒 boot）。
+fn rr3_face_arr(face_sect: &toml::Value) -> Result<&Vec<toml::Value>, String> {
+    face_sect
+        .get("non_pointable")
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| {
+            "config [rr3-interact.face] 缺 non_pointable（不可点名表情数组）".to_string()
+        })
+}
+
+/// 单项：必须是**在册契约值**的字符串（逐条点名拒 boot）。
+fn rr3_face_at(i: usize, e: &toml::Value) -> Result<&'static str, String> {
+    let s = e.as_str().ok_or_else(|| {
+        format!("config [rr3-interact.face] non_pointable[{i}] 必须是字符串，收到 {e}")
+    })?;
+    rr3_face_expr_lookup(s).ok_or_else(|| {
+        format!(
+            "config [rr3-interact.face] non_pointable[{i}] 非在册表情 {s:?}（在册值 {}）",
+            RR3_FACE_EXPRESSIONS_JOINED
+        )
+    })
+}
+
+/// 兜底表情：缺键回落 `idle`（在册白名单恒含，expect 不是兜底而是不变量）
+fn rr3_face_default(face_sect: &toml::Value) -> Result<&'static str, String> {
+    let Some(name) = face_sect.get("default_expression") else {
+        return Ok(rr3_face_expr_lookup("idle").expect("在册白名单恒含 idle，lookup 必中"));
+    };
+    let s = name.as_str().ok_or_else(|| {
+        format!("config [rr3-interact.face] default_expression 必须是字符串，收到 {name}")
+    })?;
+    rr3_face_pick(s)
+}
+
+/// 在册表情解析：表外点名（在册值清单逐字带出）。
+fn rr3_face_pick(s: &str) -> Result<&'static str, String> {
+    rr3_face_expr_lookup(s).ok_or_else(|| {
+        format!(
+            "config [rr3-interact.face] default_expression 非在册表情 {s:?}（在册值 {}）",
+            RR3_FACE_EXPRESSIONS_JOINED
+        )
+    })
+}
+
+/// config 键的 u64 下钻（S-5 同款口径）：键缺省不动 `out`（回落调用方给的
+/// 默认）；类型错（非整数/负数）显式点名拒 boot，不静默吞。段名进文案便于
+/// 逐段定位（player/face/panel 各段共用）。
+fn rr3_cfg_u64(
+    sect: &toml::Value,
+    key: &str,
+    sect_name: &str,
+    out: &mut u64,
+) -> Result<(), String> {
+    let Some(v) = sect.get(key) else {
+        return Ok(());
+    };
+    *out = rr3_cfg_nonneg(v, key, sect_name)?;
+    Ok(())
+}
+
+/// 非负整数域（类型错/负数逐条点名，段名进文案便于定位）。
+fn rr3_cfg_nonneg(v: &toml::Value, key: &str, sect_name: &str) -> Result<u64, String> {
+    let t = v
+        .as_integer()
+        .ok_or_else(|| format!("[rr3-interact.{sect_name}] {key} 必须是整数，收到 {v}"))?;
+    u64::try_from(t).map_err(|_| format!("[rr3-interact.{sect_name}] {key} 不得为负: {t}"))
+}
+
+#[cfg(test)]
+mod tests;

@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# build-onboard —— 板上原生构建承载件（0.0.6 批F1，洞 L；R13 音频件换装）。
+#
+# 为什么需要它：musl 全静态与 alsa 结构性互斥（alsa-sys 绑 C libasound 动态库 + 运行时
+# 插件），交叉路径不存在——真麦采集 / 真播放的音频件（rr3-sense / rr3-interact 带
+# `alsa` feature）只能在**板上原生构建**。本脚本把"源码上板 → 板上取依赖 → 板上构建 →
+# 产物归位 staging"四步收敛成一条链，供 pack-arm64.sh 出的 staging 树合流后板上
+# `dpkg-deb --build`（装机步骤见 base/os/distro/boards/raspberry-pi-64.md）。
+#
+# 分工：宿主 musl 静态件（rrd / rr3-ctl / 五模块宿主构建件）仍走 pack-arm64.sh；
+# 本脚本**只覆盖**音频两件（sense / interact）的 bin——先跑 pack-arm64.sh 备好 payload，
+# 再跑本脚本把音频两件的 bin 换成板上原生构建件（动态 ELF + libasound）。
+#
+# 用法: build-onboard.sh <user@host> [out_dir] [remote_src_dir]
+#   user@host       板上 SSH 目标（免密已配，如 pi@<board-ip>）
+#   out_dir         pack-arm64.sh 的同一出参目录（缺省 /tmp/rr3-arm64-deploy）
+#   remote_src_dir  板上源码根（缺省 ~/rockrobot3-src）
+#
+# 前置门（任一不过即点名退出）：板上 cargo/rustc（rustup）且 rustc ≥1.82（workspace 锁
+# 解锁门）、`libasound2-dev` + `pkg-config`（Debian 系：sudo apt-get install -y
+# libasound2-dev pkg-config）。
+set -euo pipefail
+
+cd "$(dirname "$0")/../.." # 仓根
+
+HOST="${1:-}"
+OUT="${2:-/tmp/rr3-arm64-deploy}"
+RMT_SRC="${3:-~/rockrobot3-src}"
+PAY="$OUT/payload"
+
+if [ -z "$HOST" ]; then
+  echo "用法: build-onboard.sh <user@host> [out_dir] [remote_src_dir]" >&2
+  exit 2
+fi
+
+# 远端命令统一走登录 shell 的 PATH（非交互 ssh 默认不带 ~/.cargo/bin）
+rrun() { ssh "$HOST" "export PATH=\$HOME/.cargo/bin:\$PATH; $1"; }
+
+echo "== ① 板上依赖门（cargo/rustc ≥1.82 + alsa 开发件）=="
+if ! rrun 'command -v cargo >/dev/null && cargo --version && rustc --version'; then
+  echo "板上缺 cargo/rustc：装 rustup（https://rustup.rs）" >&2
+  exit 1
+fi
+ver="$(rrun 'rustc --version')"
+# 数值比较（awk 拆主次版本；字符串比较会把 1.9 误判 > 1.82）
+if ! printf '%s\n' "$ver" | awk '{split($2,a,"."); exit !(a[1]>1 || (a[1]==1 && a[2]>=82))}'; then
+  echo "板上 rustc < 1.82（workspace 锁解锁门未过）：rustup 升级 aarch64，或转备选 gnu 自产 sysroot（R13）" >&2
+  exit 1
+fi
+if ! rrun 'pkg-config --exists alsa && pkg-config --modversion alsa'; then
+  echo "板上缺 alsa 开发件：sudo apt-get install -y libasound2-dev pkg-config" >&2
+  exit 1
+fi
+
+echo "== ② 源码同步（rsync 排除 target/、.git/ 与四个 ESP32 宿主工具目录——板上构建闭包只含 base/+modules/，0.0.6 批F5 收口批收窄）=="
+# **2026-10-31 事故与修法（本脚本最贵的一课）**：`rsync -a` 保留 mtime，而 target/
+# 被 --exclude 排除、板上旧产物**永不清理**；当仓库文件的 mtime 比板上旧产物旧
+# （git 检出/同步时间早于某次板上构建）时，cargo 的 mtime 指纹判定"源码未变"
+# → **静默复用陈旧编译物**。当日实证：payload 里的 brain/interact 是 10-26 的
+# 旧二进制，与当日新 rrd 的帧语义不兼容，表现为"注册回复到 128B 帧头即断流"
+# （strace 取证见 status.md U 轮④）——排查方向被误导了整整一轮。
+# 修法两层：① 同步后**强制刷新源码 mtime**（touch 全部 .rs/Cargo.*），让 cargo
+# 必须重算指纹；② 构建后加**新鲜度门禁**：二进制早于任一源码即点名失败。
+# 与之配套的判据：本脚本永不信任 target/ 的存在，只信任 mtime 与源码的新旧关系。
+rsync -a --checksum --delete \
+  --exclude 'target/' --exclude '.git/' \
+  --exclude 'tools/esp32-periph-base/' --exclude 'tools/espidf-sentinel/' \
+  --exclude 'tools/espidf-std-hello/' --exclude 'tools/esp32-uart-echo/' \
+  ./ "$HOST:$RMT_SRC/"
+echo "-- 刷新源码 mtime（防 cargo 复用陈旧产物）"
+rrun "find $RMT_SRC/base $RMT_SRC/modules -name '*.rs' -o -name 'Cargo.toml' -o -name 'Cargo.lock' | xargs -r touch"
+
+echo "== ③ 依赖通道（板上有外网则直连 crates.io；无外网则预置 vendor）=="
+# 仓库根无 Cargo.toml（分立 workspace 布局：base/runtime、modules/*、tools/* 各自独立，
+# 首跑真板踩实）——对本脚本 ④ 实际构建的三个 manifest 各自 fetch
+for m in brain sense interact; do
+  if ! rrun "cd $RMT_SRC/modules/rr3-$m && cargo fetch --locked"; then
+    echo "cargo fetch 失败（rr3-${m}）：板无外网时在宿主 \`cargo vendor --versioned-dirs <vendor_dir>\`，" >&2
+    echo "把 vendor/ 与指向它的 .cargo/config.toml 一并同步上板，或改用有网环境后重跑。" >&2
+    exit 1
+  fi
+done
+
+echo "== ④ 板上原生构建（sense/interact 带 alsa feature；brain 带 TLS——ureq+rustls(ring) 需要 C 工具链，宿主 musl 交叉结构性不覆盖，2026-10-31 定案归板上）=="
+# 仓根 .cargo/config.toml 把 target-dir 移出源码区（/tmp/rr3-build）；板上同步会
+# 带上该配置，若沿用各模块 target/ 路径会读到**陈旧产物**（2026-11-09 实录：
+# 取回的是 10-31 的 interact，缺 periph_uart 键，真机拒启）。这里显式指定
+# 板侧 target 根，让产物路径可预期且不落源码区。
+RMT_TARGET="$RMT_SRC/target"
+rrun "cd $RMT_SRC && CARGO_TARGET_DIR=$RMT_TARGET cargo build --locked --release --manifest-path modules/rr3-brain/Cargo.toml"
+for m in sense interact; do
+  echo "-- rr3-$m"
+  rrun "cd $RMT_SRC && CARGO_TARGET_DIR=$RMT_TARGET cargo build --locked --release --features alsa --manifest-path modules/rr3-$m/Cargo.toml"
+done
+
+echo "== ⑤ 产物归位 staging（payload/rr3-modules/<name>/bin）=="
+# 新鲜度门禁（2026-10-31 事故后加，见 ② 注）：产物必须比任一源文件新，否则
+# "构建成功"只是假象——cargo 复用了陈旧对象。门禁失败即点名退出，不出旧包。
+for m in brain sense interact; do
+  stale="$(rrun "find $RMT_SRC/base $RMT_SRC/modules -name '*.rs' -newer $RMT_TARGET/release/rr3-$m | head -3" || true)"
+  if [ -n "$stale" ]; then
+    echo "rr3-$m 产物陈旧（比源码旧）——拒出包。新于产物的源文件：" >&2
+    printf '%s\n' "$stale" >&2
+    exit 1
+  fi
+done
+for m in brain sense interact; do
+  mkdir -p "$PAY/rr3-modules/rr3-$m"
+  rsync "$HOST:$RMT_TARGET/release/rr3-$m" "$PAY/rr3-modules/rr3-$m/bin"
+done
+
+echo "== ⑥ 板上构建件断言（动态 ELF aarch64；音频两件 ldd 含 libasound）=="
+for m in brain sense interact; do
+  bin="$PAY/rr3-modules/rr3-$m/bin"
+  file "$bin" | grep -q "ELF 64-bit.*ARM aarch64" # 板上原生构建件是 aarch64 ELF
+  if file "$bin" | grep -q "statically linked"; then
+    echo "rr3-$m 是静态产物（应为动态链——板上构建未生效？）" >&2
+    exit 1
+  fi
+done
+for m in sense interact; do
+  rrun "ldd $RMT_TARGET/release/rr3-$m" | grep -q libasound
+done
+
+echo "== ⑦ 装机面 config 漂移报告（非阻断；批N38 件二）=="
+# 为什么非阻断：本脚本只出 payload，装机（dpkg -i）在其后——此刻漂移属正常。判据单点
+# 在 verify-board-config.sh（sha256 逐文件），本处只作**报告**；装机完成后按 boards §10
+# 步④ 重跑同一工具，那时漂移即真问题（仓内 config 已改而板上没铺 → 静默旧档生效）。
+set +e
+bash tools/deploy/verify-board-config.sh --repo . --remote "$HOST"
+set -e
+
+echo "payload 音频件已换成板上原生构建件: $PAY"
+echo "下一步：在主 staging 树合流后板上 dpkg-deb --build（见 boards/raspberry-pi-64.md）"

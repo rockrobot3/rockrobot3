@@ -1,33 +1,19 @@
 //! # rr-bus
 //!
-//! 总线客户端骨架：主题/广播常量层。M2 在此之上实现 UDS 客户端与订阅分发
-//! （architecture.md §6）。v0.0.1 故意不放半成品的 `BusClient`，避免 M2 推翻自己。
+//! 总线**语义常量 re-export 层**：真值在 `rr-core`（0.0.5 第 II 轮批D₁，ADR-0018
+//! 裁定 1），本 crate re-export 保持既有 import 路径逐字不变（`rrd`/`tools` 的
+//! `use rr_bus::…` 零波及）。
+//!
+//! **std 承载客户端已迁 `rr-bus-api`**（基-35 窄化②，批N9 件一，照 `rr-hal-api`
+//! ＋`⑨-w` 先例）：五单元承载面直依契约 crate，不再绑本 crate；客户端（连接 →
+//! 注册 → 心跳 → 发布 / `rr3.call` / 收帧）见 `rr-bus-api::client`。
 
-use rr_ipc::RR3_CONTRACT_SCHEMA_VERSION;
-
-/// 广播目标（A-IPC 标准：dst_task = 0 表示广播）
-pub const RR3_BROADCAST_DST_TASK: u64 = 0;
-
-/// `rrd` 自身的 task 号：0 已被广播占用，守护进程固定 1（spec §5.0）
-pub const RR3_TASK_RRD: u64 = 1;
-
-/// 模块 `src_task` 分配池的起点（0=广播、1=rrd 均保留）
-pub const RR3_TASK_FIRST_MODULE: u64 = 2;
-
-/// EVENT 优先级下界。
-///
-/// **占位值**：v0.0.1 没有任何契约/ADR/文档定义过优先级区间，这两个数只是给
-/// `rr-ota`/`rrd` 留出的常量位；调度类与优先级语义随 M2 的调度 ADR 定稿后替换。
-pub const RR3_PRIORITY_MIN: u32 = 0;
-
-/// EVENT 优先级上界（同上：M2 调度 ADR 前的占位值，非对齐 Airy IPC 或 Linux 调度类）
-pub const RR3_PRIORITY_MAX: u32 = 139;
-
-/// 主题分隔符
-pub const RR3_TOPIC_SEP: char = '/';
-
-/// 契约 schema 版本透传（rr-bus 侧的再导出；rrd 握手回显属 M2 待落地）
-pub const RR3_BUS_CONTRACT_VERSION: u32 = RR3_CONTRACT_SCHEMA_VERSION;
+pub use rr_core::{
+    rr3_event_compose, rr3_frame_compose, rr3_task_kind, Rr3TaskKind, RR3_BROADCAST_DST_TASK,
+    RR3_BUS_CONTRACT_VERSION, RR3_METHOD_CALL, RR3_PAYLOAD_EVENT, RR3_PAYLOAD_REQUEST,
+    RR3_PAYLOAD_RESPONSE, RR3_PRIORITY_MAX, RR3_PRIORITY_MIN, RR3_TASK_FIRST_MODULE, RR3_TASK_RRD,
+    RR3_TOPIC_SEP, RR3_TRACE_ID_DIRECT,
+};
 
 #[cfg(test)]
 mod tests {
@@ -44,7 +30,12 @@ mod tests {
         assert_eq!(RR3_BROADCAST_DST_TASK, 0);
         assert_eq!(RR3_TASK_RRD, 1);
         assert_eq!(RR3_TASK_FIRST_MODULE, 2);
-        assert!(RR3_TASK_FIRST_MODULE > RR3_TASK_RRD, "模块池必须让开两个保留号");
+        const {
+            assert!(
+                RR3_TASK_FIRST_MODULE > RR3_TASK_RRD,
+                "模块池必须让开两个保留号"
+            );
+        }
     }
 
     /// 占位窗口要有内容可言：区间非空（MIN < MAX），且两个值都落在常量文档自己声明的
@@ -53,12 +44,13 @@ mod tests {
     #[test]
     fn priority_window_is_nonempty_placeholder_band() {
         const BAND: std::ops::RangeInclusive<u32> = 0..=139; // 常量文档声明的占位带
-        assert!(
-            RR3_PRIORITY_MIN < RR3_PRIORITY_MAX,
-            "占位窗口为空：MIN={} MAX={}",
-            RR3_PRIORITY_MIN,
-            RR3_PRIORITY_MAX
-        );
+        const {
+            // const 上下文不允许 format!：字面值见上方两个常量本体，此处只钉关系
+            assert!(
+                RR3_PRIORITY_MIN < RR3_PRIORITY_MAX,
+                "占位窗口为空（MIN >= MAX）"
+            );
+        }
         assert!(
             BAND.contains(&RR3_PRIORITY_MIN) && BAND.contains(&RR3_PRIORITY_MAX),
             "占位值越出常量文档声明的 {BAND:?}：MIN={} MAX={}",
@@ -70,5 +62,13 @@ mod tests {
     #[test]
     fn bus_reexports_contract_version() {
         assert_eq!(RR3_BUS_CONTRACT_VERSION, 1);
+    }
+
+    /// re-export 与 rr-core 真值一致（下沉后防两册漂移）
+    #[test]
+    fn reexports_match_rr_core_truth() {
+        assert_eq!(rr_core::RR3_TASK_RRD, RR3_TASK_RRD);
+        assert_eq!(rr_core::RR3_METHOD_CALL, RR3_METHOD_CALL);
+        assert_eq!(rr_core::RR3_TOPIC_SEP, RR3_TOPIC_SEP);
     }
 }

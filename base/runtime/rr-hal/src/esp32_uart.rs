@@ -1,0 +1,487 @@
+//! ESP32 外设桥后端（0.0.5 增补轮五 批C）：舵机/显示两能力面的 UART 能力帧承载。
+//!
+//! 路线二裁定（批C，Q1–Q4 对表）：板上外设**不进城**——不注册总线身份，宿主 HAL
+//! 桥后端直连 UART。"进城"读作"进传输层帧面 + 在册主题形状"：帧面 JSON-RPC
+//! `method` 恒 `rr3.call`、点名主题在 `params.topic`（conn.rs rr3_route_call 转发
+//! 形状，哨兵 handle_request 同款分发依据），主题复用在册
+//! `rr3-act/servo/command` 与 `rr3-interact/face/expression`，payload 形状与模块
+//! 应答体逐字同源（contracts/events/act-servo_command.schema.json、
+//! events/interact-face_expression.schema.json）——topics.toml/rrd/桥三个已收官
+//! 面零改动（`topics.toml` 全轮只许 P1 那一次改动的防重规则不受扰动）。
+//!
+//! 连接模型：**长连接**。首调 `Rr3UartConn::open_with_baud`（rr-ipc 排他开口：
+//! flock 账本，跨进程第二个 opener 当场被拒——两个模块进程同抢一块板是 fail-closed
+//! 点名，不是静默截流；open 自带 TCIFLUSH 开口即净，批D1 敞口的正式处置）。
+//! macOS CP2102 的 DTR/RTS 翻转会复位板子（E7 实锤），open 后等
+//! [`RR3_OPEN_SETTLE_MS`] 启动窗口再发首帧。io 失败 drop 连接（close + flock 退账）
+//! 下次调用重开。**读侧带应答窗口**（[`RR3_REPLY_WAIT_DS`]）：板侧对合法 Request
+//! 确定性应答，板死/断线/复位时读在窗口耗尽后回 Closed，调用方报废连接重开——
+//! 旧版缺省阻塞读会让 HAL/面板线程永久挂死（rr-ipc 只提供显式超时档，桥/哨兵等
+//! 该阻塞等的收流端语义不受影响）。
+//!
+//! task 位形（帧头约定）：宿主下行 `src=1`（rrd 位形，与 `rr-core::RR3_TASK_RRD`
+//! 同值），板上 `dst=2`（外设执行面位形，[`RR3_PERIPH_TASK`]）。应答帧板侧回
+//! `src=2/dst=1`、`trace_id` 原样回带，本侧按 `dst==1` 门 + id 回显校验。
+//! 位形/主题/信封真值单点在 `rr-periph-proto`（ADR-0024，固件双向复用），本模块
+//! re-export 保 `rr_hal::esp32_uart::*` 路径不变。
+//!
+//! 慢速事件级接口纪律（ADR-0007）：set_angle/draw 都是 round-trip ~26ms 量级
+//! （115200 下 300B 往返），远低于 100Hz 事务上限，不碰反射环边界。
+
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::Duration;
+
+use rr_ipc::{
+    rr3_body_split, rr3_uart_baud_speed, Rr3Frame, Rr3FrameBuf, Rr3PayloadType, Rr3TransportConn,
+    Rr3UartConn, RR3_BOARD_BINDING_ADC_RAIL_PIN, RR3_BOARD_BINDING_CRED_STORE,
+    RR3_BOARD_BINDING_I2C_SCL, RR3_BOARD_BINDING_I2C_SDA, RR3_BOARD_BINDING_I2S_BCLK,
+    RR3_BOARD_BINDING_I2S_SD, RR3_BOARD_BINDING_I2S_WS, RR3_BOARD_BINDING_LEDC_PAN,
+    RR3_BOARD_BINDING_LEDC_TILT, RR3_BOARD_BINDING_UART2_RX, RR3_BOARD_BINDING_UART2_TX,
+    RR3_METHOD_SET_BINDINGS,
+};
+use serde_json::{json, Map, Value};
+
+use crate::descriptor::{rr3_bindings_parse, Rr3HalBindings, RR3_HAL_BINDINGS_ENV};
+use crate::{Rr3Display, Rr3FaceFrame, Rr3HalError, Rr3PwmServo};
+
+// 协议共享面（ADR-0024）：task 位形/主题/magic/波特率缺省/env 名/请求组帧/应答
+// 解析的真值单点在 rr-periph-proto（宿主与固件双向复用）；本模块 re-export 保
+// 既有 `rr_hal::esp32_uart::*` 路径——调用方与测试零改动。
+pub(crate) use rr_periph_proto::consts::RR3_TASK_HOST;
+pub use rr_periph_proto::consts::{
+    RR3_BRIDGE_BAUD, RR3_FACE_TOPIC, RR3_HAL_PERIPH_BAUD_ENV, RR3_HAL_PERIPH_UART_ENV,
+    RR3_PERIPH_TASK, RR3_SERVO_TOPIC,
+};
+pub use rr_periph_proto::host_call::{rr3_bridge_call, rr3_bridge_req_body, rr3_bridge_req_frame};
+pub use rr_periph_proto::response::rr3_bridge_decode;
+
+/// open 后的启动窗口：DTR/RTS 翻转复位板子（E7），ESP32 上电到帧面就绪的
+/// 等待（esp-idf 启动 + OLED init 的实测时长量级，1.2s 留裕量）。
+const RR3_OPEN_SETTLE_MS: u64 = 1200;
+
+/// 应答等待窗口（十分之一秒；50 = 5s）：板侧正常应答在毫秒级，最长延迟来源是
+/// 控制面每轮先排空的音频分片（4×59ms @1.5M ≈ 236ms）与 outbox 回包，5s 留足
+/// 一个量级。窗口耗尽即判"板侧无应答/链路断"，报废连接下次重开——**不许**让
+/// 调用线程无限等（拔线/板死时 HAL 面与面板 RPC 会整条挂死）。
+const RR3_REPLY_WAIT_DS: u8 = 50;
+
+/// ESP32 档舵机轴 env 键：`pan` / `tilt`（板上双轴云台 ↔ 宿主单轴 trait 的
+/// 映射面，缺省 `pan`；板侧帧面另有 `axis` 参数可逐调用覆盖）。真值单点已上移
+/// 契约层（rr-hal-api `RR3_PERIPH_AXIS_ENV`，批N3 件五——rrd 装配链同键选轴档案），
+/// 本地 re-export 保既有路径。
+pub use rr_hal_api::RR3_PERIPH_AXIS_ENV as RR3_HAL_PERIPH_AXIS_ENV;
+
+/// 轴 env 取值裁决：只认 `pan` / `tilt`（trim 后）。独立纯函数：裁决可单测。
+pub fn rr3_axis_parse(s: &str) -> Option<&'static str> {
+    ["pan", "tilt"].iter().copied().find(|a| *a == s.trim())
+}
+
+/// 波特率 env 取值裁决（批D②）：十进制解析后过 rr-ipc 档位表
+/// （[`rr3_uart_baud_speed`]）——档位真值单点在 rr-ipc，本侧不抄第二份白名单。
+pub fn rr3_baud_parse(s: &str) -> Option<u32> {
+    let baud = s.trim().parse::<u32>().ok()?;
+    rr3_uart_baud_speed(baud).ok().map(|_| baud)
+}
+
+/// 板侧绑定载荷（纯函数，批N4 件七(b) 基-24 桥上配置腿宿主半边）：描述符板侧
+/// 键 `Some` 者逐键入载荷，值保持字符串（描述符同形纪律：注入文本值全字符串，JSON
+/// 侧不换形）；全缺 = `None`（无板侧配置可注）。独立纯函数：键位/换形可单测。
+fn rr3_board_payload(b: &Rr3HalBindings) -> Option<Value> {
+    let mut m = Map::new();
+    rr3_board_pins(&mut m, b);
+    rr3_cred_store_put(&mut m, b);
+    if m.is_empty() {
+        return None;
+    }
+    Some(Value::Object(m))
+}
+
+/// 凭证库键（描述符有值才注入，值保持字符串）。
+fn rr3_cred_store_put(m: &mut Map<String, Value>, b: &Rr3HalBindings) {
+    if let Some(v) = &b.cred_store {
+        m.insert(
+            RR3_BOARD_BINDING_CRED_STORE.to_string(),
+            json!(v.to_string()),
+        );
+    }
+}
+
+/// 十个板侧引脚键逐键入载荷：`Some` 者按十进制字符串写（描述符值全字符串同形）。
+fn rr3_board_pins(m: &mut Map<String, Value>, b: &Rr3HalBindings) {
+    let pins: [(&str, Option<u8>); 10] = [
+        (RR3_BOARD_BINDING_I2C_SDA, b.i2c_sda),
+        (RR3_BOARD_BINDING_I2C_SCL, b.i2c_scl),
+        (RR3_BOARD_BINDING_ADC_RAIL_PIN, b.adc_rail_pin),
+        (RR3_BOARD_BINDING_UART2_TX, b.uart2_tx),
+        (RR3_BOARD_BINDING_UART2_RX, b.uart2_rx),
+        (RR3_BOARD_BINDING_LEDC_PAN, b.ledc_pan),
+        (RR3_BOARD_BINDING_LEDC_TILT, b.ledc_tilt),
+        (RR3_BOARD_BINDING_I2S_BCLK, b.i2s_bclk),
+        (RR3_BOARD_BINDING_I2S_SD, b.i2s_sd),
+        (RR3_BOARD_BINDING_I2S_WS, b.i2s_ws),
+    ];
+    for (key, v) in pins {
+        let Some(v) = v else {
+            continue;
+        };
+        m.insert(key.to_string(), json!(v.to_string()));
+    }
+}
+
+/// 板侧绑定载荷取环境（[`RR3_HAL_BINDINGS_ENV`] → 同形解析 → 载荷）。返回 `None`
+/// 的三种形态都**不构成错误**——绑定只服务板侧自愈路径，执法点在板侧消费面
+/// fail-closed（未注入即拒并点名），桥上腿的职责是"尽力送达、失败可见"：
+/// - env 未设 = 无描述符形态（纯 sim/`--manifest` 调试后门）；
+/// - 文本解析失败 = 配置坏，eprintln 点名后跳过（fail-visible；后端选择侧已
+///   fail-closed，此处兜底点名不静默放行坏值）；
+/// - 三键全缺 = 无板侧配置可注（host 档描述符本就无板侧键）。
+fn rr3_env_bindings() -> Option<Value> {
+    let text = std::env::var(RR3_HAL_BINDINGS_ENV).ok()?;
+    let b = rr3_bindings_of(&text)?;
+    rr3_board_payload(&b)
+}
+
+/// 描述符文本解析：失败点名后跳过（fail-visible，不静默放行坏值）。
+fn rr3_bindings_of(text: &str) -> Option<Rr3HalBindings> {
+    rr3_bindings_parse(text)
+        .map_err(|errs| {
+            eprintln!(
+                "rr-hal-esp32: {} 解析失败，跳过板侧绑定推送: {}",
+                RR3_HAL_BINDINGS_ENV,
+                errs.join("; ")
+            );
+        })
+        .ok()
+}
+
+/// 开串口：失败当场点名（细节落日志）后折 Busy。
+fn rr3_conn_open(path: &std::path::Path, baud: u32) -> Result<Rr3UartConn, Rr3HalError> {
+    Rr3UartConn::open_with_baud(path, baud).map_err(|e| {
+        eprintln!("rr-hal-esp32: 串口 open 失败 {}: {e}", path.display());
+        Rr3HalError::Busy
+    })
+}
+
+/// 开口后定档：净化输入队列 + 应答窗口。失败当场点名（细节落日志）后折 Busy。
+fn rr3_conn_ready(c: &Rr3UartConn, path: &std::path::Path) -> Result<(), Rr3HalError> {
+    // settle 后补冲：开口触发的 DTR/RTS 复位让板端 banner 在开口
+    // flush 之后才进队（批C e2e 实证 BadMagic），首帧前必须净化。
+    if let Err(e) = c.rr3_flush_input() {
+        eprintln!("rr-hal-esp32: 开口净化失败 {}: {e}", path.display());
+        return Err(Rr3HalError::Busy);
+    }
+    // 应答窗口一开口就定档：本连接的一切 rr3_recv_buf 都带同一静默
+    // 上限（见 [`RR3_REPLY_WAIT_DS`]）——板死/断线时调用线程必能醒来。
+    if let Err(e) = c.rr3_set_read_timeout(RR3_REPLY_WAIT_DS) {
+        eprintln!("rr-hal-esp32: 设应答窗口失败 {}: {e}", path.display());
+        return Err(Rr3HalError::Busy);
+    }
+    Ok(())
+}
+
+/// UART 长连接 + 请求 id 计数（servo/display 两实例面共用的连接盒）。
+struct Rr3BridgeConn {
+    path: PathBuf,
+    /// 开口波特率（批D②：构造时定档，[`RR3_BRIDGE_BAUD`] 为缺省）。
+    baud: u32,
+    conn: Option<Rr3UartConn>,
+    next_id: u64,
+}
+
+impl Rr3BridgeConn {
+    /// 波特率显式档（批D②）：缺省与板固件 `board::UART2_BAUD_HZ` 同源
+    /// （[`RR3_BRIDGE_BAUD`]），env/构造参数只作降速实验覆盖。
+    fn rr3_bridge_conn_new(path: PathBuf, baud: u32) -> Self {
+        Self {
+            path,
+            baud,
+            conn: None,
+            next_id: 1,
+        }
+    }
+
+    /// 连接保障：未开则 open + 启动窗口等待。失败当场 eprintln 点名（批J G5
+    /// "错误当场可见"口径）后折 Busy（HAL 错型无 io 载荷，细节落日志）。
+    fn rr3_ensure(&mut self) -> Result<(), Rr3HalError> {
+        if self.conn.is_some() {
+            return Ok(());
+        }
+        self.conn = Some(self.rr3_dial()?);
+        // 板侧绑定推送（批N4 件七(b) 基-24 桥上配置腿）：每次（重）开连接
+        // 都推——板侧重启或连接重建后注入态随之恢复，板侧覆盖语义幂等。
+        // 推送失败只点名不上抛（rr3_push_bindings 内部消化）：绑定仅服务
+        // 板侧自愈路径，执法点在板侧消费面 fail-closed，不挡舵机/表情能力面。
+        self.rr3_push_bindings();
+        Ok(())
+    }
+
+    /// 开口 + 启动窗口等待 + 定档（净化输入队列 + 应答窗口），交回新连接。
+    fn rr3_dial(&self) -> Result<Rr3UartConn, Rr3HalError> {
+        rr3_conn_open(&self.path, self.baud).and_then(|c| {
+            std::thread::sleep(Duration::from_millis(RR3_OPEN_SETTLE_MS));
+            rr3_conn_ready(&c, &self.path).map(|()| c)
+        })
+    }
+
+    /// 板侧绑定推送（`rr3.set_bindings`，载荷住 `params.args`——method 面信封，
+    /// rr-ipc bindings 模块定形）。推送失败（io/协议/板侧拒收）只 eprintln 点名，
+    /// 不上抛不重试：绑定推送不挡能力面（执法点在板侧消费面 fail-closed）；
+    /// io 失败时连接已由 rr3_method_call 报废，下次重开重推。
+    fn rr3_push_bindings(&mut self) {
+        let Some(payload) = rr3_env_bindings() else {
+            return;
+        };
+        if let Err(e) = self.rr3_method_call(RR3_METHOD_SET_BINDINGS, &json!({ "args": payload })) {
+            eprintln!(
+                "rr-hal-esp32: 板侧绑定推送未达（板侧自愈路径将 fail-closed 拒并点名）: {e:?}"
+            );
+        }
+    }
+
+    /// 一次 `rr3.call` round-trip（主题点名形状，rrd 转发同源）。
+    fn rr3_call(&mut self, topic: &str, args: &Value) -> Result<Value, Rr3HalError> {
+        self.rr3_method_call("rr3.call", &json!({ "topic": topic, "args": args }))
+    }
+
+    /// 一次 method 面 round-trip：组帧 → 发 → 阻塞收 → 四道门（dst/前缀/
+    /// jsonrpc+id/error）。io 或协议失败点名后折 Busy，连接报废下次重开。
+    fn rr3_method_call(&mut self, method: &str, params: &Value) -> Result<Value, Rr3HalError> {
+        self.rr3_ensure()
+            .and_then(|()| self.rr3_send_req(method, params))
+            .and_then(|id| self.rr3_reply(id))
+    }
+
+    /// 组一帧并写出（id 在此分配）：失败点名并报废连接，下次调用重开。
+    fn rr3_send_req(&mut self, method: &str, params: &Value) -> Result<u64, Rr3HalError> {
+        let id = self.next_id;
+        self.next_id += 1;
+        let req = rr3_bridge_req_frame(id, method, params);
+        self.rr3_write_req(&req, id)
+    }
+
+    /// 写出请求帧：失败点名并报废连接（下次调用重开），成功回 id。
+    fn rr3_write_req(&mut self, req: &Rr3Frame, id: u64) -> Result<u64, Rr3HalError> {
+        let Some(conn) = self.conn.as_mut() else {
+            return Err(Rr3HalError::Busy); // rr3_ensure 后必在，防御性兜底
+        };
+        match conn.rr3_send_buf(Rr3FrameBuf::from(req)) {
+            Ok(()) => Ok(id),
+            Err(e) => {
+                eprintln!("rr-hal-esp32: Request 写出失败: {e:?}");
+                self.conn = None;
+                Err(Rr3HalError::Busy)
+            }
+        }
+    }
+
+    /// 应答收帧与解码（`rr3_method_call` 的下半程）：读超时档已在连接开口时定
+    /// 死，板侧无应答/链路断在此回 Busy 并报废连接，下次调用重开。
+    fn rr3_reply(&mut self, id: u64) -> Result<Value, Rr3HalError> {
+        let buf = self.rr3_recv_reply()?;
+        let frame = self.rr3_reply_frame(buf)?;
+        let (ty, body) = self.rr3_split_body(&frame.payload)?;
+        rr3_bridge_decode(ty, &body, id).map_err(|e| {
+            eprintln!("rr-hal-esp32: 应答门拒绝: {e}");
+            Rr3HalError::Busy
+        })
+    }
+
+    /// 拆 payload 类型前缀：非法即点名并报废连接。
+    fn rr3_split_body(&mut self, payload: &[u8]) -> Result<(Rr3PayloadType, Vec<u8>), Rr3HalError> {
+        rr3_body_split(payload).map_err(|e| {
+            eprintln!("rr-hal-esp32: 应答 payload 前缀非法: {e:?}");
+            self.conn = None;
+            Rr3HalError::Busy
+        })
+    }
+
+    /// 应答帧还原与 dst 归属门：任一不过即点名并报废连接。
+    fn rr3_reply_frame(&mut self, buf: Rr3FrameBuf) -> Result<Rr3Frame, Rr3HalError> {
+        self.rr3_frame_of(buf)
+            .and_then(|frame| self.rr3_dst_gate(&frame).map(|()| frame))
+    }
+
+    /// dst 归属门：非宿主位形即点名并报废连接。
+    fn rr3_dst_gate(&mut self, frame: &Rr3Frame) -> Result<(), Rr3HalError> {
+        if frame.header.dst_task != RR3_TASK_HOST {
+            eprintln!(
+                "rr-hal-esp32: 应答 dst_task={} 非 {RR3_TASK_HOST}，拒收",
+                frame.header.dst_task
+            );
+            self.conn = None;
+            return Err(Rr3HalError::Busy);
+        }
+        Ok(())
+    }
+
+    /// 应答帧还原：失败点名并报废连接。
+    fn rr3_frame_of(&mut self, buf: Rr3FrameBuf) -> Result<Rr3Frame, Rr3HalError> {
+        Rr3Frame::try_from(buf).map_err(|e| {
+            eprintln!("rr-hal-esp32: 应答帧还原失败: {e:?}");
+            self.conn = None;
+            Rr3HalError::Busy
+        })
+    }
+
+    /// 读一帧（窗口耗尽即判板侧无应答/链路断，点名后报废连接）。
+    fn rr3_recv_reply(&mut self) -> Result<Rr3FrameBuf, Rr3HalError> {
+        let conn = self.rr3_conn_mut()?;
+        match conn.rr3_recv_buf() {
+            Ok(b) => Ok(b),
+            Err(e) => {
+                eprintln!("rr-hal-esp32: 应答收帧失败（板侧无应答/链路断）: {e:?}");
+                self.conn = None;
+                Err(Rr3HalError::Busy)
+            }
+        }
+    }
+
+    /// 取连接可变引用（未开即 Busy，防御性兜底）。
+    fn rr3_conn_mut(&mut self) -> Result<&mut Rr3UartConn, Rr3HalError> {
+        self.conn.as_mut().ok_or(Rr3HalError::Busy)
+    }
+}
+
+/// 锁面：HAL trait 的 `&self` 读面（angle/frame）也要求触链路——Mutex 内部可
+/// 变性同时覆盖读/写两面的连接重建。模块调用面单线程，无争用，锁只作形状。
+fn lock<'a, T>(m: &'a Mutex<T>) -> std::sync::MutexGuard<'a, T> {
+    m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+// ---------------------------------------------------------------------------
+// 舵机桥档：Rr3PwmServo 经 rr3-act/servo/command 帧
+// ---------------------------------------------------------------------------
+
+/// ESP32 舵机桥后端：`set_angle` 发 `{"angle_deg":N,"axis":axis}`（写），
+/// `angle` 发 `{"axis":axis}`（无 angle_deg=回读——schema 的读形状）。
+pub struct Rr3Esp32UartServo {
+    conn: Mutex<Rr3BridgeConn>,
+    axis: &'static str,
+}
+
+impl Rr3Esp32UartServo {
+    pub fn rr3_esp32_servo_new(path: PathBuf, axis: &'static str) -> Self {
+        Self::rr3_esp32_servo_baud(path, axis, RR3_BRIDGE_BAUD)
+    }
+
+    /// 波特率显式档（批D②）：env [`RR3_HAL_PERIPH_BAUD_ENV`] 的解析结果经此处入 conn。
+    pub fn rr3_esp32_servo_baud(path: PathBuf, axis: &'static str, baud: u32) -> Self {
+        Self {
+            conn: Mutex::new(Rr3BridgeConn::rr3_bridge_conn_new(path, baud)),
+            axis,
+        }
+    }
+}
+
+impl Rr3PwmServo for Rr3Esp32UartServo {
+    fn set_angle(&mut self, deg: u16) -> Result<(), Rr3HalError> {
+        let result = lock(&self.conn).rr3_call(
+            RR3_SERVO_TOPIC,
+            &json!({ "angle_deg": deg, "axis": self.axis }),
+        )?;
+        rr3_echo_check(&result, deg)
+    }
+
+    fn angle(&self) -> Result<u16, Rr3HalError> {
+        let result = lock(&self.conn).rr3_call(RR3_SERVO_TOPIC, &json!({ "axis": self.axis }))?;
+        rr3_angle_of(&result)
+    }
+}
+
+/// 回显一致性：板侧生效角必须与设定角逐度一致（round-trip 判据的协议面）。
+fn rr3_echo_check(result: &Value, deg: u16) -> Result<(), Rr3HalError> {
+    if result.get("angle_deg").and_then(Value::as_u64) != Some(deg as u64) {
+        eprintln!(
+            "rr-hal-esp32: 舵机回显不一致（设 {deg}，回 {:?}）",
+            result.get("angle_deg")
+        );
+        return Err(Rr3HalError::Busy);
+    }
+    Ok(())
+}
+
+/// 回读角：缺键或越 u16 即点名回 Busy。
+fn rr3_angle_of(result: &Value) -> Result<u16, Rr3HalError> {
+    result
+        .get("angle_deg")
+        .and_then(Value::as_u64)
+        .and_then(|v| u16::try_from(v).ok())
+        .ok_or_else(|| {
+            eprintln!("rr-hal-esp32: 舵机回读缺 angle_deg 或越 u16");
+            Rr3HalError::Busy
+        })
+}
+
+// ---------------------------------------------------------------------------
+// 显示桥档：Rr3Display 经 rr3-interact/face/expression 帧（HAL 渲染变体）
+// ---------------------------------------------------------------------------
+
+/// ESP32 显示桥后端：`draw` 发 `{"frame":[8u8]}`（位图，板侧 8x8→64x64 放大
+/// 渲染到 OLED 中央）；`frame` 返回本地缓存——探活语义见 impl 注记。
+pub struct Rr3Esp32UartDisplay {
+    conn: Mutex<Rr3BridgeConn>,
+    last: Mutex<Rr3FaceFrame>,
+    probed: Mutex<bool>,
+}
+
+impl Rr3Esp32UartDisplay {
+    pub fn rr3_esp32_disp_new(path: PathBuf) -> Self {
+        Self::rr3_esp32_disp_baud(path, RR3_BRIDGE_BAUD)
+    }
+
+    /// 波特率显式档（批D②）：env [`RR3_HAL_PERIPH_BAUD_ENV`] 的解析结果经此处入 conn。
+    pub fn rr3_esp32_disp_baud(path: PathBuf, baud: u32) -> Self {
+        Self {
+            conn: Mutex::new(Rr3BridgeConn::rr3_bridge_conn_new(path, baud)),
+            last: Mutex::new([0; 8]),
+            probed: Mutex::new(false),
+        }
+    }
+}
+
+impl Rr3Display for Rr3Esp32UartDisplay {
+    fn draw(&mut self, frame: &Rr3FaceFrame) -> Result<(), Rr3HalError> {
+        let result = lock(&self.conn).rr3_call(RR3_FACE_TOPIC, &json!({ "frame": frame }))?;
+        rr3_applied_check(&result)?;
+        *lock(&self.last) = *frame;
+        // draw 成功 = 链路已证（四道应答门真 round-trip），frame() 不必再探活
+        // ——探活帧是全黑位图，板侧当真渲染会擦掉屏上现帧（批C e2e 实证）。
+        *lock(&self.probed) = true;
+        Ok(())
+    }
+
+    /// 读回当前帧（HAL 契约：读回 == 上次 draw 的帧）。探活语义：链路未建立
+    /// （从未 draw 过）时先发一条全黑帧 round-trip（rr3-interact 开机探活的真
+    /// 验证——板不在位则 Busy 显式回错，探活 exit(1) 是预期语义，R11③ 口径），
+    /// 之后恒返回缓存（节拍 250ms 的 draw 持续真发，链路活性由 draw 面兜底）。
+    fn frame(&self) -> Result<Rr3FaceFrame, Rr3HalError> {
+        self.rr3_probe()?;
+        Ok(*lock(&self.last))
+    }
+}
+
+/// 出帧应答门：缺 applied=true 即点名回 Busy。
+fn rr3_applied_check(result: &Value) -> Result<(), Rr3HalError> {
+    if result.get("applied").and_then(Value::as_bool) != Some(true) {
+        eprintln!("rr-hal-esp32: 出帧应答缺 applied=true");
+        return Err(Rr3HalError::Busy);
+    }
+    Ok(())
+}
+
+impl Rr3Esp32UartDisplay {
+    /// 链路未证（从未 draw 过）时先发一条全黑探活帧；已证则直返。
+    fn rr3_probe(&self) -> Result<(), Rr3HalError> {
+        if *lock(&self.probed) {
+            return Ok(());
+        }
+        let probe: Rr3FaceFrame = [0; 8];
+        lock(&self.conn).rr3_call(RR3_FACE_TOPIC, &json!({ "frame": probe }))?;
+        *lock(&self.probed) = true;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests;

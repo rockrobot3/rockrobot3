@@ -7,6 +7,14 @@
 
 use crate::protocol::header::Rr3PayloadType;
 
+// 0.0.7 批B：Vec 取自 alloc 而非 std——std 目标上两者是同一类型（std::vec::Vec
+// 就是 alloc::vec::Vec 的 re-export），零行为差异；xtensa 等裸金属目标配
+// `-Z build-std=alloc,core` 即可编译本模块（transport 层在 none 目标整体门控，
+// 见 lib.rs）。
+extern crate alloc;
+
+use alloc::vec::Vec;
+
 /// 类型前缀宽度（字节）。冻结为 2：够放 u16 枚举值，且 2 字节对齐不留空洞
 pub const RR3_BODY_TYPE_PREFIX_LEN: usize = 2;
 
@@ -28,14 +36,25 @@ pub fn rr3_body_encode(ty: Rr3PayloadType, body: &[u8]) -> Vec<u8> {
 
 /// 解码：拆出类型与体（体是新拥有的 Vec，调用方随便 move）
 pub fn rr3_body_split(raw: &[u8]) -> Result<(Rr3PayloadType, Vec<u8>), Rr3BodyError> {
+    rr3_body_len_ok(raw)?;
+    let ty = rr3_body_ty(raw)?;
+    Ok((ty, raw[RR3_BODY_TYPE_PREFIX_LEN..].to_vec()))
+}
+
+/// 体长下界：连类型前缀都带不全即短。
+fn rr3_body_len_ok(raw: &[u8]) -> Result<(), Rr3BodyError> {
     if raw.len() < RR3_BODY_TYPE_PREFIX_LEN {
         return Err(Rr3BodyError::TooShort { got: raw.len() });
     }
+    Ok(())
+}
+
+/// 类型前缀解码（值不在冻结枚举里即拒）。
+fn rr3_body_ty(raw: &[u8]) -> Result<Rr3PayloadType, Rr3BodyError> {
     let mut buf = [0u8; RR3_BODY_TYPE_PREFIX_LEN];
     buf.copy_from_slice(&raw[..RR3_BODY_TYPE_PREFIX_LEN]);
     let v = u16::from_le_bytes(buf);
-    let ty = Rr3PayloadType::from_u16(v).ok_or(Rr3BodyError::UnknownType { v })?;
-    Ok((ty, raw[RR3_BODY_TYPE_PREFIX_LEN..].to_vec()))
+    Rr3PayloadType::from_u16(v).ok_or(Rr3BodyError::UnknownType { v })
 }
 
 #[cfg(test)]
@@ -53,8 +72,16 @@ mod tests {
             (Rr3PayloadType::Notification, [0x05, 0x00]),
         ] {
             let got = rr3_body_encode(ty, b"x");
-            assert_eq!(&got[..RR3_BODY_TYPE_PREFIX_LEN], &want[..], "{ty:?} 前缀字节错");
-            assert_eq!(&got[RR3_BODY_TYPE_PREFIX_LEN..], b"x", "体必须紧跟前缀，不插填充");
+            assert_eq!(
+                &got[..RR3_BODY_TYPE_PREFIX_LEN],
+                &want[..],
+                "{ty:?} 前缀字节错"
+            );
+            assert_eq!(
+                &got[RR3_BODY_TYPE_PREFIX_LEN..],
+                b"x",
+                "体必须紧跟前缀，不插填充"
+            );
         }
     }
 
@@ -86,7 +113,10 @@ mod tests {
 
     #[test]
     fn rejects_truncated_prefix() {
-        assert_eq!(rr3_body_split(&[0x03]), Err(Rr3BodyError::TooShort { got: 1 }));
+        assert_eq!(
+            rr3_body_split(&[0x03]),
+            Err(Rr3BodyError::TooShort { got: 1 })
+        );
         assert_eq!(rr3_body_split(&[]), Err(Rr3BodyError::TooShort { got: 0 }));
     }
 

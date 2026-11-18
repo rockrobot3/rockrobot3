@@ -1,0 +1,35 @@
+[package]
+name = "rr3-brain"
+# 版本随 module.toml [manifest].version（SURFACE 自述行的 0.1.0 是 Python
+# __version__ 的逐字保留，两套号各随其主，不互相改写）
+version = "0.0.1"
+edition = "2021"
+license = "UNLICENSED"
+publish = false
+
+# 独立工程：modules/ 不在 base/runtime workspace 内
+[workspace]
+
+[[bin]]
+name = "rr3-brain"
+path = "src/main.rs"
+
+[dependencies]
+# path 依赖进仓内三件套（勿用 crates.io 同名包）；serde_json/toml 用具体版本——
+# 本 crate 是独立 workspace，吃不到 base/runtime 的 workspace 继承。
+# rr-hal-api/rr-bus-api 直依＝单元契约面清单必依（基-35，check.sh ⑨-w 逐单元点名）。
+# 模块公共骨架（0.0.8 W-A 批0，ADR-0016 增补评审取证笔1）：bootstrap 收敛序列 +
+# serve 主循环 + Dispatcher——brain 是第六消费方（六消费方同批改纪律）。
+rr-hal-api = { path = "../../base/runtime/rr-hal-api" }
+rr-bus-api = { path = "../../base/runtime/rr-bus-api" }
+rr3mod = { path = "../../base/runtime/rr3mod" }
+# 线格式原语（迁移件四）：pcm_b64 的编解码走 rr-ipc 线格式层唯一实现（仓内
+# base64 既有惯例——sense 上行/interact 收流同款，不引第三方 base64 crate）
+rr-ipc = { path = "../../base/runtime/rr-ipc" }
+serde_json = "1"
+toml = "0.8"
+# 云端 HTTP/TLS 客户端（批N32 裁定 5：同步 API＋rustls 系——零异步栈，本仓全同步面，
+# reqwest 异步栈不取；TLS 必须库承载，panel 手写 HTTP 仅局域网服务端先例不适用云端）。
+# default-features 关掉 gzip（最小依赖面，三家端点无解压需求）；tls feature = rustls
+# ＋内置根证书（webpki-roots，板上无系统 CA 库亦可复现）。mock 路径纯 std 零 HTTP。
+ureq = { version = "2", default-features = false, features = ["tls"] }

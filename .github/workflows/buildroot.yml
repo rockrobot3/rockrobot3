@@ -1,0 +1,515 @@
+# Buildroot 出厂轨构建门（M1 构建半边，2026-11-16 立）。
+#
+# 为什么单独一条流水线：全量 Buildroot 构建是小时级重活，不能塞进每次 push 的
+# 通用门禁；但"配置是否真能构建"又必须由 CI 给回执，不能靠本机 macOS 推断。
+# 本文件先交**板级 dts 回移的编译回执**（Linux 6.6 + v6.12 dts 回移补丁），
+# 通过后再接全量镜像 job（同一触发面，届时只加 job 不改判据）。
+#
+# 触发面：改动 buildroot 轨或本文件即跑；也可 workflow_dispatch 手动触发。
+name: buildroot
+
+on:
+  push:
+    branches: [main, "dev/**"]
+    # 发布面（ADR-0028）：v* 标签走全量构建 + release job 签名/推送 ghcr。
+    # 标签推送不做路径过滤（GitHub 对 tag push 不评估 paths）。
+    tags: ["v*"]
+    paths:
+      - "base/os/buildroot/**"
+      - ".github/workflows/buildroot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: buildroot-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  LINUX_VER: "6.6"
+  PATCH: base/os/buildroot/board/radxa-zero3/patches/0001-arm64-dts-rockchip-add-radxa-zero-3.patch
+
+jobs:
+  dtb-backport:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 安装内核 dts 构建依赖
+        run: |
+          set -o pipefail
+          if ! sudo apt-get update -qq 2>&1 | tail -3; then
+            echo "::error title=apt-update::apt-get update 失败"
+            exit 1
+          fi
+          if ! sudo apt-get install -y -qq gcc-aarch64-linux-gnu bc bison flex libssl-dev 2>&1 | tail -5; then
+            echo "::error title=apt-install::内核 dts 依赖安装失败"
+            exit 1
+          fi
+          command -v aarch64-linux-gnu-gcc
+
+      # 内核 tarball（~140MB）按版本钉 key 缓存：dtb 门每次跑都要源码，重复
+      # 下载是本 job 主要网络耗时（2026-11-17 治理）；解包+补丁每拍重做——
+      # 秒级、确定性，补丁只打在解包后的新树上，缓存永远是无补丁的原包。
+      - name: 恢复内核源码包缓存
+        id: linux-src
+        uses: actions/cache@v4
+        with:
+          path: /tmp/linux.tar.xz
+          key: linux-${{ env.LINUX_VER }}-source-v1
+      - name: 取 Linux 6.6 源码并应用 Radxa ZERO 3 回移补丁
+        run: |
+          set -o pipefail
+          if [ ! -s /tmp/linux.tar.xz ]; then
+            if ! curl -fL --retry 3 --retry-delay 2 -o /tmp/linux.tar.xz \
+                "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${LINUX_VER}.tar.xz"; then
+              echo "::error title=kernel-fetch::Linux ${LINUX_VER} 源码下载失败"
+              exit 1
+            fi
+          fi
+          tar -xJf /tmp/linux.tar.xz -C /tmp
+          src="/tmp/linux-${LINUX_VER}"
+          if ! patch -p1 --forward -d "$src" < "$PATCH" > /tmp/patch.log 2>&1; then
+            echo "::error title=dts-patch::回移补丁未干净应用（见 /tmp/patch.log 摘要）"
+            tail -8 /tmp/patch.log
+            exit 1
+          fi
+          if grep -qE "fuzz|FAILED|Hunk .* FAILED" /tmp/patch.log; then
+            echo "::warning title=dts-patch::补丁应用带 fuzz/失败行（检查上下文）"
+            cat /tmp/patch.log
+          fi
+          grep -nE "radxa-zero-3[ew]" "$src/arch/arm64/boot/dts/rockchip/Makefile"
+
+      - name: 构建两个变体的 dtb（6.6 基线）
+        run: |
+          set -o pipefail
+          src="/tmp/linux-${LINUX_VER}"
+          make -C "$src" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig >/dev/null
+          if ! grep -q "^CONFIG_ARCH_ROCKCHIP=y" "$src/.config"; then
+            "$src/scripts/config" --file "$src/.config" --enable ARCH_ROCKCHIP
+          fi
+          make -C "$src" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig >/dev/null
+          if ! make -C "$src" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)" \
+              rockchip/rk3566-radxa-zero-3w.dtb rockchip/rk3566-radxa-zero-3e.dtb > /tmp/dtb.log 2>&1; then
+            echo "::error title=dtb-build::dtb 构建失败（见日志摘要）"
+            grep -iE "error|Error|fatal" /tmp/dtb.log | tail -8
+            exit 1
+          fi
+          for b in rk3566-radxa-zero-3w.dtb rk3566-radxa-zero-3e.dtb; do
+            f="$src/arch/arm64/boot/dts/rockchip/$b"
+            [ -s "$f" ] || { echo "::error title=dtb-missing::$b 未生成"; exit 1; }
+            printf 'PASS  %s %s bytes\n' "$b" "$(stat -c%s "$f")"
+            file "$f"
+          done
+          echo "PASS  Linux ${LINUX_VER} + v6.12 板级 dts 回移：两个变体 dtb 构建通过"
+
+  # 全量镜像（M1 构建半边）：小时级重活，只在显式提交信息带 [buildroot-full] 或
+  # workflow_dispatch 时跑；日常 buildroot 改动只跑上面的 dtb 门。
+  image:
+    needs: dtb-backport
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message || '', '[buildroot-full]')
+    # 2026-11-16 实测：ubuntu-latest（GCC 14）构建 Buildroot 2024.02.11 的
+    # host-m4 1.4.19 时 gnulib gl_oset.h 编译失败（expected identifier before 'int'）。
+    # Buildroot 2024.02 的受支持宿主是 Ubuntu 22.04；钉 22.04 而不是给 host-m4
+    # 打补丁——宿主工具链错配是根因，补丁只是掩盖。
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 释放磁盘（Buildroot 全量构建）
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+          df -h /
+
+      - name: 安装 Buildroot 宿主依赖
+        run: |
+          set -o pipefail
+          sudo apt-get update -qq 2>&1 | tail -3
+          if ! sudo apt-get install -y -qq build-essential git wget cpio unzip rsync bc \
+              bison flex libssl-dev libncurses-dev python3 file 2>&1 | tail -5; then
+            echo "::error title=br-deps::Buildroot 宿主依赖安装失败"
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+          targets: aarch64-unknown-linux-musl
+
+      - name: 取 Buildroot 2024.02.11 并叠 configs/board
+        run: |
+          set -o pipefail
+          ok=0
+          for _ in 1 2 3; do
+            rm -rf /tmp/buildroot
+            if git clone --depth 1 --branch 2024.02.11 \
+                https://github.com/buildroot/buildroot.git /tmp/buildroot; then
+              ok=1
+              break
+            fi
+            sleep 3
+          done
+          if [ "$ok" != 1 ]; then
+            echo "::error title=br-clone::Buildroot 2024.02.11 clone 失败"
+            exit 1
+          fi
+          cp -a base/os/buildroot/configs/. /tmp/buildroot/configs/
+          cp -a base/os/buildroot/board/. /tmp/buildroot/board/
+          ls /tmp/buildroot/configs/rock3_zero3_defconfig /tmp/buildroot/board/radxa-zero3/patches/
+
+      # 只缓存下载面（DL_DIR）：包源码 + custom git（U-Boot/rkbin）。输出树不缓存
+      # ——半成品 O= 树跨拍复用会把"上一拍失败的残骸"带进下一拍，是假绿的经典来源。
+      # key 含 Buildroot 版本与 defconfig 哈希；restore-keys 允许同版本配置变更后
+      # 复用仍然有效的包源码（Buildroot 对每个包自带 hash/revision 校验）。
+      - name: 恢复 Buildroot 下载缓存
+        uses: actions/cache@v4
+        with:
+          path: /tmp/buildroot/dl
+          key: br-dl-2024.02.11-${{ hashFiles('base/os/buildroot/configs/rock3_zero3_defconfig') }}
+          restore-keys: |
+            br-dl-2024.02.11-
+
+      # 交叉构建失败极少是环境问题，多是本仓代码/特性组合问题：日志归因交给
+      # tools/ci/log-digest.sh 的单点口径（与 br-* 各步同一套噪音过滤）。
+      - name: 交叉构建注入产物（aarch64-musl 静态）
+        run: |
+          set -o pipefail
+          if ! bash tools/ci/cross-artifacts.sh aarch64-unknown-linux-musl \
+              'ARM aarch64' static > /tmp/stage-build.log 2>&1; then
+            bash tools/ci/log-digest.sh --title stage-build --log /tmp/stage-build.log --tail 8
+            exit 1
+          fi
+
+      - name: 注入 BINARIES_DIR（rrd / rr3-ctl / rr3-ota-ctl / 五模块）
+        run: |
+          set -euo pipefail
+          rel=/tmp/rr3-build/aarch64-unknown-linux-musl/release
+          mkdir -p /tmp/br-out/images/rr3-modules
+          install -m 0755 "$rel/rrd" /tmp/br-out/images/rrd
+          install -m 0755 "$rel/rr3-ctl" /tmp/br-out/images/rr3-ctl
+          install -m 0755 "$rel/rr3-ota-ctl" /tmp/br-out/images/rr3-ota-ctl
+          for m in act connect interact sense power; do
+            d=/tmp/br-out/images/rr3-modules/rr3-$m
+            mkdir -p "$d"
+            install -m 0755 "$rel/rr3-$m" "$d/bin"
+            install -m 0644 "modules/rr3-$m/module.toml" "$d/manifest.toml"
+          done
+          find /tmp/br-out/images -maxdepth 3 -type f | head -20
+
+      - name: 应用 defconfig
+        run: |
+          set -o pipefail
+          # BR2_DL_DIR 显式钉到缓存目录：O= 输出树下的默认 dl 路径与预置点
+          # 不一致时，Buildroot 会重下（2026-11-16 实测）。
+          if ! make -C /tmp/buildroot O=/tmp/br-out BR2_DL_DIR=/tmp/buildroot/dl \
+              rock3_zero3_defconfig > /tmp/br-defconfig.log 2>&1; then
+            bash tools/ci/log-digest.sh --title br-defconfig --log /tmp/br-defconfig.log --tail 8
+            exit 1
+          fi
+
+      # U-Boot 单包先跑：2026-11-17 全量构建在 uboot 阶段失败，而失败注解被
+      # "pyerrors.h" 这类含 error 的路径污染，根因读不出来。这一拍把失败面
+      # 锁到 U-Boot，失败时交给 log-digest 归因（噪音过滤口径单点）。
+      - name: 预构建 U-Boot（快速定位）
+        run: |
+          set -o pipefail
+          # -j 必须带上：单线程跑 host-python/host-dtc/ATF/U-Boot 要小时级，
+          # 诊断拍的价值就在"快失败"。
+          if ! make -C /tmp/buildroot O=/tmp/br-out BR2_DL_DIR=/tmp/buildroot/dl \
+              -j"$(nproc)" uboot > /tmp/br-uboot.log 2>&1; then
+            # dtc 版本是 scripts_dtc 失败的第一现场：缺文件/版本过旧都在这里现形。
+            dtc_v=$([ -x /tmp/br-out/host/bin/dtc ] && /tmp/br-out/host/bin/dtc -v 2>&1 | head -1 || echo MISSING)
+            bash tools/ci/log-digest.sh --title br-uboot --log /tmp/br-uboot.log \
+              --tail 80 --note "dtc=${dtc_v}"
+            exit 1
+          fi
+          tail -3 /tmp/br-uboot.log
+
+      - name: 全量构建（make）
+        env:
+          RR3_REPO_ROOT: ${{ github.workspace }}
+        run: |
+          set -o pipefail
+          if ! make -C /tmp/buildroot O=/tmp/br-out BR2_DL_DIR=/tmp/buildroot/dl \
+              -j"$(nproc)" > /tmp/br-build.log 2>&1; then
+            # 阶段推进（末 3 条 `>>>`）与信号行一起进注解；genimage/post-image
+            # 的失败只报 target-post-image Error 1，真因在末段，故回显 40 行。
+            bash tools/ci/log-digest.sh --title br-build --log /tmp/br-build.log \
+              --phases --tail 40
+            exit 1
+          fi
+          tail -5 /tmp/br-build.log
+
+      - name: 上传构建日志（失败时）
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: buildroot-logs
+          path: |
+            /tmp/br-defconfig.log
+            /tmp/br-uboot.log
+            /tmp/br-build.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # 镜像名真值在 genimage.cfg（`image <名>.img`），CI 不写第二份字面量：
+      # 2026-11-17 审计发现旧断言硬写 sdcard.img，而 genimage 实际产出
+      # rock3-zero3.img——即使全量 make 成功也会在断言步假红。
+      - name: 解析镜像名（genimage.cfg 单点）
+        id: img
+        run: |
+          set -euo pipefail
+          name=$(awk '$1=="image" && $2 ~ /\.img$/ { print $2; exit }' \
+            base/os/buildroot/board/radxa-zero3/genimage.cfg)
+          if [ -z "$name" ]; then
+            echo "::error title=br-image-name::genimage.cfg 找不到顶层 .img 声明"
+            exit 1
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "PASS  镜像名解析：$name"
+
+      - name: 镜像产物断言（GPT 分区 + dtb）
+        run: |
+          set -euo pipefail
+          img="/tmp/br-out/images/${{ steps.img.outputs.name }}"
+          if [ ! -s "$img" ]; then
+            echo "::error title=br-image::${{ steps.img.outputs.name }} 未生成"
+            ls -l /tmp/br-out/images | head
+            exit 1
+          fi
+          ls -l "$img"
+          sha256sum "$img"
+          sfdisk -d "$img" > /tmp/br-parts.txt || {
+            echo "::error title=br-part::sfdisk 读不出分区表"
+            exit 1
+          }
+          # 分区名是 rr-ota 槽位标签的物理对应物：名字漂移 = 升级链错槽。
+          for p in boot rr_a rr_b rr_factory rr_staging data; do
+            if ! grep -q "name=\"$p\"" /tmp/br-parts.txt; then
+              echo "::error title=br-part::GPT 缺分区 $p"
+              cat /tmp/br-parts.txt
+              exit 1
+            fi
+            echo "PASS  GPT 分区 $p"
+          done
+          for b in rk3566-radxa-zero-3w.dtb rk3566-radxa-zero-3e.dtb; do
+            if [ ! -s "/tmp/br-out/images/$b" ]; then
+              echo "::error title=br-dtb::$b 不在 images"
+              exit 1
+            fi
+            echo "PASS  $b"
+          done
+          echo "PASS  Buildroot 2024.02.11 全量构建：${{ steps.img.outputs.name }} 产出"
+
+      # 只读内容断言：genimage 成功不等于分区内容对。e2fsck 抓坏 fs；
+      # dumpe2fs 抓标签错槽；debugfs 抓 /etc/fstab 缺伪文件系统；
+      # fdtdump 抓 u-boot.itb 缺 BL31（binman 成功但 FIT 里没有 bl31 是"能烧不能启"）。
+      - name: 镜像内容只读断言（ext4 / fstab / FIT）
+        run: |
+          set -euo pipefail
+          d=/tmp/br-out/images
+          host=/tmp/br-out/host
+          for spec in rr_a:rr_a rr_b:rr_b rr_factory:rr_factory rr_staging:rr_staging data:rr_data; do
+            f=${spec%%:*}
+            want=${spec##*:}
+            img="$d/$f.ext4"
+            if [ ! -s "$img" ]; then
+              echo "::error title=br-fs::$f.ext4 缺失"
+              exit 1
+            fi
+            if ! "$host/sbin/e2fsck" -fn "$img" >"/tmp/fsck-$f.log" 2>&1; then
+              echo "::error title=br-fsck::$f.ext4 未过 e2fsck -fn"
+              tail -8 "/tmp/fsck-$f.log"
+              exit 1
+            fi
+            got=$("$host/sbin/dumpe2fs" -h "$img" 2>/dev/null | sed -n 's/^Filesystem volume name:[[:space:]]*//p')
+            if [ "$got" != "$want" ]; then
+              echo "::error title=br-label::$f.ext4 标签 '$got' != '$want'（槽位标签漂移）"
+              exit 1
+            fi
+            echo "PASS  $f.ext4 e2fsck + label=$got"
+          done
+          if [ ! -x "$host/sbin/debugfs" ]; then
+            echo "::error title=br-tool::host debugfs 缺席（host-e2fsprogs 未装 debugfs）"
+            exit 1
+          fi
+          # rootfs 内容断言：只查 fstab 不够——空文件系统也可能有标签。
+          # /usr/bin/rrd 与 S99rrd 必须真在 rr_a.ext4 里，才证明 srcpath 生效。
+          for p in /usr/bin/rrd /etc/init.d/S99rrd; do
+            if ! "$host/sbin/debugfs" -R "stat $p" "$d/rr_a.ext4" 2>&1 | grep -q 'Inode:'; then
+              echo "::error title=br-rootfs::rr_a.ext4 缺 $p（rootfs 未装入）"
+              exit 1
+            fi
+            echo "PASS  rr_a.ext4 含 $p"
+          done
+          fstab=$("$host/sbin/debugfs" -R "cat /etc/fstab" "$d/rr_a.ext4" 2>&1 || true)
+          for k in sysfs devtmpfs "LABEL=rr_data" "LABEL=rr_staging"; do
+            if ! printf '%s\n' "$fstab" | grep -q "$k"; then
+              echo "::error title=br-fstab::rr_a.ext4 的 /etc/fstab 缺 '$k'"
+              printf '%s\n' "$fstab"
+              exit 1
+            fi
+          done
+          echo "PASS  rr_a.ext4 /etc/fstab 含 sysfs/devtmpfs/rr_data/rr_staging"
+          if ! "$host/bin/fdtdump" "$d/u-boot.itb" 2>/dev/null | grep -q 'atf-bl31'; then
+            echo "::error title=br-fit::u-boot.itb 缺 atf-bl31（BL31 未进 FIT）"
+            exit 1
+          fi
+          echo "PASS  u-boot.itb 含 atf-bl31"
+          sz=$(stat -c%s "$d/idbloader.img")
+          if [ "$sz" -lt 100000 ]; then
+            echo "::error title=br-tpl::idbloader.img 仅 $sz B，疑似缺 TPL"
+            exit 1
+          fi
+          echo "PASS  idbloader.img $sz B（含 TPL/SPL）"
+
+      - name: 生成摘要清单
+        run: |
+          set -euo pipefail
+          cd /tmp/br-out/images
+          sha256sum "${{ steps.img.outputs.name }}" ./*.ext4 ./*.dtb > checksums.txt
+          cat checksums.txt
+
+      # 产物留档是为了让 OTA 签名链有**真实载体**可签（tag/发布面消费），
+      # 不是演示下载；保留 14 天与一次全量构建的复核窗口同档。
+      - name: 上传镜像与摘要
+        uses: actions/upload-artifact@v7
+        with:
+          name: rock3-zero3-image
+          path: |
+            /tmp/br-out/images/${{ steps.img.outputs.name }}
+            /tmp/br-out/images/*.ext4
+            /tmp/br-out/images/*.dtb
+            /tmp/br-out/images/checksums.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  # 发布面（ADR-0028）：只在 v* 标签上签名并推送 ghcr。
+  # 机制在 tools/deploy/ota-bundle.sh（规范名 → manifest → 签名 → 公钥复验 →
+  # 摘要），本 job 只做触发/密钥/不可变策略；私钥只落 0600 临时文件并在
+  # always 步删除，不打印、不进 artifact。无 Secret 即失败，无跳过开关。
+  release:
+    needs: image
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: rock3-zero3-image
+          path: /tmp/rr3-release
+      - name: 复核 artifact 摘要
+        run: |
+          set -euo pipefail
+          cd /tmp/rr3-release
+          sha256sum -c checksums.txt
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - name: 构建 rr3-ota-ctl（宿主机）
+        run: |
+          set -o pipefail
+          if ! cargo build -q --locked --release \
+               --manifest-path base/ota/rr3-ota-ctl/Cargo.toml 2>&1 | tee /tmp/ota-build.log; then
+            bash tools/ci/log-digest.sh --title ota-build --log /tmp/ota-build.log --tail 12
+            exit 1
+          fi
+      - name: 版本与密钥前置（fail-closed）
+        env:
+          KEY_HEX: ${{ secrets.RR3_OTA_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          ver="${tag#v}"
+          if ! printf '%s' "$ver" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error title=ota-version::标签 $tag 不是 v<major.minor.patch>"
+            exit 1
+          fi
+          if [ -z "${KEY_HEX:-}" ]; then
+            echo "::error title=ota-key::Secret RR3_OTA_SIGNING_KEY 未配置（tag 发布必须签名，无回退）"
+            exit 1
+          fi
+          if ! printf '%s' "$KEY_HEX" | grep -Eq '^[0-9a-fA-F]{64}$'; then
+            echo "::error title=ota-key::Secret 不是 64 位十六进制种子"
+            exit 1
+          fi
+          echo "VER=$ver" >> "$GITHUB_ENV"
+          umask 077
+          printf '%s\n' "$KEY_HEX" >"$RUNNER_TEMP/rr3-ota.key"
+          chmod 600 "$RUNNER_TEMP/rr3-ota.key"
+      - name: 组包 / 签名 / 自复验
+        run: |
+          set -euo pipefail
+          RR3_OTA_CTL=/tmp/rr3-build/release/rr3-ota-ctl \
+            bash tools/deploy/ota-bundle.sh \
+              --image /tmp/rr3-release/rr_a.ext4 \
+              --version "$VER" \
+              --key-file "$RUNNER_TEMP/rr3-ota.key" \
+              --out /tmp/rr3-ota-bundle
+      - name: 清理私钥
+        if: always()
+        run: rm -f "$RUNNER_TEMP/rr3-ota.key"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: oras-project/setup-oras@v2
+      - name: 不可变标签检查 + 推送 ghcr
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER}"
+          ota="ghcr.io/${owner}/rockrobot3-ota:${VER}"
+          build="ghcr.io/${owner}/rockrobot3-buildroot:${VER}"
+          for ref in "$ota" "$build"; do
+            if out=$(oras manifest fetch "$ref" 2>&1); then
+              echo "::error title=ota-immutable::已存在：$ref（拒绝覆盖）"
+              exit 1
+            fi
+            if ! printf '%s' "$out" | grep -qiE 'not found|404|manifest unknown'; then
+              echo "::error title=ota-immutable::读 $ref 失败且非 404：${out:0:400}"
+              exit 1
+            fi
+          done
+          cd /tmp/rr3-ota-bundle
+          img="rr3-rootfs-rk3566-${VER}.img"
+          pub=$(sed -n 's/^pub=//p' bundle.txt)
+          oras push "$ota" \
+            --artifact-type application/vnd.rr3.ota.bundle.v1+json \
+            "${img}:application/octet-stream" \
+            "${img}.manifest:application/octet-stream" \
+            "${img}.sig:application/octet-stream" \
+            "${pub}:application/octet-stream" \
+            "checksums.txt:text/plain" \
+            "bundle.txt:text/plain"
+          echo "PASS  已推送 $ota"
+          cd /tmp/rr3-release
+          oras push "$build" \
+            --artifact-type application/vnd.rr3.buildroot.image.v1+json \
+            "rock3-zero3.img:application/octet-stream" \
+            "rk3566-radxa-zero-3w.dtb:application/vnd.device-tree+octet-stream" \
+            "rk3566-radxa-zero-3e.dtb:application/vnd.device-tree+octet-stream" \
+            "checksums.txt:text/plain"
+          echo "PASS  已推送 $build"
+          oras manifest fetch "$ota" >/dev/null
+          oras manifest fetch "$build" >/dev/null
+          echo "PASS  ghcr 两个制品可读"
+      - name: job summary
+        if: always()
+        run: |
+          {
+            echo "## OTA release"
+            echo "- tag: ${GITHUB_REF_NAME}"
+            echo "- version: ${VER:-?}"
+            echo "- key_id: $(sed -n 's/^key_id=//p' /tmp/rr3-ota-bundle/bundle.txt 2>/dev/null || echo '缺')"
+            echo "- OTA: ghcr.io/${GITHUB_REPOSITORY_OWNER}/rockrobot3-ota:${VER:-?}"
+            echo "- buildroot: ghcr.io/${GITHUB_REPOSITORY_OWNER}/rockrobot3-buildroot:${VER:-?}"
+          } >>"$GITHUB_STEP_SUMMARY"

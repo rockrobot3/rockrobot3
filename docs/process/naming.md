@@ -8,7 +8,7 @@
 | 对象 | 规则 | 示例 |
 |---|---|---|
 | 模块目录 / crate / 进程 / bin | `rr3-<域>` | `rr3-sense`、`rr3-brain`、`rr3-ctl`、`rr3-mkmod`、`rr3-sim`、`rr3-ota-ctl` |
-| 基座内部 crate（workspace 成员） | `rr-<设施名>`（无 3） | `rr-ipc`、`rr-bus`、`rr-hal`、`rr-registry`、`rr-ota` |
+| 基座内部 crate（workspace 成员） | `rr-<设施名>`（无 3） | `rr-ipc`、`rr-mech`、`rr-bus`、`rr-hal`、`rr-registry`、`rr-ota` |
 | Rust lib target（crate 真名） | 连字符转下划线 | `rr3_sense` |
 | Rust 跨 crate 导出自由函数 | `rr3_<域>_<动作>` | `rr3_frame_read()`、`rr3_body_encode()`（`rr-ipc` 导出，`rrd/src/conn.rs` 实际消费） |
 | Rust 导出类型 | `Rr3` 前缀 | `Rr3Header`、`Rr3StatusCode`（`rr-ipc/src/protocol/header.rs`）、`Rr3Frame`（`rr-ipc/src/transport/frame.rs`） |
@@ -18,6 +18,7 @@
 | Python 包级可见全局函数 | `rr3_<域>_<动作>` | `rr3_brain_submit_text()` |
 | C（未来新增；legacy 已冻结） | `rr3_<域>_<动作>` | `rr3_ota_slot_switch()` |
 | 事件 / RPC 主题 | `rr3-<模块>/<域>/<事件>` | `rr3-sense/audio/vad_start` |
+| 能力格（`contracts/slots.toml`，ADR-0012） | `<域>.<格>` 两段式小写（基础层格名随 `base_capabilities` 原名，同为两段式，如 `bus.publish`）；与主题命名不同轴，互不混写 | `audio.capture`、`bus.publish` |
 | 配置键 / 环境变量 | `RR3_` 大写前缀 | `RR3_LOG_LEVEL`、`RR3_BUS_PATH` |
 | systemd 单元 | `rr3-<域>.service` | `rr3-sense.service` |
 | D-Bus 总线名 | `cn.rockrobot.rr3.<域>` | `cn.rockrobot.rr3.connect` |
@@ -37,7 +38,7 @@
   （跨进程 e2e 的对端，落点见 [../architecture/architecture.md](../architecture/architecture.md) §3）。
   两者只作既成例外登记，**不外扩为新规则**：新起的包、bin、模块目录仍须按矩阵取名。矩阵将来若要
   收紧或给这两个名字改名，须先出 ADR 再动 `base/runtime` 的包名与 bin 名
-- 该边界的**主题/crate/manifest 名**部分由 CI 七步（`tools/ci/check.sh`，见
+- 该边界的**主题/crate/manifest 名**部分由 CI 门禁（`tools/ci/check.sh`，见
   [conventions.md](conventions.md) §2）兜底；**Rust 符号前缀**在 v0.0.1 没有 lint
   （方案 D7 只冻结三条语义检查），靠评审——将来可在 `tools/` 补脚本，但需与上一条裁定一并收口
 
@@ -46,8 +47,8 @@
 > **校验入口（v0.0.1 实况，与 [architecture.md](../architecture/architecture.md) §6.3 同一口径）**：
 > 共**三处**，职责各不相同——① `rr3-mkmod` 生成自检；② `rr-registry` 契约测试
 > （`cargo test -p rr-registry`，由 `tools/ci/check.sh` ②/③ 步点名）；③ rrd 在册表判定
-> `RrdRegistry::rr3_reg_publish_check`（按 `manifest.name` 判前缀归属并放行/拒绝，四道门）。
-> 入口 ③ 的判定逻辑在 `base/runtime/rrd/src/registry.rs`（`RrdRegistry::rr3_reg_publish_check`
+> `RrdRegistry::rr3_reg_pub_check`（按 `manifest.name` 判前缀归属并放行/拒绝，四道门）。
+> 入口 ③ 的判定逻辑在 `base/runtime/rrd/src/registry.rs`（`RrdRegistry::rr3_reg_pub_check`
 > 返回 `Rr3PublishDeny`，四道门次序即安全语义）；**它接到线上流量的哪一段属实况，一律以
 > [`../status.md`](../status.md) 为准，本文不复述**。接口字面量（门序、错误码、`Display` 文案）
 > 归 [`../reference/rrd-registry.md`](../reference/rrd-registry.md) §8 与

@@ -1,0 +1,30 @@
+# servo 装配清单（五件套④）：装配期注入面声明（ADR-0019 修订 1 ③——
+# [assemble.handles] 声明件用哪个能力面 trait ← 绑描述符哪个键、[assemble.ops]
+# 声明件暴露哪些参数槽 ← 取哪个 config 键；装配段校验缺项即该格 Degraded）。
+schema_version = 2
+
+[assemble]
+# 舵机执行面经能力面 Rr3PwmServo，绑描述符 pwm_chip + pwm_channel 两键（§3 注入面）
+handles = [
+  { trait = "Rr3PwmServo", desc_key = "pwm_chip" },
+  { trait = "Rr3PwmServo", desc_key = "pwm_channel" },
+]
+# 时限/限速 ← config.toml [rr3-act.servo]（§3 逐槽落位，L-5 补齐）。**行程不在
+# ops**（批N3 件五门 g 收敛，全案 §8 门 g"行程字面量档案之外读者数为 0"）：
+# 行程真值 = 执行件档案（hardware/<形态>/axis/<instance>.toml 的 lo_deg/hi_deg/
+# center_deg），经 rrd 装配链投影 RR3_ACT_AXIS_STATE 注入，组合件填 Rr3ServoCfg
+# ——config/assemble 两侧的字面量读者已全部撤除（A-17：ops[].src_key 也是读者，
+# 撤 config 键必须同批撤这两槽，否则"档案落地后 config 那份仍被 src_key 引着"）。
+ops = [
+  { slot = "move_timeout_ms", src_key = "rr3-act.servo.move_timeout_ms" },
+  { slot = "state_min_interval_ms", src_key = "rr3-act.servo.state_min_interval_ms" },
+]
+# 电流需求申报（校验⑨ 申报面，批N2 首件基-36 + 门 c 五键定形）：act.axis.pwm 是
+# 全仓唯一 kind=power 角色（roles.toml），SG90 类峰值 ~700 mA / 连续 ~120 mA
+# （ADR-0021 裁定 2 / 全案坑 9）。**每实例语义**：条目是每个角色实例（每轴）的需求，
+# 装载读者 rrd rr3_demand_budget_check 按角色实例数扩算后 Σ(critical=true) 对
+# rail5v current_cap_ma=2000 比对；concurrency_group=[] 显式不分群 = 与同域全体
+# 并发（最坏口径，T-5 必须显式写）。
+demands = [
+  { rail = "rail5v", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [] },
+]

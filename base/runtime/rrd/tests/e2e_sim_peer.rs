@@ -14,6 +14,17 @@ use rr_ipc::{rr3_body_split, Rr3PayloadType};
 use std::time::Duration;
 use support::*;
 
+/// simb 旁观连接上线（两处同款）：注册旁观者并消费注册回执
+fn connect_simb(rrd: &RrdTest) -> RrdClient {
+    let mut b = rrd.rr3_connect();
+    rr3_send(
+        &mut b,
+        &rr3_register_frame(&rr3_manifest("rr3-simb", 100, 500, "always"), "rr3-simb"),
+    );
+    rr3_read_rpc(&mut b);
+    b
+}
+
 /// 真进程完成握手、task 取自 rrd 的应答（不是自设），心跳被连续接受
 #[test]
 fn sim_peer_registers_and_beats_are_accepted() {
@@ -50,12 +61,7 @@ fn sim_peer_publish_reaches_another_connection() {
     // 旁观连接必须先上线：转发只发给"当时在册"的连接，晚注册的收不到（Task 7 的 fanout 语义）。
     // 这也决定了 task 号：b 先到拿 2，夹具稍后拿 3 —— 所以断言比对的是 rrd 日志里那个分配值，
     // 不是写死的 2。
-    let mut b = rrd.rr3_connect();
-    rr3_send(
-        &mut b,
-        &rr3_register_frame(&rr3_manifest("rr3-simb", 100, 500, "always"), "rr3-simb"),
-    );
-    rr3_read_rpc(&mut b);
+    let mut b = connect_simb(&rrd);
 
     let manifest = rr3_fixture_manifest("pub", "sima");
     let mut peer = SimPeer::rr3_start(&rrd.socket, &manifest, "publish_once");
@@ -111,12 +117,7 @@ fn sim_peer_clean_exit_broadcasts_unregistered_and_never_restarts() {
 fn killed_foreign_peer_is_only_an_eof_and_its_plan_is_skipped() {
     let mut rrd = RrdTest::rr3_start("e2e-abort");
 
-    let mut b = rrd.rr3_connect();
-    rr3_send(
-        &mut b,
-        &rr3_register_frame(&rr3_manifest("rr3-simb", 100, 500, "always"), "rr3-simb"),
-    );
-    rr3_read_rpc(&mut b);
+    let mut b = connect_simb(&rrd);
 
     let manifest = rr3_fixture_manifest("abort", "sima"); // always 策略
     let mut peer = SimPeer::rr3_start(&rrd.socket, &manifest, "abort");
@@ -136,7 +137,10 @@ fn killed_foreign_peer_is_only_an_eof_and_its_plan_is_skipped() {
     // 本用例的 unregistered 判据就会随机红（实测未排空 10 次红 1 次）。RST 那一支**仍然没人测**
     // ——11b 把"退出码定性"补给了 owned 那一路（`e2e_spawn_restart` 的 S1/S2），而这条连接是
     // 外来的，它连 RST 都只会读成一次 EOF。这里排掉混淆项，不是把它判给"不存在"。
-    assert!(plan.contains("退出（干净收尾）"), "现值：EOF 才叫干净收尾；实际 {plan}");
+    assert!(
+        plan.contains("退出（干净收尾）"),
+        "现值：EOF 才叫干净收尾；实际 {plan}"
+    );
     assert!(
         plan.contains(&format!("entry={}", env!("CARGO_BIN_EXE_sim_peer"))),
         "重启计划必须回显 manifest 里那条绝对 entry（占位符确实被替换过的证据）: {plan}"
@@ -161,8 +165,12 @@ fn identity_comes_from_manifest_not_from_the_role_env() {
     p2.rr3_wait("注册成功 name=rr3-simb");
 
     // task 号各不同且按注册序递增（rrd 分配，与被测进程无关）
-    assert!(rrd.rr3_wait_log("注册 rr3-sima task=2").contains("policy=always"));
-    assert!(rrd.rr3_wait_log("注册 rr3-simb task=3").contains("policy=never"));
+    assert!(rrd
+        .rr3_wait_log("注册 rr3-sima task=2")
+        .contains("policy=always"));
+    assert!(rrd
+        .rr3_wait_log("注册 rr3-simb task=3")
+        .contains("policy=never"));
 
     // 换 role 不换身份：行为变了（它会发布），name 仍是 manifest 里那个。
     // 先 drop p1：同名重复注册会被 EBUSY 挡住（Task 7 已钉），那样测不到 role 这一维。

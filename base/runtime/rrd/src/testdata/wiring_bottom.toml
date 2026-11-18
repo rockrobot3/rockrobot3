@@ -1,0 +1,10 @@
+[[wire]]
+connector = "J-T"
+hdr_pin = [1, 2]
+signal = ["vcc", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "none"
+keyed = false
+rated_a = 1.0
+gnd_common = "star-1"

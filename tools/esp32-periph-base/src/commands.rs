@@ -1,0 +1,505 @@
+//! 控制串口（UART0）命令行面：逐行解析与应答。
+//!
+//! 承载 `frame_round`（一行一答的帧级往返）、自由度参数解析与板侧运维命令
+//! （状态/复位/绑定/表情等）；命令词与应答形状是板侧对外契约，改文案即改
+//! 运维面。总线归属门不在本文件——写口与裁决归 `frame.rs`/`state.rs`。
+
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+
+use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size};
+
+use crate::board::{
+    FRAME_DRAIN_MAX, OLED_COLS, OLED_ROWS, RR3_FACE_EXPRS, RR3_MAGIC_FIRST, UART2_BAUD_HZ,
+};
+use crate::face::expr_eye_base;
+use crate::frame::{frame_dispatch, frame_recv, frame_send_response};
+use crate::link::{drain_uart_quiet, read_line, reply, UartIo};
+use crate::oled::glyph;
+use crate::periph::CtlUart;
+use crate::ports_impl::Rr3BoardClock;
+use crate::servo::{axis_check, Axis};
+use crate::state::{
+    drain_audio, drain_outbox, esp_random_u32, lock_bus, now_ms, push_job, Bus, CtlState, Job,
+};
+
+// ---------------------------------------------------------------------------
+// 指令循环（批B 行面 + 批C 帧面双面并存：行面保留调试与舵机五点 SCAN 判据）
+// ---------------------------------------------------------------------------
+
+/// 帧面一轮（控制面双面分流的 0x31 分支）：收帧 + 协议门（失败丢弃不回）→ 分发
+/// （校验/改状态/推作业）→ Response 回帧。UartIo 只在收/发两段活着；执行段无硬件
+/// 借用（作业已推给运行面），控制面保持轻。
+fn frame_round(io: &mut CtlUart, bus: &Arc<Mutex<Bus>>, ctl: &mut CtlState, first: u8) {
+    let recv = {
+        let mut uio = UartIo {
+            uart: &mut io.uart,
+            pre: Some(first),
+        };
+        frame_recv(&mut uio)
+    };
+    let req = match recv {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[periph] 帧面丢弃: {e}");
+            // **残尾吞净**（稳健性修复）：失败时已消费多少字节不可知（TornHeader/
+            // Header 都不给出剩余量），不吞净就会让残尾被下一轮当行命令解析——
+            // 垃圾指令执行 / 刷一串无人请求的 ERR。读到线静默一拍为止，上限
+            // FRAME_DRAIN_MAX 防呆（见 drain_uart_quiet 注）。
+            drain_uart_quiet(&mut io.uart, FRAME_DRAIN_MAX);
+            return;
+        }
+    };
+    println!("[periph] 帧面 id={} topic=\"{}\"", req.id, req.topic);
+    let result = frame_dispatch(bus, ctl, &req);
+    if let Err(e) = &result {
+        eprintln!("[periph] 帧面业务失败 id={}: {e}", req.id);
+    }
+    let mut uio = UartIo {
+        uart: &mut io.uart,
+        pre: None,
+    };
+    frame_send_response(&mut uio, &req, result, &Rr3BoardClock);
+}
+
+/// 控制面主循环（**独占 UART2，不碰 I2C/LEDC**）：逐字节窥视首字节——0x31（帧
+/// magic LE 首字节）走帧面 round，其余作行首字节继续收行走批B 行面。行面的硬件
+/// 动作一律折成作业推给运行面；本循环只做解析/校验/改状态/回包，故慢外设不阻塞
+/// 命令吞吐。未知指令 ERR（fail-closed，不猜不拖）。
+pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
+    let mut ctl = CtlState {
+        prev_expr: String::from("none"),
+    };
+    let _ = reply(
+        &mut io.uart,
+        &format!(
+            "READY periph-base v0.4.0 ctrl/runtime split + serial-servo + baud{UART2_BAUD_HZ} (type HELP for commands)"
+        ),
+    );
+    loop {
+        // 先清 outbox（运行面异步回包：SCAN 逐点等）+ audio_q（批D③ 音频分片整帧
+        // 上行，同线程串行写与行面字节互不交错），再窥视下一字节
+        drain_outbox(&mut io.uart, &bus);
+        drain_audio(&mut io.uart, &bus);
+        // 窥视带 1-tick（10ms）超时：空口返回 Ok(0) 即回到轮首（转手清 outbox +
+        // 让出 CPU，自主行为在运行面跑，不再占用控制面）；有字节（Ok(n≥1)）照旧
+        // 双面分流（帧/行路径的后续读带 LINE_BYTE_TICKS 字节间超时，半行也不会
+        // 让控制面永久挂住）。Err 才是真读失败。
+        match peek_byte(&mut io) {
+            Ok(None) => continue,
+            Ok(Some(first)) => serve(&mut io, &bus, &mut ctl, first),
+            Err(()) => {
+                eprintln!("[periph] UART 读失败，退避后重试");
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+}
+
+/// 窥视一个首字节：`Ok(None)` = 空口（已等过一个 tick），`Err` = 真读失败。
+fn peek_byte(io: &mut CtlUart) -> Result<Option<u8>, ()> {
+    let mut first = [0u8; 1];
+    match io.uart.read(&mut first, 1) {
+        Ok(0) => Ok(None),
+        Ok(_) => Ok(Some(first[0])),
+        Err(_) => Err(()),
+    }
+}
+
+/// 一轮命令服务：首字节定面（0x31 帧面 / 其余行面），行面解析 → 分派 → 应答。
+fn serve(io: &mut CtlUart, bus: &Arc<Mutex<Bus>>, ctl: &mut CtlState, first: u8) {
+    if first == RR3_MAGIC_FIRST {
+        frame_round(io, bus, ctl, first);
+        return;
+    }
+    let line = match read_line(&mut io.uart, first) {
+        Ok(l) => l,
+        Err(why) => {
+            // 必须回 ERR：旧版只 eprintln 就 continue，宿主侧只看到"发了命令、
+            // 永远等不到应答"（静默超时），而线上已经产的残字节还可能被下一轮
+            // 当新命令解析。fail-closed 且 fail-visible。
+            eprintln!("[periph] 收行失败: {why}");
+            let _ = reply(&mut io.uart, &format!("ERR {why}"));
+            return;
+        }
+    };
+    let line = line.trim();
+    if line.is_empty() {
+        heartbeat(bus);
+        return;
+    }
+    let mut parts = line.split_whitespace();
+    let head = parts.next().unwrap_or("");
+    let result = rr3_cmd_exec(head, &mut parts, line, bus, ctl); // 应答回写并计丢应答（TX 环满/写错时 `reply` 回 false）：宿主等的是这一
+                                                                 // 行，丢了必须留痕（`INFO reply_drop`），不再静默。
+    let dropped = match result {
+        Ok(line) => !reply(&mut io.uart, &line),
+        Err(e) => !reply(&mut io.uart, &format!("ERR {e}")),
+    };
+    if dropped {
+        let mut b = lock_bus(bus);
+        b.st.reply_drop = b.st.reply_drop.saturating_add(1);
+    }
+}
+
+/// 空行 = 宿主音频心跳（A9.3）：不是协议命令，新旧固件都不应答；仅音频会话中计入
+/// 存活时刻（旧宿主不发空行 → 永不武装看门狗）。
+fn heartbeat(bus: &Arc<Mutex<Bus>>) {
+    let mut b = lock_bus(bus);
+    if b.st.audio_on {
+        b.st.audio_host_ms = now_ms();
+    }
+}
+
+/// 行面指令分派（cmd_loop 的纯解析/记账半边）：输入已切好的 head/parts 与原始行
+/// （OLED 取原文保留内嵌空格），输出应答行或 ERR 文案。硬件动作一律推作业，
+/// 本函数不碰慢外设；`ctl` 只承载 FACE 的前一表情记账。
+fn rr3_cmd_exec(
+    head: &str,
+    parts: &mut std::str::SplitWhitespace<'_>,
+    line: &str,
+    bus: &Arc<Mutex<Bus>>,
+    ctl: &mut CtlState,
+) -> Result<String, String> {
+    if let Some(r) = rr3_cmd_motion(head, parts, bus) {
+        return r;
+    }
+    if let Some(r) = rr3_cmd_face(head, parts, bus, ctl) {
+        return r;
+    }
+    if let Some(r) = rr3_cmd_ui(head, parts, line, bus) {
+        return r;
+    }
+    Err(format!("unknown cmd \"{head}\"（HELP 看指令表）"))
+}
+
+fn rr3_cmd_motion(
+    head: &str,
+    parts: &mut std::str::SplitWhitespace<'_>,
+    bus: &Arc<Mutex<Bus>>,
+) -> Option<Result<String, String>> {
+    let r = match head {
+        "PAN" => cmd_pan(parts, bus),
+        "TILT" => cmd_tilt(parts, bus),
+        "SERVO" => cmd_servo(parts, bus),
+        "SCAN" => cmd_scan(bus),
+        "WANDER" => cmd_wander(parts, bus),
+        _ => return None,
+    };
+    Some(r)
+}
+
+/// 外部点名让位：写死动作命令一到，自主扫摆必须停（否则动作被自主节拍打断）。
+fn claim_motion(bus: &Arc<Mutex<Bus>>) {
+    lock_bus(bus).st.wander_on = false;
+}
+
+/// `PAN <deg>`：单轴移动。**不写前记账**——`st` 角度只由运行面在作业成功后镜像
+/// 硬件真值（见 runtime `exec_job`），失败/排队时读接口不复述没到达的角。
+fn cmd_pan(
+    parts: &mut std::str::SplitWhitespace<'_>,
+    bus: &Arc<Mutex<Bus>>,
+) -> Result<String, String> {
+    let d = axis_check(Axis::Pan, parse_deg(parts.next())?)?;
+    claim_motion(bus);
+    push_job(
+        bus,
+        Job::Move {
+            pan: Some(d),
+            tilt: None,
+        },
+    );
+    push_job(bus, Job::RedrawOled);
+    Ok(format!("OK pan={d}"))
+}
+
+/// `TILT <deg>`：单轴移动，记账口径同 `PAN`。
+fn cmd_tilt(
+    parts: &mut std::str::SplitWhitespace<'_>,
+    bus: &Arc<Mutex<Bus>>,
+) -> Result<String, String> {
+    let d = axis_check(Axis::Tilt, parse_deg(parts.next())?)?;
+    claim_motion(bus);
+    push_job(
+        bus,
+        Job::Move {
+            pan: None,
+            tilt: Some(d),
+        },
+    );
+    push_job(bus, Job::RedrawOled);
+    Ok(format!("OK tilt={d}"))
+}
+
+/// `SERVO <pan> <tilt>`：串行降级（运行面先 pan 到位 → 整定 → 再 tilt，削峰值
+/// 电流），两轴角度由运行面在整条串行移动成功后提交。任一角非法即整条拒发。
+fn cmd_servo(
+    parts: &mut std::str::SplitWhitespace<'_>,
+    bus: &Arc<Mutex<Bus>>,
+) -> Result<String, String> {
+    let (p, t) = parse_pair(parts)?;
+    let p = axis_check(Axis::Pan, p)?;
+    let t = axis_check(Axis::Tilt, t)?;
+    claim_motion(bus);
+    push_job(
+        bus,
+        Job::Move {
+            pan: Some(p),
+            tilt: Some(t),
+        },
+    );
+    push_job(bus, Job::RedrawOled);
+    Ok(format!("OK pan={p} tilt={t}"))
+}
+
+/// 取两个角度参数：任一缺失/非数都归为同一条参数文案（旧行为逐字保留）。
+fn parse_pair(parts: &mut std::str::SplitWhitespace<'_>) -> Result<(u32, u32), String> {
+    match (parse_deg(parts.next()), parse_deg(parts.next())) {
+        (Ok(p), Ok(t)) => Ok((p, t)),
+        _ => Err("SERVO 需两个 0-180 角度参数".into()),
+    }
+}
+
+/// `SCAN`：判据②（**串行**）——运行面按本轴行程五等分点逐点扫描（pan
+/// 70/80/90/100/110、tilt 80/85/90/95/100），每点先 pan 到位再 tilt 到位，逐点
+/// outbox 回包。控制面只置位 + 排队并即刻 ack——不被 ~6s 的扫描阻塞（旧版在
+/// 命令线程里跑，是"卡顿"来源之一）。
+fn cmd_scan(bus: &Arc<Mutex<Bus>>) -> Result<String, String> {
+    claim_motion(bus); // 判据测试不被自主扫摆扰动
+    push_job(bus, Job::Scan);
+    Ok("OK scan queued (串行 pan→tilt，逐点回包)".into())
+}
+
+/// `WANDER [STOP]`：无参开自主扫摆（两轴方向独立随机），`STOP` 停摆并回报当前角。
+fn cmd_wander(
+    parts: &mut std::str::SplitWhitespace<'_>,
+    bus: &Arc<Mutex<Bus>>,
+) -> Result<String, String> {
+    match parts.next() {
+        Some("STOP") => {
+            claim_motion(bus);
+            let (p, t) = {
+                let b = lock_bus(bus);
+                (b.st.pan_deg, b.st.tilt_deg)
+            };
+            Ok(format!("OK wander off pan={p} tilt={t}"))
+        }
+        None => {
+            {
+                let mut b = lock_bus(bus);
+                b.st.wander_on = true;
+                // 两轴方向独立随机起步，立即起摆
+                b.st.wander_pan_dir = if esp_random_u32() % 2 == 0 { 1 } else { -1 };
+                b.st.wander_tilt_dir = if esp_random_u32() % 2 == 0 { 1 } else { -1 };
+                b.st.next_wander_ms = 0;
+            }
+            let (p, t) = {
+                let b = lock_bus(bus);
+                (b.st.pan_deg, b.st.tilt_deg)
+            };
+            Ok(format!("OK wander on pan={p} tilt={t}"))
+        }
+        Some(other) => Err(format!("WANDER 参数非法: {other}（无参=开，STOP=停）")),
+    }
+}
+
+fn rr3_cmd_face(
+    head: &str,
+    parts: &mut std::str::SplitWhitespace<'_>,
+    bus: &Arc<Mutex<Bus>>,
+    ctl: &mut CtlState,
+) -> Option<Result<String, String>> {
+    let r = match head {
+        "FACE" => match parts.next() {
+            Some(expr) if RR3_FACE_EXPRS.contains(&expr) => {
+                let base = expr_eye_base(expr);
+                ctl.prev_expr = expr.to_string();
+                {
+                    let mut b = lock_bus(bus);
+                    b.st.expr_mode = true;
+                    b.st.frame_mode = false;
+                    b.st.base = base;
+                    b.st.last_text = format!("EXPR {expr}");
+                    b.st.anim_reset();
+                    b.st.drawn = base;
+                }
+                push_job(bus, Job::RenderCapsules);
+                Ok(format!("OK face={expr}"))
+            }
+            Some(other) => Err(format!(
+                "expression 不在白名单: \"{other}\"（可选: {}）",
+                RR3_FACE_EXPRS.join("/")
+            )),
+            None => Err(format!(
+                "FACE 需表情参数（可选: {}）",
+                RR3_FACE_EXPRS.join("/")
+            )),
+        },
+        _ => return None,
+    };
+    Some(r)
+}
+
+fn rr3_cmd_ui(
+    head: &str,
+    parts: &mut std::str::SplitWhitespace<'_>,
+    line: &str,
+    bus: &Arc<Mutex<Bus>>,
+) -> Option<Result<String, String>> {
+    let r = match head {
+        "HELP" => cmd_help(),
+        "OLED" => cmd_oled(head, line, bus),
+        "RAIL" => cmd_rail(bus),
+        "AUDIO" => cmd_audio(parts, bus),
+        "INFO" => cmd_info(bus),
+        "FONT" => cmd_font(),
+        _ => return None,
+    };
+    Some(r)
+}
+
+fn cmd_help() -> Result<String, String> {
+    Ok(format!("CMDS: OLED <text> | FACE <idle|blink|talk|think|happy|listen|turn|sleepy|surprised|angry|sad|confused|focus|love|dizzy|scared> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | RAIL | AUDIO ON|OFF | INFO | HELP  (行程 pan 60-120 / tilt 80-100，中位 90；SERVO/SCAN 串行先左右后俯仰；RAIL 采一次 5V 轨压；AUDIO ON 起双麦 16k 双声道分片上行@{UART2_BAUD_HZ}，宿主 rr3-audio-rec 收流落 wav；开机默认表情 idle + 姿态 P060 T093)"))
+}
+
+/// `OLED <text>`：参数取原始行去指令头，保留内嵌空格（≤63 字符 = 3 行 × 21 列，
+/// row3 角度行）。控制面记账 + 排队，运行面出字（慢 I2C 不在控制面）。
+fn cmd_oled(head: &str, line: &str, bus: &Arc<Mutex<Bus>>) -> Result<String, String> {
+    let rest = line[head.len()..].trim_start();
+    if rest.is_empty() {
+        return Err("OLED 缺文本参数".into());
+    }
+    if rest.len() > OLED_COLS * (OLED_ROWS - 1) {
+        return Err(format!(
+            "OLED 文本超长（≤{} 字符 = 3 行 × 21 列，第 4 行为角度行）",
+            OLED_COLS * (OLED_ROWS - 1)
+        ));
+    }
+    {
+        let mut b = lock_bus(bus);
+        b.st.last_text = rest.to_string();
+        b.st.frame_mode = false;
+        b.st.expr_mode = false;
+    }
+    push_job(bus, Job::RedrawOled);
+    Ok(format!("OK oled \"{rest}\""))
+}
+
+fn cmd_rail(bus: &Arc<Mutex<Bus>>) -> Result<String, String> {
+    push_job(bus, Job::SampleRail);
+    Ok("OK rail sample queued".into())
+}
+
+/// 音频上行开关（批D③）：ON 后 mic 线攒满分片（2048 帧 = 128ms）即组 Event 帧推
+/// audio_q，控制面每轮 drain_audio 整帧写 UART2。OFF 后队列余片仍照常发完
+/// （drain_audio 不看开关），mic 线不再攒新片。宿主心跳走**空行**（A9.3，见
+/// cmd_loop 空行分支）：ON/OFF 归零心跳时刻，看门狗只认本会话内的空行——旧宿主
+/// 不发空行时永不启用。
+fn cmd_audio(
+    parts: &mut std::str::SplitWhitespace<'_>,
+    bus: &Arc<Mutex<Bus>>,
+) -> Result<String, String> {
+    let on = match parts.next() {
+        Some("ON") => true,
+        Some("OFF") => false,
+        _ => return Err("AUDIO 需 ON|OFF 参数".into()),
+    };
+    {
+        let mut b = lock_bus(bus);
+        b.st.audio_on = on;
+        b.st.audio_host_ms = 0;
+    }
+    Ok(if on { "OK audio on" } else { "OK audio off" }.into())
+}
+
+/// `INFO` 观测面：一拍取齐状态快照后拼行（取锁只此一次，避免中途跳变）。
+fn cmd_info(bus: &Arc<Mutex<Bus>>) -> Result<String, String> {
+    let (plo, phi) = Axis::Pan.range();
+    let (tlo, thi) = Axis::Tilt.range();
+    let (
+        pan,
+        tilt,
+        wander,
+        phase,
+        last_text,
+        rail_mv,
+        rail_raw,
+        rail_valid,
+        rail_tier,
+        rail_low,
+        selfheal_skip,
+        audio_on,
+        audio_seq,
+        audio_sent,
+        audio_dropped,
+        audio_q,
+        job_drop,
+        reply_drop,
+    ) = {
+        let b = lock_bus(bus);
+        (
+            b.st.pan_deg,
+            b.st.tilt_deg,
+            b.st.wander_on,
+            b.st.wander_phase,
+            b.st.last_text.clone(),
+            b.st.rail_mv,
+            b.st.rail_raw,
+            b.st.rail_valid,
+            b.st.rail_tier,
+            b.st.rail_low_events,
+            b.st.selfheal_skipped,
+            b.st.audio_on,
+            b.st.audio_seq,
+            b.st.audio_sent,
+            b.st.audio_dropped,
+            b.audio_q.len(),
+            b.st.job_dropped,
+            b.st.reply_drop,
+        )
+    };
+    let rail = if rail_valid {
+        format!("{rail_mv}mV raw={rail_raw}")
+    } else {
+        format!("absent raw={rail_raw}")
+    };
+    let rail_tier_name = if rail_valid {
+        rail_tier.name()
+    } else {
+        "unknown"
+    };
+    // SAFETY：两个堆查询都是无参只读的 IDF 系统调用，不触碰 Rust 内存状态。
+    let (free, min_free) = unsafe { (esp_get_free_heap_size(), esp_get_minimum_free_heap_size()) };
+    Ok(format!(
+        "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} rail={rail} rail_tier={rail_tier_name} low_events={rail_low} selfheal_skip={selfheal_skip} audio={} seq={audio_seq} sent={audio_sent} drop={audio_dropped} q={audio_q} job_drop={job_drop} reply_drop={reply_drop} oled_last=\"{last_text}\" free={free}B min_free={min_free}B",
+        if wander { "on" } else { "off" },
+        if audio_on { "on" } else { "off" },
+    ))
+}
+
+/// `FONT` 字模自检护栏：打印 "ABC123" 的 5x7 字模 hex，供人工比对。
+fn cmd_font() -> Result<String, String> {
+    let hex: Vec<String> = "ABC123"
+        .bytes()
+        .map(|c| {
+            glyph(c)
+                .iter()
+                .map(|b| format!("{b:02X}"))
+                .collect::<String>()
+        })
+        .collect();
+    Ok(format!("FONT ABC123 = {}", hex.join(",")))
+}
+
+/// 角度参数解析（0–180 之外一律 Err——调用方不再 clamp，fail-closed）。
+fn parse_deg(s: Option<&str>) -> Result<u32, String> {
+    let Some(s) = s else {
+        return Err("缺角度参数".into());
+    };
+    let deg: u32 = s.parse().map_err(|_| format!("角度参数非法: \"{s}\""))?;
+    if deg > 180 {
+        return Err(format!("角度超范围 0-180: {deg}"));
+    }
+    Ok(deg)
+}

@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.82"
 license = "UNLICENSED"
 publish = false
-description = "OTA 槽位查看/切换 CLI（骨架：只读侧先落地，写侧随 M6）"
+description = "OTA 槽位查看/切换 CLI（0.0.3 批D：switch/factory 引导配置改写实装；回滚链属板上件）"
 
 # 独立工程：base/ota 不在 base/runtime workspace 内
 [workspace]
@@ -16,3 +16,6 @@ path = "src/main.rs"
 
 [dependencies]
 rr-ota = { path = "../../runtime/rr-ota" }
+# 原子写序的单点（独占建 → fsync → rename → 父目录 fsync）：manifest/签名/公钥
+# 与 staging 安装复用同一份，不另写第二条写路径（rr-ipc/src/persist.rs 头注）。
+rr-ipc = { path = "../../runtime/rr-ipc" }

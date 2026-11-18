@@ -5,11 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "总线客户端骨架：主题/广播常量层（M2 接 UDS 客户端）"
+description = "总线语义常量 re-export 层（std 承载客户端已迁 rr-bus-api，基-35 窄化②）"
 
 [lib]
 name = "rr_bus"
 path = "src/lib.rs"
 
 [dependencies]
-rr-ipc = { path = "../rr-ipc" }
+rr-core = { path = "../rr-core" }

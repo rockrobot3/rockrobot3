@@ -1,0 +1,182 @@
+# RockRobot3 装配单：esp32-mini 机型（F-B 桥接微型形态，0.0.5 批K R3-D6 第二形态样例）
+# 纯数据、零逻辑，门禁与 profiles/default.toml 完全同一套（ADR-0012 裁定 5② 查册门；
+# 机型集 pin 在 rr-registry contract.rs，新增/删除本文件须同批改那条 pin，C2 判据）。
+# 形态语义（docs/design/模块设计索引.md §10 F-B 行，理由以该行为准）：三格微型形态，
+# 经桥上灌——只启用 audio.capture / audio.vad（rr3-sense）与 act.servo（rr3-act）；
+# 不启用 net.*（桥就是它的链路）、cognition.*（认知在 host）、ui.face/audio.playback
+# （无屏无喇叭）。证明的命题："裁剪 = 改数据"——本文件只加数据，件码、对外主题、
+# contracts/slots.toml 一律零改动（功能守恒红线）。
+# 板侧必须自己守住：限位 / 时限 / 饱和通告在板侧跑（桥断仍守护——"经桥不等于把安全
+# 托付给网络"的硬判据，见模块设计索引 §10）。板侧真跑的触发条件 = 0.0.7 轻承载档
+# 真板（ESP32-S3 硬件已齐，0.0.6 §5.4 BOM），本版只做装配演练
+# （rrd profile.rs 的 rr3_profile_boot_inputs 正例 + contract.rs 形状 pin）。
+
+# schema_version = 3（0.0.5 增补轮六批N1，§4.2 [pins] 定形）：[[pin]] 物理绑定段
+# 进场（板侧唯一执行件的真值点），七物理键不再走 [hardware]（门 n 注入路径唯一）；
+# rtos 档 rrd 不派生，板侧描述符消费归 0.0.7 批G/批D1。
+# schema_version = 4（0.0.5 增补轮六批N2，校验⑩ 定形）：[supplies.budget] 内存预算
+# 子段进场（⑩-a/⑩-b 分母，ADR-0021 修订 3：栈/堆预算不住 platform 表）——
+# rtos 档必填三数键（合法不适用才走 not_applicable），3→4 为破坏性变更。
+# schema_version = 5（0.0.5 增补轮六批N5，F-30 环容量判据落数据）：[runtime] rrd
+# 运行参数段进场（log_ring_cap）——rtos 档上灌演练时 rrd 侧装载判同一次（rrd 不分
+# 档豁免 [runtime]），装载期缺即红，4→5 为破坏性变更。
+# 批N9 件五注记（MC-7 缺③ [hardware] 进位补齐，键位扩面不升 schema_version——
+# 批N4 件七(b) 补三键同例）：[hardware] 三键 → 十键——板侧主驱动引脚真值
+# （uart2/ledc/i2s 七键）进场。键位语义不变（板侧裸寄存器/外设路径的引脚真值，
+# 非 [pins] 派生面，门 n 物理键集不收）；消费语义升级 = 板侧主驱动**装配对账锚**
+# （批N4 件七(c) 只盖自愈/观测面，本批盖主驱动）：esp-idf-hal 需具名引脚类型
+# （无法由 i32 构造），驱动仍具名装配，注入值作对账真值——桥连接建立注入到达时
+# 逐键判等，不齐 ERROR 点名＋计数（消费面纪律，不拒 boot 不打死指令面）。
+# ledc_pan/ledc_tilt 与 [[pin]] physical 同源同值（双写漂移由板侧对账面抓；
+# rtos 档 [pins] 派生为在册余量归 0.0.7 批G/D1——派生落位后本两键退役，
+# 双真值点随之消解）。
+
+schema_version = 5
+
+# [os] 段缺省：route 轴（distro | buildroot）是 Linux 底座镜像路线，rtos 档不适用
+# （rrd 装载对 [os] 只收不读，architecture.md §4.3 注记）。
+
+[runtime]
+# rrd 自身运维参数（批N5 件二，F-30）：日志环容量（行数）。rrd 装载不分档豁免
+# [runtime]（宿主运维参数与承载档位两轴），取值与 default 同源同值。
+log_ring_cap = 512
+# P0-3 根因门：HAL 后端必须进装配单显式数据。rtos 板端档 = esp32（板侧跑 esp32
+# periph-mech，不经过 rrd 模块注入；此处仅满足 schema 校验一致性）。
+hal_backend = "esp32"
+
+[platform]
+# 平台档位（ADR-0018 修订 1 三档）：ESP32 跑 RTOS 底座、经桥上主承载层 = rtos。
+tier = "rtos"
+# 平台事实表外键（§4.6，批N1 基-22）：校验③④⑤⑧按它选 contracts/platform/esp32.toml
+# （真形态实例，取值源 board.rs 引脚真值段 + 数据手册）。
+chip = "esp32"
+
+[supplies]
+# 平台供给声明（ADR-0018 修订 4 ② 看门狗三键 + 修订 2 ③ 时序预算位三键）。
+# watchdog_feeder = "rr-core"：板侧无 rrd，平台看门狗由 rr-core::runtime 运行环喂
+# （本地守护输出格式 = 批K H6）。watchdog_timeout_ms 平台兜底宽于模块级
+# health.watchdog_timeout_ms = 10000；时序三位为**声明预算位**，与 0.0.7 板侧
+# 生产真值的对账归点验矩阵轻承载档行（architecture §12.6 / tools/ci/matrix.sh）。
+watchdog_present = true
+watchdog_timeout_ms = 15000
+watchdog_feeder = "rr-core"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
+
+# [[supplies.domain]] 电力网络声明（第七供给位，schema 3）：最小事实集 = rail5v 单域
+# （舵机轨，[pins] 唯一引用；板侧 5V 轨阈值与 board.rs RAIL_*_MV 占位同源）。
+# 域集与取值待 0.0.7 批D1 真件对账回填（全案 §4.1b"取值待器件"：ESP32 一份可由
+# board.rs 直读）；armed=false（未标定即不武装），绑定引用位无对象显式写 "none"。
+[[supplies.domain]]
+name = "rail5v"
+nominal_mv = 5000
+mild_mv = 4600
+severe_mv = 4400
+current_cap_ma = 2000
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+evidence = "none"
+max_age_ms = 0
+
+# [supplies.budget] 内存预算声明（校验⑩ 分母，schema 4，批N2）——rtos 档必填三数键
+# （合法不适用才走 not_applicable，不许留空——F-6）。取值为**声明预算位**：
+# task_stack_budget_bytes = 65536 = 2× 现役 16KB 任务栈 + 余量（board.rs
+# THREAD_STACK/MIC_THREAD_STACK 同源）；heap_total_bytes = 327680 按 ESP32-S3
+# 数据手册可配 PSRAM 前的内部 SRAM 堆上限推算，待 0.0.7 真板对账回填；
+# heap_reserved_bytes = 98816 板侧常驻堆账逐项留痕（批N4 件二 N-13 ② 全账，F-13：
+# 常驻缓冲全是堆账，只加总栈会击穿半边）——
+#   16384 = UART2_TX_RING（board.rs :102）；
+#   65536 = audio_q 峰值 = AUDIO_Q_CAP(4) × 每片 16384B（mic.rs Vec<i32> with_capacity
+#           AUDIO_CHUNK_FRAMES×2 = 4096 元素 × 4B，board.rs :92/:96）；
+#     512 = 渲染缓冲 ≈ OLED_ROWS(4)×(OLED_COLS(21)+Vec 元头) + 外层（periph.rs :199），
+#           向上取整给余量；
+#   16384 = 批N4 板侧配置服务预留（选型 esp_http_server 单连接口径推算，含 lwip
+#           TCP 收发窗口与控制块；真值随服务本体施工与 0.0.7 真板
+#           esp_get_free_heap_size 对账回填——N-13 ①，结构先行、取值随后）。
+# 四项逐项可溯板侧常量；总账回填后不得再写"首版推算"字样以外的值。
+[supplies.budget]
+not_applicable = false
+task_stack_budget_bytes = 65536
+heap_total_bytes = 327680
+heap_reserved_bytes = 98816
+
+[bindings]
+# 格位 → 件。三格微型形态恰好三绑定；基础层由基座内建承载，不在此绑定。
+"act.servo" = "rr3-act"
+"audio.capture" = "rr3-sense"
+"audio.vad" = "rr3-sense"
+
+# [hardware] 板侧配置键（批N4 件七(b) 基-24 桥上配置腿三键；批N9 件五补主驱动
+# 七键，语义见头注；批N17 件三补 cred_store 键半边）：板侧裸寄存器/外设路径的
+# 引脚真值与非 GPIO 存储源标记——非 [pins] 派生面（无 role 对应，门 n 物理键集
+# 不收），rtos 档原样直给进 RR3_HAL_BINDINGS，经桥 rr3.set_bindings 注入板侧；
+# 注入前板侧消费面 fail-closed 拒（不回退硬编码）。取值与板侧 main.rs 引脚真值段
+# 同源：I2C SDA=21/SCL=22（OLED 总线）；34 = 电池分压 ADC（输入-only 脚）；UART2
+# TX=18/RX=19（桥链路面，1.5M）；LEDC pan=32/tilt=33（与 [[pin]] physical 同源
+# 同值）；I2S BCLK=4/SD=27/WS=26（INMP441 双麦，2026-10-21 验收档）；cred_store
+# = nvs:rr3（凭据存储源标记非凭据值——板侧读数面可见，boot 读链不消费＝批N14
+# 架构事实，与板侧 cred namespace "rr3" 单真值同源）。宿主侧两键
+# （alsa_device/link_ifname）仍缺省——本形态无宿主音频/链路语义。主驱动具名引脚
+# 面（esp-idf-hal 结构约束）的装载归 0.0.7 批G/批D1。
+[hardware]
+i2c_sda = "21"
+i2c_scl = "22"
+adc_rail_pin = "34"
+uart2_tx = "18"
+uart2_rx = "19"
+ledc_pan = "32"
+ledc_tilt = "33"
+i2s_bclk = "4"
+i2s_sd = "27"
+i2s_ws = "26"
+cred_store = "nvs:rr3"
+
+[[pin]]
+# 板侧执行件 pan（水平）轴（SG90：LEDC0 通道 0、信号脚 32，0.0.6 §5.4 BOM）——物理绑定
+# 真值点（schema 3，增补轮六 §4.2），role 外键查册 contracts/roles.toml。rtos 档
+# rrd 不派生（controller 词形 ledc<N> 是板侧词表，host 档派生器不识别也不需要）；
+# 校验①照跑（role 在册 / per_instance=true ⇒ instance 必填 / direction 与角色一致）。
+role = "act.axis.pwm"
+instance = "pan"
+controller = "ledc0"
+channel = 0
+physical = [32]
+direction = "out"
+rail = "rail5v"
+failsafe = "release"
+mux_group = []
+
+[[pin]]
+# tilt（俯仰）轴（LEDC0 通道 1、信号脚 33——main.rs channel1/gpio33 与 board.rs
+# 引脚真值段同源；批N3 件五：hardware/esp32-mini/axis/tilt.toml 的外键对账对象，
+# 板侧双轴收敛时补齐，instance=tilt 与档案 pin 末段对账）。
+role = "act.axis.pwm"
+instance = "tilt"
+controller = "ledc0"
+channel = 1
+physical = [33]
+direction = "out"
+rail = "rail5v"
+failsafe = "release"
+mux_group = []
+
+[enabled_slots]
+# 模块 → 本形态启用的格位集合。裁剪自检三问（模块设计索引 §10）逐条在案：
+# ① 被裁格里无人依赖（net.* 桥即链路、cognition.* 认知在 host、ui/audio.playback 无屏无喇叭）；
+# ② 被裁主题的申报面批J C14 已收（asr/text、dialog/turn 置 retired，订阅撤申报）；
+# ③ 安全核仍在板侧（act 反射环 rr-core::control 可达，不托付桥）。
+rr3-act = ["act.servo"]
+rr3-sense = ["audio.capture", "audio.vad"]
+
+[slots]
+# 本板物理在位格位声明（缺格三源合一第一源）。三格全在位，升序排列；
+# 基础层恒在位，不进本声明。
+present = [
+    "act.servo",
+    "audio.capture",
+    "audio.vad",
+]

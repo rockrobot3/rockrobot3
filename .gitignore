@@ -1,47 +1,97 @@
-# Rockrobot3 项目仓
-# 策略：非必要不追踪
-# 默认忽略所有文件
+# Rockrobot3 仓库追踪策略：默认忽略所有，仅白名单放行。
+# 白名单逐项登记——目录级通配只用于源码骨架（CI 门按名执法）与既有
+# 档案子树；新增文档/顶层路径必须先在本文件登记，否则不会出现在
+# git status，静默丢件（策略正文见 docs/process/conventions.md §1.1）。
 *
-# 项目仓必要文件（白名单）
+# ---- 仓级说明与许可 ----
 !.gitignore
-!.gitmodules
+!.gitattributes
 !README.md
 !README_zh.md
 !LICENSE
-# 项目仓必要文档（社区/安全/Docker 构建依赖，须入库）
-!.dockerignore
-# 项目仓直属模块（非 submodule，需完整追踪）
+# ---- 构建与供应链配置 ----
+!.cargo/
+!.cargo/**
+# ---- CI 与门禁 ----
 !.github/
 !.github/**
+# ---- 项目文档：顶层逐项登记，非项目必须的文档不追踪 ----
 !docs/
-!docs/**
-# Agent 工作产物不入库：实施计划/账本属会话副产物，不是项目交付物
-docs/superpowers/
-.superpowers/
-
-# ---- v0.0.1 结构化改造：新骨架必须可追踪 ----
+!docs/README.md
+!docs/status.md
+# 在制品历史台账（status.md 结构化拆分，2026-11-17）
+!docs/status-history.md
+!docs/openitems.toml
+!docs/洛克三号-开源智能硬件赛道-参赛介绍.md
+!docs/architecture/
+!docs/architecture/**
+!docs/design/
+!docs/design/**
+!docs/reference/
+!docs/reference/**
+!docs/evidence/
+!docs/evidence/**
+!docs/process/
+# docs/process 顶层文档逐项登记：新增文档先来此登记再入库
+!docs/process/ci-workflows.md
+!docs/process/conventions.md
+!docs/process/decisions.md
+!docs/process/legacy-digest.md
+!docs/process/naming.md
+# 架构决策记录与批次开发档案（整体子树，既有档案史完整保留）
+!docs/process/adr/
+!docs/process/adr/**
+!docs/process/dev/
+!docs/process/dev/**
+# ---- 结构化源码骨架（通配放行，散件由门禁 ⑦/⑬ 执法） ----
 !base/
 !base/**
 !modules/
 !modules/**
 !contracts/
 !contracts/**
+!profiles/
+!profiles/**
+!hardware/
+!hardware/**
 !tools/
 !tools/**
-!legacy/
-!legacy/**
 
-# ---- 永不入库：再生件与本地密钥 ----
-# sdkconfig 由 idf.py 从 sdkconfig.defaults 每次 configure 再生成，含本机绝对路径与本地配置，绝不入库
-# （sdkconfig.defaults 是权威输入，保持追踪；编译期 -D 注入的密钥不会落进 sdkconfig，只会进 build/ 产物）
-**/sdkconfig
-**/sdkconfig.local
+# ---- 产物面：白名单目录内的再排除，一律不追踪 ----
 **/target/
 **/build/
-# rr3-brain 是 Python 包：编译产物随 build 再生，不入库（modules/** 白名单覆盖过宽）
 **/__pycache__/
 **/*.py[cod]
-# ESP-IDF 组件缓存与配置备份：idf.py reconfigure 自动再生，不入库
-**/managed_components/
-**/dependencies.lock
-**/sdkconfig.old
+*.wav
+*.log
+*.tmp
+*.bak
+*.swp
+*.orig
+*.rej
+
+# ---- 编辑器与 Agent 会话目录 ----
+**/.trae/
+**/.idea/
+**/.vscode/
+**/.claude/
+**/.cursor/
+**/.copilot/
+**/.aider*
+
+# ---- 凭据、覆盖率、调试符号与系统元数据 ----
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+secrets.json
+.rr3/
+*.profraw
+*.profdata
+*.dSYM/
+.DS_Store
+.screenshots/

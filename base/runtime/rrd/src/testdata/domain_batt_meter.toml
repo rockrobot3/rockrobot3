@@ -1,0 +1,14 @@
+[[supplies.domain]]
+name = "batt"
+nominal_mv = 3700
+mild_mv = 3500
+severe_mv = 3300
+current_cap_ma = 2000
+sense = "power.battery.meter"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+evidence = "none"
+max_age_ms = 0
+

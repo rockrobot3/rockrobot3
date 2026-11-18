@@ -1,0 +1,345 @@
+//! 拆帧器（批D④ 判据② 收流线程化的机制面上提）：大块裸字节 → 整帧，纯内存。
+//!
+//! 上提事实源 `tools/rr3-audio-rec/src/main.rs`（原收流端本地件，2026-10-18 A 批
+//! 随 rr-hal esp32 音频源后端共用而单点化）：机制面只做"对齐 magic + 头层解析
+//! 定长 + 按 plen 切整帧"，头校验全数交 [`Rr3Header::from_bytes`]（零第二份帧
+//! 语义）；失步恢复 = 从坏帧起点弃 4B magic 续扫（原分相读接缝 resync 的内存版
+//! ——字节已在缓冲，弃扫不再产生任何新 I/O，滑移由此不放大为风暴）。
+//!
+//! 纯 core+alloc（no_std 同律）：不触时钟、不触 I/O，喂进拉出全凭调用方节奏。
+
+use alloc::string::String;
+use alloc::vec::Vec;
+
+use crate::protocol::header::{Rr3Header, MAGIC, RR3_IPC_HDR_SIZE};
+
+/// 帧头 magic 小端线上字节（字段值 0x41524531 小端存储 = 31 45 52 41 = "1ERA"，
+/// 自 [`MAGIC`] 派生单点）。b64 载荷里也会出现该子串，失步后撞上即"合法幻影
+/// 帧头"，重同步扫描以它为锚。
+pub const RR3_MAGIC_LE: [u8; 4] = MAGIC.to_le_bytes();
+
+/// 拆帧 plen 护栏缺省值（收流端策略面缺省）：板面音频片 plen 实测 ~11KB，
+/// rr-ipc 头层上限 64MiB——幻影 magic（b64 载荷撞出的合法 "1ERA"）后的垃圾
+/// plen 若照单全收，等待/缓冲都天文。超护栏按坏帧弃 4B magic 续扫。语义上是
+/// 策略值，[`FrameAssembler::with_plen_cap`] 可按消费者改档。
+pub const RR3_FRAMING_PLEN_CAP_DEFAULT: usize = 1024 * 1024;
+
+/// 拆帧出片：整帧 = 头（已解析）+ 载荷字节。
+pub type Assembled = (Rr3Header, Vec<u8>);
+
+/// 拆帧器：`feed` 推裸字节，`pull` 出整帧；坏帧 Err 起点已弃，续扫由下次
+/// pull 自然接上。
+pub struct FrameAssembler {
+    buf: Vec<u8>,
+    /// 距上一整帧的弃扫字节（诊断：重同步日志行）。
+    discarded: u64,
+    /// plen 护栏（构造期注入，缺省 [`RR3_FRAMING_PLEN_CAP_DEFAULT`]）。
+    plen_cap: usize,
+}
+
+impl Default for FrameAssembler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FrameAssembler {
+    /// 缺省护栏（板面音频片 ~11KB 的千倍余量）。
+    pub fn new() -> Self {
+        Self::with_plen_cap(RR3_FRAMING_PLEN_CAP_DEFAULT)
+    }
+
+    /// 指定 plen 护栏（消费者策略档）。
+    pub fn with_plen_cap(plen_cap: usize) -> Self {
+        Self {
+            buf: Vec::new(),
+            discarded: 0,
+            plen_cap,
+        }
+    }
+
+    /// 读线程推来的裸字节进缓冲。
+    pub fn feed(&mut self, bytes: &[u8]) {
+        self.buf.extend_from_slice(bytes);
+    }
+
+    /// 距上一整帧的弃扫字节。
+    pub fn discarded(&self) -> u64 {
+        self.discarded
+    }
+
+    /// 尝试出下一整帧：Ok(Some) = 出帧（消费即移除）；Ok(None) = 不够一帧，
+    /// 等更多字节；Err((弃字节数, 诊断)) = 坏帧（magic 在而头非法 / plen 越栏），
+    /// 起点已弃，续扫由下次 pull 自然接上。
+    pub fn pull(&mut self) -> Result<Option<Assembled>, (u64, String)> {
+        // 对齐 magic：无全 magic 则只留尾 3B（可能跨块的前缀），其余静默弃
+        // （起始垃圾/断帧残骸——帧间垃圾不计数，丢片由 seq 对账如实记账）。
+        if !self.rr3_align_magic() {
+            return Ok(None);
+        }
+        let Some(header) = self.rr3_parse_header()? else {
+            return Ok(None);
+        };
+        let plen = header.payload_len as usize;
+        let want = RR3_IPC_HDR_SIZE + plen;
+        if self.buf.len() < want {
+            return Ok(None);
+        }
+        self.rr3_take_frame(header, want).map(Some)
+    }
+
+    /// 整帧落袋：CRC 一致则消费出帧，不一致整帧丢弃。
+    fn rr3_take_frame(
+        &mut self,
+        header: Rr3Header,
+        want: usize,
+    ) -> Result<Assembled, (u64, String)> {
+        let payload = self.buf[RR3_IPC_HDR_SIZE..want].to_vec();
+        let actual = crate::protocol::header::rr3_crc32(&payload);
+        if actual != header.payload_crc32 {
+            // 载荷被破坏：整帧丢弃（不在坏载荷里重扫 magic——可能撞上伪帧起点）。
+            // 丢片由 seq 对账如实记账，误码本身在此显形。
+            self.buf.drain(..want);
+            self.discarded += want as u64;
+            return Err((
+                want as u64,
+                alloc::format!(
+                    "载荷 CRC32 不符 declared={} actual={actual}（整帧丢弃）",
+                    header.payload_crc32
+                ),
+            ));
+        }
+        self.buf.drain(..want);
+        self.discarded = 0;
+        Ok((header, payload))
+    }
+
+    /// magic 对齐：找到即弃前导并回 `true`；无 magic 只留尾 3B 并回 `false`。
+    fn rr3_align_magic(&mut self) -> bool {
+        let Some(pos) = find(&self.buf, &RR3_MAGIC_LE) else {
+            return self.rr3_magic_tail();
+        };
+        if pos > 0 {
+            self.discarded += pos as u64;
+            self.buf.drain(..pos);
+        }
+        true
+    }
+
+    /// 无 magic：只留尾 3B（可能跨块的前缀），其余作残骸弃掉并回 `false`。
+    fn rr3_magic_tail(&mut self) -> bool {
+        let keep_from = self.buf.len().saturating_sub(RR3_MAGIC_LE.len() - 1);
+        self.discarded += keep_from as u64;
+        self.buf.drain(..keep_from);
+        false
+    }
+
+    /// 头层解析 + plen 护栏：不够一帧头回 `Ok(None)`；头非法/越栏弃 4B magic 回错。
+    fn rr3_parse_header(&mut self) -> Result<Option<Rr3Header>, (u64, String)> {
+        if self.buf.len() < RR3_IPC_HDR_SIZE {
+            return Ok(None);
+        }
+        self.rr3_head_of()
+            .and_then(|header| self.rr3_plen_guard(&header).map(|()| Some(header)))
+    }
+
+    /// 头层解码：坏头弃 4B magic 回错（真帧起点可能就在其后不远处）。
+    fn rr3_head_of(&mut self) -> Result<Rr3Header, (u64, String)> {
+        let parsed = Rr3Header::from_bytes(&self.buf[..RR3_IPC_HDR_SIZE]);
+        parsed.map_err(|e| self.drop_magic(4, alloc::format!("头层拒收: {e:?}")))
+    }
+
+    /// plen 护栏：超拆帧上限即弃 4B magic（幻影头）。
+    fn rr3_plen_guard(&mut self, header: &Rr3Header) -> Result<(), (u64, String)> {
+        let plen = header.payload_len as usize;
+        if plen > self.plen_cap {
+            return Err(self.drop_magic(
+                4,
+                alloc::format!("payload_len {plen} 越拆帧护栏 {}（幻影头）", self.plen_cap),
+            ));
+        }
+        Ok(())
+    }
+
+    /// 坏帧处置：弃 magic 起点（坏头只弃 4B——真帧起点可能就在其后不远处，
+    /// 续扫自会找到），返回 (弃字节数, 诊断)。
+    fn drop_magic(&mut self, n: usize, why: String) -> (u64, String) {
+        self.buf.drain(..n);
+        self.discarded += n as u64;
+        (n as u64, why)
+    }
+}
+
+/// 子串查找（拆帧器专用；core 无字节切片 `find`，不引依赖）。
+fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.len() > hay.len() {
+        return None;
+    }
+    (0..=hay.len() - needle.len()).find(|&i| &hay[i..i + needle.len()] == needle)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::body::rr3_body_encode;
+    use crate::protocol::header::{opcode, Rr3PayloadType, MAX_PAYLOAD_LEN};
+
+    /// 构造一条与板面 mic.rs 同形的 Event 帧线上字节（头 + 载荷，无 CRC 尾——
+    /// 线格式本就无尾，FrameBuf 的 seal 是所有权语义非校验）。载荷体对拆帧器
+    /// 不透明（topic/字段门是消费方面，不属本机制）。
+    fn board_like_frame(seq: u32) -> Vec<u8> {
+        let body = alloc::format!(
+            "{{\"topic\":\"rr3-sense/audio/pcm\",\"seq\":{seq},\"format\":\"s16le\"}}"
+        );
+        let payload = rr3_body_encode(Rr3PayloadType::Event, body.as_bytes());
+        let mut hdr = Rr3Header::rr3_hdr_broadcast(opcode::SEND, payload.len() as u32);
+        hdr.trace_id = 0;
+        hdr.timestamp_ns = 100;
+        hdr.src_task = 2; // 板面外设执行面位形（诊断显示用；拆帧器不读）
+        hdr.dst_task = 1; // 宿主位形
+        let mut bytes = crate::protocol::header::rr3_header_encode(&hdr, &payload).to_vec();
+        bytes.extend_from_slice(&payload);
+        bytes
+    }
+
+    /// 拆帧器：分块喂入（头中/载荷中切）→ 整帧逐字节还原。
+    #[test]
+    fn assembler_reassembles_split_frames() {
+        let bytes = board_like_frame(7);
+        let mut a = FrameAssembler::new();
+        a.feed(&bytes[..64]);
+        assert!(a.pull().unwrap().is_none(), "半个头不出帧");
+        a.feed(&bytes[64..100]);
+        assert!(a.pull().unwrap().is_none(), "载荷中段不出帧");
+        a.feed(&bytes[100..]);
+        let (hdr, payload) = a.pull().unwrap().expect("拼满必须出帧");
+        assert_eq!(hdr.payload_len as usize, payload.len());
+        assert_eq!(
+            hdr.trace_id, 0,
+            "头逐字段还原（trace_id 是构造时显式钉的值）"
+        );
+        assert!(a.pull().unwrap().is_none(), "缓冲耗尽");
+    }
+
+    /// 拆帧器：前导垃圾（含半个 magic 前缀）静默弃扫，真帧照常出。
+    #[test]
+    fn assembler_skips_garbage_then_yields_frame() {
+        let bytes = board_like_frame(9);
+        let mut a = FrameAssembler::new();
+        let mut noisy = b"junk\x01\x02junk1ER".to_vec(); // 尾部半个 magic 前缀
+        noisy.extend_from_slice(&bytes);
+        a.feed(&noisy);
+        let (hdr, payload) = a.pull().unwrap().expect("垃圾弃扫后必须出真帧");
+        assert_eq!(hdr.dst_task, 1);
+        assert!(!payload.is_empty());
+        assert!(a.pull().unwrap().is_none());
+    }
+
+    /// 拆帧器：坏帧（reserved 污染——滑移实测签名）计错弃 4B magic，续扫
+    /// 收敛到下一真帧。
+    #[test]
+    fn assembler_bad_header_drops_magic_and_resumes() {
+        let mut bad = board_like_frame(1);
+        bad[RR3_IPC_HDR_SIZE - 1] = 0xFF; // 头 reserved 尾字节污染
+        let bytes2 = board_like_frame(2);
+        let mut a = FrameAssembler::new();
+        a.feed(&bad);
+        a.feed(&bytes2);
+        let (dropped, why) = a.pull().unwrap_err();
+        assert_eq!(dropped, 4, "坏帧只弃 magic 起点");
+        assert!(why.contains("ReservedNotZero"), "{why}");
+        let (hdr, payload) = a.pull().unwrap().expect("坏帧后续扫必须出真帧");
+        assert_eq!(hdr.trace_id, 0);
+        assert!(!payload.is_empty());
+    }
+
+    /// 拆帧器：载荷被改一个字节（头原样）→ CRC 不符，整帧丢弃并报错；
+    /// 丢弃后缓冲不残留，下一真帧照常出。
+    #[test]
+    fn assembler_rejects_corrupted_payload_crc() {
+        let good = board_like_frame(3);
+        let mut bad = good.clone();
+        let plen = u32::from_le_bytes(bad[40..44].try_into().unwrap()) as usize;
+        assert!(plen > 0, "构造的帧必须带载荷");
+        bad[RR3_IPC_HDR_SIZE] ^= 0x01; // 只翻转载荷首字节，头里的声明值不变
+        let mut a = FrameAssembler::new();
+        a.feed(&bad);
+        let (dropped, why) = a.pull().unwrap_err();
+        assert_eq!(
+            dropped,
+            (RR3_IPC_HDR_SIZE + plen) as u64,
+            "坏载荷的整帧（头+载荷）必须被丢弃"
+        );
+        assert!(why.contains("CRC32 不符"), "{why}");
+        assert!(a.pull().unwrap().is_none(), "坏帧丢弃后缓冲不得残留整帧");
+
+        a.feed(&good);
+        let (hdr, payload) = a.pull().unwrap().expect("坏帧丢弃后下一真帧必须照常出");
+        assert_eq!(hdr.payload_len as usize, payload.len());
+    }
+
+    /// 误码离线取证（A8，真板不在场时的确定性面）：载荷任一字节单点翻转都被
+    /// CRC32 门拒收并整帧丢弃。CRC 对单字节差分的映射非零（生成多项式次数
+    /// 32 > 差分次数 <8），故逐字节扫描是确定性判据，不是抽样。
+    #[test]
+    fn assembler_payload_single_byte_flips_all_rejected() {
+        let good = board_like_frame(21);
+        let plen = good.len() - RR3_IPC_HDR_SIZE;
+        assert!(plen > 0);
+        for i in 0..plen {
+            let mut bad = good.clone();
+            bad[RR3_IPC_HDR_SIZE + i] ^= 1 << (i % 8);
+            let mut a = FrameAssembler::new();
+            a.feed(&bad);
+            let (dropped, why) = a.pull().unwrap_err();
+            assert_eq!(dropped, bad.len() as u64, "第 {i} 字节：坏帧必须整帧丢弃");
+            assert!(why.contains("CRC32 不符"), "第 {i} 字节：{why}");
+        }
+        // 扫描后拆帧器状态未被污染：一条好帧照常出
+        let mut a = FrameAssembler::new();
+        a.feed(&good);
+        assert!(a.pull().unwrap().is_some());
+    }
+
+    /// 误码鲁棒性：全帧逐位翻转不得 panic；坏帧后的缓冲不得越过帧长上界
+    /// （拆帧器只认 magic 对齐 + plen 护栏，超出即报错弃帧）。
+    #[test]
+    fn assembler_bit_flip_sweep_never_panics() {
+        let good = board_like_frame(22);
+        for bit in 0..good.len() * 8 {
+            let mut bad = good.clone();
+            bad[bit / 8] ^= 1 << (bit % 8);
+            let mut a = FrameAssembler::new();
+            a.feed(&bad);
+            // 任一位翻转后：Ok(Some)/Ok(None)/Err 都是合法收敛，唯独不许 panic
+            let _ = a.pull();
+            // 再喂一条好帧，缓冲仍有界（不 panic 即证明未按幻影 plen 无限等）
+            a.feed(&good);
+            let _ = a.pull();
+        }
+    }
+
+    /// 拆帧器：头层合法的 64MiB plen 越拆帧护栏——按坏帧弃 magic，不缓冲；
+    /// 自定义护栏同径生效。
+    #[test]
+    fn assembler_rejects_plen_over_cap() {
+        let hdr_bytes = {
+            let mut h = Rr3Header::rr3_hdr_broadcast(opcode::SEND, MAX_PAYLOAD_LEN);
+            h.trace_id = 0;
+            h.timestamp_ns = 100;
+            h.src_task = 2;
+            h.dst_task = 1;
+            h.to_bytes().to_vec()
+        };
+        let mut a = FrameAssembler::new();
+        a.feed(&hdr_bytes);
+        let (dropped, why) = a.pull().unwrap_err();
+        assert_eq!(dropped, 4);
+        assert!(why.contains("越拆帧护栏"), "{why}");
+
+        // 消费者策略档：护栏抬高到 64MiB 即放行头层（合法 plen 只等载荷，不出帧）
+        let mut wide = FrameAssembler::with_plen_cap(MAX_PAYLOAD_LEN as usize);
+        wide.feed(&hdr_bytes);
+        assert!(wide.pull().unwrap().is_none());
+    }
+}

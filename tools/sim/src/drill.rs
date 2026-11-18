@@ -1,0 +1,402 @@
+//! 演练步骤的可测实现（F4）。
+//!
+//! 约定：凡是"会碰真实进程/套接字"的动作都由 `main.rs` 编排，本模块只放
+//! **纯逻辑**（参数解析、路径定位、manifest 文本、`rr3-ctl` 输出解析、注入式轮询）
+//! ——单测因此全部平台无关，④ 步在 Windows 上也能跑到它们。
+
+use std::path::PathBuf;
+
+/// 演练里两个真模块的身份（名字必须真实存在于 contracts/topics.toml 的 owner 集）。
+/// brain/chain 演练里 A=sense（发布 pcm/vad_start，前缀归属按名字首段判）、B=interact。
+pub const RR3_SIM_MODULE_A: &str = "rr3-sense";
+pub const RR3_SIM_MODULE_B: &str = "rr3-interact";
+/// 两面演练（drill）的主题（契约 event，owner=rr3-sense；C14① 2026-10-10 评审裁定：
+/// asr/text 走 retired 后演练主题换成 vad_start，发布方身份随之换位——见下两常量）
+pub const RR3_SIM_B_TOPIC: &str = "rr3-sense/audio/vad_start";
+/// 两面演练（drill）的 boot resident 身份：RR3_SIM_B_TOPIC 的 owner 是 rr3-sense，
+/// 前缀归属要求发布方叫 rr3-sense，而 resident 侧不发布——故 resident 用 rr3-interact、
+/// 外部 publish_once 用 rr3-sense（C14① 同批换位，A/B 常量保持 brain/chain 语义不动）
+pub const RR3_DRILL_RESIDENT: &str = RR3_SIM_MODULE_B;
+/// 两面演练的外部发布者身份（publish_once：发布 [`RR3_SIM_B_TOPIC`] 后退场）
+pub const RR3_DRILL_PUBLISHER: &str = RR3_SIM_MODULE_A;
+/// --brain 演练（M4）里的第三个真模块：Python 认知层
+pub const RR3_SIM_MODULE_BRAIN: &str = "rr3-brain";
+/// 演练实例面板地址：板上常驻系统实例（deb 装机）的 rr3-interact 占缺省
+/// 127.0.0.1:8080，演练必须换端口否则面板绑定失败拖垮模块（批F4 真板实测缺陷）
+pub const RR3_SIM_PANEL_ADDR: &str = "127.0.0.1:18080";
+
+/// 演练参数（全部有默认值：在仓内任意目录直接 `rr3-sim` 即可跑）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rr3SimArgs {
+    /// 套接字路径（缺省：临时目录下按进程号起名）
+    pub socket: Option<PathBuf>,
+    /// 仓根（缺省：从当前目录向上找 `contracts/topics.toml`）
+    pub repo: Option<PathBuf>,
+    /// 收尾不杀 rrd（保留现场人工排查）
+    pub keep: bool,
+    /// 走 --brain 演练（rrd + rr3-sense(sim) + rr3-brain + rr3-interact 四真进程）
+    pub brain: bool,
+    /// 走装配演练（D9）：`--profile <装配单>`——装配单驱动 rrd 装配链 boot 全部
+    /// face 模块（仓源 manifest 原文仅 entry 绝对化 + config 同目录），六模块真进程
+    /// 巡检 `denied_publish = 0`。与 --brain 互斥（parse 处同给即拒，Q3 同款）。
+    pub profile: Option<PathBuf>,
+    /// 走全链演练（0.0.6 批F4 sim 档，判据 10）：采集→意图→判向→转向→表情
+    /// 六真进程 mock 闭环。与 --brain/--profile 互斥（各证一面，不合并）。
+    pub chain: bool,
+    /// --chain 专用：取证后稳态保持时长（毫秒；None = 不保持）。保持期间按拍采
+    /// `rr3-ctl health`，聚合 since_beat 峰值与末拍相位——实时性基线的操作口径。
+    pub hold_ms: Option<u64>,
+    /// 各二进制的显式覆盖（缺省按仓内 target/debug 布局推）
+    pub rrd: Option<PathBuf>,
+    pub sim_peer: Option<PathBuf>,
+    pub rrctl: Option<PathBuf>,
+    pub sense: Option<PathBuf>,
+    pub interact: Option<PathBuf>,
+    /// --chain 专用：rr3-act 的显式覆盖
+    pub act: Option<PathBuf>,
+    /// --brain 专用：音频后端（缺省 `sim`；`mac` = macOS 真麦/扬声器，与 rr-hal
+    /// `RR3_HAL_BACKEND` 取值同白名单）。缺省不变的 CI 纪律：真件只显式启用。
+    pub audio_backend: Option<String>,
+    /// --brain 专用：音频回放后端（interact 面；缺省跟随 `--audio-backend`——
+    /// 既有 sim/mac 链路零改动）。两条 fail-closed（A 批 c4）：`--audio-backend
+    /// esp32` 必须显式给本旗标（板面流与回放是两块后端，缺省跟随会令 interact
+    /// 抢同一 UART 被 flock 拒）；本旗标取 esp32 拒收（板无扬声器，回放恒宿主）。
+    pub sink_backend: Option<String>,
+    /// --brain 专用：brain 云模式（缺省 `mock`；`real` = 真云，需 `RR3_CLOUD_API_KEY`
+    /// 经调用方环境传入——密钥铁律只走环境变量）。
+    pub brain_cloud: Option<String>,
+    /// --brain 专用：真云端点（`--brain-cloud real` 时**必给**，fail-closed 不落
+    /// 演练 config 的死地址；mock 模式给了即拒——演练 config 不碰网络）。
+    pub brain_base_url: Option<String>,
+    /// --brain 专用：rr3-brain 的显式覆盖（缺省按仓内 target/debug 布局推，
+    /// 批N32 件四起 brain 是 Rust 模块——与其余模块同形）
+    pub brain_bin: Option<PathBuf>,
+}
+
+/// 解析 `rr3-sim` 参数。未知参数即错（脚本工具的第一错法是静默忽略拼写错误）。
+pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
+    let mut a = rr3_sim_args_default();
+    let mut i = 0;
+    while i < args.len() {
+        i = rr3_sim_arg_step(&mut a, args, i)?;
+    }
+    rr3_sim_args_check(&a)?;
+    Ok(a)
+}
+
+/// 演练参数缺省面（全部有默认值：在仓内任意目录直接 `rr3-sim` 即可跑）。
+fn rr3_sim_args_default() -> Rr3SimArgs {
+    Rr3SimArgs {
+        socket: None,
+        repo: None,
+        keep: false,
+        brain: false,
+        profile: None,
+        chain: false,
+        hold_ms: None,
+        rrd: None,
+        sim_peer: None,
+        rrctl: None,
+        sense: None,
+        interact: None,
+        act: None,
+        audio_backend: None,
+        sink_backend: None,
+        brain_cloud: None,
+        brain_base_url: None,
+        brain_bin: None,
+    }
+}
+
+/// 单步解析：返回下一项下标（布尔旗标推进 1、取值旗标推进 2）。
+fn rr3_sim_arg_step(a: &mut Rr3SimArgs, args: &[String], i: usize) -> Result<usize, String> {
+    let flag = args[i].as_str();
+    if rr3_sim_arg_switch(a, flag) {
+        return Ok(i + 1);
+    }
+    if !rr3_sim_arg_takes(flag) {
+        return Err(rr3_sim_unknown(flag));
+    }
+    rr3_sim_arg_set(a, flag, rr3_sim_arg_value(args, i, flag)?)?;
+    Ok(i + 2)
+}
+
+/// 无值开关（布尔旗标）落位；`true` = 本项已被消费。
+fn rr3_sim_arg_switch(a: &mut Rr3SimArgs, flag: &str) -> bool {
+    match RR3_SIM_BOOLS.iter().find(|(f, _)| *f == flag) {
+        Some((_, set)) => {
+            set(a);
+            true
+        }
+        None => false,
+    }
+}
+
+/// 取值旗标判定（含 `--rrctl`：落位兜底归 `rr3_sim_arg_set`）。
+fn rr3_sim_arg_takes(flag: &str) -> bool {
+    flag == "--rrctl" || RR3_SIM_ARG_SETS.iter().any(|(f, _)| *f == flag)
+}
+
+/// `--hold-ms` 取值：非负整数毫秒（范围裁决归 `rr3_args_hold`）。
+fn rr3_sim_hold_into(a: &mut Rr3SimArgs, v: String) -> Result<(), String> {
+    let ms: u64 = v
+        .parse()
+        .map_err(|_| format!("--hold-ms 须为非负整数毫秒: {v}"))?;
+    a.hold_ms = Some(ms);
+    Ok(())
+}
+
+/// 取值旗标的下一项：缺项/疑似开关即点名（脚本工具的第一错法是静默吃掉下一旗标）。
+fn rr3_sim_arg_value(args: &[String], i: usize, flag: &str) -> Result<String, String> {
+    let v = args
+        .get(i + 1)
+        .ok_or_else(|| format!("{flag} 缺参数"))?
+        .clone();
+    if v.starts_with('-') {
+        return Err(format!("{flag} 缺参数：收到疑似开关的 {v}"));
+    }
+    Ok(v)
+}
+
+/// 取值旗标落位（路径九件、后端词四件与 `--hold-ms`；`--rrctl` 无专名分支）。
+fn rr3_sim_arg_set(a: &mut Rr3SimArgs, flag: &str, v: String) -> Result<(), String> {
+    match RR3_SIM_ARG_SETS.iter().find(|(f, _)| *f == flag) {
+        Some((_, set)) => set(a, v),
+        None => {
+            a.rrctl = Some(PathBuf::from(v));
+            Ok(())
+        }
+    }
+}
+
+/// 旗标 → 落位函数表（`--rrctl` 不在表内：兜底语义归 `rr3_sim_arg_set`）。
+type Rr3SimSet = fn(&mut Rr3SimArgs, String) -> Result<(), String>;
+const RR3_SIM_ARG_SETS: [(&str, Rr3SimSet); 14] = [
+    ("--socket", |a, v| rr3_sim_path_into(&mut a.socket, v)),
+    ("--repo", |a, v| rr3_sim_path_into(&mut a.repo, v)),
+    ("--rrd", |a, v| rr3_sim_path_into(&mut a.rrd, v)),
+    ("--sim-peer", |a, v| rr3_sim_path_into(&mut a.sim_peer, v)),
+    ("--sense", |a, v| rr3_sim_path_into(&mut a.sense, v)),
+    ("--interact", |a, v| rr3_sim_path_into(&mut a.interact, v)),
+    ("--act", |a, v| rr3_sim_path_into(&mut a.act, v)),
+    ("--brain-bin", |a, v| rr3_sim_path_into(&mut a.brain_bin, v)),
+    ("--profile", |a, v| rr3_sim_path_into(&mut a.profile, v)),
+    ("--hold-ms", rr3_sim_hold_into),
+    ("--audio-backend", |a, v| {
+        a.audio_backend = Some(v);
+        Ok(())
+    }),
+    ("--sink-backend", |a, v| {
+        a.sink_backend = Some(v);
+        Ok(())
+    }),
+    ("--brain-cloud", |a, v| {
+        a.brain_cloud = Some(v);
+        Ok(())
+    }),
+    ("--brain-base-url", |a, v| {
+        a.brain_base_url = Some(v);
+        Ok(())
+    }),
+];
+
+/// 路径取值落位（九件同形，避免九份重复闭包）。
+fn rr3_sim_path_into(slot: &mut Option<PathBuf>, v: String) -> Result<(), String> {
+    *slot = Some(PathBuf::from(v));
+    Ok(())
+}
+
+/// 无值开关（布尔旗标）落位表。
+type Rr3SimFlag = fn(&mut Rr3SimArgs);
+const RR3_SIM_BOOLS: [(&str, Rr3SimFlag); 3] = [
+    ("--keep", |a| a.keep = true),
+    ("--brain", |a| a.brain = true),
+    ("--chain", |a| a.chain = true),
+];
+
+fn rr3_sim_unknown(other: &str) -> String {
+    format!(
+        "未知参数 {other}（可用：--socket --repo --keep --brain --chain --hold-ms --profile --rrd --sim-peer --rrctl --sense --interact --act --brain-bin --audio-backend --sink-backend --brain-cloud --brain-base-url）"
+    )
+}
+
+/// 旗标组合与取值域裁决（互斥/归属/白名单/fail-closed ① ②），parse 只编排。
+fn rr3_sim_args_check(a: &Rr3SimArgs) -> Result<(), String> {
+    rr3_args_modes(a)?;
+    rr3_args_hold(a)?;
+    rr3_args_audio(a)?;
+    rr3_args_cloud(a)
+}
+
+/// `--hold-ms`：仅 --chain 适用；1s 起、10min 封顶（短于此无稳态判据意义）。
+fn rr3_args_hold(a: &Rr3SimArgs) -> Result<(), String> {
+    let Some(ms) = a.hold_ms else {
+        return Ok(());
+    };
+    if !a.chain {
+        return Err("--hold-ms 仅 --chain 演练适用".to_string());
+    }
+    if !(1000..=600_000).contains(&ms) {
+        return Err(format!(
+            "--hold-ms 须在 1000..600000 之间（当前 {ms}）：稳态段少于 1s 无判据意义"
+        ));
+    }
+    Ok(())
+}
+
+/// 三种演练模式互斥（各证一面，不合并）。
+fn rr3_args_modes(a: &Rr3SimArgs) -> Result<(), String> {
+    rr3_modes_chain(a)?;
+    rr3_modes_brain(a)
+}
+
+/// --chain 与 --brain/--profile 互斥（全链闭环与后两者各证一面）。
+fn rr3_modes_chain(a: &Rr3SimArgs) -> Result<(), String> {
+    if (a.brain || a.profile.is_some()) && a.chain {
+        return Err(
+            "--chain 与 --brain/--profile 同给：全链闭环、对话闭环与装配演练互斥（各证一面，不合并）"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// --brain 与 --profile 互斥（对话闭环演练与装配演练各证一面）。
+fn rr3_modes_brain(a: &Rr3SimArgs) -> Result<(), String> {
+    if a.brain && a.profile.is_some() {
+        return Err(
+            "--brain 与 --profile 同给：对话闭环演练与装配演练互斥（各证一面，不合并）".to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// 音频双后端旗标：仅 --brain 适用，白名单 + 板面约束（fail-closed ①②）。
+fn rr3_args_audio(a: &Rr3SimArgs) -> Result<(), String> {
+    rr3_audio_backend(a, "--audio-backend", a.audio_backend.as_ref())?;
+    rr3_audio_backend(a, "--sink-backend", a.sink_backend.as_ref())?;
+    rr3_audio_pairs(a)
+}
+
+/// 单面后端旗标的归属与白名单（`--audio-backend` / `--sink-backend` 同域）。
+fn rr3_audio_backend(a: &Rr3SimArgs, flag: &str, backend: Option<&String>) -> Result<(), String> {
+    let Some(b) = backend else {
+        return Ok(());
+    };
+    if !a.brain {
+        return Err(format!("{flag} 仅 --brain 演练适用"));
+    }
+    rr3_backend_known(flag, b)
+}
+
+/// 后端词必须在白名单（与 RR3_HAL_BACKEND 同表）。
+fn rr3_backend_known(flag: &str, b: &str) -> Result<(), String> {
+    const AUDIO_BACKENDS: [&str; 5] = ["sim", "linux", "esp32", "mac", "placeholder"];
+    if !AUDIO_BACKENDS.contains(&b) {
+        return Err(format!(
+            "{flag} 取值不认: {b}（允许 sim/linux/esp32/mac/placeholder——与 RR3_HAL_BACKEND 同白名单）"
+        ));
+    }
+    Ok(())
+}
+
+/// 两后端组合裁决（fail-closed ①②）。
+fn rr3_audio_pairs(a: &Rr3SimArgs) -> Result<(), String> {
+    rr3_audio_sink_ok(a)?;
+    rr3_audio_src_ok(a)
+}
+
+/// fail-closed ②（A 批 c4）：板无扬声器，回放恒宿主——显式给 esp32 即拒。
+fn rr3_audio_sink_ok(a: &Rr3SimArgs) -> Result<(), String> {
+    if a.sink_backend.as_deref() == Some("esp32") {
+        return Err(
+            "--sink-backend esp32 拒收：板无扬声器，TTS 回放恒宿主（mac AudioQueue / sim 尾窗）"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// fail-closed ①（A 批 c4）：esp32 源未显式给回放后端拒起——缺省跟随
+/// audio_backend 会令 interact 吃 esp32 抢同一 UART（Rr3UartConn flock 跨进程
+/// 排他），探活必败；板面流与回放是两块后端，必须分列明示。
+fn rr3_audio_src_ok(a: &Rr3SimArgs) -> Result<(), String> {
+    if a.audio_backend.as_deref() == Some("esp32") && a.sink_backend.is_none() {
+        return Err(
+            "--audio-backend esp32 必须显式给 --sink-backend（板面流与回放是两块后端；缺省跟随会令 interact 抢同一 UART 被 flock 拒）"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// 云端旗标：仅 --brain 适用，枚举 + 端点形状 + real 必须显式端点。
+fn rr3_args_cloud(a: &Rr3SimArgs) -> Result<(), String> {
+    rr3_cloud_mode(a)?;
+    rr3_cloud_url(a)?;
+    rr3_cloud_real(a)
+}
+
+/// real 必须显式端点（演练 config 缺省是死地址，fail-closed 不落）。
+fn rr3_cloud_real(a: &Rr3SimArgs) -> Result<(), String> {
+    if a.brain_cloud.as_deref() == Some("real") && a.brain_base_url.is_none() {
+        return Err(
+            "--brain-cloud real 必须显式给 --brain-base-url（演练 config 缺省是死地址，fail-closed 不落）"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// 云模式枚举与 --brain 归属。
+fn rr3_cloud_mode(a: &Rr3SimArgs) -> Result<(), String> {
+    let Some(c) = &a.brain_cloud else {
+        return Ok(());
+    };
+    if !a.brain {
+        return Err("--brain-cloud 仅 --brain 演练适用".to_string());
+    }
+    rr3_cloud_known(c)
+}
+
+/// 云模式词必须在白名单（mock/real）。
+fn rr3_cloud_known(c: &str) -> Result<(), String> {
+    const BRAIN_CLOUDS: [&str; 2] = ["mock", "real"];
+    if !BRAIN_CLOUDS.contains(&c) {
+        return Err(format!("--brain-cloud 取值不认: {c}（允许 mock/real）"));
+    }
+    Ok(())
+}
+
+/// 云端点形状与 mock/real 组合。
+fn rr3_cloud_url(a: &Rr3SimArgs) -> Result<(), String> {
+    let Some(u) = &a.brain_base_url else {
+        return Ok(());
+    };
+    if !a.brain {
+        return Err("--brain-base-url 仅 --brain 演练适用".to_string());
+    }
+    rr3_cloud_url_ok(a, u)
+}
+
+/// mock/real 组合门 + 端点形状门。
+fn rr3_cloud_url_ok(a: &Rr3SimArgs, u: &str) -> Result<(), String> {
+    if a.brain_cloud.as_deref() != Some("real") {
+        return Err(
+            "--brain-base-url 仅 --brain-cloud real 适用：mock 云不碰网络，端点给了也不会被读"
+                .to_string(),
+        );
+    }
+    if !rr3_url_http_ok(u) {
+        return Err(format!("--brain-base-url 须以 http(s):// 开头: {u}"));
+    }
+    Ok(())
+}
+
+/// 端点须是 http(s) 绝对地址。
+fn rr3_url_http_ok(u: &str) -> bool {
+    u.starts_with("http://") || u.starts_with("https://")
+}
+
+mod repo;
+pub use repo::*;

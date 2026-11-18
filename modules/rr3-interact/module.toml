@@ -13,14 +13,20 @@ capabilities = ["ui.face", "audio.playback"]
 required = ["bus.publish", "bus.subscribe"]
 optional = []
 
-# asr/text 与 dialog/turn 是面向其它模块的呈现事件（owner 即命名空间归属，
-# 生产者可以是 brain，见 contracts/topics.toml 的 owner 字段语义）
+# C14（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：asr/text 与 dialog/turn 两条
+# 发布申报走 retired 撤除（号位保留、义务解除，contracts/topics.toml status="retired"，
+# 本模块全仓零发布点）；intent/result 订阅同批撤申报（不补实现）。
+# net/link 是面板状态页的链路卡片数据源（0.0.4 批C 订阅，发布方 rr3-connect 批D 上线）
+# tts_pcm 是语音下行载荷通路（MC-1 订阅，发布方 rr3-brain）：流收缓冲 + tts/text
+# 点名对账排空——流只是载荷，点名才是"该不该播"的唯一判据（0.0.5 方案 §20 第 1 条 (a)）
 [events]
-publishes = ["rr3-interact/asr/text", "rr3-interact/dialog/turn"]
-subscribes = ["rr3-brain/intent/result"]
+publishes = []
+subscribes = ["rr3-connect/net/link", "rr3-brain/audio/tts_pcm"]
 
 [rpc]
-exposes = ["rr3-interact/face/expression", "rr3-interact/tts/text"]
+# ops/list = ops 槽快照读口（批N4 件九二）：白名单十一槽应答（face/player/panel/selftest），
+# 面板观测面读口（面板与被点名模块同进程，仍走 rrd 归属门）
+exposes = ["rr3-interact/face/expression", "rr3-interact/tts/text", "rr3-interact/ops/list"]
 
 [resources]
 restart_policy = "always"

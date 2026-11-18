@@ -1,0 +1,14 @@
+# vad 装配清单（五件套④）：装配期注入面声明（ADR-0019 修订 1 ③——
+# [assemble.handles] 声明件用哪个能力面 trait ← 绑描述符哪个键、[assemble.ops]
+# 声明件暴露哪些参数槽 ← 取哪个 config 键；装配段校验缺项即该格 Degraded）。
+schema_version = 2
+
+[assemble]
+# 纯软件状态机件（吃 capture 输出），不占外设句柄
+handles = []
+# 起音/判停/最短语音阈值 ← config.toml [rr3-sense.vad]（§3 逐槽落位，L-5 补齐）
+ops = [
+  { slot = "rms_start", src_key = "rr3-sense.vad.rms_start" },
+  { slot = "silence_tail_ms", src_key = "rr3-sense.vad.silence_tail_ms" },
+  { slot = "min_speech_ms", src_key = "rr3-sense.vad.min_speech_ms" },
+]

@@ -1,0 +1,18 @@
+# player 装配清单（五件套④）：装配期注入面声明（ADR-0019 修订 1 ③——
+# [assemble.handles] 声明件用哪个能力面 trait ← 绑描述符哪个键、[assemble.ops]
+# 声明件暴露哪些参数槽 ← 取哪个 config 键；装配段校验缺项即该格 Degraded）。
+schema_version = 2
+
+[assemble]
+# 播放面经能力面 Rr3AudioSink，绑描述符 alsa_device 键（§3 注入面）
+handles = [
+  { trait = "Rr3AudioSink", desc_key = "alsa_device" },
+]
+# 预缓冲/音量（§3）：MC-2 实装回归——两键从 config.toml [rr3-interact.player]
+# 经本表 ops 槽声明进件（组合件读入透传，机制面 rr3_tts_apply_gain/
+# rr3_prebuffer_ready 吃值），legacy 0cf029e 语义（起播水位抗抖动、样点
+# 整型增益饱和）。
+ops = [
+  { slot = "prebuffer_ms", src_key = "rr3-interact.player.prebuffer_ms" },
+  { slot = "volume_pct", src_key = "rr3-interact.player.volume_pct" },
+]

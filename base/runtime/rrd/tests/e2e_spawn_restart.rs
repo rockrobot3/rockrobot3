@@ -23,7 +23,6 @@
 //! S2 把两条路放在同一框里对照。
 mod support;
 
-use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
@@ -38,7 +37,10 @@ use support::*;
 /// 归 Task 13 的夹具整合。
 fn rr3_observer(rrd: &mut RrdTest, name: &str) -> RrdClient {
     let mut c = rrd.rr3_connect();
-    rr3_send(&mut c, &rr3_register_frame(&rr3_manifest(name, 100, 60_000, "never"), name));
+    rr3_send(
+        &mut c,
+        &rr3_register_frame(&rr3_manifest(name, 100, 60_000, "never"), name),
+    );
     // 等**关于自己**的那条 registered 广播，而不是 rrd 的日志：广播在 `rr3_reg_add` 之后才发，
     // 所以收到它就知道自己已在册（此后每条 fanout 都会算上这一份）。
     rr3_read_state(&mut c, name, "registered");
@@ -60,16 +62,21 @@ fn rr3_broadcast_count(line: &str) -> u64 {
 /// 为什么需要：`go_silent` 那一世睡在 `sleep(3600s)` 里、不再读 socket，rrd 死后没人收它
 /// （std 的 `Child` drop 既不 kill 也不 wait，而 rrd 才是它的父进程）。S4 的判据链要求
 /// "第三世也被起出来"，那第三世就是这条泄漏。
-/// 为什么不算判据、也不算依赖：它不断言任何东西，失败一律忽略；且只动 `/proc/<pid>/cmdline`
-/// 里确实是 `sim_peer` 的那一个——pid 被回收也不会误杀别人。
+/// 为什么不算判据、也不算依赖：它不断言任何东西，失败一律忽略；且只动 `ps` 查出来
+/// 确实是 `sim_peer` 的那一个——pid 被回收也不会误杀别人。
+/// （`ps` 而不是 `/proc/{pid}/cmdline`：macOS 没有 /proc，照抄 Linux 写法这条卫生在
+/// mac 上会静默变成 no-op，挂死夹具全部泄漏——S5 同一个教训。）
 /// （产品侧的对应事实是已知边界③：rrd 不持有 SIGCHLD，也不在退出时杀子进程；S5 只管常驻支。）
 fn rr3_kill_hung_fixture(pid: u64) {
-    let cmdline = format!("/proc/{pid}/cmdline");
-    match std::fs::read(&cmdline) {
-        Ok(b) if String::from_utf8_lossy(&b).contains("sim_peer") => {
-            let _ = Command::new("/bin/kill").arg(pid.to_string()).status();
-        }
-        _ => {}
+    let ps = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output();
+    let is_sim_peer = ps
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("sim_peer"))
+        .unwrap_or(false);
+    if is_sim_peer {
+        let _ = Command::new("/bin/kill").arg(pid.to_string()).status();
     }
 }
 
@@ -77,19 +84,29 @@ fn rr3_kill_hung_fixture(pid: u64) {
 #[test]
 fn boot_spawned_module_reaches_running_then_restarts_after_crash() {
     let m = rr3_fixture_manifest("sr-s1", "sima"); // restart_policy = always
+                                                   // 与 S2/S3 同一处置：本用例钉的是"退出码那一路的定性"，共用夹具的 500ms
+                                                   // watchdog 是 e2e_watchdog 的判据。高负载机上收尸可能晚于 500ms，watchdog
+                                                   // 抢记后收尸走 Silent、断言红在竞争噪声上（16 路并行实测复现）。
+    rr3_fixture_watchdog_ms(&m, 60_000);
     let mut rrd = RrdTest::rr3_start_boot("sr-s1", &[&m.path], "abort", E2E_TICK_MS);
     let mut b = rr3_observer(&mut rrd, "rr3-obs");
 
     // ---- 第一世：boot 的那一次没有"第几次重启"可说 ----
     let spawn1 = rrd.rr3_wait_log("spawn rr3-sima pid=");
-    assert!(!spawn1.contains("attempt="), "boot 的第一世不该带 attempt: {spawn1}");
+    assert!(
+        !spawn1.contains("attempt="),
+        "boot 的第一世不该带 attempt: {spawn1}"
+    );
     assert!(
         spawn1.contains(&format!("entry={}", env!("CARGO_BIN_EXE_sim_peer"))),
         "spawn 行必须回显 manifest 里那条绝对 entry（占位符确实被替换过、路径确实按它起的）: {spawn1}"
     );
     let pid1 = rr3_field_from_log(&spawn1, "pid=");
     let reg1 = rrd.rr3_wait_log("注册 rr3-sima task=");
-    assert!(reg1.contains("policy=always"), "身份与策略都来自 manifest 文件: {reg1}");
+    assert!(
+        reg1.contains("policy=always"),
+        "身份与策略都来自 manifest 文件: {reg1}"
+    );
     let task1 = rr3_field_from_log(&reg1, "task=");
 
     // ---- E-8：registered → running 第一次上线，日志有它、线上也有它 ----
@@ -98,8 +115,11 @@ fn boot_spawned_module_reaches_running_then_restarts_after_crash() {
     // 是两种合法时序——整个 workspace 并发跑时实测到过 `1`（旁观者尚未在册），
     // 单跑这个二进制时是 `2`。数字断言挪到第二世（下面 `run2`），那里的计数才有唯一答案。
     rrd.rr3_wait_log("rr3-sima → running（广播到");
-    let on = rr3_read_state(&mut b, "rr3-sima", "running");
-    assert_eq!(on["src_task"], task1, "线上那条 running 必须是第一世的（按 src_task 认，不按到达序猜）");
+    let on = rr3_read_state_task(&mut b, "rr3-sima", "running", Some(task1));
+    assert_eq!(
+        on["src_task"], task1,
+        "线上那条 running 必须是第一世的（按 src_task 认，不按到达序猜）"
+    );
 
     // ---- 终态：owned 的模块由退出码定性（spec §5.4 崩溃检测双路的那一路） ----
     let exit1 = rrd.rr3_wait_log("rr3-sima 子进程退出 status=signal: 6");
@@ -116,18 +136,31 @@ fn boot_spawned_module_reaches_running_then_restarts_after_crash() {
     let spawn2 = rrd.rr3_wait_log("spawn rr3-sima pid=");
     let pid2 = rr3_field_from_log(&spawn2, "pid=");
     assert_ne!(pid1, pid2, "重启必须是一个新进程，不是把同一行读第二遍");
-    assert!(spawn2.contains("attempt=1"), "第二次必须报出这是第几次重启: {spawn2}");
+    assert!(
+        spawn2.contains("attempt=1"),
+        "第二次必须报出这是第几次重启: {spawn2}"
+    );
     let reg2 = rrd.rr3_wait_log("注册 rr3-sima task=");
     let task2 = rr3_field_from_log(&reg2, "task=");
-    assert_ne!(task1, task2, "task 由 rrd 递增分配，重启后是新号（旧号回收不得复用）");
+    assert_ne!(
+        task1, task2,
+        "task 由 rrd 递增分配，重启后是新号（旧号回收不得复用）"
+    );
     let run2 = rrd.rr3_wait_log("rr3-sima → running（广播到");
     // 此刻在册且带句柄的恰好两条：旁观者 + 第二世自己（旁观者早在第一世之前就在册，
     // 第一世又活了整整一世，所以这一处的计数没有上面那种时序歧义）。
     // E-9 在这一路排的是 `RR3_TASK_RRD`，等于**不排除**——发起者自己也收到关于自己的
     // running；谁"顺手把发起者排除掉"会让这一条当场红，而 A-3 还没替这两处口径做决定。
-    assert_eq!(rr3_broadcast_count(&run2), 2, "running 该发给当时在册的两条连接: {run2}");
-    let on = rr3_read_state(&mut b, "rr3-sima", "running");
-    assert_eq!(on["src_task"], task2, "§9 的\"重启成功后必须重新注册才恢复 running\"——线上那一帧属于第二世");
+    assert_eq!(
+        rr3_broadcast_count(&run2),
+        2,
+        "running 该发给当时在册的两条连接: {run2}"
+    );
+    let on = rr3_read_state_task(&mut b, "rr3-sima", "running", Some(task2));
+    assert_eq!(
+        on["src_task"], task2,
+        "§9 的\"重启成功后必须重新注册才恢复 running\"——线上那一帧属于第二世"
+    );
 }
 
 /// S2 — A-6 的对照：**同一个 abort role、两种所有权、两种线上相位**。
@@ -136,6 +169,10 @@ fn boot_spawned_module_reaches_running_then_restarts_after_crash() {
 fn an_owned_crash_is_failed_while_a_foreign_one_is_unregistered() {
     let owned = rr3_fixture_manifest("sr-s2-own", "simb"); // 被 boot 的那一份
     let foreign = rr3_fixture_manifest("sr-s2-fgn", "sima"); // 测试自己起的那一份
+                                                             // 夹具默认的 wd=500ms 是 e2e_watchdog 的判据，不是本用例要的：这里钉的是"退出码定性"，
+                                                             // 必须把 watchdog 那一路从判据里排掉（负载下收尸可能晚于 500ms，谁先记就是掷硬币）。
+    rr3_fixture_watchdog_ms(&owned, 60_000);
+    rr3_fixture_watchdog_ms(&foreign, 60_000);
     let mut rrd = RrdTest::rr3_start_boot("sr-s2-own", &[&owned.path], "abort", E2E_TICK_MS);
     let mut b = rr3_observer(&mut rrd, "rr3-obs");
 
@@ -145,9 +182,15 @@ fn an_owned_crash_is_failed_while_a_foreign_one_is_unregistered() {
     let spawn = rrd.rr3_wait_log("spawn rr3-simb pid=");
     let own_task = rr3_field_from_log(&rrd.rr3_wait_log("注册 rr3-simb task="), "task=");
     let exit = rrd.rr3_wait_log("rr3-simb 子进程退出 status=signal: 6");
-    assert!(exit.contains("→ 广播 failed"), "owned 的死因由退出码定性: {exit}");
+    assert!(
+        exit.contains("→ 广播 failed"),
+        "owned 的死因由退出码定性: {exit}"
+    );
     let on = rr3_read_state(&mut b, "rr3-simb", "failed");
-    assert_eq!(on["src_task"], own_task, "线上那条 failed 指向 boot 起的那一世");
+    assert_eq!(
+        on["src_task"], own_task,
+        "线上那条 failed 指向 boot 起的那一世"
+    );
 
     // ---- foreign：只有 EOF 这一路信号 → unregistered，且计划被跳过 ----
     let mut peer = SimPeer::rr3_start(&rrd.socket, &foreign, "abort");
@@ -179,6 +222,8 @@ fn an_owned_crash_is_failed_while_a_foreign_one_is_unregistered() {
 #[test]
 fn never_policy_crash_does_not_spawn_again() {
     let m = rr3_fixture_manifest("sr-s3", "simb"); // restart_policy = never
+                                                   // 同 S2：钉的是退出码那一路的定性 + never 不再起，500ms watchdog 抢记会把两路搅在一起
+    rr3_fixture_watchdog_ms(&m, 60_000);
     let mut rrd = RrdTest::rr3_start_boot("sr-s3", &[&m.path], "abort", E2E_TICK_MS);
     let mut b = rr3_observer(&mut rrd, "rr3-obs");
 
@@ -187,8 +232,15 @@ fn never_policy_crash_does_not_spawn_again() {
     let task1 = rr3_field_from_log(&rrd.rr3_wait_log("注册 rr3-simb task="), "task=");
     rrd.rr3_wait_log("rr3-simb → running（广播到");
     let exit = rrd.rr3_wait_log("rr3-simb 子进程退出 status=signal: 6");
-    assert!(exit.contains("→ 广播 failed 到 1 个连接"), "§9：never 的夹具照样标 failed: {exit}");
-    assert_eq!(rr3_read_state(&mut b, "rr3-simb", "failed")["src_task"], task1, "只广播这一条");
+    assert!(
+        exit.contains("→ 广播 failed 到 1 个连接"),
+        "§9：never 的夹具照样标 failed: {exit}"
+    );
+    assert_eq!(
+        rr3_read_state(&mut b, "rr3-simb", "failed")["src_task"],
+        task1,
+        "只广播这一条"
+    );
 
     // 三条否定各钉一层，窗口都用"已知的退避基数"量不出来（判据是内容，不是时长）：
     // - `spawn rr3-simb`：确实没有第二个进程（`spawn ` 只属于成功起进程那一行）
@@ -215,29 +267,46 @@ fn watchdog_expiry_of_an_owned_hang_kills_and_restarts() {
     // "杀掉挂死的"这一行是唯一能区分"重起了"与"重起了但旧的去哪了"两种说法的证据：
     // std 的 `Child` 被覆盖不等于杀进程，删掉那一行这条用例必须红（brief Step 7 的另一半）。
     let kill1 = rrd.rr3_wait_log("杀掉挂死的 rr3-sima pid=");
-    assert_eq!(rr3_field_from_log(&kill1, "pid="), pid1, "杀掉必须正是刚判死的那一世");
+    assert_eq!(
+        rr3_field_from_log(&kill1, "pid="),
+        pid1,
+        "杀掉必须正是刚判死的那一世"
+    );
 
     let spawn2 = rrd.rr3_wait_log("spawn rr3-sima pid=");
     let pid2 = rr3_field_from_log(&spawn2, "pid=");
     assert_ne!(pid1, pid2, "重起的是另一个进程");
     assert!(spawn2.contains("attempt=1"), "{spawn2}");
     let task2 = rr3_field_from_log(&rrd.rr3_wait_log("注册 rr3-sima task="), "task=");
-    assert_ne!(task1, task2, "第一世的条目让位了才有新 task：同名注册被 EBUSY 挡住就是红在这里");
+    assert_ne!(
+        task1, task2,
+        "第一世的条目让位了才有新 task：同名注册被 EBUSY 挡住就是红在这里"
+    );
 
     // 第二世**又**被判死（这条不许省）：杀不干净就会有"活着的"进程占着 name，
     // 第二世判死说明第一世的 fd/条目确实让位了。
     rrd.rr3_wait_log(&format!("watchdog 判死 rr3-sima task={task2} "));
     let kill2 = rrd.rr3_wait_log("杀掉挂死的 rr3-sima pid=");
-    assert_eq!(rr3_field_from_log(&kill2, "pid="), pid2, "第二次杀的必须是第二世");
+    assert_eq!(
+        rr3_field_from_log(&kill2, "pid="),
+        pid2,
+        "第二次杀的必须是第二世"
+    );
     let spawn3 = rrd.rr3_wait_log("spawn rr3-sima pid=");
     let pid3 = rr3_field_from_log(&spawn3, "pid=");
-    assert_ne!(pid2, pid3, "第二次重启的必须是第三个进程，不是把同一行读第二遍");
+    assert_ne!(
+        pid2, pid3,
+        "第二次重启的必须是第三个进程，不是把同一行读第二遍"
+    );
     // 尾注**钉在 attempt=1 而不是"递增到 2"**（写实，不是猜）：11a 的 D-2 归零与判死同在一趟
     // 扫描里，段序是先归零后到期（`rr3_reg_expire`），而"注册→喂一颗→挂死"的模块到期时
     // `now - registered_at ≥ 500ms` 必然成立 → streak 每次都被清成 0 → 每一世的计划都是
     // attempt=1。真正"递增到上限"的形状是 crash loop（起来就死、活不满窗口），那条由
     // registry 的表级用例钉（含归零那一条），本用例不假装它在测这件事。
-    assert!(spawn3.contains("attempt=1"), "到期那一路的计划要真的被执行: {spawn3}");
+    assert!(
+        spawn3.contains("attempt=1"),
+        "到期那一路的计划要真的被执行: {spawn3}"
+    );
     // 判据到此为止。第三世还是个挂死的夹具，测试进程是它名义上的"旁观者"却救不了它——
     // 只做卫生清理（不断言、不报错），别把一堆 sleep(3600s) 留给后面的用例与 CI。
     rr3_kill_hung_fixture(pid3);
@@ -252,13 +321,18 @@ fn rrd_death_does_not_leave_boot_spawned_children() {
     let pid = rr3_field_from_log(&spawn, "pid=");
     rrd.rr3_wait_log("注册 rr3-sima task=");
     // 前置必须先成立：进程还活着，否则"它消失了"什么也没测。
-    assert!(Path::new(&format!("/proc/{pid}")).exists(), "夹具必须还在: {spawn}");
+    // 判活走 `rr3_pid_alive` 而不是 `/proc/{pid}`：macOS 没有 /proc，照抄 Linux 写法
+    // 这条前置在 mac 上恒假，S5 从来没法在 mac 上跑到 drop 那一半。
+    assert!(rr3_pid_alive(pid), "夹具必须还在: {spawn}");
 
     drop(rrd); // → `RrdTest::drop` 杀 rrd 并 unlink 套接字
 
     // 依据是读代码读来的，不是猜的：`sim_peer::rr3_resident` 每颗心跳都读应答，rrd 一死
     // socket 即 EOF → `rr3_wait_reply` 立刻 Err → 进程退出。
     // 有界轮询：判据是"消失"这件事本身，2s 只是不再等的上限（与 `rr3_wait_line` 同一口径）。
-    let gone = rr3_wait_until(|| !Path::new(&format!("/proc/{pid}")).exists(), Duration::from_secs(2));
-    assert!(gone, "rrd 死后 boot 起的常驻夹具必须自己退出；/proc/{pid} 两秒内没消失");
+    let gone = rr3_wait_until(|| !rr3_pid_alive(pid), Duration::from_secs(2));
+    assert!(
+        gone,
+        "rrd 死后 boot 起的常驻夹具必须自己退出；pid={pid} 两秒内没消失"
+    );
 }

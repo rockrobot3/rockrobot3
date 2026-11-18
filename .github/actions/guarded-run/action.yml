@@ -1,0 +1,41 @@
+# guarded-run —— 把"命令失败 → 单行注解"的模板收成一处（2026-11-16 流水线治理）。
+#
+# 此前 platforms.yml 的六个 esp 门各自内联同一段 tee/grep/tr 模板：注解格式改一次要
+# 改六处，漏改就让失败退化成 GitHub 上只有一句 "exit code 1"（根因不可见）。
+# 本 action 是判据单点；调用方只给 title / prelude / command（策略面）。
+name: guarded-run
+description: 执行一条命令，失败时把日志里的错误行压成一条可归因的 GitHub 注解
+inputs:
+  title:
+    description: 注解标题（失败归因的锚，如 esp32-periph-base）
+    required: true
+  prelude:
+    description: 命令前置脚本的绝对路径（如 esp 环境导出）；空 = 不前置
+    required: false
+    default: ""
+  command:
+    description: 要执行的命令（多行 shell 片段，经 bash -c 执行）
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: ${{ inputs.title }}
+      shell: bash
+      env:
+        GUARDED_TITLE: ${{ inputs.title }}
+        GUARDED_PRELUDE: ${{ inputs.prelude }}
+        GUARDED_CMD: ${{ inputs.command }}
+      run: |
+        set -o pipefail
+        log="${RUNNER_TEMP:-/tmp}/guarded-${GUARDED_TITLE}.log"
+        if [ -n "${GUARDED_PRELUDE}" ]; then
+          # `~/` 由调用方书写（GitHub 输入不做 shell 展开），这里补成 $HOME。
+          pre="${GUARDED_PRELUDE/#\~/$HOME}"
+          # shellcheck disable=SC1090
+          . "${pre}"
+        fi
+        if ! bash -c "${GUARDED_CMD}" 2>&1 | tee "${log}"; then
+          errs="$(grep -iE 'error(\[|:)|failed|错误|FAIL' "${log}" | tail -4 | tr '\n' ' ')"
+          echo "::error title=${GUARDED_TITLE}::${errs:0:900}"
+          exit 1
+        fi

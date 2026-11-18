@@ -1,8 +1,10 @@
-//! rr3-ctl —— 总线侧运维 CLI（骨架）。
+//! rr3-ctl —— 总线侧运维 CLI。
 //!
-//! 规划能力（architecture.md §3）：查在册模块与健康状态、取日志、触发 OTA。
-//! v0.0.1 只交付**命令面**：参数解析与输出形状先定下来，真正的 UDS 往返随 M2
-//! （rrd 上线后才有东西可问）。命令实现不得绕过 rrd 的鉴权语义。
+//! 规划能力（architecture.md §3）：查在册模块与健康状态、取日志、触发 OTA、
+//! 读运维计数、系统重启。F3（ADR-0010）起子命令经 UDS 真连 rrd 的事务面
+//! （0.0.4 批B 起 CLI 六子命令与 ctl 白名单对齐）：一次性控制连接，一问一答
+//! 即断；`ota` 随 M6，rrd 侧恒拒；`reboot` 缺省恒拒，解锁面在装机环境
+//! （rrd 执行面双重门），CLI 不加本地门。命令实现不得绕过 rrd 的鉴权语义。
 
 mod commands;
 
@@ -11,7 +13,8 @@ use rr_ipc::{RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT};
 fn usage() -> ! {
     eprintln!("用法: rr3-ctl [--bus-path <path>] <命令>");
     eprintln!(
-        "命令: {}（均属 M2，当前只回显计划）",
+        "命令: {}（status/health/logs/counters 实查 rrd；ota 恒拒随 M6；\
+         reboot 缺省恒拒，解锁面在装机环境）",
         commands::COMMANDS.join(" | ")
     );
     std::process::exit(2)
@@ -23,39 +26,64 @@ fn parse(args: &[String]) -> (Option<String>, Option<String>) {
     let mut cmd = None;
     let mut i = 0;
     while i < args.len() {
-        if args[i] == "--bus-path" {
-            i += 1;
-            match args.get(i) {
-                Some(v) => bus = Some(v.clone()),
-                None => usage(),
-            }
-        } else if cmd.is_none() {
-            cmd = Some(args[i].clone());
-        }
+        rr3_parse_step(args, &mut i, &mut bus, &mut cmd);
         i += 1;
     }
     (bus, cmd)
+}
+
+/// 单参数落位：`--bus-path` 消费下一槽，否则首个裸参即命令名。
+fn rr3_parse_step(
+    args: &[String],
+    i: &mut usize,
+    bus: &mut Option<String>,
+    cmd: &mut Option<String>,
+) {
+    if args[*i] == "--bus-path" {
+        *i += 1;
+        *bus = Some(rr3_bus_value(args.get(*i)));
+    } else if cmd.is_none() {
+        *cmd = Some(args[*i].clone());
+    }
+}
+
+/// `--bus-path` 的值（缺值即用法错误退出）。
+fn rr3_bus_value(v: Option<&String>) -> String {
+    match v {
+        Some(v) => v.clone(),
+        None => usage(),
+    }
 }
 
 /// 套接字路径优先级：命令行 > `RR3_BUS_PATH` > 契约默认值
 fn resolve_bus_path(override_path: Option<&str>) -> String {
     override_path
         .map(str::to_string)
-        .or_else(|| std::env::var(RR3_BUS_PATH_ENV).ok())
-        .unwrap_or_else(|| RR3_UDS_PATH_DEFAULT.to_string())
+        .or_else(rr3_env_bus)
+        .unwrap_or_else(rr3_bus_default)
+}
+
+/// `RR3_BUS_PATH` 环境变量（未设即 None）。
+fn rr3_env_bus() -> Option<String> {
+    std::env::var(RR3_BUS_PATH_ENV).ok()
+}
+
+/// 契约默认总线路径。
+fn rr3_bus_default() -> String {
+    RR3_UDS_PATH_DEFAULT.to_string()
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (bus, cmd) = parse(&args);
     let Some(cmd) = cmd.as_deref() else { usage() };
-    match commands::run(cmd, &resolve_bus_path(bus.as_deref())) {
-        Ok(report) => println!("{report}"),
-        Err(e) => {
+    commands::run(cmd, &resolve_bus_path(bus.as_deref())).map_or_else(
+        |e| {
             eprintln!("rr3-ctl {cmd}: {e}");
             std::process::exit(1);
-        }
-    }
+        },
+        |report| println!("{report}"),
+    );
 }
 
 #[cfg(test)]
@@ -84,8 +112,8 @@ mod tests {
     #[test]
     fn bus_path_override_beats_default() {
         assert_eq!(resolve_bus_path(Some("/tmp/x.sock")), "/tmp/x.sock");
-        let expected = std::env::var(RR3_BUS_PATH_ENV)
-            .unwrap_or_else(|_| RR3_UDS_PATH_DEFAULT.to_string());
+        let expected =
+            std::env::var(RR3_BUS_PATH_ENV).unwrap_or_else(|_| RR3_UDS_PATH_DEFAULT.to_string());
         assert_eq!(resolve_bus_path(None), expected);
     }
 }

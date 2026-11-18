@@ -1,0 +1,33 @@
+[package]
+name = "espidf-sentinel"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "UNLICENSED"
+publish = false
+description = "0.0.7 批D1 层③ 哨兵（esp-rs std，内跑 rr-core::runtime 的真板消费者）"
+
+# 独立 workspace：xtensa-esp32-espidf 目标 + build-std 与 base/runtime 主 workspace 互斥，
+# 门禁 ④/⑥ 的宿主 check/test 不扫本目录（check.sh 显式排除；编译走
+# tools/ci/espidf-sentinel-check.sh，工具链缺位 SKIP 纪律同 espidf-std-check.sh）。
+[workspace]
+
+[dependencies]
+# 版本组合对表批W1 钉死登记（tools/espidf-std-hello/README.md）：
+# esp-idf-sys =0.35.0 ↔ ESP-IDF v5.2.2 ↔ embuild =0.32.0 ↔ ldproxy 0.3.5。
+esp-idf-sys = { version = "=0.35.0", features = ["binstart"] }
+# UART2 半分体（UartTx/UartRx）：esp-idf-hal 0.44.x 与 esp-idf-sys 0.35 同代（其
+# Cargo.toml 依赖 esp-idf-sys ^0.35），精确 pin 保版本组合可复现。
+esp-idf-hal = "=0.44.1"
+# 机制核消费者面（全案 §2.1 修订版 9 口径：不另写状态机）——path 依赖主仓两个
+# no_std crate：rr-ipc（字节契约 + 窄缝 + blanket conn）与 rr-core（运行时状态机）。
+rr-ipc = { path = "../../base/runtime/rr-ipc" }
+rr-core = { path = "../../base/runtime/rr-core" }
+# JSON-RPC 体组包/拆包（上行 RPC 与应答解析；依赖闭包 L1 档位，与 rr-bus 同口径）。
+serde_json = "1"
+
+[build-dependencies]
+# 链接参数接力（同 espidf-std-hello build.rs 注释）：esp-idf-sys 的
+# cargo:rustc-link-arg 只作用于它自己包内 bins 面，根 crate 必须经 links 元数据
+# （DEP_ESP_IDF_EMBUILD_LINK_ARGS）自行取回并转发。
+embuild = "=0.32.0"
