@@ -137,6 +137,7 @@ impl RrdRegistry {
                 watchdog_ms: e.facts.watchdog_ms,
                 since_beat_ms: now_ms.saturating_sub(e.last_beat_ms),
                 boot_ms: self.boot_ms.map(|b| e.registered_at_ms.saturating_sub(b)),
+                fan_dropped: e.fan_dropped,
             })
             .collect();
         v.sort_by_key(|r| r.src_task);

@@ -278,6 +278,7 @@ fn format_health(envelope: &Value) -> Result<String, String> {
                 cell(m, "watchdog_ms"),
                 cell(m, "since_beat_ms"),
                 cell(m, "boot_ms"),
+                cell(m, "fan_dropped"),
             ]
         })
         .collect();
@@ -290,6 +291,7 @@ fn format_health(envelope: &Value) -> Result<String, String> {
             "WD_MS",
             "SINCE_BEAT_MS",
             "BOOT_MS",
+            "FAN_DROP",
         ],
         &rows,
     ))

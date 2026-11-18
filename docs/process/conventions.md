@@ -3846,6 +3846,11 @@ cancel 语义、needs 图沿用），自检负例由六条扩到十一条；全�
 `rr3_reg_fan_dropped()` 聚合，`ctl.status` 回 `fan_dropped`，`rr3-ctl status` 渲染同名行；
 单测钉"两次丢帧后聚合 = 2、续投后不回退"与 CLI 渲染；rrd-rpc/status 对表。
 
+**2026-11-18 慢消费者点名与 ctl.logs 口径订正（续轮十二）**：事实——全局
+`fan_dropped` 只能回答"丢了多少"，不能回答"谁慢"；`rrd-rpc.md` 的 `ctl.logs` 还写着
+"不落盘"，与 sink 已实装矛盾。处置——`ctl.health` 行增 `fan_dropped`（`rr3-ctl` 健康表
+第八列 `FAN_DROP`），单测钉"health 行 = 2"；rrd-rpc 的 health/logs 两行按现状订正。
+
 **2026-11-18 publish 合并腿缺 checkout（main 首跑红）**：事实——远端结构治理后
 publish 吃 main 推送（edge 标签）；main 首跑 build 两腿绿、merge 腿 `exit 127`：
 合并腿直接 `bash tools/deploy/image-smoke.sh`，但该 job 没有 `actions/checkout`，
