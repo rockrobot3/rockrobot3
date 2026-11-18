@@ -246,6 +246,7 @@ fn format_status(envelope: &Value) -> Result<String, String> {
     out.push_str(&rr3_count_note(result, "denied_publish"));
     out.push_str(&rr3_count_note(result, "fan_dropped"));
     out.push_str(&rr3_text_note(result, "log_sink"));
+    out.push_str(&rr3_log_write_note(result));
     out.push_str(&rr3_text_note(result, "ctr_store"));
     out.push_str(&rr3_boot_note(result));
     Ok(out)
@@ -287,6 +288,17 @@ fn rr3_text_note(result: &Value, key: &str) -> String {
         .get(key)
         .and_then(Value::as_str)
         .map_or(String::new(), |s| format!("{key} = {s}\n"))
+}
+
+/// 落盘写阻塞窗一行（`log_sink_max_us` / `log_sink_slow` 两字段成对出现；
+/// 缺任一不渲染，不拿半截数冒充）。
+fn rr3_log_write_note(result: &Value) -> String {
+    let max = result.get("log_sink_max_us").and_then(Value::as_u64);
+    let slow = result.get("log_sink_slow").and_then(Value::as_u64);
+    match (max, slow) {
+        (Some(a), Some(b)) => format!("log_write = max_us={a} slow={b}\n"),
+        _ => String::new(),
+    }
 }
 
 /// 装配摘要行（`boot`）：字符串原样一行；`null`/缺字段渲染 `?`——远程诊断最先要

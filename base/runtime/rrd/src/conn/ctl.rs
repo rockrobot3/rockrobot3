@@ -134,11 +134,14 @@ fn rr3_ctl_status(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
             g.rr3_reg_fan_dropped(),
         )
     };
+    let sink = crate::rr3_log_sink_info();
     Ok(json!({
         "modules": modules,
         "denied_publish": denied,
         "fan_dropped": fan_dropped,
-        "log_sink": crate::rr3_log_sink_state(),
+        "log_sink": sink.state,
+        "log_sink_max_us": sink.max_us,
+        "log_sink_slow": sink.slow,
         "ctr_store": crate::counters::rr3_ctr_store_state(),
         "boot": crate::rr3_boot_summary_get(),
     }))

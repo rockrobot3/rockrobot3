@@ -60,6 +60,7 @@ fn status_table_is_aligned_and_counts_denied_publish() {
             {"name": "rr3-long-name", "task": 2, "phase": "running"},
             {"name": "rr3-a", "task": 3, "phase": "registered"}
         ], "denied_publish": 7, "fan_dropped": 3, "log_sink": "on",
+        "log_sink_max_us": 1200, "log_sink_slow": 0,
         "ctr_store": "dead",
         "boot": "tier=rk3566 chip=rk3566 profile=rock3-zero3 modules=5"}});
     let out = format_status(&env).unwrap();
@@ -72,11 +73,15 @@ fn status_table_is_aligned_and_counts_denied_publish() {
     assert_eq!(lines[4], "fan_dropped = 3", "广播积压丢帧必须可读");
     assert_eq!(lines[5], "log_sink = on", "落盘状态必须可读（on/off/dead）");
     assert_eq!(
-        lines[6], "ctr_store = dead",
+        lines[6], "log_write = max_us=1200 slow=0",
+        "落盘阻塞窗必须可读（峰值与慢写计数）"
+    );
+    assert_eq!(
+        lines[7], "ctr_store = dead",
         "计数落盘执行面存亡必须可读（off/on/dead）"
     );
     assert!(
-        lines[7].starts_with("boot = tier=rk3566"),
+        lines[8].starts_with("boot = tier=rk3566"),
         "装配摘要必须可读（远程诊断首要上下文）: {out}"
     );
 }

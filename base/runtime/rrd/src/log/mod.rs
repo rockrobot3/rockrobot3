@@ -16,7 +16,7 @@ mod sink;
 #[cfg(unix)]
 pub(crate) use sink::{rr3_log_dir_ensure, rr3_log_rotate};
 #[cfg(unix)]
-pub use sink::{rr3_log_sink_set, rr3_log_sink_state, rr3_unit_log_dir};
+pub use sink::{rr3_log_sink_info, rr3_log_sink_set, rr3_unit_log_dir};
 
 /// 行字节（单点）：文本 + 换行一次成片。**分行两次 write 会在多线程日志下交错**
 /// （A 行头 + B 行头 + 两个换行 ⇒ 排障看到被吞并的半行），且每次 write 各自
