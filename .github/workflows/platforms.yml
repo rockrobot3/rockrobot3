@@ -281,15 +281,21 @@ jobs:
       - name: workspace 编译面（Windows）
         working-directory: base/runtime
         run: cargo check --workspace
-      # 缺口④补腿（续轮十六）：独立工程（modules/tools/base/ota）不在 workspace 内，
-      # 此前 Windows 面零覆盖。先收**平台中性**子集（无 std::os::unix / libc 依赖，
-      # 且不依赖 rr_ipc::transport::uart——该模块只在 linux/macos 编译，raw termios）：
-      # 首跑实测 sentinel-harness 因 uart 门失败，已移出子集并在覆盖矩阵登记理由。
+      # 缺口④补腿（续轮十六，扩面续轮十八）：独立工程（modules/tools/base/ota）不在
+      # workspace 内，此前 Windows 面零覆盖。子集判据：不依赖仅 linux/macos 编译的
+      # 模块（如 rr_ipc::transport::uart，raw termios），Unix 专属动作各自 cfg 门控
+      # （rrctl 的 UDS 查询在非 Unix 返回"仅 Unix 可用"，编译面仍成立）。
       # 任一编不过即红并点名工程根，不留"只看 workspace"的假绿。
       - name: 独立工程编译面（Windows，④ 中性子集）
         shell: pwsh
         run: |
-          $roots = @("tools/mkmodule", "tools/rr3-codegen")
+          $roots = @(
+            "tools/mkmodule",
+            "tools/rr3-codegen",
+            "tools/rrctl",
+            "tools/rr3-pack",
+            "base/ota/rr3-ota-ctl"
+          )
           foreach ($r in $roots) {
             Write-Output "== check $r"
             cargo check --manifest-path "$r/Cargo.toml"
