@@ -119,16 +119,17 @@ job 定义 ≤10；integration/platforms 的 push/PR 必须 `paths-ignore` 含 `
 | 进迭时空 K1/K3（riscv64） | `cross` riscv64-gnu 七件 | `qemu-riscv64` 真跑 | qemu 内 golden 对拍（第 5 路编译期 const 已接） | **无**（publish 仅 amd64/arm64） | 真板环境与发布面缺 |
 | ESP32（classic） | `esp32-gates`：periph-base / uart-echo / espidf-std / sentinel / act-sense | **无运行腿**（xtensa 无 qemu，运行归真板） | 编译期 const + `ipct003` 第④路 | tag release 固件 ELF（`firmware` job） | 真板运行证据不在 CI |
 | ESP32-S3 | `esp32-gates`：periph-base S3 / act-sense S3 | **无运行腿** | xtensa 编译期 | **无**（firmware 仅 classic） | 真板运行与发布面缺 |
-| 宿主 Windows x86_64 | `host-windows`：workspace check + test；独立工程中性子集（`mkmodule` / `rr3-codegen` / `rr3-sentinel-harness`） | 原生 | 由测试面覆盖 | — | 依赖 UDS/HAL 实现面的独立工程按平台缺省排除（理由在缺口④） |
+| 宿主 Windows x86_64 | `host-windows`：workspace check + test；独立工程中性子集（`mkmodule` / `rr3-codegen`） | 原生 | 由测试面覆盖 | — | 依赖 UDS/termios/HAL 实现面的独立工程按平台缺省排除（理由在缺口④） |
 | 宿主 macOS | `host-macos`：workspace 全量测试；`host-macos-independent`：独立工程测试（两腿并行） | 原生 | 由测试面覆盖 | — | esp 条件工程按门禁口径排除 |
 
 **已知缺口四条**（下一轮补腿对象，不冒充已覆盖）：① riscv64 无发布镜像；
 ② S3 无固件 release 资产；③ 三块真板（esp32 / rock3 / spacemit）的运行证据不属 CI
-能力，归板上批次；④ Windows 独立工程门**部分收口**（续轮十六）：已覆盖 3 个平台
-中性工程（`tools/mkmodule` / `tools/rr3-codegen` / `tools/rr3-sentinel-harness`，
-无 `std::os::unix`/`libc` 依赖、传输面走 uart）；`modules/*`、`tools/sim`、
-`tools/rrctl`、`tools/rr3-bridge` 等依赖 UDS 或 HAL 实现面，按平台缺省不纳入
-Windows 腿——纳入前先要它们各自具备非 Unix 编译面。
+能力，归板上批次；④ Windows 独立工程门**部分收口**（续轮十六）：已覆盖 2 个平台
+中性工程（`tools/mkmodule` / `tools/rr3-codegen`，无 `std::os::unix`/`libc` 依赖）；
+`tools/rr3-sentinel-harness` 首跑实测依赖 `rr_ipc::transport::uart`（仅 linux/macos
+编译，raw termios），`modules/*`、`tools/sim`、`tools/rrctl`、`tools/rr3-bridge`
+等依赖 UDS 或 HAL 实现面，按平台缺省不纳入 Windows 腿——纳入前先要它们各自具备
+非 Unix 编译面。
 
 ## 点验矩阵出数入口：`matrix.sh`
 
