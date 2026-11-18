@@ -43,6 +43,9 @@ struct Entry {
     tx: Option<SyncSender<Rr3Frame>>,
     /// 广播队列满导致的丢帧计数（满侧不摘连接，只丢帧；见 `rr3_reg_fanout`）
     fan_dropped: u64,
+    /// 稳态心跳间隔峰值（续轮二十五）：只在"已在运行"的续命拍上更新——首拍间隔
+    /// 是启动延迟，已由 boot_ms 记账，混进来会假报实时性长尾。
+    beat_peak_ms: u64,
 }
 
 #[derive(Debug)]

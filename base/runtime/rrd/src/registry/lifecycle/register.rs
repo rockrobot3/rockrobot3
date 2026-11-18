@@ -86,6 +86,7 @@ impl RrdRegistry {
                 registered_at_ms: now_ms,
                 tx: Some(tx),
                 fan_dropped: 0,
+                beat_peak_ms: 0,
             },
         );
         self.rr3_add_exposes(facts, task);

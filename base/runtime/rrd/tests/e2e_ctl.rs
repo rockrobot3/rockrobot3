@@ -138,6 +138,10 @@ fn ctl_health_echoes_heartbeat_and_watchdog_numbers() {
     assert_eq!(r["heartbeat_ms"], 200, "{v}");
     assert_eq!(r["watchdog_ms"], 900, "{v}");
     assert!(r["since_beat_ms"].is_u64(), "距上次心跳必须以数回显: {v}");
+    assert_eq!(
+        r["beat_peak_ms"], 0,
+        "未发过续命拍时峰值必须为 0（首拍不计，不造假值）: {v}"
+    );
     assert_eq!(r["phase"], "registered");
     rr3_assert_ctl_closed(&mut ctl);
 }
