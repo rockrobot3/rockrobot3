@@ -95,8 +95,10 @@ paths-ignore 缺失/publish 可取消/job 超限十一条负例，gate 的 `scri
 
 ## 平台覆盖矩阵（2026-11-17 首立，按 workflow 事实源抄录）
 
-"每个芯片平台都在流水线里验证"的对照表。**编译腿**只证明目标 ISA 能构建，
-**执行腿**才证明产物在目标环境跑得起来；两者都缺的格子必须如实留空。
+"每个芯片平台都在流水线里验证"的对照表（**结构真源** =
+[`docs/process/ci-workflows.md`](../../docs/process/ci-workflows.md)；本表只映射"哪个平台
+被哪条腿覆盖"）。**编译腿**只证明目标 ISA 能构建，**执行腿**才证明产物在目标环境
+跑得起来；两者都缺的格子必须如实留空。
 
 | 平台 | 编译/构建腿 | 目标环境执行 | 契约字节面 | 发布制品 | 缺口（不冒领） |
 |---|---|---|---|---|---|
@@ -106,7 +108,7 @@ paths-ignore 缺失/publish 可取消/job 超限十一条负例，gate 的 `scri
 | ESP32（classic） | `esp32-gates`：periph-base / uart-echo / espidf-std / sentinel / act-sense | **无运行腿**（xtensa 无 qemu，运行归真板） | 编译期 const + `ipct003` 第④路 | tag release 固件 ELF（`firmware` job） | 真板运行证据不在 CI |
 | ESP32-S3 | `esp32-gates`：periph-base S3 / act-sense S3 | **无运行腿** | xtensa 编译期 | **无**（firmware 仅 classic） | 真板运行与发布面缺 |
 | 宿主 Windows x86_64 | `host-windows`：workspace check + test | 原生 | 由测试面覆盖 | — | 独立工程门未在 Windows 跑 |
-| 宿主 macOS | `host-macos`：workspace 全量测试 + 独立工程测试 | 原生 | 由测试面覆盖 | — | esp 条件工程按门禁口径排除 |
+| 宿主 macOS | `host-macos`：workspace 全量测试；`host-macos-independent`：独立工程测试（两腿并行） | 原生 | 由测试面覆盖 | — | esp 条件工程按门禁口径排除 |
 
 **已知缺口四条**（下一轮补腿对象，不冒充已覆盖）：① riscv64 无发布镜像；
 ② S3 无固件 release 资产；③ 三块真板（esp32 / rock3 / spacemit）的运行证据不属 CI
