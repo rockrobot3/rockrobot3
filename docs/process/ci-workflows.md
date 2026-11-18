@@ -48,5 +48,9 @@ with 入参），不依赖 runner 镜像预装版本；交叉 job 同时显式�
 步序与每步判据见 `conventions.md` §2；脚本说明见
 [`../../tools/ci/README.md`](../../tools/ci/README.md)。
 
+本文件的**结构判据**由 [`tools/ci/workflows_audit.py`](../../tools/ci/workflows_audit.py)
+在 gate `scripts` job 执法（工具链钉版 / 缓存参数 / 触发过滤 / 作业上限 / needs 图 /
+并发语义），政策变更须同批改脚本与自检夹具。
+
 **门禁的确定性执行入口始终是本地 `bash tools/ci/check.sh`**——合入前必须
 本地跑绿，不依赖远端流水线。

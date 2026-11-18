@@ -3833,6 +3833,13 @@ macOS runner 时序更紧）。处置——`rr3_log` 改**落盘先于 stdout**�
 `lib.rs` 结构化拆到 `src/log.rs`（修序后 lib 触到 600 行门；纯移位，`lib.rs` re-export
 保持 `crate::rr3_log*` 路径零改动——lib 86 行 / log 532 行）。
 
+**2026-11-18 流水线审计对齐新结构（续轮九）**：事实——远端结构治理把 CI 政策写成
+[ci-workflows.md](ci-workflows.md)（工具链钉 1.100.0、缓存 `workspaces` 必填与
+`cache-all-crates`、触发 `paths-ignore`、job ≤10、publish 不可中断），但
+`tools/ci/workflows_audit.py` 仍只查版本矩阵/并发/超时/needs——政策没有执法位。
+处置——审计扩到新政策六类（工具链钉版、缓存参数、触发过滤、job 上限、publish
+cancel 语义、needs 图沿用），自检负例由六条扩到十一条；全仓五条 workflow 通过。
+
 **2026-11-18 publish 合并腿缺 checkout（main 首跑红）**：事实——远端结构治理后
 publish 吃 main 推送（edge 标签）；main 首跑 build 两腿绿、merge 腿 `exit 127`：
 合并腿直接 `bash tools/deploy/image-smoke.sh`，但该 job 没有 `actions/checkout`，
