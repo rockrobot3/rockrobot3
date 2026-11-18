@@ -125,6 +125,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # 合并腿要跑仓内 image-smoke.sh：没有 checkout 时 `bash tools/deploy/...`
+      # 直接 exit 127（2026-11-18 main 首跑实证；此前 publish 只在 tag 触发，
+      # 合并腿从未在 main 面被执行过）。
+      - uses: actions/checkout@v7
       - name: 登录 ghcr.io
         uses: docker/login-action@v3
         with:
