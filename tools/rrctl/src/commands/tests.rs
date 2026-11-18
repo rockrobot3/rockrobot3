@@ -37,10 +37,20 @@ fn rejection_envelope_names_code_and_message() {
 
 #[test]
 fn command_list_matches_the_rrd_ctl_whitelist() {
-    // 六方法同名对齐是本批的裁定（ADR-0010 裁定 2/4/6）：方法名漂移在此变红
+    // 八方法同名对齐（ADR-0010 裁定 2/4/6；续轮十五补 wiring/contracts）：方法名
+    // 漂移在此变红；domain.set 是写口，按安全链评审单列，不在此表
     assert_eq!(
         COMMANDS,
-        ["status", "health", "logs", "ota", "counters", "reboot"]
+        [
+            "status",
+            "health",
+            "logs",
+            "ota",
+            "counters",
+            "reboot",
+            "wiring",
+            "contracts"
+        ]
     );
 }
 
@@ -121,6 +131,12 @@ fn malformed_envelope_is_an_error_not_a_panic() {
     assert!(format_counters(&json!({"result": {"counters": 3}})).is_err());
     assert!(format_reboot(&json!({"result": {}})).is_err());
     assert!(format_reboot(&json!({"result": {"reboot": false}})).is_err());
+    assert!(format_wiring(&json!({})).is_err());
+    assert!(
+        format_wiring(&json!({"result": {"available": true}})).is_err(),
+        "available:true 但缺 pins 数组 = 形状错，不得渲染空表"
+    );
+    assert!(format_contracts(&json!({"result": {"available": true}})).is_err());
 }
 
 #[test]
@@ -170,6 +186,83 @@ fn reboot_success_renders_acknowledgement() {
     let env = json!({"result": {"reboot": true}});
     let out = format_reboot(&env).unwrap();
     assert!(out.contains("重启"), "{out}");
+}
+
+/// `wiring` 渲染（续轮十五）：六段齐全、判果 FAIL 显形、角色数组按逗号拼接；
+/// 空段打 `（无）` 不输出只有表头的噪声。
+#[test]
+fn wiring_renders_all_sections_and_flags_failed_checks() {
+    let env = json!({"result": {
+        "available": true,
+        "pins": [{"pin_id": "servo.pwm", "role": "servo", "instance": "main",
+                  "controller": "pwm0", "channel": 0, "physical": "GPIO12",
+                  "direction": "out", "rail": "V5", "addr": 0, "device": "pwm",
+                  "failsafe": true, "mux_group": "g0"}],
+        "domains": [{"name": "V5", "nominal_mv": 5000, "mild_mv": 4500,
+                     "severe_mv": 4000, "current_cap_ma": 2000, "sense": "ina219",
+                     "current_sense": "none", "switch": "none", "switchable": false,
+                     "armed": false, "max_age_ms": 1000, "evidence": "measured"}],
+        "wires": [],
+        "axis": [{"pin": "servo.pwm", "center_deg": 90, "lo_deg": 0, "hi_deg": 180,
+                  "dir_sign": 1, "slew_deg_s": 120, "settle_ms": 300, "hold": "brake",
+                  "current_ceil_ma": 900, "warmup_ms": 0, "hard_stop": "clamp",
+                  "calibrated": false, "source": "assumption"}],
+        "roles": [{"name": "servo", "slot": "act.servo", "direction": "out",
+                   "requires": ["power.v5", "pwm.timer0"], "derives": []}],
+        "checks": [{"item": "rail 覆盖", "pass": true, "reason": "ok"},
+                   {"item": "电流加总", "pass": false, "reason": "超 2000mA"}]
+    }});
+    let out = format_wiring(&env).unwrap();
+    for seen in [
+        "PINS（1）",
+        "servo.pwm",
+        "DOMAINS（1）",
+        "WIRES（0）",
+        "（无）",
+        "AXIS（1）",
+        "ROLES（1）",
+        "power.v5,pwm.timer0",
+        "CHECKS（1/2 通过）",
+        "FAIL",
+        "超 2000mA",
+        "false",
+    ] {
+        assert!(out.contains(seen), "wiring 输出缺 {seen}: {out}");
+    }
+}
+
+/// 快照未在册（`--manifest` 调试路径）：如实报不可得与原因，不造表。
+#[test]
+fn wiring_unavailable_reports_the_reason_without_tables() {
+    let env = json!({"result": {"available": false, "reason": "未以 --profile 启动"}});
+    let out = format_wiring(&env).unwrap();
+    assert!(out.contains("不可得") && out.contains("--profile"), "{out}");
+    assert!(!out.contains("PINS"), "不可得时不得造表: {out}");
+}
+
+/// `contracts` 渲染：四册账、真值集账与判果三段；sha256 全量可对账。
+#[test]
+fn contracts_renders_books_truth_set_and_checks() {
+    let env = json!({"result": {
+        "available": true,
+        "contracts": [{"file": "topics.toml", "sha256": "ab12", "bytes": 321}],
+        "truth_set": [{"member": "rrd", "sha256": "cd34", "bytes": 654}],
+        "checks": [{"item": "齐全", "pass": true, "reason": "四册在册"}]
+    }});
+    let out = format_contracts(&env).unwrap();
+    for seen in [
+        "CONTRACTS（1）",
+        "topics.toml",
+        "ab12",
+        "321",
+        "TRUTH_SET（1）",
+        "rrd",
+        "cd34",
+        "CHECKS（1/1 通过）",
+        "四册在册",
+    ] {
+        assert!(out.contains(seen), "contracts 输出缺 {seen}: {out}");
+    }
 }
 
 /// 真往返：起一个假的"最小 rrd"（accept → 读一帧 → 回 canned 应答），
@@ -270,6 +363,21 @@ mod unix_tests {
         assert!(
             err.contains("-22") && err.contains("RR3_REBOOT_OK"),
             "拒绝应带码与文案: {err}"
+        );
+    }
+
+    /// wiring 真往返：协议面与渲染面各钉一半（空快照也须给出六段标题）。
+    #[test]
+    fn wiring_roundtrip_renders_the_fake_rrds_reply() {
+        let bus = spawn_fake_rrd(
+            json!({"result": {"available": true, "pins": [], "domains": [], "wires": [],
+                              "axis": [], "roles": [], "checks": []}})
+            .to_string(),
+        );
+        let out = run("wiring", &bus).expect("往返应成功");
+        assert!(
+            out.contains("PINS（0）") && out.contains("CHECKS（0/0 通过）"),
+            "{out}"
         );
     }
 }

@@ -1333,7 +1333,7 @@ schema 维持空缺不冻结，冻结与 rrd shm 接线绑定同一份后续 ADR
 结项批。`docs/process/dev/0.0.5版本洛克三号对齐与裁定方案.md` §2 裁定记录段落档。
 ①a–⑤ 全绿重跑。裁定后 T2–T5 依序解锁。
 2026-10-05 0.0.5 批B（T2 rrctl 补 `counters`/`reboot` 两子命令——CLI 四→六与 rrd ctl
-白名单对齐，Q1 裁定落地）**纯 rrctl 面改动**：`tools/rrctl/src/commands.rs` COMMANDS
+白名单对齐，Q1 裁定落地）**纯 rrctl 面改动**：`tools/rrctl/src/commands/mod.rs` COMMANDS
 4→6（`counters`/`reboot` append，与 `rr3.ctl.*` 白名单六方法逐一同名对齐，配套单测
 钉死方法名不漂移）；`format_counters` 按模块前缀分组成 MODULE/KEY/VALUE 人读表
 （`模块名/键` 拆前缀，rrd 自有键如 `boots` 无前缀归 `rrd` 组，空表打"无计数"，
