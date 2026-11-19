@@ -7,6 +7,10 @@
 必须从仓库根或任意子目录执行——脚本自己 `git rev-parse --show-toplevel` 定位仓库根，
 不在 git 仓库内则直接拒绝执行。
 
+**步骤体拆分（2026-11-20）**：`check.sh` 保留 `step` 标题与调用序；各步实现按族放
+`tools/ci/steps/<id>.sh`，由入口显式 source。`gate_steps_audit.py` 仍解析入口的
+`step` 行，步骤清单与顺序不因搬文件而失锚。
+
 | 步 | 命令 | 覆盖 |
 |---|---|---|
 | ① | `cargo check --all-targets --workspace`（在 `base/runtime`） | 编译，含 `#[cfg(test)]` 目标 |
