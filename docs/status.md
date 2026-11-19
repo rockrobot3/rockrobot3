@@ -109,7 +109,9 @@ CI runner 单次 `boot_max=60ms` 佐证同一结论）。跨环境比较只看"�
 **实时性基线（sim 档，2026-11-17 首立；2026-11-19 补 CI 回执）**
 
 判据载体：`rr3-sim --chain --hold-ms`（取证后保持稳态，每 500ms 采 `rr3-ctl health`，
-聚合各产品模块 `since_beat_ms` 与 `beat_peak_ms` 峰值；观察者 `rr3-obs` 不计）。
+聚合各产品模块 `since_beat_ms` 与 `beat_peak_ms` 峰值；观察者 `rr3-obs` 不计；
+每模块 `fan_dropped`（health FAN_DROP 列）同拍聚合，稳态判据要求逐模块为 0，
+丢帧时错误文案点名到具体模块）。
 判据＝四产品模块末拍 `running`、两路峰值不触各自 `watchdog_ms`（sim 档心跳 200ms /
 看门狗 1000ms），且收尾 `rr3-ctl status` 的 `fan_dropped` / `fan_write_timeout` /
 `log_sink_slow` 为 0（积压丢帧 / 对端不收 / 慢写三条单调计数收尾为 0 即全程未发生）。CI `sim-chain` 缺省 hold 60s
