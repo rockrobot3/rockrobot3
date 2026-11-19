@@ -36,15 +36,18 @@ use rr_ipc::{
 use serde_json::{json, Value};
 
 mod client;
+mod ctl;
 mod fixture;
 mod frames;
 mod inst;
 
-// 四组各自是独立子模块，重导出即 support 的对外面：某个测试二进制只消费其中
+// 各组各自是独立子模块，重导出即 support 的对外面：某个测试二进制只消费其中
 // 一两组时，其余组的 glob 重导出会被判"未用导入"——那是按测试二进制分别算的
 // 口径产物，不是漏用，统一在本行放行（组内符号仍受拆件前同款 dead_code 纪律）。
 #[allow(unused_imports)]
 pub use client::*;
+#[allow(unused_imports)]
+pub use ctl::*;
 #[allow(unused_imports)]
 pub use fixture::*;
 #[allow(unused_imports)]
