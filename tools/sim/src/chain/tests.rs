@@ -319,6 +319,25 @@ fn steady_tail_requires_fan_dropped_line() {
 }
 
 #[test]
+fn steady_check_names_the_dropping_module() {
+    let mut four = String::new();
+    for m in RR3_STEADY_MODS {
+        let row = if m == "rr3-sense" {
+            format!("{m}  2  running  200  1000  80  0  ?  2\n")
+        } else {
+            steady_row(m, "running", 200, 1000, 80)
+        };
+        four.push_str(&row);
+    }
+    let mut agg = Rr3SteadyAgg::default();
+    agg.rr3_steady_feed(&four).unwrap();
+    steady_tail_ok(&mut agg);
+    let e = agg.rr3_steady_check().unwrap_err();
+    assert!(e.contains("模块级丢帧"), "{e}");
+    assert!(e.contains("rr3-sense=2"), "丢帧必须点名到模块: {e}");
+}
+
+#[test]
 fn steady_feed_reads_peak_column() {
     let mut agg = Rr3SteadyAgg::default();
     agg.rr3_steady_feed("rr3-act  2  running  200  1000  150  260  ?  0\n")

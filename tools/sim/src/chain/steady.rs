@@ -5,7 +5,8 @@
 //! - 四个产品模块在每拍都在表内（观察者是夹具，跳过不计）；
 //! - 末拍全部 `running`（保持期间掉线/重启即失败）；
 //! - 各模块 `since_beat_ms` 与 `beat_peak_ms` 峰值不触自己的 `watchdog_ms`
-//!   （触线 = 判活输入已到边缘，rrd 下一轮就可能收尸）；
+//!   （触线 = 判活输入已到边缘，rrd 下一轮就可能收尸），且各模块 `fan_dropped`
+//!   为 0（丢帧点名到具体模块，便于直接查它的读循环）；
 //! - 收尾 `rr3-ctl status` 的三个**单调**计数为 0：`fan_dropped`（广播积压丢帧）、
 //!   `fan_write_timeout`（对端 5s 不收）与 `log_write slow`（单次落盘 ≥50ms）——
 //!   单调计数收尾为 0 即证明全程未发生；同时把 `log_sink_max_us`（全程峰值）
@@ -38,6 +39,8 @@ pub(crate) struct Rr3SteadyMod {
     pub(crate) heartbeat_ms: u64,
     pub(crate) watchdog_ms: u64,
     pub(crate) phase: String,
+    /// 该模块广播积压丢帧累计（health 表 FAN_DROP 列；慢消费者点名）
+    pub(crate) fan_dropped: u64,
 }
 
 /// 全段聚合：采样拍数与逐模块统计 + 收尾 status 的全局阻塞面读数。
@@ -72,6 +75,7 @@ impl Rr3SteadyAgg {
             e.heartbeat_ms = r.heartbeat_ms;
             e.watchdog_ms = r.watchdog_ms;
             e.phase = r.phase;
+            e.fan_dropped = e.fan_dropped.max(r.fan_dropped);
             if let Some(b) = r.boot_ms {
                 self.max_boot_ms = Some(self.max_boot_ms.unwrap_or(0).max(b));
             }
@@ -94,8 +98,10 @@ impl Rr3SteadyAgg {
         Ok(())
     }
 
-    /// 稳态判据：四模块在表、末拍 running、两路峰值不触看门狗、全局阻塞面为零。
+    /// 稳态判据：四模块在表、末拍 running、两路峰值不触看门狗、无模块级丢帧、
+    /// 全局阻塞面为零。
     pub(crate) fn rr3_steady_check(&self) -> Result<(), String> {
+        let mut drops: Vec<String> = Vec::new();
         for m in RR3_STEADY_MODS {
             let Some(e) = self.mods.get(m) else {
                 return Err(format!("稳态段缺模块 {m}（保持期间未注册或已退场）"));
@@ -115,6 +121,15 @@ impl Rr3SteadyAgg {
                     e.max_peak_ms, e.watchdog_ms
                 ));
             }
+            if e.fan_dropped > 0 {
+                drops.push(format!("{m}={}", e.fan_dropped));
+            }
+        }
+        if !drops.is_empty() {
+            return Err(format!(
+                "稳态段模块级丢帧：{}（该模块读速跟不上广播积压；查其读循环与订阅面）",
+                drops.join(" ")
+            ));
         }
         match (self.fan_dropped, self.fan_wr_timeout, self.log_slow) {
             (Some(0), Some(0), Some(0)) => Ok(()),
@@ -129,11 +144,16 @@ impl Rr3SteadyAgg {
     /// 报告文本（模块名字典序；列宽固定，便于回执对读）。
     pub(crate) fn rr3_steady_text(&self, hold_ms: u64) -> String {
         let mut out = format!("稳态段：hold {hold_ms}ms，采样 {} 拍\n", self.samples);
-        out.push_str("模块  最大 since_beat(ms)  续命峰值(ms)  心跳(ms)  看门狗(ms)  末拍\n");
+        out.push_str("模块  最大 since_beat(ms)  续命峰值(ms)  心跳(ms)  看门狗(ms)  丢帧  末拍\n");
         for (name, e) in &self.mods {
             out.push_str(&format!(
-                "{name}  {}  {}  {}  {}  {}\n",
-                e.max_since_ms, e.max_peak_ms, e.heartbeat_ms, e.watchdog_ms, e.phase
+                "{name}  {}  {}  {}  {}  {}  {}\n",
+                e.max_since_ms,
+                e.max_peak_ms,
+                e.heartbeat_ms,
+                e.watchdog_ms,
+                e.fan_dropped,
+                e.phase
             ));
         }
         out.push_str(&format!(
@@ -223,6 +243,7 @@ struct Rr3SteadyRow {
     since_ms: u64,
     peak_ms: u64,
     boot_ms: Option<u64>,
+    fan_dropped: u64,
 }
 
 /// 解析一行 health；`beat_peak_ms` 列缺位按 0（旧格式兼容，不静默当健康）。
@@ -239,6 +260,8 @@ fn rr3_steady_row(line: &str) -> Result<Option<Rr3SteadyRow>, String> {
     }
     let peak_ms = rr3_steady_opt_num(&f, 6, line, "beat_peak_ms")?.unwrap_or(0);
     let boot_ms = rr3_steady_opt_num(&f, 7, line, "boot_ms")?;
+    // FAN_DROP 列缺位按 0（旧格式兼容；数值错仍报错）
+    let fan_dropped = rr3_steady_opt_num(&f, 8, line, "fan_dropped")?.unwrap_or(0);
     Ok(Some(Rr3SteadyRow {
         name: f[0].to_string(),
         phase: f[2].to_string(),
@@ -247,6 +270,7 @@ fn rr3_steady_row(line: &str) -> Result<Option<Rr3SteadyRow>, String> {
         since_ms: rr3_steady_num(f[5], line, "since_beat_ms")?,
         peak_ms,
         boot_ms,
+        fan_dropped,
     }))
 }
 
