@@ -9,10 +9,11 @@
 
 **步骤体拆分（2026-11-20）**：`check.sh` 保留 `step` 标题与调用序；各步实现按族放
 `tools/ci/steps/<id>.sh`，由入口显式 source。`gate_steps_audit.py` 仍解析入口的
-`step` 行，步骤清单与顺序不因搬文件而失锚。当前已拆：`7`（§13 静态断言五门）、
-`8`（件级判据三门）、`9y`（跨平台可编面）、`9a`（角色覆盖）、
-`9n`/`9c`/`9r`/`9z`（四个静态门）、`9w`（依赖面禁令）、`10`（门 d 面板覆盖率）、
-`13`（仓面卫生门）。
+`step` 行，步骤清单与顺序不因搬文件而失锚。当前已拆：`4b`（独立工程 clippy）、
+`5`（文档门）、`6`（测试接线）、`7`（§13 静态断言五门）、`8`（件级判据三门）、
+`9y`（跨平台可编面）、`9a`（角色覆盖）、`9n`/`9c`/`9r`/`9z`（四个静态门）、
+`9w`（依赖面禁令）、`10`（门 d 面板覆盖率）、`13`（仓面卫生门）、
+`14`（装载门体量基线）、`16`（源文件行数门）。
 
 | 步 | 命令 | 覆盖 |
 |---|---|---|
@@ -33,9 +34,9 @@
 | ⑩ | `steps/10.sh`（读 contracts 快照与分母基线） | 面板覆盖率对账（门 d）：分子 = covers 申报 + applies 生效路径，分母 = 字段级五路并集；红账 0、分母下限 83，缩分母即红 |
 | ⑫ | `python3 tools/ci/metrics.py`（真值 `metrics-baseline.json`） | 质量度量门：重复率 ≤3%、CC 均值 ≤2.50 / 最大 ≤11、生产函数 >80 行 ≤5、生产 panic ≤60、>20B 生产函数名 0、≥1000ms 长睡 0；基线只降不升 |
 | ⑬ | `steps/13.sh`（git grep + git status） | 仓面卫生门：追踪文件无本机绝对路径、无构建目录、源码类新件必须入册、shell `$name` 后接非 ASCII 即红 |
-| ⑯ | `check.sh` ⑯ 段 | 源文件行数门：每个 `.rs` <600 行；超标文件数按 `gate-lines-baseline.txt` 只降不升 |
-| ⑭ | `check.sh` ⑭ 段 | 装载门体量基线门（裁-13/基-38）：装配单锚函数的块行数、`read_to_string` 样板数、rr-registry 同形函数数按 `gate-size-baseline.txt` 只降不升；锚函数缺失或基线形状坏即红 |
+| ⑭ | `steps/14.sh` | 装载门体量基线门（裁-13/基-38）：装配单锚函数的块行数、`read_to_string` 样板数、rr-registry 同形函数数按 `gate-size-baseline.txt` 只降不升；锚函数缺失或基线形状坏即红 |
 | ⑮ | `python3 tools/ci/lockio_audit.py`（先 `--self-test`） | 锁内 I/O 门：`lock·log` 同行 / 条件位临时 guard 延寿到块体 / 直调会写待落盘日志的 registry 方法；扫面打空即门禁失效；gate `scripts` 同源执法 |
+| ⑯ | `steps/16.sh` | 源文件行数门：每个 `.rs` <600 行；超标文件数按 `gate-lines-baseline.txt` 只降不升 |
 
 **基线只降不升审计（`baselines_audit.py`，gate `scripts` job）**：把 `tools/ci/*-baseline.*`
 与 base ref 的同名文件逐键比对——已存在的键上调即红；新键/缺键告警；未登记基线文件即红。
