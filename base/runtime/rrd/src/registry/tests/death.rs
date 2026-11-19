@@ -158,6 +158,22 @@ fn crash_budget_survives_reregistration_and_caps_after_five_incarnations() {
     let _ = t;
 }
 
+/// 达上限不是"只打一行日志"：health 行必须把崩溃连击与终态一起回显，
+/// 外部（ctl/面板/运维脚本）才能把"永久降级"与"正在重启"区分开。
+#[test]
+fn health_exposes_restart_exhausted_at_cap() {
+    let mut r = RrdRegistry::new(1000);
+    let f = || facts("rr3-sima", 100, 500, "always");
+    for i in 0..RR3_RESTART_FAILURE_CAP {
+        let _t = r.rr3_reg_add(&f(), chan().0, i as u64 * 10).unwrap();
+        let _ = r.rr3_reg_death("rr3-sima", false, i as u64 * 10 + 5);
+    }
+    let rows = r.rr3_reg_health(100);
+    let row = rows.iter().find(|x| x.name == "rr3-sima").expect("在册行");
+    assert_eq!(row.crash_streak, RR3_RESTART_FAILURE_CAP);
+    assert!(row.restart_exhausted, "达上限必须可读为终态");
+}
+
 /// 到期那一路也记账，且**只记一次**：判死后 conn 再收尾不得双计（ledger R-A4 的收口）
 #[test]
 fn expiry_charges_once_and_the_later_conn_death_is_silent() {

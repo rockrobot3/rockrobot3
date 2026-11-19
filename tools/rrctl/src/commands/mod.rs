@@ -242,6 +242,13 @@ fn rr3_cell_num(v: &Value) -> String {
     v.as_u64().map_or("?".to_string(), |n| n.to_string())
 }
 
+/// 布尔渲染：`yes` / `no`；缺字段或非布尔显式 `?`（与数字口径同一条）。
+fn cell_bool(v: &Value, key: &str) -> String {
+    v[key].as_bool().map_or("?".to_string(), |b| {
+        if b { "yes" } else { "no" }.to_string()
+    })
+}
+
 fn format_status(envelope: &Value) -> Result<String, String> {
     let (result, modules) = rr3_ctl_modules(envelope)?;
     let rows: Vec<Vec<String>> = modules
@@ -332,6 +339,8 @@ fn format_health(envelope: &Value) -> Result<String, String> {
                 cell(m, "beat_peak_ms"),
                 cell(m, "boot_ms"),
                 cell(m, "fan_dropped"),
+                cell(m, "crash_streak"),
+                cell_bool(m, "restart_exhausted"),
             ]
         })
         .collect();
@@ -346,6 +355,8 @@ fn format_health(envelope: &Value) -> Result<String, String> {
             "PEAK_MS",
             "BOOT_MS",
             "FAN_DROP",
+            "CRASH",
+            "EXHAUSTED",
         ],
         &rows,
     ))

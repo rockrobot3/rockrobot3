@@ -151,23 +151,32 @@ fn rr3_ctl_status(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
 /// ctl.health 读面：心跳健康快照（watchdog 判活的输入）+ 降级原因
 /// （模块 / 类别 / 点名文案；未定格的后门路径为 null，不造假值）。
 fn rr3_ctl_health(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
-    let modules = {
+    let rows = {
         let g = rr3_lock(&ctx.shared);
         g.rr3_reg_health(ctx.rr3_ctx_now_ms())
-            .into_iter()
-            .map(|r| {
-                json!({
-                    "name": r.name, "task": r.src_task, "phase": r.phase.as_str(),
-                    "heartbeat_ms": r.heartbeat_ms, "watchdog_ms": r.watchdog_ms,
-                    "since_beat_ms": r.since_beat_ms, "boot_ms": r.boot_ms,
-                    "beat_peak_ms": r.beat_peak_ms,
-                    "fan_dropped": r.fan_dropped,
-                })
-            })
-            .collect::<Vec<Value>>()
     };
+    let exhausted: Vec<String> = rows
+        .iter()
+        .filter(|r| r.restart_exhausted)
+        .map(|r| r.name.clone())
+        .collect();
+    let modules = rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "name": r.name, "task": r.src_task, "phase": r.phase.as_str(),
+                "heartbeat_ms": r.heartbeat_ms, "watchdog_ms": r.watchdog_ms,
+                "since_beat_ms": r.since_beat_ms, "boot_ms": r.boot_ms,
+                "beat_peak_ms": r.beat_peak_ms,
+                "fan_dropped": r.fan_dropped,
+                "crash_streak": r.crash_streak,
+                "restart_exhausted": r.restart_exhausted,
+            })
+        })
+        .collect::<Vec<Value>>();
     Ok(json!({
         "modules": modules,
+        "restart_exhausted": exhausted,
         "degraded": crate::rr3_degrade_get(),
     }))
 }
