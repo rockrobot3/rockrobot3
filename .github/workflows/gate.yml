@@ -313,8 +313,8 @@ jobs:
       # SKIP 纪律单点：本地缺工具链退 0，CI 内缺工具链退 1（覆盖缺口不得冒充绿）。
       - name: SKIP 纪律自检（本地 SKIP / CI 即红）
         run: bash tools/ci/skip.sh --self-test
-      # 步骤清单是 check.sh 的显式契约：删/改/换序一个 step 都会被这条抓住。
-      - name: 门禁步骤清单自检（一致/删除/新增/改名/换序/打空六例）
+      # 步骤清单是 check.sh 的显式契约：删/改/换序一个 step、或一号两门，都会被这条抓住。
+      - name: 门禁步骤清单自检（一致/删除/新增/改名/换序/门号重复/子号放行/打空八例）
         run: python3 tools/ci/gate_steps_audit.py --self-test
       - name: 门禁步骤清单（check.sh 与 gate_steps.txt 逐字同序）
         run: python3 tools/ci/gate_steps_audit.py
