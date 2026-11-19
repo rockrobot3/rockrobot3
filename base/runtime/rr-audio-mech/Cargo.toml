@@ -1,0 +1,12 @@
+[package]
+name = "rr-audio-mech"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "语音机制核：VAD/DoA/切段/WAV 的整数纯逻辑（no_std，零平台依赖）"
+
+[lib]
+name = "rr_audio_mech"
+path = "src/lib.rs"

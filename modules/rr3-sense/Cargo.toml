@@ -22,6 +22,8 @@ alsa = ["rr-hal/alsa"]
 # path 依赖进仓内三件套（勿用 crates.io 同名包）；serde_json/toml 用具体版本——
 # 本 crate 是独立 workspace，吃不到 base/runtime 的 workspace 继承
 rr-ipc = { path = "../../base/runtime/rr-ipc" }
+# 语音机制核（W1-1）：VAD/DoA 整数纯逻辑，no_std、零平台依赖；宿主与固件共用。
+rr-audio-mech = { path = "../../base/runtime/rr-audio-mech" }
 # 总线承载契约面（基-35 窄化②/批N9 件一）：承载客户端走 rr_bus_api；语义常量直引
 # rr-core（真值单点，不经 re-export 中介）。
 rr-bus-api = { path = "../../base/runtime/rr-bus-api" }
