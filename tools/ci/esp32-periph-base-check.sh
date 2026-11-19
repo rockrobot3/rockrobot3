@@ -110,6 +110,16 @@ else
   fail=1
 fi
 
+# ⑦c W3-2a 自治档编译面（autonomy feature：SNTP 对时；默认固件零行为变化）
+if cargo +esp build --features autonomy \
+     --config 'source.crates-io.replace-with="rsproxy-sparse"' \
+     --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
+  echo "PASS  classic autonomy 档构建（W3-2a SNTP）"
+else
+  echo "FAIL  classic autonomy 档构建失败" >&2
+  fail=1
+fi
+
 # ⑧ 纯逻辑单测编译面（批N13 件一：httpd 路由/漂移/JSON 形状单测；批N14 cred
 #    零回显契约单测；批N23 件一起 atoms/<名>/mech.rs 机制核单测——xtensa 目标
 #    本机不可跑，--no-run 只验测试码编译；xtensa 测试 harness 执行面归真板批）
@@ -119,7 +129,7 @@ esp_test_log=/tmp/rr3-esp32-periph-test.log
 # `-Zpanic_abort_tests`：panic=abort 下测试 harness 的唯一合法形状，缺失时 rustc
 # 直接拒编（"building tests with panic=abort is not supported"）。
 esp_test_rf="--cfg espidf_time64 -Zunstable-options -Cpanic=immediate-abort -Zpanic_abort_tests"
-if RUSTFLAGS="$esp_test_rf" cargo +esp test --no-run --features spk-tone \
+if RUSTFLAGS="$esp_test_rf" cargo +esp test --no-run --features spk-tone,autonomy \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
      >"$esp_test_log" 2>&1; then

@@ -26,6 +26,8 @@ esp32 = []
 esp32s3 = []
 # W4-1 I2S TX 仪式档：仅用于功放/扬声器上板验收（编译期开，不影响默认固件）。
 spk-tone = []
+# W3-2 自治形态：SNTP 对时与后续自治任务接线（默认固件零行为变化）。
+autonomy = []
 
 # 批D③ 真板实锤（2026-10-13）：dev 缺省 opt-level=0 下 mic 线程的逐元素堆写
 # （extend_from_slice / String::push / serde_json 序列化）慢两个数量级——组帧
