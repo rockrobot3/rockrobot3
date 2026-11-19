@@ -35,7 +35,7 @@ for b in rrd rr3-ctl rr3-ota-ctl; do
   [ -x "$rel/$b" ] || { echo "缺产物 $rel/${b}（先原生 cargo build --release）" >&2; exit 1; }
 done
 [ -x "$pack_bin" ] || {
-  echo "缺打包器 $pack_bin（交叉腿用 RR3_PACK_BIN 指向宿主原生 rr3-pack）" >&2
+  echo "缺打包器 ${pack_bin}（交叉腿用 RR3_PACK_BIN 指向宿主原生 rr3-pack）" >&2
   exit 1
 }
 for m in act brain connect interact sense power; do

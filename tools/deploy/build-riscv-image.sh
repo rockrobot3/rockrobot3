@@ -28,7 +28,7 @@ export AR_riscv64_unknown_linux_gnu="${AR_riscv64_unknown_linux_gnu:-riscv64-lin
 for b in "$CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER" \
          "$CC_riscv64_unknown_linux_gnu" "$AR_riscv64_unknown_linux_gnu"; do
   command -v "$b" >/dev/null || {
-    echo "ERROR: 缺交叉工具 $b（apt install gcc-riscv64-linux-gnu）" >&2
+    echo "ERROR: 缺交叉工具 ${b}（apt install gcc-riscv64-linux-gnu）" >&2
     exit 1
   }
 done
