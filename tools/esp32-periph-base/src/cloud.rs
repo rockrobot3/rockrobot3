@@ -19,6 +19,7 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
+use esp_idf_sys::esp_http_client_method_t_HTTP_METHOD_POST;
 use esp_idf_sys::{
     esp_crt_bundle_attach, esp_http_client_cleanup, esp_http_client_config_t,
     esp_http_client_fetch_headers, esp_http_client_get_status_code, esp_http_client_handle_t,
@@ -52,8 +53,6 @@ const TTS_STACK: usize = 24_576;
 const HTTP_TIMEOUT_MS: i32 = 8_000;
 /// 重试间隔（契约 §4）。
 const RETRY_DELAY_MS: u64 = 500;
-/// IDF `esp_http_client_method_t` 的 POST 枚举值（GET=0、POST=1）。
-const HTTP_METHOD_POST: u32 = 1;
 /// worker 空转周期（只为及时退出，不承担心跳——dialog 归 W6）。
 const IDLE_MS: u64 = 2_000;
 
@@ -104,7 +103,7 @@ fn nvs_get(key: &str, max: usize) -> Option<String> {
     let read = opened
         && unsafe { nvs_get_str(h, k.as_ptr(), buf.as_mut_ptr() as *mut _, &mut len) } == ESP_OK;
     // SAFETY：无论读成败，句柄都由本函数成对关闭。
-    opened.then(|| unsafe { nvs_close(h) });
+    let _ = opened.then(|| unsafe { nvs_close(h) });
     read.then(|| {
         let end = buf
             .iter()
@@ -255,7 +254,7 @@ fn rr3_http_post(url: &str, key: &str, body: &[u8]) -> Result<Vec<u8>, String> {
     };
     let cfg = esp_http_client_config_t {
         url: url_c.as_ptr(),
-        method: HTTP_METHOD_POST,
+        method: esp_http_client_method_t_HTTP_METHOD_POST,
         timeout_ms: HTTP_TIMEOUT_MS,
         crt_bundle_attach: Some(esp_crt_bundle_attach),
         ..Default::default()
