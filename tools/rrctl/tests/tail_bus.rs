@@ -18,7 +18,7 @@ use rr_ipc::{
 };
 use serde_json::{json, Value};
 
-const RR3_TAIL_SRC: u32 = 7;
+const RR3_TAIL_SRC: u64 = 7;
 
 /// 假 rrd 的回放剧本。
 enum Mode {
@@ -40,7 +40,7 @@ fn tmp_bus(tag: &str) -> PathBuf {
 }
 
 /// 按当前时间造一帧 SEND（payload 类型由调用方给：Response / Event）。
-fn frame_send(src: u32, dst: u32, ty: Rr3PayloadType, body: &str) -> Rr3Frame {
+fn frame_send(src: u64, dst: u64, ty: Rr3PayloadType, body: &str) -> Rr3Frame {
     let payload = rr3_body_encode(ty, body.as_bytes());
     Rr3Frame {
         header: Rr3Header {
@@ -60,7 +60,7 @@ fn frame_send(src: u32, dst: u32, ty: Rr3PayloadType, body: &str) -> Rr3Frame {
     }
 }
 
-fn reply(stream: &mut UnixStream, id: u64, result: Value) -> std::io::Result<()> {
+fn reply(stream: &mut UnixStream, id: u64, result: Value) -> Result<(), rr_ipc::Rr3FrameError> {
     let body = json!({"jsonrpc": "2.0", "id": id, "result": result}).to_string();
     rr3_frame_write(
         stream,
@@ -68,7 +68,7 @@ fn reply(stream: &mut UnixStream, id: u64, result: Value) -> std::io::Result<()>
     )
 }
 
-fn event(stream: &mut UnixStream, body: Value) -> std::io::Result<()> {
+fn event(stream: &mut UnixStream, body: Value) -> Result<(), rr_ipc::Rr3FrameError> {
     let text = body.to_string();
     rr3_frame_write(
         stream,
