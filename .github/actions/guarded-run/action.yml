@@ -35,7 +35,9 @@ runs:
           . "${pre}"
         fi
         if ! bash -c "${GUARDED_CMD}" 2>&1 | tee "${log}"; then
-          errs="$(grep -iE 'error(\[|:)|failed|错误|FAIL' "${log}" | tail -4 | tr '\n' ' ')"
+          # 取错误行连同后 3 行上下文（rustc 的 `-->` 位置与 expected/found 在
+          # 后两行；只抓 error 行会退化成"mismatched types 盲猜"，2026-11-19 实测）。
+          errs="$(grep -A3 -iE 'error(\[|:)|^FAIL|错误|failed' "${log}" | head -60 | tr '\n' ' ' | tr -s ' ')"
           echo "::error title=${GUARDED_TITLE}::${errs:0:900}"
           exit 1
         fi
