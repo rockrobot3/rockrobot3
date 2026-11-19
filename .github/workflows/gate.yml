@@ -93,7 +93,7 @@ jobs:
       - name: clippy -D warnings（base/runtime + 全部独立工程）
         run: |
           set -o pipefail
-          if ! cargo clippy --all-targets --manifest-path base/runtime/Cargo.toml --workspace -- -D warnings 2>&1 | tee /tmp/clippy.log; then
+          if ! cargo clippy --locked --all-targets --manifest-path base/runtime/Cargo.toml --workspace -- -D warnings 2>&1 | tee /tmp/clippy.log; then
             bash tools/ci/log-digest.sh --title clippy --log /tmp/clippy.log \
               --sig 'error(\[|:)|warning: unused' --tail 12
             exit 1
@@ -101,7 +101,7 @@ jobs:
           while IFS= read -r -d '' m; do
             # 独立工程逐个编译：失败按同一口径压成单行注解（cargo 失败退出码是 101，
             # 不带本注解时 GitHub 只报"exit code 101"，根因不可见）。
-            if ! cargo clippy -q --all-targets --manifest-path "$m" -- -D warnings 2>&1 | tee /tmp/clippy_one.log; then
+            if ! cargo clippy --locked -q --all-targets --manifest-path "$m" -- -D warnings 2>&1 | tee /tmp/clippy_one.log; then
               bash tools/ci/log-digest.sh --title "clippy($m)" --log /tmp/clippy_one.log \
                 --sig 'error(\[|:)|warning: unused' --tail 12
               exit 1
@@ -173,14 +173,14 @@ jobs:
       - name: rr-hal alsa 特性全目标编译 + 单测
         run: |
           set -o pipefail
-          if ! cargo check --all-targets --manifest-path base/runtime/Cargo.toml \
+          if ! cargo check --locked --all-targets --manifest-path base/runtime/Cargo.toml \
                -p rr-hal --features alsa 2>&1 | tee /tmp/alsa.log; then
             bash tools/ci/log-digest.sh --title alsa --log /tmp/alsa.log \
               --sig 'error(\[|:)' --tail 12
             exit 1
           fi
           # 单测不打开音频设备（选择器只在 open 时真连 PCM），CI 无设备也可跑。
-          if ! cargo test -q --manifest-path base/runtime/Cargo.toml \
+          if ! cargo test --locked -q --manifest-path base/runtime/Cargo.toml \
                -p rr-hal --features alsa --lib 2>&1 | tee /tmp/alsa-test.log; then
             bash tools/ci/log-digest.sh --title alsa-test --log /tmp/alsa-test.log \
               --sig 'error(\[|:)|FAILED|panicked at' --tail 12

@@ -302,7 +302,7 @@ jobs:
           workspaces: base/runtime
       - name: workspace 编译面（Windows）
         working-directory: base/runtime
-        run: cargo check --workspace
+        run: cargo check --locked --workspace
       # 缺口④补腿（续轮十六，扩面续轮十八）：独立工程（modules/tools/base/ota）不在
       # workspace 内，此前 Windows 面零覆盖。子集判据：不依赖仅 linux/macos 编译的
       # 模块（如 rr_ipc::transport::uart，raw termios），Unix 专属动作各自 cfg 门控
@@ -321,7 +321,7 @@ jobs:
           )
           foreach ($r in $roots) {
             Write-Output "== check $r"
-            cargo check --manifest-path "$r/Cargo.toml"
+            cargo check --locked --manifest-path "$r/Cargo.toml"
             if ($LASTEXITCODE -ne 0) {
               Write-Output "::error title=windows-independent::独立工程 $r 在 Windows 编不过"
               exit 1
@@ -338,7 +338,7 @@ jobs:
           # --message-format short：错误行自带 `file:line:col`。
           # Tee-Object 默认写 UTF-16，而 Select-String 按 UTF-8 读会零匹配（实测
           # "共 0 条"）——统一 -Encoding utf8，失败时再补日志尾部，避免只见 exit code。
-          cargo test --workspace --no-fail-fast --message-format short 2>&1 |
+          cargo test --locked --workspace --no-fail-fast --message-format short 2>&1 |
             Tee-Object -FilePath "$env:RUNNER_TEMP\win-test.log"
           if ($LASTEXITCODE -ne 0) {
             $log = "$env:RUNNER_TEMP\win-test.log"
@@ -381,7 +381,7 @@ jobs:
         working-directory: base/runtime
         run: |
           set -o pipefail
-          if ! cargo test --workspace 2>&1 | tee /tmp/mac.log; then
+          if ! cargo test --locked --workspace 2>&1 | tee /tmp/mac.log; then
             # 失败面要能定位到断言：test 行 + panic 位置 + 末 12 行（断言文案常在
             # panic 行的下一行，只抓 "test ... FAILED" 等于只报门牌号不报原因）。
             fails=$(grep -E "^test .* FAILED|^error(\[|:)|panicked at" /tmp/mac.log \
@@ -401,6 +401,6 @@ jobs:
                      -not -path "tools/espidf-sentinel/*" -not -path "tools/esp32-periph-base/*" \
                      | sort); do
             echo "=== $m ==="
-            cargo test -q --manifest-path "$m"
+            cargo test --locked -q --manifest-path "$m"
           done
 
