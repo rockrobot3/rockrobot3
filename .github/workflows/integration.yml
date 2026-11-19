@@ -127,7 +127,7 @@ jobs:
   # 时间），默认口径如实记"未跑"不冒领 PASS、退 0；矩阵出现 FAIL 列时退 1（job 红）。
   matrix:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -145,9 +145,18 @@ jobs:
       # 需要 binfmt——runner 缺省没有，缺它容器真跑失败（非 SKIP），① 被误判
       # "对拍破裂"致 job 红。ipct003 job 有同一步，此处与之同源。
       - uses: docker/setup-qemu-action@v4
+      # ② 机制核编译面要真跑 `cargo +esp`：此前本作业没装 esp 工具链，
+      # rr-core-xtensa-check.sh 以 SKIP 退 0，矩阵记为"未跑"；SKIP 收口后
+      # CI 内 SKIP 即红，本作业必须把工具链装上，让这一列有真实回执。
+      - uses: ./.github/actions/esp-toolchain
+        with:
+          targets: esp32
       - name: 点验矩阵出数（bash tools/ci/matrix.sh）
         run: |
           set -o pipefail
+          # espup 生成的环境脚本补齐 xtensa gcc/ldproxy 的 PATH；文件缺位时
+          # cargo +esp check 仍可走（check 不链接），故这里按可选前置处理。
+          [ -f "$HOME/export-esp.sh" ] && . "$HOME/export-esp.sh"
           if ! bash tools/ci/matrix.sh 2>&1 | tee /tmp/matrix.log; then
             fails=$(grep -E "(^| )FAIL" /tmp/matrix.log | tail -4 | tr '\n' ' ')
             echo "::error title=matrix::${fails:0:900}"
