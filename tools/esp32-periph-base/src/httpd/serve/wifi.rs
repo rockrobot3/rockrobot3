@@ -153,17 +153,16 @@ pub(super) unsafe fn wifi_sta_wait_conn() -> bool {
 pub(super) unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWriteResult {
     let old = crate::cred::rr3_cred_read(); // None＝原空态（回退目标＝erase）
                                             // 写 NVS（cred 模块内复验形制——毒不双入；败＝NVS 未动无需回退）
-    if crate::cred::rr3_cred_write(ssid, pass).is_err() {
+    let true = crate::cred::rr3_cred_write(ssid, pass).is_ok() else {
         return Rr3WifiWriteResult::rejected("nvs");
-    }
+    };
     // apply 新凭据（disconnect 返回值不看——未连态不阻断 apply 链；
     // set/connect 任一败一律进回退分支）
     esp_wifi_disconnect();
     let mut apply_ok = wifi_sta_set_cred(ssid.as_bytes(), pass.as_bytes()) == ESP_OK;
-    if apply_ok {
-        apply_ok = esp_wifi_connect() == ESP_OK;
-    }
-    if apply_ok && wifi_sta_wait_conn() {
+    apply_ok = apply_ok && esp_wifi_connect() == ESP_OK;
+    let applied = apply_ok && wifi_sta_wait_conn();
+    if applied {
         return Rr3WifiWriteResult {
             ok: true,
             connected: true,
@@ -172,30 +171,28 @@ pub(super) unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWrit
         };
     }
     // 新凭据未连——回退旧值（Some→写回；None→erase；cred 模块幂等语义在案）
-    let revert_ok = match &old {
-        Some(c) => crate::cred::rr3_cred_write(&c.ssid, c.pass()).is_ok(),
-        None => crate::cred::rr3_cred_erase().is_ok(),
-    };
-    if !revert_ok {
+    let revert_ok = old.as_ref().map_or_else(
+        || crate::cred::rr3_cred_erase().is_ok(),
+        |c| crate::cred::rr3_cred_write(&c.ssid, c.pass()).is_ok(),
+    );
+    let true = revert_ok else {
         return Rr3WifiWriteResult {
             ok: false,
             connected: false,
             reverted: false,
             stage: "revert",
         };
-    }
+    };
     // 回退写成功——apply 旧凭据重连（原空态＝停在断态，不 connect）
-    match &old {
-        Some(c) => {
+    old.as_ref().map_or_else(
+        || esp_wifi_disconnect(),
+        |c| {
             esp_wifi_disconnect();
             if wifi_sta_set_cred(c.ssid.as_bytes(), c.pass().as_bytes()) == ESP_OK {
                 let _ = esp_wifi_connect();
             }
-        }
-        None => {
-            esp_wifi_disconnect();
-        }
-    }
+        },
+    );
     let connected = wifi_sta_wait_conn();
     Rr3WifiWriteResult {
         ok: true,
@@ -214,31 +211,38 @@ pub(super) unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWrit
 /// WiFi 驱动，重复或并发调用会与 IDF 全局状态冲突。
 pub(super) unsafe fn wifi_bringup(ssid: &[u8], pass: &[u8]) -> Result<&'static str, i32> {
     // ① netif + 事件循环 + STA 缺省 netif（句柄留存——等连判据查 IP 用）
-    esp_ok(esp_netif_init())?;
-    esp_ok(esp_event_loop_create_default())?;
+    let r = esp_netif_init();
+    let true = r == ESP_OK else { return Err(r) };
+    let r = esp_event_loop_create_default();
+    let true = r == ESP_OK else { return Err(r) };
     let _ = STA_NETIF.set(esp_netif_create_default_wifi_sta() as usize);
     // ② WiFi 起栈（手抄宏配置见 wifi_default_config）
     let cfg = wifi_default_config();
-    esp_ok(esp_wifi_init(&cfg))?;
+    let r = esp_wifi_init(&cfg);
+    let true = r == ESP_OK else { return Err(r) };
     // **模式必须先于接口配置**（2026-10-31 真板排查）：IDF 的 esp_wifi_set_config
     // 按接口查"该接口是否已在当前模式里启用"，模式仍是缺省 STA 时配 AP 接口返回
     // ESP_ERR_INVALID_ARG——表现为配置腿整段起不来、板侧 AP 不可见，而其它功能
     // 全部正常（板活着但不配网，排查极易误判成 SoftAP 支持未编入）。
-    esp_ok(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_APSTA))?;
+    let r = esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_APSTA);
+    let true = r == ESP_OK else { return Err(r) };
     // AP 常开（SoftAP 配网面，见 wifi_ap_configure 注）：netif 与 config 须在
     // esp_wifi_start 前就位——IDF 在 start 时才拉起 AP/DHCP 服务。
     let ap_ssid = wifi_ap_configure()?;
     // STA 凭据（helper 共用——写口 apply/回退同款；位形已在 spawn 前验）；
     // ap-only 档空凭据不配置 STA，只起 AP
     if !ssid.is_empty() {
-        esp_ok(wifi_sta_set_cred(ssid, pass))?;
+        let r = wifi_sta_set_cred(ssid, pass);
+        let true = r == ESP_OK else { return Err(r) };
     }
-    esp_ok(esp_wifi_start())?;
+    let r = esp_wifi_start();
+    let true = r == ESP_OK else { return Err(r) };
     // STA 关联发起（批N15 件二真板取证实锤的缺陷修复：esp_wifi_start 只起驱动
     // 不自动连 AP——缺此步板永不关联、无 got ip；写口 apply/回退两路本就有
     // connect，唯 boot 路漏）。ap-only 档无 STA 目标，跳过。
     if !ssid.is_empty() {
-        esp_ok(esp_wifi_connect())?;
+        let r = esp_wifi_connect();
+        let true = r == ESP_OK else { return Err(r) };
     }
     Ok(ap_ssid)
 }

@@ -189,32 +189,21 @@ const RR3_PLAY_BODY_MAX: usize = 131_072;
 /// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
 #[cfg(feature = "tts")]
 pub(crate) unsafe fn handle_play(req: *mut httpd_req_t, _bus: &Arc<Mutex<Bus>>) -> i32 {
-    if !req_hdr_token_ok(req) {
+    let true = req_hdr_token_ok(req) else {
         println!("[periph] 写口 play 拒收：admin token 缺失或错误");
         return resp_err(
             req,
             httpd_err_code_t_HTTPD_401_UNAUTHORIZED,
             b"admin token missing or invalid\0",
         );
-    }
-    let body = match req_body_read_max(req, RR3_PLAY_BODY_MAX) {
-        Ok(b) => b,
-        Err(BodyErr::Bounds) => {
-            println!("[periph] 写口 play 拒收：body 空或超 {RR3_PLAY_BODY_MAX}B");
-            return resp_err(
-                req,
-                httpd_err_code_t_HTTPD_400_BAD_REQUEST,
-                b"play body out of bounds\0",
-            );
-        }
-        Err(BodyErr::Recv) => {
-            println!("[periph] 写口 play 拒收：body 收包不完整");
-            return resp_err(
-                req,
-                httpd_err_code_t_HTTPD_400_BAD_REQUEST,
-                b"play body recv failed\0",
-            );
-        }
+    };
+    let Ok(body) = req_body_read_max(req, RR3_PLAY_BODY_MAX) else {
+        println!("[periph] 写口 play 拒收：body 空/超 {RR3_PLAY_BODY_MAX}B 或收包不完整");
+        return resp_err(
+            req,
+            httpd_err_code_t_HTTPD_400_BAD_REQUEST,
+            b"play body out of bounds or recv failed\0",
+        );
     };
     let n = body.len();
     let reply = match crate::playout::rr3_play(body) {
@@ -418,14 +407,16 @@ unsafe fn httpd_register(bus: &Arc<Mutex<Bus>>) -> Result<(), i32> {
         server_port: HTTPD_SERVER_PORT,
         ctrl_port: 32768, // ESP_HTTPD_DEF_CTRL_PORT
         max_open_sockets: 7,
-        max_uri_handlers: 8,
+        // W4-2b 起白名单最多 9 条（tts 档）；留余量到 12，避免加端点时静默注册失败。
+        max_uri_handlers: 12,
         max_resp_headers: 8,
         backlog_conn: 5,
         recv_wait_timeout: 5,
         send_wait_timeout: 5,
         ..Default::default()
     };
-    esp_ok(httpd_start(&mut h, &conf))?;
+    let r = httpd_start(&mut h, &conf);
+    let true = r == ESP_OK else { return Err(r) };
     let _ = HTTPD_BUS.set(Arc::clone(bus));
     for (method, path, _, _, _) in RR3_BOARD_ROUTES {
         let cpath = CString::new(*path).expect("白名单 path 不含 NUL");
@@ -440,7 +431,8 @@ unsafe fn httpd_register(bus: &Arc<Mutex<Bus>>) -> Result<(), i32> {
             handler: Some(rr3_httpd_dispatch),
             user_ctx: std::ptr::null_mut(),
         };
-        esp_ok(httpd_register_uri_handler(h, &uri))?;
+        let r = httpd_register_uri_handler(h, &uri);
+        let true = r == ESP_OK else { return Err(r) };
     }
     Ok(())
 }
