@@ -271,6 +271,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rr-audio-mech"
+version = "0.0.1"
+
+[[package]]
 name = "rr-bus-api"
 version = "0.0.1"
 dependencies = [
@@ -304,6 +308,7 @@ version = "0.0.1"
 name = "rr3-brain"
 version = "0.0.1"
 dependencies = [
+ "rr-audio-mech",
  "rr-bus-api",
  "rr-hal-api",
  "rr-ipc",

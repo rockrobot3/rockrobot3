@@ -2,26 +2,12 @@
 //! ——44B WAV 头与 multipart 请求体装配（字节级，无 IO 无环境读取无 JSON，
 //! ⑧-b 依赖闭包纪律）。云端档位/密钥/HTTP 传输/boundary 随机源在组合件级
 //! [`crate::cloud`]（策略与 IO 不进机制核；boundary 由组合件供给——随机性是
-//! 策略供给，机制只做装配）。语义对位 legacy asr.c（build_wav_header）与
-//! rr3_brain/cloud/asr.py（上传体形状）。
+//! 策略供给，机制只做装配）。
+//!
+//! W1-3：WAV 头形状迁至 `rr-audio-mech`（三形态共用），本件只 re-export；
+//! multipart 装配仍属云协议面，留待 W2 抽取。
 
-/// 44B WAV 头（PCM s16le 单声道），字节序对齐 legacy asr.c 的 build_wav_header。
-pub fn rr3_wav_header(sample_rate: u32, data_len: u32) -> [u8; 44] {
-    let mut b = [0u8; 44];
-    b[0..4].copy_from_slice(b"RIFF");
-    b[4..8].copy_from_slice(&(36 + data_len).to_le_bytes());
-    b[8..16].copy_from_slice(b"WAVEfmt ");
-    b[16..20].copy_from_slice(&16u32.to_le_bytes());
-    b[20..22].copy_from_slice(&1u16.to_le_bytes()); // PCM
-    b[22..24].copy_from_slice(&1u16.to_le_bytes()); // 单声道
-    b[24..28].copy_from_slice(&sample_rate.to_le_bytes());
-    b[28..32].copy_from_slice(&(sample_rate * 2).to_le_bytes()); // byte rate
-    b[32..34].copy_from_slice(&2u16.to_le_bytes()); // block align
-    b[34..36].copy_from_slice(&16u16.to_le_bytes()); // bits per sample
-    b[36..40].copy_from_slice(b"data");
-    b[40..44].copy_from_slice(&data_len.to_le_bytes());
-    b
-}
+pub use rr_audio_mech::rr3_wav_header;
 
 /// multipart 请求体装配：model 字段 + file 字段（filename="a.wav"，WAV 头仓内
 /// 自建）+ PCM + 收尾 boundary——对位 asr.py 上传体形状（整段 WAV 一次上传，
