@@ -20,13 +20,12 @@ mod support;
 
 use std::path::{Path, PathBuf};
 
-use rr_ipc::{rr3_body_split, Rr3PayloadType};
 use serde_json::json;
 
 use support::{
-    rr3_build_module_bin, rr3_connect_observer, rr3_field_from_log, rr3_json_of,
+    rr3_ask_ctl, rr3_build_module_bin, rr3_connect_observer, rr3_field_from_log, rr3_json_of,
     rr3_module_manifest_text, rr3_read_call_reply, rr3_read_where, rr3_repo_root, rr3_rpc_frame,
-    rr3_send, RrdClient, RrdTest, SimManifest, E2E_TICK_MS,
+    rr3_send, RrdTest, SimManifest, E2E_TICK_MS,
 };
 
 /// --manifest 直驱的落盘薄封装：渲染文本来自 support 的 [`rr3_module_manifest_text`]，
@@ -40,18 +39,6 @@ fn rr3_module_manifest(tag: &str, name: &str, bin: &Path) -> SimManifest {
     std::fs::write(&path, rendered)
         .unwrap_or_else(|e| panic!("写夹具 manifest {} 失败: {e}", path.display()));
     SimManifest { path }
-}
-
-/// 发一帧 ctl 请求（src 按契约填 0），收回第一条 Response 体——e2e_act/e2e_ctl
-/// 同款帮手的本地副本（ctl 一问一答即断，逐拍新开裸连接）
-fn rr3_ask_ctl(c: &mut RrdClient, method: &str, id: u64) -> serde_json::Value {
-    rr3_send(c, &rr3_rpc_frame(method, id, json!({}), 0));
-    let f = rr3_read_where(c, &format!("{method} 的应答"), |f| {
-        rr3_body_split(&f.payload)
-            .map(|(ty, _)| ty == Rr3PayloadType::Response)
-            .unwrap_or(false)
-    });
-    rr3_json_of(&f)
 }
 
 #[test]
