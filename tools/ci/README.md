@@ -140,13 +140,14 @@ job 定义 ≤10；integration/platforms 的 push/PR 必须 `paths-ignore` 含 `
 的 `cross-artifacts` 必须含英特尔/AMD `x86_64-unknown-linux-gnu`、瑞芯微
 `aarch64-unknown-linux-musl`、进迭时空 `riscv64gc-unknown-linux-gnu` 三条腿，
 `esp32-gates` 必须含 `esp32`/`esp32s3` 两腿；每腿的验证脚本（`periph-base-check.sh`
-等）也按名钉住——腿在而步骤被删即"名存实亡"红。**权限与失败显形**：顶层
+等）也按名钉住——腿在而步骤被删即"名存实亡"红；`riscv-image` 构建门（腿 +
+`build-riscv-image.sh`）同样钉住。**权限与失败显形**：顶层
 `permissions:` 必须存在、含 `contents: read`、不得 `write-all`；任何
 `continue-on-error` 非 `false` 即红（掩码会把漂红巡检变成假绿）。`--self-test` 给
 好例 + 缺并发/缺超时/版本漂移/needs 悬空/needs 成环/push 无范围/工具链未钉版/
 缓存缺参/paths-ignore 缺失/publish 可取消/job 超限/continue-on-error/缺 permissions/
-芯片矩阵缩水/芯片 job 缺失/芯片验证步骤缺失十六条负例，gate 的 `scripts` job
-先自检后执法。
+芯片矩阵缩水/芯片 job 缺失/芯片验证步骤缺失/riscv 镜像腿缺失十七条负例，gate 的
+`scripts` job 先自检后执法。
 
 ## 平台覆盖矩阵（2026-11-17 首立，按 workflow 事实源抄录）
 

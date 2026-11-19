@@ -12,7 +12,8 @@
 - 任何 `continue-on-error` 非 false 即红：失败必须显形，不能把红掩成绿
   （漂红巡检与门禁都靠退出码，掩码等于把治理面掏空）。
 - platforms.yml 的五芯片矩阵腿（英特尔/AMD x86_64、瑞芯微 aarch64、进迭时空
-  riscv64、esp32、esp32s3）缺任一即红：覆盖缩水不能只靠评审记得。
+  riscv64、esp32、esp32s3）缺任一即红，腿内验证脚本缺一即红；riscv-image
+  构建门（腿 + 脚本）同样钉住：覆盖缩水不能只靠评审记得。
 
 用法：
     workflows_audit.py [--root <仓根>]
@@ -61,6 +62,8 @@ CHIP_MATRIX = {
         "riscv64gc-unknown-linux-gnu",    # 进迭时空 SpacemiT K1/K3
     ],
     "esp32-gates": ["chip: esp32", "chip: esp32s3"],
+    # RISC-V 发布镜像构建门：腿与脚本都钉住，删掉即"镜像路径不再被验证"。
+    "riscv-image": ["build-riscv-image.sh"],
 }
 
 # 矩阵腿的验证步骤（脚本名即判据锚）：腿在而步骤被删，等于覆盖名存实亡。
@@ -464,6 +467,7 @@ def self_test():
         ("芯片矩阵缩水被抓", any("五芯片覆盖不得缩水" in b for b in bad)),
         ("芯片 job 缺失被抓", any("缺 job esp32-gates" in b for b in bad)),
         ("芯片验证步骤缺失被抓", any("验证步骤" in b for b in bad)),
+        ("riscv 镜像腿缺失被抓", any("缺 job riscv-image" in b for b in bad)),
         ("好例零误报", not any("good.yml" in b for b in bad)),
     ]
     for name, ok in cases:

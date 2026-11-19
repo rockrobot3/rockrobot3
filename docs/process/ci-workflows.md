@@ -35,7 +35,7 @@ CI 单一事实源在 GitHub Actions（R30 裁定：atomgit 无流水线功能�
 | 工作流 | 作业 | 职责 |
 |---|---|---|
 | `gate.yml`（7） | conventions / release / lint / supply / alsa / ota-bundle / scripts | 门禁主线（与本地 `tools/ci/check.sh` 同一入口）：规约全步（含质量度量与仓面卫生）、release 档溢出检查测试、rustfmt＋clippy 全工程、supply 供应链审计（cargo-deny --strict，周程定时复核公告）、ALSA 真后端编译门、OTA bundle 装配门、脚本卫生与基线棘轮审计、SKIP 纪律自检、门禁步骤清单审计 |
-| `platforms.yml`（7） | cross-artifacts ×3 / esp32-gates ×2 / autonomy-face / ipct003 / host-windows / host-macos | 跨平台与跨架构面：交叉编译矩阵、ESP32 专用门（含 autonomy/tts 双档构建腿）、自治健康面真跑（30 s 模拟 + 复位闸门）、ipct003 跨架构对拍（--strict）、宿主等价面（Windows＋macOS；macOS 单腿含 workspace 与独立工程串行） |
+| `platforms.yml`（8） | cross-artifacts ×3 / riscv-image / esp32-gates ×2 / autonomy-face / ipct003 / host-windows / host-macos | 跨平台与跨架构面：交叉编译矩阵、RISC-V 运行镜像构建门（交叉产物 → stage → QEMU 两段冒烟，不推送）、ESP32 专用门（含 autonomy/tts 双档构建腿）、自治健康面真跑（30 s 模拟 + 复位闸门）、ipct003 跨架构对拍（--strict）、宿主等价面（Windows＋macOS；macOS 单腿含 workspace 与独立工程串行） |
 | `integration.yml`（7） | distro-smoke / ota-sign / rk3566-onboard / buildroot-assembly / sim-assemble / sim-chain / matrix | 集成面：deb 装机冒烟、OTA 签名链、板面装配断言、装配与全链闭环演练（含 60s 稳态与阻塞面判据）、点验矩阵出数 |
 | `coverage.yml`（1） | workspace | 覆盖率观测面：周程/手动跑 `cargo llvm-cov`，summary 作为 artifact 留存；非阻断，先积累趋势再决定 ratchet |
 
@@ -71,7 +71,9 @@ with 入参），不依赖 runner 镜像预装版本；交叉 job 同时显式�
 **brain 产物面（同日）**：有目标 C 工具链的腿（原生 x86_64、apt 交叉 riscv64）
 带 `with-brain` 构建 `rr3-brain` 并单独上传；瑞芯微 musl 腿走 rust-lld 无目标 C
 工具链，brain 的 ureq+rustls(ring) 归板上原生构建——覆盖差异由矩阵 `extra`
-数据位表达，脚本机制只有一份。
+数据位表达，脚本机制只有一份。**riscv-image 腿（同日）**：在每次 push 上把
+riscv64 发布镜像路径跑通（交叉产物 → `rr3-pack` stage → QEMU `docker build`
+→ 文件面/运行面两段冒烟），不推送 ghcr；发布腿随后只加 login/push/merge。
 
 **权限与失败显形（2026-11-18 续轮十六）**：
 
