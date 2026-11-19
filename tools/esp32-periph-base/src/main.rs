@@ -85,6 +85,9 @@ mod link;
 mod mic;
 mod oled;
 mod periph;
+// 云 TTS 客户端（W4-2b）：仅 tts 档编译；与播放面共用 tts gate。
+#[cfg(feature = "tts")]
+mod cloud;
 // I2S1 TX 真实 PCM 播放面（W4-2）：仅 --features tts 编译；与 spk-tone 互斥。
 #[cfg(feature = "tts")]
 mod playout;
@@ -437,6 +440,9 @@ fn main() {
     // ---- W3-2b：自治监督壳（仅 autonomy 档启动；/api/board/health 常驻）----
     #[cfg(feature = "autonomy")]
     autonomy::rr3_start();
+    // W4-2b：云 TTS worker 先于 httpd 起（`/say` 不撞"未装配"窗）。
+    #[cfg(feature = "tts")]
+    cloud::spawn_tts();
     httpd::rr3_httpd_spawn(&bus);
     // ---- W3-2a：自治形态开机 SNTP 对时（仅 autonomy 档；失败显式点名）----
     #[cfg(feature = "autonomy")]

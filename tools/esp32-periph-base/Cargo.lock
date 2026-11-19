@@ -519,6 +519,7 @@ dependencies = [
  "periph-mech",
  "rr-audio-mech",
  "rr-autonomy",
+ "rr-cloud-proto",
  "rr-ipc",
  "rr-mech",
  "rr-periph-proto",
@@ -999,6 +1000,14 @@ version = "0.0.1"
 [[package]]
 name = "rr-autonomy"
 version = "0.0.1"
+
+[[package]]
+name = "rr-cloud-proto"
+version = "0.0.1"
+dependencies = [
+ "rr-audio-mech",
+ "serde_json",
+]
 
 [[package]]
 name = "rr-ipc"

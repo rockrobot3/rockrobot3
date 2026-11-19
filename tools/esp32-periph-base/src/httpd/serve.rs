@@ -213,6 +213,70 @@ pub(crate) unsafe fn handle_play(req: *mut httpd_req_t, _bus: &Arc<Mutex<Bus>>) 
     resp_json(req, &reply)
 }
 
+/// 云配置/朗读写口 body 上界（1024 B：512 B 文本 + JSON 键壳 + key 值）。
+#[cfg(feature = "tts")]
+const RR3_CLOUD_BODY_MAX: usize = 1024;
+
+/// POST /api/board/cloud——云 TTS 配置写口（base/model/voice + 可选 key → NVS）。
+/// key 只进 NVS，应答与日志均不回显值。
+///
+/// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
+#[cfg(feature = "tts")]
+pub(crate) unsafe fn handle_cloud(req: *mut httpd_req_t, _bus: &Arc<Mutex<Bus>>) -> i32 {
+    let Ok(body) = req_body_read_max(req, RR3_CLOUD_BODY_MAX) else {
+        println!("[periph] 写口 cloud 拒收：body 空/超 {RR3_CLOUD_BODY_MAX}B 或收包不完整");
+        return resp_err(
+            req,
+            httpd_err_code_t_HTTPD_400_BAD_REQUEST,
+            b"cloud body out of bounds or recv failed\0",
+        );
+    };
+    let true = rr3_token_check(&body) else {
+        println!("[periph] 写口 cloud 拒收：admin token 缺失或错误");
+        return resp_err(
+            req,
+            httpd_err_code_t_HTTPD_401_UNAUTHORIZED,
+            b"admin token missing or invalid\0",
+        );
+    };
+    let reply = crate::cloud::rr3_cloud_write(&body).map_or_else(
+        |e| format!("{{\"ok\":false,\"err\":\"{e}\"}}"),
+        |()| "{\"ok\":true}".to_string(),
+    );
+    resp_json(req, &reply)
+}
+
+/// POST /api/board/say——朗读写口（JSON `{token,text}` → 云 TTS → 播放队列）。
+///
+/// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
+#[cfg(feature = "tts")]
+pub(crate) unsafe fn handle_say(req: *mut httpd_req_t, _bus: &Arc<Mutex<Bus>>) -> i32 {
+    let Ok(body) = req_body_read_max(req, RR3_CLOUD_BODY_MAX) else {
+        println!("[periph] 写口 say 拒收：body 空/超 {RR3_CLOUD_BODY_MAX}B 或收包不完整");
+        return resp_err(
+            req,
+            httpd_err_code_t_HTTPD_400_BAD_REQUEST,
+            b"say body out of bounds or recv failed\0",
+        );
+    };
+    let true = rr3_token_check(&body) else {
+        println!("[periph] 写口 say 拒收：admin token 缺失或错误");
+        return resp_err(
+            req,
+            httpd_err_code_t_HTTPD_401_UNAUTHORIZED,
+            b"admin token missing or invalid\0",
+        );
+    };
+    let reply = crate::cloud::rr3_say_body(&body).map_or_else(
+        |e| format!("{{\"ok\":false,\"err\":\"{e}\"}}"),
+        |text| match crate::cloud::rr3_say(text) {
+            Ok(()) => "{\"ok\":true}".to_string(),
+            Err(e) => format!("{{\"ok\":false,\"err\":\"{e}\"}}"),
+        },
+    );
+    resp_json(req, &reply)
+}
+
 /// `X-RR3-Token` 头校验（raw body 端点用；令牌上限 128 B，超长即拒）。
 ///
 /// # Safety: req 为有效请求指针；`httpd_req_get_hdr_value_str` 只读请求头。

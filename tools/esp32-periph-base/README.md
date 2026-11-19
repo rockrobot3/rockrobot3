@@ -171,6 +171,27 @@ curl -X POST -H "X-RR3-Token: $TOKEN" --data-binary @say.wav http://<板IP>/api/
 - `tts` 与 `spk-tone` 互斥（同占 I2S1，编译期断言）；引脚同 W4-1 表。
 - 采样率不符时显式失败（`[spk] 播放失败: 采样率非 16 kHz`），板侧不重采样。
 
+## W4-2b 云 TTS（`--features tts`，隐含 `autonomy`）
+
+板侧直连云 TTS：NVS 凭据 → HTTPS `/v1/audio/speech` → 本板播放（半双工门自动生效）。
+
+```bash
+# 1) 下发云配置（base = 服务基址，不含 /v1；key 只进 NVS，不回显）
+curl -X POST http://<板IP>/api/board/cloud -H 'Content-Type: application/json' \
+  -d '{"token":"'$TOKEN'","base":"https://api.example.com","model":"tts-1","voice":"alloy","key":"sk-..."}'
+# 2) 朗读一句（异步入队；串口看 [cloud] 取数与 [spk] 播放行）
+curl -X POST http://<板IP>/api/board/say -H 'Content-Type: application/json' \
+  -d '{"token":"'$TOKEN'","text":"你好，我是洛克三号"}'
+```
+
+- 契约：只请求 `response_format=pcm`/16 kHz；8 s 超时、最多 2 次（429/5xx/传输失败重试）；
+  MP3/AAC 显式失败，不引解码器。
+- `key` 缺席＝保留旧值；写口与读口都不回显值（只打 `key=保留/更新`）。
+- TLS 用 IDF `esp_http_client` + mbedTLS FULL 证书束（`sdkconfig.defaults`）；
+  证书有效期校验依赖 SNTP——`[autonomy]` 对时失败时先修时间再试。
+- 401/403 = 鉴权失败（查 key）；5xx 自动重试一次；TTS 响应上限 256 KB。
+- `tts` 隐含 `autonomy`（SNTP/健康面），与 `spk-tone` 互斥。
+
 ## 自治健康面（W3-2b / W3-3）
 
 烧 `--features autonomy` 后，`GET /api/board/health` 返回监督壳快照：

@@ -11,3 +11,8 @@ CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
 CONFIG_LWIP_DHCPS=y
 # 控制台回 UART0 缺省（USB 串口可观测 boot 横幅：凭据源 + SoftAP SSID 点名）。
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+
+# W4-2b 云 TTS（HTTPS）：mbedTLS 根证书束。契约禁止明文回退，证书校验必须在位；
+# FULL 档覆盖主流 CA（Let's Encrypt/DigiCert/Google/Amazon 等），Flash 代价 ~64 KB。
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
