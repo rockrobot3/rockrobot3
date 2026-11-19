@@ -9,11 +9,18 @@
 #   python3 tools/ci/ci_steady.py                 # 本地 HEAD
 #   python3 tools/ci/ci_steady.py --head 2a03b7b
 #   python3 tools/ci/ci_steady.py --repo owner/name
+#   python3 tools/ci/ci_steady.py --head <sha> --assert   # 叠加实时性判据
 #
-# 退出码: 0 = 打印到摘要; 1 = 有 check-run 但无摘要注解; 2 = API 不可读/无 check-run
+# 退出码: 0 = 打印到摘要（--assert 时且判据全过）; 1 = 有 check-run 但无摘要注解;
+#         2 = API 不可读/无 check-run; 3 = --assert 判据越界
+#
+# --assert 阈值口径（暂行，待多点跨环境后定稿）：稳态续命间隔与峰值均 ≤ 500ms
+# （看门狗下界 1000ms 的一半）；写超时/慢写恒 0；单次日志落盘 ≤ 10ms
+# （业务主路阻塞窗上界）；冷启动 ≤ 2s。任何一项越界即 3，不静默。
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import urllib.error
@@ -22,6 +29,14 @@ import urllib.request
 DEFAULT_REPO = "rockrobot3/rockrobot3"
 JOB = "sim-chain"
 TITLE_KEY = "稳态"
+ASSERT_LIMITS = {
+    "since_max": 500,
+    "peak_max": 500,
+    "wr": 0,
+    "slow": 0,
+    "log_max_us": 10_000,
+    "boot_max": 2_000,
+}
 
 
 def api(url):
@@ -51,10 +66,33 @@ def annotations(repo, run_id):
     return api(f"https://api.github.com/repos/{repo}/check-runs/{run_id}/annotations")
 
 
+def parse_metrics(message):
+    """摘要注解 → {键: 整数}；`k=v` 片段里只取纯数字，`?` 等非数值跳过。"""
+    out = {}
+    for k, v in re.findall(r"([a-z_]+)=([0-9]+)", message):
+        out[k] = int(v)
+    return out
+
+
+def assert_limits(hits):
+    """按 ASSERT_LIMITS 判据逐键核对；缺键也算未达标（不拿缺数当健康）。"""
+    metrics = {}
+    for x in hits:
+        metrics.update(parse_metrics(x.get("message") or ""))
+    fails = []
+    for key, limit in ASSERT_LIMITS.items():
+        if key not in metrics:
+            fails.append(f"{key} 缺失")
+        elif metrics[key] > limit:
+            fails.append(f"{key}={metrics[key]} > {limit}")
+    return metrics, fails
+
+
 def main():
     ap = argparse.ArgumentParser(description="读取 sim-chain 稳态摘要（check-run 注解，无需凭据）")
     ap.add_argument("--repo", default=DEFAULT_REPO)
     ap.add_argument("--head", default="")
+    ap.add_argument("--assert", dest="do_assert", action="store_true", help="按暂行阈值判实时性")
     a = ap.parse_args()
     head = a.head or local_head()
     if not head:
@@ -78,6 +116,13 @@ def main():
     if not hits:
         print(f"ci_steady: {JOB} 的 check-run {job['id']} 没有稳态摘要注解", file=sys.stderr)
         return 1
+    if not a.do_assert:
+        return 0
+    _, fails = assert_limits(hits)
+    if fails:
+        print("ci_steady: 实时性判据越界：" + "；".join(fails), file=sys.stderr)
+        return 3
+    print("ci_steady: 实时性判据全过（暂行阈值）")
     return 0
 
 
