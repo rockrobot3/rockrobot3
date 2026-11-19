@@ -112,12 +112,16 @@ fn status_table_says_empty_when_no_module_is_registered() {
 
 #[test]
 fn health_table_carries_the_three_heartbeat_numbers() {
-    let env = json!({"result": {"modules": [
-        {"name": "rr3-sima", "task": 2, "phase": "running",
-         "heartbeat_ms": 200, "watchdog_ms": 1000, "since_beat_ms": 501,
-         "beat_peak_ms": 640, "boot_ms": 811, "fan_dropped": 4,
-         "crash_streak": 5, "restart_exhausted": true}
-    ]}});
+    let env = json!({"result": {
+        "modules": [
+            {"name": "rr3-sima", "task": 2, "phase": "running",
+             "heartbeat_ms": 200, "watchdog_ms": 1000, "since_beat_ms": 501,
+             "beat_peak_ms": 640, "boot_ms": 811, "fan_dropped": 4,
+             "crash_streak": 5, "restart_exhausted": true}
+        ],
+        "restart_exhausted": ["rr3-sima"],
+        "watchdog_overruns": 3
+    }});
     let out = format_health(&env).unwrap();
     let line = out.lines().nth(1).unwrap();
     for needle in [
@@ -128,6 +132,10 @@ fn health_table_carries_the_three_heartbeat_numbers() {
     for head in ["PEAK_MS", "BOOT_MS", "FAN_DROP", "CRASH", "EXHAUSTED"] {
         assert!(out.contains(head), "健康表头缺 {head}: {out}");
     }
+    assert!(
+        out.contains("restart_exhausted=1 watchdog_overruns=3"),
+        "健康表尾必须汇总运行级终态: {out}"
+    );
 }
 
 #[test]

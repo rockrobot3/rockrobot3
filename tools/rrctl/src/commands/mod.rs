@@ -325,7 +325,7 @@ fn rr3_boot_note(result: &Value) -> String {
 }
 
 fn format_health(envelope: &Value) -> Result<String, String> {
-    let (_result, modules) = rr3_ctl_modules(envelope)?;
+    let (result, modules) = rr3_ctl_modules(envelope)?;
     let rows: Vec<Vec<String>> = modules
         .iter()
         .map(|m| {
@@ -344,7 +344,7 @@ fn format_health(envelope: &Value) -> Result<String, String> {
             ]
         })
         .collect();
-    Ok(render_table(
+    let table = render_table(
         &[
             "NAME",
             "TASK",
@@ -359,6 +359,18 @@ fn format_health(envelope: &Value) -> Result<String, String> {
             "EXHAUSTED",
         ],
         &rows,
+    );
+    // 表尾两列是运行级终态：表内逐模块看"谁耗尽"，表尾一眼看"整体是否已降级"。
+    let over = result
+        .get("watchdog_overruns")
+        .and_then(Value::as_u64)
+        .map_or("?".to_string(), |n| n.to_string());
+    let exhausted = result
+        .get("restart_exhausted")
+        .and_then(Value::as_array)
+        .map_or("?".to_string(), |a| a.len().to_string());
+    Ok(format!(
+        "{table}\nrestart_exhausted={exhausted} watchdog_overruns={over}"
     ))
 }
 
