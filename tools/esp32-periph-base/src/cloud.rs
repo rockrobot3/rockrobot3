@@ -139,7 +139,11 @@ fn nvs_set(key: &str, val: &str) -> Result<(), i32> {
     };
     // SAFETY：句柄成对关闭。
     unsafe { nvs_close(h) };
-    (r == ESP_OK).then_some(()).ok_or(r)
+    (r == ESP_OK).then_some(()).ok_or_else(|| {
+        // 键名级点名（不出值），err 码供真板排障对表 IDF nvs.h。
+        eprintln!("[cloud] NVS 写 {key} 失败 err={r:#x}");
+        r
+    })
 }
 
 /// 读云 TTS 配置（每次取数现读——面板写入下一轮生效，不缓存）。
