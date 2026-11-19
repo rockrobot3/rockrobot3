@@ -24,22 +24,10 @@ mod support;
 use std::time::Duration;
 
 use rr_bus::RR3_TASK_RRD;
-use rr_ipc::{rr3_body_split, Rr3PayloadType};
+use rr_ipc::Rr3PayloadType;
 use serde_json::json;
 
 use support::*;
-
-/// 发一帧 ctl 请求（src 按契约填 0），收回第一条 Response 体——e2e_ctl 同款帮手
-/// 的本地副本（ctl 一问一答即断，用例内逐拍新开裸连接，搬 support 反增耦合面）
-fn rr3_ask_ctl(c: &mut RrdClient, method: &str, id: u64) -> serde_json::Value {
-    rr3_send(c, &rr3_rpc_frame(method, id, json!({}), 0));
-    let f = rr3_read_where(c, &format!("{method} 的应答"), |f| {
-        rr3_body_split(&f.payload)
-            .map(|(ty, _)| ty == Rr3PayloadType::Response)
-            .unwrap_or(false)
-    });
-    rr3_json_of(&f)
-}
 
 /// 满配装配单：act 三格位各绑 rr3-act、enabled_slots 与 bindings 互认领。
 /// 格位名取自真 `contracts/slots.toml`（Q1 裁定立格 act.relay 后三格齐备）。
