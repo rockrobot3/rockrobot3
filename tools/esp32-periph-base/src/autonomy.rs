@@ -1,9 +1,9 @@
 //! 自治壳（W3-2b 起，W3-3 接线）：把 `rr-autonomy` 监督核接到板侧，提供
 //! `/api/board/health` 真状态与"接线任务心跳 → 判死 → 整机复位"闭环。
 //!
-//! 接线范围（W3-3 裁定）：**net / audio-in / motion / ui 四项**为真心跳；
-//! `dialog`（云对话主循环，W6）与 `audio-out`（PCM 播放，W4-2）尚未落地，
-//! 显式 `rr3_sup_degrade` 不参与判死——不伪造心跳，也不把"未实现"报成故障。
+//! 接线范围（W3-3 裁定）：**net / audio-in / motion / ui** 为真心跳；`tts` 档另接
+//! `audio-out`（W4-2 播放面）；`dialog`（云对话主循环，W6）尚未落地，显式
+//! `rr3_sup_degrade` 不参与判死——不伪造心跳，也不把"未实现"报成故障。
 //!
 //! 心跳通道：按任务**位图**（[`BEATS`]）合并——生产者只做一次原子 OR，不排队、
 //! 不丢拍、不取锁；监督线程每 200 ms 栅格 `swap` 清零后逐位续命。音频与运行
@@ -34,13 +34,28 @@ pub(crate) const SNTP_UNKNOWN: i8 = 0;
 pub(crate) const SNTP_SYNCED: i8 = 1;
 pub(crate) const SNTP_FAILED: i8 = -1;
 
+/// audio-out 看门狗窗：播放线程空转心跳周期 [`crate::playout::PLAY_IDLE_MS`] 的
+/// 3 倍余量. 旧值 1000 ms 与空转周期相等，调度抖动即被误判 dead（W4-2 真板
+/// 2026-11-20 实录：boot 后连续两次 `心跳超时 task=audio-out` 又立即恢复）。
+#[cfg(feature = "tts")]
+const AUDIO_OUT_TIMEOUT_MS: u64 = 3_000;
+#[cfg(not(feature = "tts"))]
+const AUDIO_OUT_TIMEOUT_MS: u64 = 1_000;
+
+/// 判据在编译期成立：看门狗窗必须 ≥ 空转心跳的两倍，否则空闲即误判。
+#[cfg(feature = "tts")]
+const _: () = assert!(
+    AUDIO_OUT_TIMEOUT_MS >= crate::playout::PLAY_IDLE_MS * 2,
+    "audio-out 看门狗窗必须 ≥ 空转心跳周期的 2 倍"
+);
+
 /// 监督策略量（板侧）：栅格 200 ms；超时按各任务真实节拍留裕量。
 /// net 15 s（含 boot 窗内 DHCP 等连）；audio-in 1.5 s（read 批 ≈32 ms）；
-/// motion/ui 4 s（SCAN 单点 2.4 s，进度点心跳见 runtime）；dialog/audio-out
-/// 的超时在 degraded 下不参与判死。
+/// motion/ui 4 s（SCAN 单点 2.4 s，进度点心跳见 runtime）；audio-out 见
+/// [`AUDIO_OUT_TIMEOUT_MS`]；dialog 10 s 但 degraded 下不参与判死。
 const SUP_CFG: Rr3SupCfg = Rr3SupCfg {
     tick_ms: 200,
-    timeouts_ms: [15_000, 1_500, 10_000, 1_000, 4_000, 4_000],
+    timeouts_ms: [15_000, 1_500, 10_000, AUDIO_OUT_TIMEOUT_MS, 4_000, 4_000],
 };
 
 /// 板侧已接线任务（心跳真值来源）。`audio-out` 只在 tts 档存在（W4-2 播放面）；

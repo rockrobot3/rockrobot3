@@ -11,11 +11,13 @@
 # （.flash.appdesc 0x100 字节）；本工程走 espidf std 路径，descriptor 由 IDF v5.2.2
 # 构建自带（.flash.appdesc 0x120 字节，2026-10-22 实测）。两路径各随其版本钉死。
 #
-# 用法: flash-esp32.sh [--release] [--monitor] [--port <dev>] [--check-only]
+# 用法: flash-esp32.sh [--release] [--monitor] [--port <dev>] [--check-only] [--features <list>]
 #   --release     release 构建（缺省 debug）
 #   --monitor     烧录后进 monitor（退出键 Ctrl+]）
 #   --port <dev>  串口设备（缺省 espflash 自动探测）
 #   --check-only  干跑：构建 + descriptor 校验后即止，不触串口（无板机器的验证面）
+#   --features    额外的 Cargo feature 列表（如 `autonomy,tts`；叠加在芯片默认档上，
+#                 不改默认固件行为）
 #
 # 前置门（产线脚本语义：缺件 FAIL 点名，非 CI 门 SKIP 口径）：espflash 4.x（实测
 # 4.6.0）、esp 工具链含 rust-src（esp-1.90.0.0）、ldproxy、esp-clang、ESP-IDF v5.2.2
@@ -35,6 +37,7 @@ BUILD=debug
 MONITOR=0
 PORT=
 CHECK_ONLY=0
+FEATURES=
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -44,6 +47,9 @@ while [ $# -gt 0 ]; do
       [ $# -ge 2 ] || { echo "FAIL  --port 需要设备路径参数" >&2; exit 2; }
       PORT="$2"; shift 2 ;;
     --check-only) CHECK_ONLY=1; shift ;;
+    --features)
+      [ $# -ge 2 ] || { echo "FAIL  --features 需要 feature 列表参数" >&2; exit 2; }
+      FEATURES="$2"; shift 2 ;;
     *) echo "FAIL  未知参数: ${1}（用法见脚本头注释）" >&2; exit 2 ;;
   esac
 done
@@ -81,6 +87,7 @@ build_args=(
   --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'
 )
 if [ "$BUILD" = release ]; then build_args+=(--release); fi
+if [ -n "$FEATURES" ]; then build_args+=(--features "$FEATURES"); fi
 # 必须在工程目录跑：cargo 只从 cwd 向上找 .cargo/config.toml，工程 target/build-std/
 # [env] 配置在 $PROJ/.cargo/ 下，--manifest-path 不改变 config 搜索路径
 if ! ( cd "$PROJ" && cargo +esp build "${build_args[@]}" ); then
