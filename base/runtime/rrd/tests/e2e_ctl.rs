@@ -51,6 +51,12 @@ fn ctl_status_lists_registered_modules_and_does_not_register_itself() {
         v["result"]["denied_publish"].is_u64(),
         "denied_publish 计数必须在场: {v}"
     );
+    // 稳态判据依赖 fan_dropped 行（续轮四十三起 sim-chain 收尾必读）：读口缺列
+    // 会让 60s 稳态段在最后一刻才报"缺 fan_dropped 行"——在线级用例里先钉住。
+    assert!(
+        v["result"]["fan_dropped"].is_u64(),
+        "fan_dropped 丢帧计数必须在场: {v}"
+    );
     assert!(
         matches!(
             v["result"]["log_sink"].as_str(),
