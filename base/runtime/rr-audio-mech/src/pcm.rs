@@ -27,39 +27,50 @@ pub struct Rr3WavPcm<'a> {
 /// 不把噪声送功放。`data` 声明长度超出文件尾时截断（常见编码器 bug），声明为 0
 /// 视为空体拒绝。
 pub fn rr3_wav_pcm(bytes: &[u8]) -> Result<Option<Rr3WavPcm<'_>>, &'static str> {
-    if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+    if !rr3_is_wav(bytes) {
         return Ok(None);
     }
+    let (rate, channels, data) = rr3_wav_scan(bytes)?;
+    Ok(Some(Rr3WavPcm {
+        sample_rate: rate,
+        channels,
+        data,
+    }))
+}
+
+/// RIFF/WAVE 头识别（只看 12 字节容器头，不进入块扫描）。
+fn rr3_is_wav(bytes: &[u8]) -> bool {
+    matches!(
+        bytes,
+        [
+            b'R',
+            b'I',
+            b'F',
+            b'F',
+            _,
+            _,
+            _,
+            _,
+            b'W',
+            b'A',
+            b'V',
+            b'E',
+            ..
+        ]
+    )
+}
+
+/// 块扫描：`fmt ` 先于 `data`，返回 (采样率, 声道, data 载荷)。
+fn rr3_wav_scan(bytes: &[u8]) -> Result<(u32, u16, &[u8]), &'static str> {
     let mut off = 12usize;
     let mut fmt: Option<(u16, u32, u16, u16)> = None; // (channels, rate, bits, format)
     while off + 8 <= bytes.len() {
-        let id = &bytes[off..off + 4];
-        let size = u32::from_le_bytes([
-            bytes[off + 4],
-            bytes[off + 5],
-            bytes[off + 6],
-            bytes[off + 7],
-        ]) as usize;
-        let body = off + 8;
+        let (id, size, body) = rr3_chunk_at(bytes, off);
         let end = body.saturating_add(size).min(bytes.len());
         if id == b"fmt " {
-            if end - body < 16 {
-                return Err("WAV fmt 块截断");
-            }
             fmt = Some(rr3_fmt_parse(&bytes[body..end])?);
         } else if id == b"data" {
-            let Some((channels, rate, bits, format)) = fmt else {
-                return Err("WAV data 先于 fmt");
-            };
-            if end == body {
-                return Err("WAV data 为空");
-            }
-            rr3_fmt_check(format, channels, bits)?;
-            return Ok(Some(Rr3WavPcm {
-                sample_rate: rate,
-                channels,
-                data: &bytes[body..end],
-            }));
+            return rr3_wav_data(fmt, &bytes[body..end]);
         }
         // 块按偶数字节对齐（RIFF 规范），越界即停（残块不猜）。
         off = body.saturating_add(size).saturating_add(size & 1);
@@ -67,38 +78,65 @@ pub fn rr3_wav_pcm(bytes: &[u8]) -> Result<Option<Rr3WavPcm<'_>>, &'static str> 
     Err("WAV 缺 data 块")
 }
 
-/// `fmt ` 块前 16 字节：编码 / 声道 / 采样率 / 位宽。
+/// 单块头：`(id, 声明长度, 载荷起点)`。
+fn rr3_chunk_at(bytes: &[u8], off: usize) -> (&[u8], usize, usize) {
+    let id = &bytes[off..off + 4];
+    let size = u32::from_le_bytes([
+        bytes[off + 4],
+        bytes[off + 5],
+        bytes[off + 6],
+        bytes[off + 7],
+    ]) as usize;
+    (id, size, off + 8)
+}
+
+/// `data` 块收口：必须已有 `fmt ` 且非空（格式门在 [`rr3_fmt_parse`] 已过）。
+fn rr3_wav_data(
+    fmt: Option<(u16, u32, u16, u16)>,
+    data: &[u8],
+) -> Result<(u32, u16, &[u8]), &'static str> {
+    let Some((channels, rate, _bits, _format)) = fmt else {
+        return Err("WAV data 先于 fmt");
+    };
+    if data.is_empty() {
+        return Err("WAV data 为空");
+    }
+    Ok((rate, channels, data))
+}
+
+/// `fmt ` 块前 16 字节：编码 / 声道 / 采样率 / 位宽，并当场过播放格式门
+/// （只接受 16 bit PCM、单/双声道——I2S 槽位固定 16 bit）。
 fn rr3_fmt_parse(b: &[u8]) -> Result<(u16, u32, u16, u16), &'static str> {
+    if b.len() < 16 {
+        return Err("WAV fmt 块截断");
+    }
     let format = u16::from_le_bytes([b[0], b[1]]);
     let channels = u16::from_le_bytes([b[2], b[3]]);
     let rate = u32::from_le_bytes([b[4], b[5], b[6], b[7]]);
     let bits = u16::from_le_bytes([b[14], b[15]]);
-    Ok((channels, rate, bits, format))
-}
-
-/// 播放面只接受 16 bit PCM、单/双声道（I2S 槽位固定 16 bit）。
-fn rr3_fmt_check(format: u16, channels: u16, bits: u16) -> Result<(), &'static str> {
     if format != 1 {
         return Err("WAV 非 PCM 编码（不解码压缩格式）");
     }
     if bits != 16 {
         return Err("WAV 位宽非 16 bit");
     }
-    if channels != 1 && channels != 2 {
+    if !matches!(channels, 1 | 2) {
         return Err("WAV 声道数不是 1/2");
     }
-    Ok(())
+    Ok((channels, rate, bits, format))
 }
 
 /// PCM → I2S 立体声 s16le（`out` 先清空）：单声道复制两声道、双声道直通；
-/// 首尾 `fade_frames` 帧线性淡到 0（防爆音）。`channels ∈ {1, 2}`，样本数须整帧。
+/// 首 `fade_in` 帧与尾 `fade_out` 帧线性淡到 0（防爆音）。分块播放时由调用方
+/// 只在首块给 `fade_in`、末块给 `fade_out`。`channels ∈ {1, 2}`，字节数须整帧。
 pub fn rr3_pcm_stereo(
     src: &[u8],
     channels: u16,
-    fade_frames: usize,
+    fade_in: usize,
+    fade_out: usize,
     out: &mut Vec<u8>,
 ) -> Result<(), &'static str> {
-    if channels != 1 && channels != 2 {
+    if !matches!(channels, 1 | 2) {
         return Err("PCM 声道数不是 1/2");
     }
     let frame_bytes = channels as usize * 2;
@@ -106,38 +144,36 @@ pub fn rr3_pcm_stereo(
         return Err("PCM 字节数不是整帧");
     }
     let frames = src.len() / frame_bytes;
-    let fade = fade_frames.min(frames / 2);
+    let fade_in = fade_in.min(frames);
+    let fade_out = fade_out.min(frames);
     out.clear();
     out.reserve(frames * 4);
     for i in 0..frames {
-        let gain = rr3_fade_gain(i, frames, fade);
+        let gain = rr3_fade_gain(i, frames, fade_in, fade_out);
         let o = i * frame_bytes;
+        // 右声道偏移用 `frame_bytes - 2` 统一：单声道时即左声道样本（复制），
+        // 双声道时即 R 样本——省掉逐帧 `if channels == 2`。
         let l = rr3_apply(i16::from_le_bytes([src[o], src[o + 1]]), gain);
-        let r = if channels == 2 {
-            rr3_apply(i16::from_le_bytes([src[o + 2], src[o + 3]]), gain)
-        } else {
-            l
-        };
+        let r = rr3_apply(
+            i16::from_le_bytes([src[o + frame_bytes - 2], src[o + frame_bytes - 1]]),
+            gain,
+        );
         out.extend_from_slice(&l.to_le_bytes());
         out.extend_from_slice(&r.to_le_bytes());
     }
     Ok(())
 }
 
-/// 第 `i` 帧的 Q15 增益（满幅 = 32768，保证小样本经 `>>15` 不丢位）：首 `fade`
-/// 帧从 0 升到满、尾 `fade` 帧降回 0，中段满幅。
-fn rr3_fade_gain(i: usize, frames: usize, fade: usize) -> i32 {
-    if fade == 0 {
-        return 32_768;
-    }
-    if i < fade {
-        return (i as i64 * 32_768 / fade as i64) as i32;
-    }
+/// 第 `i` 帧的 Q15 增益（满幅 = 32768，保证小样本经 `>>15` 不丢位）：首
+/// `fade_in` 帧从 0 升到满、尾 `fade_out` 帧降回 0，其余满幅。
+fn rr3_fade_gain(i: usize, frames: usize, fade_in: usize, fade_out: usize) -> i32 {
+    // fade=0 时 `min(0)=0` + 布尔项补满幅——用算术代替两个条件分支。
+    let up = (i.min(fade_in) as i64 * 32_768 / fade_in.max(1) as i64) as i32
+        + (fade_in == 0) as i32 * 32_768;
     let tail = frames - 1 - i;
-    if tail < fade {
-        return (tail as i64 * 32_768 / fade as i64) as i32;
-    }
-    32_768
+    let down = (tail.min(fade_out) as i64 * 32_768 / fade_out.max(1) as i64) as i32
+        + (fade_out == 0) as i32 * 32_768;
+    up.min(down)
 }
 
 /// Q15 增益应用（右移 15，饱和到 i16 域）。
@@ -146,19 +182,16 @@ fn rr3_apply(s: i16, gain: i32) -> i16 {
     v.clamp(i16::MIN as i32, i16::MAX as i32) as i16
 }
 
-/// PCM 播放时长（ms）：`channels=0` 或 `rate=0` 回 0，不猜。
+/// PCM 播放时长（ms）：`channels=0` 或 `rate=0` 回 0，不猜（布尔项归零，无分支）。
 pub fn rr3_pcm_ms(bytes: usize, channels: u16, rate: u32) -> u64 {
-    if channels == 0 || rate == 0 {
-        return 0;
-    }
-    let frames = bytes / (channels as usize * 2);
-    frames as u64 * 1000 / rate as u64
+    let frames = bytes / (channels as usize * 2).max(1);
+    let ok = (channels > 0 && rate > 0) as u64;
+    frames as u64 * 1000 / rate.max(1) as u64 * ok
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::vec;
 
     /// 合成一个最小 WAV（fmt 16B + data）。
     fn wav(rate: u32, channels: u16, data: &[u8]) -> Vec<u8> {
@@ -228,7 +261,7 @@ mod tests {
             bytes.extend_from_slice(&s.to_le_bytes());
         }
         let mut out = Vec::new();
-        rr3_pcm_stereo(&bytes, 1, 1, &mut out).unwrap();
+        rr3_pcm_stereo(&bytes, 1, 1, 1, &mut out).unwrap();
         assert_eq!(out.len(), 16);
         let got: Vec<i16> = out
             .chunks_exact(2)
@@ -251,16 +284,16 @@ mod tests {
             bytes.extend_from_slice(&s.to_le_bytes());
         }
         let mut out = Vec::new();
-        rr3_pcm_stereo(&bytes, 2, 0, &mut out).unwrap();
+        rr3_pcm_stereo(&bytes, 2, 0, 0, &mut out).unwrap();
         assert_eq!(out, bytes);
     }
 
     #[test]
     fn odd_length_and_bad_channels_are_rejected() {
         let mut out = Vec::new();
-        assert!(rr3_pcm_stereo(&[0, 1, 2], 1, 0, &mut out).is_err());
-        assert!(rr3_pcm_stereo(&[0, 1], 3, 0, &mut out).is_err());
-        assert!(rr3_pcm_stereo(&[0, 1, 2, 3], 2, 0, &mut out).is_ok());
+        assert!(rr3_pcm_stereo(&[0, 1, 2], 1, 0, 0, &mut out).is_err());
+        assert!(rr3_pcm_stereo(&[0, 1], 3, 0, 0, &mut out).is_err());
+        assert!(rr3_pcm_stereo(&[0, 1, 2, 3], 2, 0, 0, &mut out).is_ok());
     }
 
     #[test]

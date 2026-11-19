@@ -48,8 +48,15 @@ enum BodyErr {
 /// 循环读满或 IDF 收包超时（n ≤ 0）才回 Recv。
 /// # Safety: req 为有效请求指针；content_len 由 IDF 填，函数按上界收包。
 unsafe fn req_body_read(req: *mut httpd_req_t) -> Result<Vec<u8>, BodyErr> {
+    req_body_read_max(req, RR3_WIFI_BODY_MAX)
+}
+
+/// 有界 body 收（上界按端点给：配网 512B、播放 128KB——同名 `BodyErr` 语义）。
+///
+/// # Safety: 同 [`req_body_read`]。
+unsafe fn req_body_read_max(req: *mut httpd_req_t, max: usize) -> Result<Vec<u8>, BodyErr> {
     let clen = (*req).content_len;
-    if clen == 0 || clen > RR3_WIFI_BODY_MAX {
+    if clen == 0 || clen > max {
         return Err(BodyErr::Bounds);
     }
     let mut buf = vec![0u8; clen];
@@ -162,6 +169,72 @@ unsafe fn handle_wifi_write(req: *mut httpd_req_t) -> i32 {
     resp_json(req, &rr3_wifi_write_json(&result))
 }
 
+/// 播放 body 上界（W4-2）：128 KB ≈ 4 s @16k mono s16；超限 fail-closed 400。
+#[cfg(feature = "tts")]
+const RR3_PLAY_BODY_MAX: usize = 131_072;
+
+/// POST /api/board/play——raw PCM/WAV body（W4-2）：令牌走 `X-RR3-Token` 头，
+/// 入队即应答（播放异步；完成/失败行见串口 `[spk]`）。
+///
+/// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
+#[cfg(feature = "tts")]
+unsafe fn handle_play(req: *mut httpd_req_t) -> i32 {
+    if !req_hdr_token_ok(req) {
+        println!("[periph] 写口 play 拒收：admin token 缺失或错误");
+        return resp_err(
+            req,
+            httpd_err_code_t_HTTPD_401_UNAUTHORIZED,
+            b"admin token missing or invalid\0",
+        );
+    }
+    let body = match req_body_read_max(req, RR3_PLAY_BODY_MAX) {
+        Ok(b) => b,
+        Err(BodyErr::Bounds) => {
+            println!("[periph] 写口 play 拒收：body 空或超 {RR3_PLAY_BODY_MAX}B");
+            return resp_err(
+                req,
+                httpd_err_code_t_HTTPD_400_BAD_REQUEST,
+                b"play body out of bounds\0",
+            );
+        }
+        Err(BodyErr::Recv) => {
+            println!("[periph] 写口 play 拒收：body 收包不完整");
+            return resp_err(
+                req,
+                httpd_err_code_t_HTTPD_400_BAD_REQUEST,
+                b"play body recv failed\0",
+            );
+        }
+    };
+    let n = body.len();
+    let reply = match crate::playout::rr3_play(body) {
+        Ok(()) => format!("{{\"ok\":true,\"bytes\":{n}}}"),
+        Err(e) => format!("{{\"ok\":false,\"err\":\"{e}\"}}"),
+    };
+    resp_json(req, &reply)
+}
+
+/// `X-RR3-Token` 头校验（raw body 端点用；令牌上限 128 B，超长即拒）。
+///
+/// # Safety: req 为有效请求指针；`httpd_req_get_hdr_value_str` 只读请求头。
+#[cfg(feature = "tts")]
+unsafe fn req_hdr_token_ok(req: *mut httpd_req_t) -> bool {
+    let mut buf = [0u8; 128];
+    if httpd_req_get_hdr_value_str(
+        req,
+        c"X-RR3-Token".as_ptr(),
+        buf.as_mut_ptr() as *mut _,
+        buf.len(),
+    ) != ESP_OK
+    {
+        return false;
+    }
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    std::str::from_utf8(&buf[..end])
+        .map(|s| s == RR3_BOARD_ADMIN_TOKEN)
+        .unwrap_or(false)
+}
+
 /// POST /api/board/reboot——动作面：应答先行落链再重启（`esp_restart` 不返回；
 /// 重启即断链，故先 send 后 restart）。鉴权失败一律 401。
 ///
@@ -212,6 +285,8 @@ unsafe extern "C" fn rr3_httpd_dispatch(req: *mut httpd_req_t) -> i32 {
         Rr3BoardRoute::Bindings => handle_bindings(req),
         Rr3BoardRoute::WifiWrite => handle_wifi_write(req),
         Rr3BoardRoute::Reboot => handle_reboot(req),
+        #[cfg(feature = "tts")]
+        Rr3BoardRoute::Play => handle_play(req),
     }
 }
 
@@ -385,7 +460,7 @@ unsafe fn start_httpd(
     #[cfg(feature = "autonomy")]
     net_watch_spawn();
     println!(
-        "[periph] 配置腿起（N-13，凭据源={cred_source}）: SoftAP SSID={ap_ssid}（WPA2，口令见 wifi_ap_configure 注）+ http://0.0.0.0:{}/api/board/*（白名单 {} 端点＝GET state/bindings＋POST wifi/reboot）",
+        "[periph] 配置腿起（N-13，凭据源={cred_source}）: SoftAP SSID={ap_ssid}（WPA2，口令见 wifi_ap_configure 注）+ http://0.0.0.0:{}/api/board/*（白名单 {} 端点，端点表＝RR3_BOARD_ROUTES）",
         HTTPD_SERVER_PORT,
         RR3_BOARD_ROUTES.len()
     );

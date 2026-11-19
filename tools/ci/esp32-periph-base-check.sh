@@ -120,6 +120,17 @@ else
   fail=1
 fi
 
+# ⑦d W4-2 播放面编译（tts feature；与 autonomy 组合＝W6 全链固件形态；
+#     与 spk-tone 互斥，故单独一条腿）
+if cargo +esp build --features autonomy,tts \
+     --config 'source.crates-io.replace-with="rsproxy-sparse"' \
+     --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
+  echo "PASS  classic autonomy+tts 档构建（W4-2 播放面）"
+else
+  echo "FAIL  classic autonomy+tts 档构建失败" >&2
+  fail=1
+fi
+
 # ⑧ 纯逻辑单测编译面（批N13 件一：httpd 路由/漂移/JSON 形状单测；批N14 cred
 #    零回显契约单测；批N23 件一起 atoms/<名>/mech.rs 机制核单测——xtensa 目标
 #    本机不可跑，--no-run 只验测试码编译；xtensa 测试 harness 执行面归真板批）

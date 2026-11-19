@@ -167,6 +167,13 @@ pub(crate) struct PeriphState {
     /// 音频分片写不全累计（宿主失联/退避时的背压面）。只进日志抽样与内部账，
     /// 不改 INFO 行格式（观测面字段冻结）。
     pub(crate) audio_write_fail: u64,
+    /// 半双工门（W4-2）：TTS 播放期为 true，mic 线停攒上行分片（防本板扬声器
+    /// 回授进云端 VAD）；播放结束/失败由播放面 Drop 清门。
+    pub(crate) tts_gate: bool,
+    /// 成功播放条数（W4-2 观测面）。
+    pub(crate) tts_played: u64,
+    /// 播放失败条数（容器/采样率/I2S 写错；W4-2 观测面）。
+    pub(crate) tts_fail: u32,
 }
 
 impl PeriphState {
@@ -208,6 +215,9 @@ impl PeriphState {
             job_dropped: 0,
             reply_drop: 0,
             audio_write_fail: 0,
+            tts_gate: false,
+            tts_played: 0,
+            tts_fail: 0,
         }
     }
 

@@ -132,6 +132,19 @@ else
   fail=1
 fi
 
+# ⑦d W4-2 播放面编译（tts feature；与 autonomy 组合＝W6 全链固件形态；
+#     与 spk-tone 互斥，故单独一条腿）
+if cargo +esp build \
+     --target xtensa-esp32s3-espidf \
+     --no-default-features --features esp32s3,autonomy,tts \
+     --config 'source.crates-io.replace-with="rsproxy-sparse"' \
+     --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
+  echo "PASS  S3 autonomy+tts 档构建（W4-2 播放面）"
+else
+  echo "FAIL  S3 autonomy+tts 档构建失败" >&2
+  fail=1
+fi
+
 # ⑧ 纯逻辑单测编译面（同 classic 门 ⑧；xtensa 目标本机不可跑，--no-run 只验编译）
 # panic=abort 下测试 harness 必须显式 `-Zpanic_abort_tests`；RUSTFLAGS 会覆盖
 # config 的 target rustflags，故整条重写（与 [target.xtensa-esp32s3-espidf] 同值）。

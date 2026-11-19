@@ -517,6 +517,7 @@ dependencies = [
  "esp-idf-hal",
  "esp-idf-sys",
  "periph-mech",
+ "rr-audio-mech",
  "rr-autonomy",
  "rr-ipc",
  "rr-mech",
@@ -990,6 +991,10 @@ dependencies = [
  "normpath",
  "windows-sys 0.59.0",
 ]
+
+[[package]]
+name = "rr-audio-mech"
+version = "0.0.1"
 
 [[package]]
 name = "rr-autonomy"

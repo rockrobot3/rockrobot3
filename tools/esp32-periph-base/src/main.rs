@@ -85,6 +85,9 @@ mod link;
 mod mic;
 mod oled;
 mod periph;
+// I2S1 TX 真实 PCM 播放面（W4-2）：仅 --features tts 编译；与 spk-tone 互斥。
+#[cfg(feature = "tts")]
+mod playout;
 mod ports_impl;
 mod power;
 mod runtime;
@@ -424,6 +427,9 @@ fn main() {
     ram_point("2-periph-ready");
     // mic 线与控制面共享 bus（audio_q 产者/消费者；clone 须在 cmd_loop move 前）
     let mic_bus = bus.clone();
+    // W4-2 播放面共享 bus（半双工门 + 播放计数；同上须在 spawn_planes 前 clone）
+    #[cfg(feature = "tts")]
+    let play_bus = bus.clone();
     // ---- 批N13 件一：板侧配置腿（N-13 服务本体）——WiFi 凭据读链批N14 订正为
     //「NVS 优先（cred 模块）→ 编译期 option_env! 注入回落（RR3_BOARD_WIFI_SSID/PASS，
     //值不落仓）」，都缺 fail-honest 点名后缺席，板其余功能照常；细节见 [httpd]/[cred]
@@ -485,6 +491,27 @@ fn main() {
     );
     #[cfg(feature = "spk-tone")]
     ram_point("4-spk-tone");
+
+    // ---- W4-2：I2S1 TX 常驻播放面（WAV/裸 16k PCM + 半双工门控；仅 tts 档）----
+    // classic：BCLK=25 / DIN=17 / WS=16（与 W4-1 验收档同脚）；S3 16/18/17。
+    #[cfg(all(feature = "tts", feature = "esp32"))]
+    playout::spawn_player(
+        peripherals.i2s1,
+        peripherals.pins.gpio25,
+        peripherals.pins.gpio17,
+        peripherals.pins.gpio16,
+        play_bus,
+    );
+    #[cfg(all(feature = "tts", feature = "esp32s3"))]
+    playout::spawn_player(
+        peripherals.i2s1,
+        peripherals.pins.gpio16,
+        peripherals.pins.gpio18,
+        peripherals.pins.gpio17,
+        play_bus,
+    );
+    #[cfg(feature = "tts")]
+    ram_point("4-spk-play");
 
     // main 循环：周期状态行（观测面）
     loop {

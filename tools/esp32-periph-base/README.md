@@ -154,6 +154,23 @@ classic 用 `--features spk-tone` 烧录后应听到两声 440 Hz。模块丝印
 - 无声排查顺序：Vin/GND → SD 是否使能 → LRC/BCLK/DIN 是否与丝印一致 → 扬声器 JST。
 - 固件入口：[`speaker.rs`](src/speaker.rs)；默认固件不编译该模块。
 
+## W4-2 真实 PCM 播放（`--features tts`）
+
+I2S1 常驻播放面：WAV（16 bit PCM）或裸 16 kHz PCM 入队播放；播放期自动置半双工门
+（mic 停攒上行，防本板扬声器回授），结束/失败自动清门。
+
+```bash
+# 板载播放（管理令牌走 X-RR3-Token 头；body = WAV 或裸 s16le）
+curl -X POST -H "X-RR3-Token: $TOKEN" --data-binary @say.wav http://<板IP>/api/board/play
+```
+
+- 只支持 16 kHz；单次 body ≤128 KB（≈4 s mono s16），超限 400。
+- 播放队列 2 条，满即拒（`{"ok":false,"err":"播放队列满"}`——播放仍是异步完成）。
+- 串口 `[spk] 播放完成 ... 误差=N%` 是"时长误差 ≤5%"验收判据；
+  `/api/board/state` 增 `tts_gate` / `tts_played` / `tts_fail`。
+- `tts` 与 `spk-tone` 互斥（同占 I2S1，编译期断言）；引脚同 W4-1 表。
+- 采样率不符时显式失败（`[spk] 播放失败: 采样率非 16 kHz`），板侧不重采样。
+
 ## 自治健康面（W3-2b / W3-3）
 
 烧 `--features autonomy` 后，`GET /api/board/health` 返回监督壳快照：
