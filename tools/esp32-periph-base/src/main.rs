@@ -89,6 +89,9 @@ mod runtime;
 // I2S TX 功放/扬声器上板验收（W4-1）：仅 --features spk-tone 编译，默认固件零行为变化。
 #[cfg(feature = "spk-tone")]
 mod speaker;
+// 自治形态网络时间（W3-2a）：仅 --features autonomy 编译。
+#[cfg(feature = "autonomy")]
+mod sntp;
 // servo 原子件机制核（批N23 件一收编：atoms/servo/mech.rs，文件级机制/策略
 // 分离——机制纯函数与行程生成物在件内，策略量留 board.rs；接线照 modules
 // 先例 #[path = "../atoms/<名>/<文件>.rs"]）。
@@ -424,6 +427,9 @@ fn main() {
     //值不落仓）」，都缺 fail-honest 点名后缺席，板其余功能照常；细节见 [httpd]/[cred]
     //模块文档。（clone 同前——须在 cmd_loop move 前）
     httpd::rr3_httpd_spawn(&bus);
+    // ---- W3-2a：自治形态开机 SNTP 对时（仅 autonomy 档；失败显式点名）----
+    #[cfg(feature = "autonomy")]
+    sntp::spawn_sntp();
     spawn_planes(ctl, rt, bus);
 
     // ---- 批D 采集冒烟 + 音频上行：INMP441 双麦 @ I2S0（classic 4/27/26，S3 6/15/7）----
