@@ -107,10 +107,16 @@ fn frame_send(payload: Vec<u8>) -> Rr3Frame {
     }
 }
 
-fn connect_on(tag: &str, log: Arc<Mutex<Vec<(String, Value)>>>) -> (Rr3BusClient, PathBuf) {
+/// 起一台假 rrd 并返回总线路径（连接方式由调用方选）。
+fn fake_on(tag: &str, log: Arc<Mutex<Vec<(String, Value)>>>) -> PathBuf {
     let path = tmp_bus_path(tag);
     let listener = UnixListener::bind(&path).unwrap();
     std::thread::spawn(move || fake_rrd(listener, log));
+    path
+}
+
+fn connect_on(tag: &str, log: Arc<Mutex<Vec<(String, Value)>>>) -> (Rr3BusClient, PathBuf) {
+    let path = fake_on(tag, log);
     let client = Rr3BusClient::rr3_connect_with(
         path.to_str().unwrap(),
         rr3_manifest_ident(MANIFEST).unwrap(),
@@ -118,6 +124,23 @@ fn connect_on(tag: &str, log: Arc<Mutex<Vec<(String, Value)>>>) -> (Rr3BusClient
     )
     .expect("连假 rrd 应成功");
     (client, path)
+}
+
+/// 显式端点入口：与 `rr3_connect` 同一套注册/心跳，只是路径不经环境变量
+/// （`rr3-ctl tail --bus-path` 的唯一落点）。
+#[test]
+fn connect_at_registers_on_explicit_path() {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let path = fake_on("at", log.clone());
+    let client =
+        Rr3BusClient::rr3_connect_at(path.to_str().unwrap(), MANIFEST).expect("连假 rrd 应成功");
+    assert_eq!(client.rr3_task(), 7);
+    assert!(
+        log.lock().unwrap().iter().any(|(m, _)| m == "rr3.register"),
+        "注册帧必须到过假 rrd"
+    );
+    drop(client);
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]

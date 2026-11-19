@@ -18,33 +18,44 @@ fn usage() -> ! {
          ota 恒拒随 M6；reboot 缺省恒拒，解锁面在装机环境）",
         commands::COMMANDS.join(" | ")
     );
+    eprintln!(
+        "      tail <topic> [--count N] [--secs S]（注册为观察者订阅事件，\
+         N 条或超时退出；JSONL 走 stdout）"
+    );
     std::process::exit(2)
 }
 
-/// 解析成 (`--bus-path` 值, 命令名)。`--bus-path` 缺值即用法错误。
-fn parse(args: &[String]) -> (Option<String>, Option<String>) {
-    let mut bus = None;
-    let mut cmd = None;
-    let mut i = 0;
-    while i < args.len() {
-        rr3_parse_step(args, &mut i, &mut bus, &mut cmd);
-        i += 1;
-    }
-    (bus, cmd)
+/// 命令行解析结果：总线覆盖路径、命令名、命令后的余参。
+struct Rr3Args {
+    bus: Option<String>,
+    cmd: Option<String>,
+    rest: Vec<String>,
 }
 
-/// 单参数落位：`--bus-path` 消费下一槽，否则首个裸参即命令名。
-fn rr3_parse_step(
-    args: &[String],
-    i: &mut usize,
-    bus: &mut Option<String>,
-    cmd: &mut Option<String>,
-) {
+/// 解析成 (`--bus-path` 值, 命令名, 余参)。`--bus-path` 缺值即用法错误。
+fn parse(args: &[String]) -> Rr3Args {
+    let mut out = Rr3Args {
+        bus: None,
+        cmd: None,
+        rest: Vec::new(),
+    };
+    let mut i = 0;
+    while i < args.len() {
+        rr3_parse_step(args, &mut i, &mut out);
+        i += 1;
+    }
+    out
+}
+
+/// 单参数落位：`--bus-path` 消费下一槽；首个裸参是命令名，其后全部进 `rest`。
+fn rr3_parse_step(args: &[String], i: &mut usize, out: &mut Rr3Args) {
     if args[*i] == "--bus-path" {
         *i += 1;
-        *bus = Some(rr3_bus_value(args.get(*i)));
-    } else if cmd.is_none() {
-        *cmd = Some(args[*i].clone());
+        out.bus = Some(rr3_bus_value(args.get(*i)));
+    } else if out.cmd.is_none() {
+        out.cmd = Some(args[*i].clone());
+    } else {
+        out.rest.push(args[*i].clone());
     }
 }
 
@@ -76,15 +87,35 @@ fn rr3_bus_default() -> String {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (bus, cmd) = parse(&args);
-    let Some(cmd) = cmd.as_deref() else { usage() };
-    commands::run(cmd, &resolve_bus_path(bus.as_deref())).map_or_else(
+    let parsed = parse(&args);
+    let Some(cmd) = parsed.cmd.as_deref() else {
+        usage()
+    };
+    let bus = resolve_bus_path(parsed.bus.as_deref());
+    rr3_dispatch(cmd, &bus, &parsed.rest).map_or_else(
         |e| {
             eprintln!("rr3-ctl {cmd}: {e}");
             std::process::exit(1);
         },
-        |report| println!("{report}"),
+        |report| {
+            // tail 的事件行是流式直写 stdout 的，收尾报告为空时不留空行
+            if !report.is_empty() {
+                println!("{report}");
+            }
+        },
     );
+}
+
+/// 命令分派：`tail` 是注册型观察者（持续收帧），其余八个走一次性 ctl 连接，
+/// 不接受余参（多传即错，避免脚本里的参数被静默吞掉）。
+fn rr3_dispatch(cmd: &str, bus: &str, rest: &[String]) -> Result<String, String> {
+    if cmd == "tail" {
+        return commands::tail::rr3_tail_run(bus, rest);
+    }
+    if !rest.is_empty() {
+        return Err(format!("{cmd} 不接受参数：{}", rest.join(" ")));
+    }
+    commands::run(cmd, bus)
 }
 
 #[cfg(test)]
@@ -97,17 +128,34 @@ mod tests {
 
     #[test]
     fn parse_extracts_command_and_bus_override() {
-        assert_eq!(parse(&v(&["status"])), (None, Some("status".into())));
+        let a = parse(&v(&["status"]));
+        assert_eq!((a.bus.as_deref(), a.cmd.as_deref()), (None, Some("status")));
+        assert!(a.rest.is_empty());
+
+        let b = parse(&v(&["--bus-path", "/tmp/a.sock", "health"]));
         assert_eq!(
-            parse(&v(&["--bus-path", "/tmp/a.sock", "health"])),
-            (Some("/tmp/a.sock".into()), Some("health".into()))
+            (b.bus.as_deref(), b.cmd.as_deref()),
+            (Some("/tmp/a.sock"), Some("health"))
         );
         // 开关在命令之后同样生效
+        let c = parse(&v(&["health", "--bus-path", "/tmp/b.sock"]));
         assert_eq!(
-            parse(&v(&["health", "--bus-path", "/tmp/b.sock"])),
-            (Some("/tmp/b.sock".into()), Some("health".into()))
+            (c.bus.as_deref(), c.cmd.as_deref()),
+            (Some("/tmp/b.sock"), Some("health"))
         );
-        assert_eq!(parse(&v(&[])), (None, None));
+        let d = parse(&v(&[]));
+        assert_eq!((d.bus.as_deref(), d.cmd.as_deref()), (None, None));
+    }
+
+    #[test]
+    fn parse_keeps_tail_args_in_order() {
+        let a = parse(&v(&["tail", "rr3-sense/audio/vad_start", "--count", "3"]));
+        assert_eq!(a.cmd.as_deref(), Some("tail"));
+        assert_eq!(a.rest, v(&["rr3-sense/audio/vad_start", "--count", "3"]));
+        // 全局开关不落进余参
+        let b = parse(&v(&["tail", "--secs", "5", "--bus-path", "/tmp/x", "t"]));
+        assert_eq!(b.bus.as_deref(), Some("/tmp/x"));
+        assert_eq!(b.rest, v(&["--secs", "5", "t"]));
     }
 
     #[test]

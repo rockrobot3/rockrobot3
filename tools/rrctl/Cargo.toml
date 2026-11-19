@@ -16,5 +16,6 @@ path = "src/main.rs"
 
 [dependencies]
 rr-bus = { path = "../../base/runtime/rr-bus" }
+rr-bus-api = { path = "../../base/runtime/rr-bus-api" }
 rr-ipc = { path = "../../base/runtime/rr-ipc" }
 serde_json = "1"
