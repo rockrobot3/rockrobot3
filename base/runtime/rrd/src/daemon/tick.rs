@@ -12,6 +12,8 @@ use crate::registry::{Rr3Expiry, Rr3Phase, RrdRegistry};
 use crate::supervisor::Rr3Supervisor;
 use crate::{rr3_lock, rr3_log};
 
+use super::notify::{rr3_notify_watchdog, NOTIFY_MS};
+
 /// 相对进程起点的单调毫秒：在册表的时钟单位（Task 5"时钟约定"）
 pub fn rr3_now_ms(t0: Instant) -> u64 {
     t0.elapsed().as_millis() as u64
@@ -74,6 +76,9 @@ pub(super) fn rr3_spawn_watchdog(
         // `rr3_spawn_with_overlay`），打在 spawn 之前它就只能证明"走到了这一行"，
         // 打在这里它证明的是"线程真的跑起来过"。文案与格式一字不改（needle 依赖它）。
         rr3_log(&format!("watchdog 启动 tick={tick_ms}ms"));
+        // 起线程即喂一次：rrd boot 可能超过 WatchdogSec，systemd 的计时从服务
+        // 启动就开始，不能等第一拍扫描完才喂。
+        rr3_notify_watchdog();
         let tick = Duration::from_millis(tick_ms);
         rr3_watchdog_loop(&shared, t0, tick, &sup);
     });
@@ -95,9 +100,14 @@ fn rr3_watchdog_loop(
 ) {
     let mut deadline = Instant::now() + tick;
     let mut over_streak: u32 = 0;
+    let mut last_notify = Instant::now();
     loop {
         // 固定栅格：到点即醒；已过点则立即开扫（不补跑中间错过的拍）
         thread::sleep(deadline.saturating_duration_since(Instant::now()));
+        if last_notify.elapsed() >= Duration::from_millis(NOTIFY_MS) {
+            rr3_notify_watchdog();
+            last_notify = Instant::now();
+        }
         let started = Instant::now();
         let expiries = rr3_lock(shared).rr3_reg_expire(rr3_now_ms(t0));
         for ex in expiries {

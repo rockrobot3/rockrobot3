@@ -28,6 +28,10 @@ ExecStart=/usr/bin/rrd --socket /var/run/rock3-ipc.sock --contracts /usr/lib/roc
 # 退避由 rrd 内层 watchdog/supervisor 管，systemd 这层只兜底，2s 足够
 Restart=always
 RestartSec=2
+# 自身看门狗（P2-2）：watchdog 线程每 5s 发 WATCHDOG=1；30s 未喂则 systemd
+# 判 rrd 死锁并重启。模块 watchdog 只能发现模块死，发现不了 rrd 自己卡住。
+WatchdogSec=30
+NotifyAccess=main
 
 [Install]
 WantedBy=multi-user.target
