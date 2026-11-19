@@ -208,4 +208,44 @@ mod tests {
         assert!(!rr3_cloud_retryable("识别接口", "识别接口 HTTP 400"));
         assert!(!rr3_cloud_retryable("识别接口", "缺 key"));
     }
+
+    /// W2-2：请求体逐字节冻结——Pi 与 MCU 必须发出同一串字节（含 JSON 键序）。
+    #[test]
+    fn request_bytes_match_frozen_golden() {
+        let messages = vec![
+            ("system".to_string(), "sys".to_string()),
+            ("user".to_string(), "hi".to_string()),
+        ];
+        assert_eq!(
+            rr3_chat_body("m", &messages, 150),
+            br#"{"max_tokens":150,"messages":[{"content":"sys","role":"system"},{"content":"hi","role":"user"}],"model":"m"}"#
+                .to_vec()
+        );
+        assert_eq!(
+            rr3_ping_body("m"),
+            br#"{"max_tokens":1,"messages":[{"content":"ping","role":"user"}],"model":"m"}"#
+                .to_vec()
+        );
+        assert_eq!(
+            rr3_tts_body("m", "hi", "m:bella", 16000),
+            br#"{"input":"hi","model":"m","response_format":"pcm","sample_rate":16000,"voice":"m:bella"}"#
+                .to_vec()
+        );
+
+        let mut want = Vec::new();
+        want.extend_from_slice(
+            b"--b\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nm\r\n",
+        );
+        want.extend_from_slice(
+            b"--b\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\nzh\r\n",
+        );
+        want.extend_from_slice(b"--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.wav\"\r\nContent-Type: audio/wav\r\n\r\n");
+        want.extend_from_slice(&rr_audio_mech::rr3_wav_header(16000, 2));
+        want.extend_from_slice(b"\x01\x02");
+        want.extend_from_slice(b"\r\n--b--\r\n");
+        assert_eq!(
+            rr3_multipart_body("m", b"\x01\x02", 16000, "b", Some("zh")),
+            want
+        );
+    }
 }
