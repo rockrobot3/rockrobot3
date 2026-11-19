@@ -87,6 +87,14 @@ run_tests() {
   printf 'PASS  %s\n' "$*"
 }
 
+# 模块语言数据源（读 module.toml `manifest.lang`；schema 必填 + 枚举 rust|python，
+# contract 钉死 schema.rs）。⑦-c 件形与 ⑧-a 豁免的**唯一判据数据源**——门内零零件名
+# 硬编码（0.0.5 批M MC-10 L-2，承 R-8：architecture §13"⑦-c 仍留两处 if rr3-brain"
+# 收编；参数 = module.toml 路径，供 ⑦-c/$mod 与 ⑧-a/$mod_dir 两处共用同一真值）。
+mod_lang() {
+  grep -m1 -E '^lang[[:space:]]*=' "$1" 2>/dev/null | sed -E 's/.*"([^"]*)".*/\1/'
+}
+
 # 步骤体（按族拆）：标题与调用序留在本文件，实现体在 tools/ci/steps/。
 . "$root/tools/ci/steps/9y.sh"
 . "$root/tools/ci/steps/9a.sh"
@@ -94,6 +102,7 @@ run_tests() {
 . "$root/tools/ci/steps/9c.sh"
 . "$root/tools/ci/steps/9r.sh"
 . "$root/tools/ci/steps/9z.sh"
+. "$root/tools/ci/steps/7.sh"
 
 step "① workspace 编译"
 run sh -c 'cd base/runtime && cargo check --locked --all-targets --workspace'
@@ -249,201 +258,7 @@ run bash tools/deploy/verify-board-config.sh --self-test
 #    执法，本步不抄第二份。业务阈值字面量无可靠静态判据（注释里的版本号同为点分数值），
 #    执法面 = atom 板无关门 + 描述符/ops 注入纪律 + 评审（§13"判不了 semantic 的留评审"）。
 step "⑦ §13 静态断言（零策略载荷/F⊗F/五件套/入口体量）"
-static_fail=0
-# ⑦-a 机制核零策略载荷：厂商/产品/芯片/器件名与 vendor/product 条件分支命中即红。
-#     机制核目录 = no_std 可达面：rr-mech 全部（0.0.5 批M 控制原语叶子件，自
-#     rr-core 下沉）+ rr-core 全部 + rr-hal-api 能力面契约层全部
-#     （0.0.5 批I C8：新机制核面同批进本扫面，门查门）+ rr-ipc 字节契约层 protocol/
-#     + 传输抽象 transport/mod.rs + 原子件面 modules/*/atoms/*/*.rs（批K H2/L-6：
-#     SURFACE 常量与 println 同在载荷面——件自述串是线上字节，板名藏进去即违约）；
-#     具体传输实现（uds/shm/tcp/uart）是平台供给，不在载荷面。
-#     行注释先剥离（`// …` 含 `//!`）再查：文档注释常需表述门禁规则自身，自指不违例。
-#     禁词是 rock3 自有清单（同 atom.rs 板无关门的厂商/产品段，另加中文板名），不搬外部模板。
-#     自家产品标识（rock3/洛克/RR3_ 前缀）不进禁词——机制自身的运行时身份（如
-#     rock3-ipc.sock 契约冻结路径）不是策略载荷，门禁禁的是**外部**板卡厂商与器件。
-policy_hits="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
-# 扫描面唯一真值（0.0.5 批M MC-10 L-4）：⑦-a 执法与 ⑦-e 自指判等共用此数组；文档两处口径
-# （conventions §2 ⑦ 行、tools/ci/README.md ⑦ 行）向它看齐——改面只改这里一处，⑦-e 拦住漏同步。
-mech_surfaces=(
-  base/runtime/rr-mech/src/*.rs
-  base/runtime/rr-core/src/*.rs
-  base/runtime/rr-hal-api/src/*.rs
-  base/runtime/rr-ipc/src/protocol/*.rs
-  base/runtime/rr-ipc/src/transport/mod.rs
-  modules/*/atoms/*/*.rs
-)
-for f in ${mech_surfaces[@]}; do
-  [ -f "$f" ] || continue
-  sed 's://.*$::' "$f" \
-    | grep -inE 'rockchip|raspberry|broadcom|espressif|allwinner|sunxi|amlogic|rk35|rk33|rv11|cm4|esp32|ina219|max7219|tp4056|es8388|sg90|cp2102|mpu6050|树莓派|if.*(vendor|product)' \
-    | sed "s|^|$f:|" >> "$policy_hits"
-done
-if [ -s "$policy_hits" ]; then
-  cat "$policy_hits"
-  printf 'FAIL  ⑦-a 机制核零策略载荷命中（厂商/产品名或 vendor 条件分支，见上行号）\n'
-  static_fail=1
-else
-  printf 'PASS  ⑦-a 机制核零策略载荷（rr-mech + rr-core + rr-hal-api + rr-ipc 契约层/传输抽象 + atoms 件面，禁词零命中）\n'
-fi
-# ⑦-b F⊗F 非法 + 禁薄胶水存在性：composite.toml [assemble].atoms 的每个成员必须解析到
-#     本模块 atoms/<名>/atom.toml——⊗ 链只能装原子件，把组合件/面当被装配方（F⊗F/C⊗C）
-#     或写不存在的名即红（§13：面间只 ⊙）。atoms 行缺失/形状畸形同红（fail-closed）。
-for c in modules/*/composite.toml; do
-  mod_dir="$(dirname "$c")"; mod="$(basename "$mod_dir")"
-  line="$(grep -E '^atoms *= *\[' "$c" || true)"
-  if [ -z "$line" ]; then
-    printf 'FAIL  ⑦-b F⊗F/装配成员: %s 缺 [assemble] atoms 行（fail-closed，不猜形状）\n' "$c"
-    static_fail=1; continue
-  fi
-  members="$(printf '%s\n' "$line" | grep -oE '"[^"]+"' | tr -d '"' || true)"
-  if [ -z "$members" ]; then
-    printf 'FAIL  ⑦-b F⊗F/装配成员: %s atoms 行无可解析成员\n' "$c"
-    static_fail=1; continue
-  fi
-  for name in $members; do
-    if [ ! -f "$mod_dir/atoms/$name/atom.toml" ]; then
-      printf 'FAIL  ⑦-b F⊗F/装配成员: %s 成员 "%s" 不是本模块原子件（atoms/%s/atom.toml 不在）——⊗ 链只装原子件，面间只 ⊙\n' "$c" "$name" "$name"
-      static_fail=1
-    fi
-  done
-done
-[ "$static_fail" -eq 0 ] && printf 'PASS  ⑦-b F⊗F/装配成员存在性（全部 composite.toml 的 ⊗ 链成员皆本模块原子件）\n'
-# —— 模块语言数据源（读 module.toml `manifest.lang`；schema 必填 + 枚举 rust|python，
-#    contract 钉死 schema.rs）。⑦-c 件形与 ⑧-a 豁免的**唯一判据数据源**——门内零零件名
-#    硬编码（0.0.5 批M MC-10 L-2，承 R-8：architecture §13"⑦-c 仍留两处 if rr3-brain"
-#    收编；参数 = module.toml 路径，供 ⑦-c/$mod 与 ⑧-a/$mod_dir 两处共用同一真值）。
-mod_lang() {
-  grep -m1 -E '^lang[[:space:]]*=' "$1" 2>/dev/null | sed -E 's/.*"([^"]*)".*/\1/'
-}
-# ⑦-c 五件套齐全（§13 计数断言，承 ②b mkmod 产物形状）：Rust 原子件五件 = atom.toml +
-#     <名>.rs（入口）+ mech.rs（实现）+ assemble.toml（装配清单）+ private.rs（唯一私有头）；
-#     Python 件为两件式（atom.toml + assemble.toml，机制本体 .py 原位——conventions
-#     §2 批C⑤ 在案，属登记豁免非 SKIP）。件形由 module.toml `lang` 数据位选（不再按
-#     零件名 `if` 猜）。组合件实体 = composite.toml + 入口 + 实现（禁薄胶水存在性）。
-for d in modules/*/atoms/*/; do
-  mod="$(basename "$(dirname "$(dirname "$d")")")"; name="$(basename "$d")"
-  lang="$(mod_lang "modules/$mod/module.toml")"
-  case "$lang" in
-    rust)   five="atom.toml assemble.toml private.rs mech.rs $name.rs" ;;
-    python) five="atom.toml assemble.toml" ;;
-    *)
-      printf 'FAIL  ⑦-c 五件套: %s 模块 %s 的 lang=%s（module.toml manifest.lang 白名单 rust|python，缺/非法即 fail-closed）\n' "$d" "$mod" "${lang:-<空>}"
-      static_fail=1; continue
-      ;;
-  esac
-  for f in $five; do
-    if [ ! -f "$d$f" ]; then
-      printf 'FAIL  ⑦-c 五件套: %s 缺 %s\n' "$d" "$f"
-      static_fail=1
-    fi
-  done
-done
-for c in modules/*/composite.toml; do
-  mod_dir="$(dirname "$c")"; mod="$(basename "$mod_dir")"
-  lang="$(mod_lang "$mod_dir/module.toml")"
-  alt=""
-  case "$lang" in
-    # rust 组合件实体（批N26 件二订正，0.0.8 W-A 批1 起）：装配入口 src/main.rs 必在；
-    # 运行机制实体 src/composite.rs（五件套②）与拆分后 src/dispatch.rs（0.0.8 方案 §4
-    # 各批目标树）至少其一——过渡期未拆模块持 composite.rs、已拆模块持 dispatch.rs，双态可判。
-    rust)   req="src/main.rs"; alt="src/composite.rs src/dispatch.rs" ;;
-    # Python 组合件实体：包目录 = 模块名破折号转下划线（naming.md §3 目录名 == 进程名 ==
-    # manifest.name；pyproject `packages.find` include `"<包>*"` 同源），不硬编码零件名。
-    python) pkg="$(printf '%s' "$mod" | tr '-' '_')"; req="$pkg/__main__.py $pkg/composite.py" ;;
-    *)
-      printf 'FAIL  ⑦-c 五件套(组合件): %s 模块 %s 的 lang=%s（缺/非法即 fail-closed）\n' "$c" "$mod" "${lang:-<空>}"
-      static_fail=1; continue
-      ;;
-  esac
-  for f in $req; do
-    if [ ! -f "$mod_dir/$f" ]; then
-      printf 'FAIL  ⑦-c 五件套(组合件): %s 缺 %s\n' "$c" "$f"
-      static_fail=1
-    fi
-  done
-  # 运行机制实体至少其一（批N26 件二，0.0.8 W-A 批1 起：composite.rs / dispatch.rs；
-  # alt 非空才判——python 组合件两件全必在，req 已覆盖）
-  if [ -n "$alt" ]; then
-    alt_ok=0
-    for f in $alt; do [ -f "$mod_dir/$f" ] && alt_ok=1; done
-    if [ "$alt_ok" -eq 0 ]; then
-      printf 'FAIL  ⑦-c 五件套(组合件): %s 缺运行机制实体（%s 至少其一）\n' "$mod" "$alt"
-      static_fail=1
-    fi
-  fi
-done
-[ "$static_fail" -eq 0 ] && printf 'PASS  ⑦-c 五件套齐全（全部原子件与组合件实体逐件计数过）\n'
-# ⑦-d 入口体量（§13：装配入口 ≤80 行；批E 起 fail-closed——六入口现况 16–18 行）。
-#     入口路径按 module.toml `lang` 数据位推导（L-2：此前硬编码 modules/rr3-brain/…）。
-for mt in modules/*/module.toml; do
-  mod_dir="$(dirname "$mt")"; mod="$(basename "$mod_dir")"
-  lang="$(mod_lang "$mt")"
-  case "$lang" in
-    rust)   e="$mod_dir/src/main.rs" ;;
-    python) pkg="$(printf '%s' "$mod" | tr '-' '_')"; e="$mod_dir/$pkg/__main__.py" ;;
-    *) continue ;;  # lang 缺/非法已由 ⑦-c 逐件点名，此处不重复扰民
-  esac
-  [ -f "$e" ] || continue
-  lines="$(wc -l < "$e" | tr -d ' ')"
-  if [ "$lines" -gt 80 ]; then
-    printf 'FAIL  ⑦-d 入口体量: %s %s 行 > 80（瘦入口纪律，逻辑下沉组合件/原子件）\n' "$e" "$lines"
-    static_fail=1
-  fi
-done
-[ "$static_fail" -eq 0 ] && printf 'PASS  ⑦-d 入口体量（全部装配入口 ≤80 行）\n'
-# ⑦-e 门禁清单自指判等（0.0.5 批M MC-10 L-4，architecture §13"门禁清单同步"行）：
-#     ⑦-a 扫面在代码里有一个真值（上面的 mech_surfaces 数组）；文档另有 conventions §2 ⑦ 行
-#     与 tools/ci/README.md ⑦ 行两处抄写。抄写靠人记得同步必然漂移——实测批M 起 `rr-mech` 进了
-#     扫面，两处文档行均未列（"文档宣称有门、门实际没扫"的制度自己也得被扫）。本件从数组归一
-#     出面名集 A（`base/runtime/<crate>/…` → `<crate>`；`modules/*/atoms/…` → `atoms`），逐名
-#     在两份文档的 `^| ⑦ |` 行里查找，缺任一即 FAIL 点名；并断言 rr-core-xtensa-check.sh 的
-#     `-p rr-*` 目标集 ⊆ A（机制核 crate 面与静态扫面同步）。方向单向：代码是唯一真值，
-#     文档向代码看齐，门不由代码迁就文档。
-mech_surfaces_names=""
-for s in "${mech_surfaces[@]}"; do
-  case "$s" in
-    base/runtime/*)    n="$(printf '%s' "$s" | awk -F/ '{print $3}')" ;;
-    modules/*/atoms/*) n="atoms" ;;
-    *) printf 'FAIL  ⑦-e 自指判等: 扫面条目 %s 无归属规则（fail-closed，不猜）\n' "$s"; static_fail=1; continue ;;
-  esac
-  case " $mech_surfaces_names " in
-    *" $n "*) ;;
-    *) mech_surfaces_names="${mech_surfaces_names:+$mech_surfaces_names }$n" ;;
-  esac
-done
-if [ -z "$mech_surfaces_names" ]; then
-  printf 'FAIL  ⑦-e 自指判等: 扫面名集归一出空（门禁失效，不放行）\n'
-  static_fail=1
-fi
-conv_row="$(grep -m1 -E '^\| ⑦ \|' docs/process/conventions.md || true)"
-ci_row="$(grep -m1 -E '^\| ⑦ \|' tools/ci/README.md || true)"
-if [ -z "$conv_row" ] || [ -z "$ci_row" ]; then
-  printf 'FAIL  ⑦-e 自指判等: 文档 ⑦ 行读不到（conventions=%s README=%s；门禁失效，不放行）\n' \
-         "$([ -n "$conv_row" ] && printf 有 || printf 空)" "$([ -n "$ci_row" ] && printf 有 || printf 空)"
-  static_fail=1
-else
-  for n in $mech_surfaces_names; do
-    case "$conv_row" in *"$n"*) ;; *) printf 'FAIL  ⑦-e 自指判等: conventions §2 ⑦ 行未列扫面名 "%s"（文档向代码看齐）\n' "$n"; static_fail=1 ;; esac
-    case "$ci_row"   in *"$n"*) ;; *) printf 'FAIL  ⑦-e 自指判等: tools/ci/README.md ⑦ 行未列扫面名 "%s"（文档向代码看齐）\n' "$n"; static_fail=1 ;; esac
-  done
-fi
-xtensa_targets="$(grep -oE '\-p rr-[a-z-]+' tools/ci/rr-core-xtensa-check.sh | awk '{print $2}' | sort -u)"
-if [ -z "$xtensa_targets" ]; then
-  printf 'FAIL  ⑦-e 自指判等: rr-core-xtensa-check.sh 的 -p rr-* 目标集打空（门禁失效，不放行）\n'
-  static_fail=1
-else
-  for t in $xtensa_targets; do
-    case " $mech_surfaces_names " in
-      *" $t "*) ;;
-      *) printf 'FAIL  ⑦-e 自指判等: xtensa 门目标 "%s" 不在静态扫面集 A（机制核面不同步）\n' "$t"; static_fail=1 ;;
-    esac
-  done
-fi
-[ "$static_fail" -eq 0 ] && printf 'PASS  ⑦-e 门禁清单自指判等（扫面名集 A 逐名在 conventions §2 与 tools/ci/README.md ⑦ 行齐 + xtensa 门目标集 ⊆ A）\n'
-rm -f "$policy_hits"
-if [ "$static_fail" -ne 0 ]; then
-  fail=1
-fi
+rr3_step_7
 
 # ⑧ 件级判据三门（0.0.5 批K H2，architecture §4.0.3 判据② + §13 表；全 fail-closed，
 #    上线即全绿——既有步序不得由 FAIL 变 SKIP，新门同理）。步序与条数登记 conventions §2。
