@@ -1,0 +1,32 @@
+# 规约门步骤清单（check.sh 的机器真值）：顺序与名称必须逐字一致。
+# 新增/删除/改名步骤 = 改本文件 + 同批评审；漏登记或静默删除由
+# tools/ci/gate_steps_audit.py 在 gate scripts job 判红。
+① workspace 编译
+①b workspace 全量测试（含未被点名的守护用例）
+①c 代码风格门 rustfmt --check（base/runtime + 全部独立工程，CI lint 同源）
+①d 静态 lint 门 clippy -D warnings（base/runtime workspace）
+② manifest schema 校验 + 注册表形状 pin
+②b mkmod 输出即契约用例（方案 P3）
+③ 主题前缀归属
+④ 独立 Rust 工程编译（modules/ + tools/ + base/ota）
+④b 独立工程 clippy -D warnings（CI lint 同源；esp 条件工程归专用门）
+⑤ 文档门（已跟踪 md 不得为空、相对链接不得断、README 不得漏进导航）
+⑥ 格格双达标·独立工程测试接线（每件 tests 真跑 ≥1，§13）
+⑥b 部署面配置漂移门·工具自检（verify-board-config --self-test）
+⑦ §13 静态断言（零策略载荷/F⊗F/五件套/入口体量）
+⑧ 件级判据三门（对拍计数门/依赖闭包门/注入面校验门，批K H2）
+⑨-d 生成物一致性（真值点 → 板侧常量表，重跑 rr3-codegen diff 为空）
+⑨-e 行程真值单点（门 g：旧行程键名与板侧旧行程常量名全仓零命中，档案是唯一真值）
+⑨-w 依赖面禁令（单元契约面走 rr-hal-api/rr-bus-api + use 面白名单冻结＋条目数基线钉数 + 板侧禁实现 crate，基-35）
+⑨-n 注入路径唯一（[hardware] 禁物理键——[pins] 派生稳态判据静态面，门 n）
+⑨-c 电流预算装载拒链（校验⑨ per-instance 扩算 + kind=power 覆盖判据，门 c）
+⑨-a 基-39 角色覆盖六表对账·执法（A 未覆盖 body normal 格 / B roles 悬空 / C trait·键差集 / D iface 实现者缺位，门 a）
+⑨-r 留痕不进被丢弃的流（六模块生产码 stdout 留痕零命中，门 r）
+⑨-z 真值集三方成员判等（单点在位＋判据面/打包面共读＋第二份字面零命中，门 z）
+⑨-y 跨平台可编面（base 层 Windows 红 crate 数基线钉数，门 y）
+⑩ 门 d 面板覆盖率对账·基线钉数门（当前上限 0）（分子 covers 申报＋applies 生效路径 / 分母字段级五路并集，门 d）
+⑫ 质量度量门（重复率 / 圈复杂度 / panic 落点 / 函数名长度 / 长睡）
+⑬ 仓面卫生门（追踪文件本机路径 / 构建目录）
+⑭ 装载门体量基线（块行数 / 读表样板 / 同形函数）
+⑭ 源文件行数门（.rs ≥600 行违规，基线只降不升）
+⑮ 锁内 I/O 门（lock·log 同行 / 条件位临时 guard / 直调 reg 日志方法）
