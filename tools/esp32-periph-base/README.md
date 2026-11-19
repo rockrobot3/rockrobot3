@@ -154,6 +154,21 @@ classic 用 `--features spk-tone` 烧录后应听到两声 440 Hz。模块丝印
 - 无声排查顺序：Vin/GND → SD 是否使能 → LRC/BCLK/DIN 是否与丝印一致 → 扬声器 JST。
 - 固件入口：[`speaker.rs`](src/speaker.rs)；默认固件不编译该模块。
 
+## 自治健康面（W3-2b）
+
+烧 `--features autonomy` 后，`GET /api/board/health` 返回监督壳快照：
+
+```bash
+# 无 WiFi 凭据：板起 SoftAP（SSID=RR3-BOARD / 口令=rock3robot），先连该 WiFi
+curl http://192.168.4.1/api/board/health
+# 已配网：换成板在路由器网段的实际 IP
+curl http://<实际板IP>/api/board/health
+```
+
+- `<板IP>` 是占位符，**不能原样敲**（zsh 会把 `<` 当输入重定向）。
+- AP-only 无外网，SNTP 30 s 后报 `failed` 属预期；先配网再测 `synced`。
+- W3-3 接线前六任务显示 `degraded`（显式未接线），不是故障；`shell=off` 表示固件未开 `autonomy` 档。
+
 ## 烧录与验收 runbook
 
 1. **烧录**（板载口 1410）：`cd tools/esp32-periph-base && cargo +esp run`——monitor 见
