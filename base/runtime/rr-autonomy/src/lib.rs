@@ -61,17 +61,18 @@ impl Rr3Task {
     }
 }
 
-/// 任务状态（四态）。
+/// 任务状态（四态；判别值供渲染面直接下标，禁止重排）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum Rr3TaskState {
     /// 已登记、尚未首次心跳
-    Starting,
+    Starting = 0,
     /// 心跳在位
-    Running,
+    Running = 1,
     /// 显式降级（不判死）
-    Degraded,
+    Degraded = 2,
     /// 超时或显式死亡，等待重启
-    Dead,
+    Dead = 3,
 }
 
 /// 监督器配置（策略量由装配注入）。

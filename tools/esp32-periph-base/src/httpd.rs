@@ -126,6 +126,7 @@ fn rr3_token_check(body: &[u8]) -> bool {
 pub(crate) const RR3_BOARD_ROUTES: &[(&str, &str, &[&str], &str)] = &[
     ("GET", "/", &[], ""),
     ("GET", "/api/board/state", &[], ""),
+    ("GET", "/api/board/health", &[], ""),
     ("GET", "/api/board/bindings", &[], ""),
     ("POST", "/api/board/wifi", &[], "live"),
     ("POST", "/api/board/reboot", &[], ""),
@@ -139,6 +140,9 @@ pub(crate) enum Rr3BoardRoute {
     /// GET /api/board/state——板侧运行态观测快照（`PeriphState` 观测字段，
     /// 批N12 件一观测面含其中）
     State,
+    /// GET /api/board/health——自治监督壳快照（W3-2b：任务状态/超时/栅格计数
+    /// 与 SNTP 状态；shell=off 时如实报未启动）
+    Health,
     /// GET /api/board/bindings——注入绑定十一键读数（批N9 件五对账锚同源；批N17
     /// 件四 cred_store 随键——非 GPIO 存储源标记，读数面可见）
     Bindings,
@@ -154,6 +158,7 @@ pub(crate) enum Rr3BoardRoute {
 pub(crate) fn rr3_board_route(method: &str, path: &str) -> Option<Rr3BoardRoute> {
     match (method, path) {
         ("GET", "/api/board/state") => Some(Rr3BoardRoute::State),
+        ("GET", "/api/board/health") => Some(Rr3BoardRoute::Health),
         ("GET", "/") => Some(Rr3BoardRoute::Index),
         ("GET", "/api/board/bindings") => Some(Rr3BoardRoute::Bindings),
         ("POST", "/api/board/wifi") => Some(Rr3BoardRoute::WifiWrite),

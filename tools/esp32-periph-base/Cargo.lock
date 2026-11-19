@@ -517,6 +517,7 @@ dependencies = [
  "esp-idf-hal",
  "esp-idf-sys",
  "periph-mech",
+ "rr-autonomy",
  "rr-ipc",
  "rr-mech",
  "rr-periph-proto",
@@ -989,6 +990,10 @@ dependencies = [
  "normpath",
  "windows-sys 0.59.0",
 ]
+
+[[package]]
+name = "rr-autonomy"
+version = "0.0.1"
 
 [[package]]
 name = "rr-ipc"
