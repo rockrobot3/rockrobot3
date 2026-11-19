@@ -21,10 +21,12 @@
 extern crate alloc;
 
 mod doa;
+mod wav;
 
 pub use doa::{
     rr3_doa_fix, rr3_frames_per_tick, rr3_pcm_best_channel, Rr3DoaBin, Rr3DoaCfg, Rr3DoaFix,
 };
+pub use wav::rr3_wav_header;
 
 /// VAD 参数（策略量由装配注入；机制件零策略载荷）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
