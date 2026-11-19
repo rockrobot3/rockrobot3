@@ -46,7 +46,7 @@ check-run annotation 是唯一无需凭据的取数通道。`sim-chain` 的稳�
 check-runs/{id}/annotations`，无需 token；取数收成单点
 `python3 tools/ci/ci_steady.py [--head <sha>] [--assert]`（只读；`--assert` 按暂行
 阈值逐键判据，缺键/越界退 3——积压丢帧/写超时/慢写必须为 0）。
-| `publish.yml`（3） | build ×2 / merge / firmware | 发布面：原生架构双腿构建 → merge 去重 → firmware 打包 |
+| `publish.yml`（4） | build ×2 / build-riscv64 / merge / firmware | 发布面：原生架构双腿构建 + riscv64 交叉腿（QEMU）→ merge 去重（三架构）→ firmware 打包 |
 | `buildroot.yml`（3） | dtb-backport / image / release | Buildroot 装配轨：交叉工具链与装配冒烟、出厂镜像轨 |
 
 ## 工具链
@@ -73,7 +73,8 @@ with 入参），不依赖 runner 镜像预装版本；交叉 job 同时显式�
 工具链，brain 的 ureq+rustls(ring) 归板上原生构建——覆盖差异由矩阵 `extra`
 数据位表达，脚本机制只有一份。**riscv-image 腿（同日）**：在每次 push 上把
 riscv64 发布镜像路径跑通（交叉产物 → `rr3-pack` stage → QEMU `docker build`
-→ 文件面/运行面两段冒烟），不推送 ghcr；发布腿随后只加 login/push/merge。
+→ 文件面/运行面两段冒烟），不推送 ghcr；`publish.yml` 的 `build-riscv64` 腿
+复用同一脚本，tag/main 时推送并把 riscv64 并入三架构清单（merge 判据同步）。
 
 **权限与失败显形（2026-11-18 续轮十六）**：
 
