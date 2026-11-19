@@ -86,6 +86,9 @@ mod periph;
 mod ports_impl;
 mod power;
 mod runtime;
+// I2S TX 功放/扬声器上板验收（W4-1）：仅 --features spk-tone 编译，默认固件零行为变化。
+#[cfg(feature = "spk-tone")]
+mod speaker;
 // servo 原子件机制核（批N23 件一收编：atoms/servo/mech.rs，文件级机制/策略
 // 分离——机制纯函数与行程生成物在件内，策略量留 board.rs；接线照 modules
 // 先例 #[path = "../atoms/<名>/<文件>.rs"]）。
@@ -451,6 +454,26 @@ fn main() {
         peripherals.pins.gpio7,
     );
     ram_point("3-mic-smoke");
+
+    // ---- W4-1：I2S TX 提示音（功放/扬声器上板验收；仅 spk-tone 档编译）----
+    // classic：BCLK=25 / DIN=17 / WS=16（16/17 自 UART2 迁 18/19 后空闲）
+    // S3 N16R8：BCLK=16 / DIN=18 / WS=17（26–37 Flash/PSRAM 区外）
+    #[cfg(all(feature = "spk-tone", feature = "esp32"))]
+    speaker::spawn_tone(
+        peripherals.i2s1,
+        peripherals.pins.gpio25,
+        peripherals.pins.gpio17,
+        peripherals.pins.gpio16,
+    );
+    #[cfg(all(feature = "spk-tone", feature = "esp32s3"))]
+    speaker::spawn_tone(
+        peripherals.i2s1,
+        peripherals.pins.gpio16,
+        peripherals.pins.gpio18,
+        peripherals.pins.gpio17,
+    );
+    #[cfg(feature = "spk-tone")]
+    ram_point("4-spk-tone");
 
     // main 循环：周期状态行（观测面）
     loop {
