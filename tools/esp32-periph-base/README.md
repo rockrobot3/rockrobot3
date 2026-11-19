@@ -134,6 +134,26 @@ rr-mech 安全核 `Rr3LowEdge` **两实例**（一核两条线）产——"越�
      判据 >1000 仅适用无增益 raw 域口径；
   终判：人耳听感（afplay 放 wav）+ 唤醒词复述。详见 main.rs 装配注与排障记录。
 
+## W4-1 I2S 功放接线（HENOPI-98357 V3.3 / I2S MONO AMP）
+
+classic 用 `--features spk-tone` 烧录后应听到两声 440 Hz。模块丝印引脚
+（以实物为准，逐脚核对）：`LRC / BCLK / DIN / GAIN / SD / GND / Vin`。
+
+| 模块丝印 | 接 ESP32 classic | 说明 |
+|---|---|---|
+| Vin | 5V | 模块标 2.5–5.5V；8 Ω 3 W 峰值建议独立 5V/1A，与板共地 |
+| GND | GND | 必须共地 |
+| LRC | GPIO16 | 字时钟（WS） |
+| BCLK | GPIO25 | 位时钟 |
+| DIN | GPIO17 | 数据（ESP32 → 功放） |
+| GAIN | 悬空 | 缺省 9 dB；接法按模块丝印表 |
+| SD | 悬空或 3.3V | 使能；接 GND 为关断 |
+| 扬声器 JST | 8 Ω 扬声器 | 模块已带 JST 座；**扬声器任一端不得接地** |
+
+- 先断电接线，再上电；首次测试音量从低开始（GAIN 悬空）。
+- 无声排查顺序：Vin/GND → SD 是否使能 → LRC/BCLK/DIN 是否与丝印一致 → 扬声器 JST。
+- 固件入口：[`speaker.rs`](src/speaker.rs)；默认固件不编译该模块。
+
 ## 烧录与验收 runbook
 
 1. **烧录**（板载口 1410）：`cd tools/esp32-periph-base && cargo +esp run`——monitor 见
