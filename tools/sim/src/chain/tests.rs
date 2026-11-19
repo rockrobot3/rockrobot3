@@ -239,9 +239,9 @@ fn steady_feed_takes_peak_and_skips_observer() {
     assert!(!agg.mods.contains_key("rr3-obs"), "观察者不计入稳态判据");
 }
 
-/// 收尾 status 的健康读数（两个单调计数为 0）。
+/// 收尾 status 的健康读数（三个单调计数为 0）。
 fn steady_tail_ok(agg: &mut Rr3SteadyAgg) {
-    agg.rr3_steady_tail("fan_write_timeout = 0\nlog_write = max_us=120 slow=0\n")
+    agg.rr3_steady_tail("fan_dropped = 0\nfan_write_timeout = 0\nlog_write = max_us=120 slow=0\n")
         .unwrap();
 }
 
@@ -285,19 +285,21 @@ fn steady_tail_requires_zero_and_reads_peak() {
         agg.rr3_steady_check().unwrap_err().contains("未采到"),
         "没采到阻塞面读数必须不通过（不拿 0 冒充）"
     );
-    agg.rr3_steady_tail("fan_write_timeout = 2\nlog_write = max_us=900 slow=1\n")
+    agg.rr3_steady_tail("fan_dropped = 3\nfan_write_timeout = 2\nlog_write = max_us=900 slow=1\n")
         .unwrap();
     assert_eq!(agg.log_max_us, Some(900), "落盘峰值原样入报告");
     let e = agg.rr3_steady_check().unwrap_err();
+    assert!(e.contains("fan_dropped=3"), "{e}");
     assert!(e.contains("fan_write_timeout=2"), "{e}");
     assert!(e.contains("log_sink_slow=1"), "{e}");
-    agg.rr3_steady_tail("fan_write_timeout = 0\nlog_write = max_us=120 slow=0\n")
+    agg.rr3_steady_tail("fan_dropped = 0\nfan_write_timeout = 0\nlog_write = max_us=120 slow=0\n")
         .unwrap();
     agg.rr3_steady_check().unwrap();
     let s = agg.rr3_steady_summary();
     for needle in [
         "since_max=80",
         "wd_min=1000",
+        "fd=0",
         "wr=0",
         "slow=0",
         "log_max_us=120",
@@ -305,6 +307,15 @@ fn steady_tail_requires_zero_and_reads_peak() {
     ] {
         assert!(s.contains(needle), "摘要缺 {needle}: {s}");
     }
+}
+
+#[test]
+fn steady_tail_requires_fan_dropped_line() {
+    let mut agg = Rr3SteadyAgg::default();
+    let e = agg
+        .rr3_steady_tail("fan_write_timeout = 0\nlog_write = max_us=120 slow=0\n")
+        .unwrap_err();
+    assert!(e.contains("fan_dropped"), "缺行必须点名: {e}");
 }
 
 #[test]

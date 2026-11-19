@@ -6,9 +6,10 @@
 //! - 末拍全部 `running`（保持期间掉线/重启即失败）；
 //! - 各模块 `since_beat_ms` 与 `beat_peak_ms` 峰值不触自己的 `watchdog_ms`
 //!   （触线 = 判活输入已到边缘，rrd 下一轮就可能收尸）；
-//! - 收尾 `rr3-ctl status` 的两个**单调**计数为 0：`fan_write_timeout`
-//!   （对端 5s 不收）与 `log_write slow`（单次落盘 ≥50ms）——单调计数收尾为 0
-//!   即证明全程未发生；同时把 `log_sink_max_us`（全程峰值）原样入报告。
+//! - 收尾 `rr3-ctl status` 的三个**单调**计数为 0：`fan_dropped`（广播积压丢帧）、
+//!   `fan_write_timeout`（对端 5s 不收）与 `log_write slow`（单次落盘 ≥50ms）——
+//!   单调计数收尾为 0 即证明全程未发生；同时把 `log_sink_max_us`（全程峰值）
+//!   原样入报告。
 //!
 //! 报告给出每模块峰值与心跳/看门狗配置、以及全局阻塞面读数，数值归 CI/本机回执，
 //! 不在此设"良好/不良"档位——档位需要跨环境基线，先收数。
@@ -44,6 +45,8 @@ pub(crate) struct Rr3SteadyMod {
 pub(crate) struct Rr3SteadyAgg {
     pub(crate) samples: u32,
     pub(crate) mods: BTreeMap<String, Rr3SteadyMod>,
+    /// 广播积压丢帧总数（单调；None = 未采到 status）
+    pub(crate) fan_dropped: Option<u64>,
     /// 写超时累计（单调；None = 未采到 status）
     pub(crate) fan_wr_timeout: Option<u64>,
     /// 单次落盘 ≥50ms 的次数（单调）
@@ -80,10 +83,11 @@ impl Rr3SteadyAgg {
         Ok(())
     }
 
-    /// 收尾一次 `rr3-ctl status`：取两个**单调**计数与落盘峰值。
+    /// 收尾一次 `rr3-ctl status`：取三个**单调**计数与落盘峰值。
     /// 缺行即点名——静默当 0 会把"没采到"伪装成"很健康"。
     pub(crate) fn rr3_steady_tail(&mut self, status: &str) -> Result<(), String> {
-        let (wr, slow, max_us) = rr3_steady_scan(status)?;
+        let (fd, wr, slow, max_us) = rr3_steady_scan(status)?;
+        self.fan_dropped = Some(fd);
         self.fan_wr_timeout = Some(wr);
         self.log_slow = Some(slow);
         self.log_max_us = max_us;
@@ -112,11 +116,11 @@ impl Rr3SteadyAgg {
                 ));
             }
         }
-        match (self.fan_wr_timeout, self.log_slow) {
-            (Some(0), Some(0)) => Ok(()),
-            (Some(wr), Some(slow)) => Err(format!(
-                "稳态阻塞面非零：fan_write_timeout={wr} log_sink_slow={slow}\
-                 （对端不收 / 单次落盘 ≥50ms；按慢消费者与磁盘抖动两条线归因）"
+        match (self.fan_dropped, self.fan_wr_timeout, self.log_slow) {
+            (Some(0), Some(0), Some(0)) => Ok(()),
+            (Some(fd), Some(wr), Some(slow)) => Err(format!(
+                "稳态阻塞面非零：fan_dropped={fd} fan_write_timeout={wr} log_sink_slow={slow}\
+                 （积压丢帧 / 对端不收 / 单次落盘 ≥50ms；按订阅者积压与磁盘抖动两条线归因）"
             )),
             _ => Err("稳态段未采到 status 阻塞面（判据缺失，不放行）".to_string()),
         }
@@ -133,7 +137,8 @@ impl Rr3SteadyAgg {
             ));
         }
         out.push_str(&format!(
-            "阻塞面：fan_write_timeout={} log_sink_slow={} log_sink_max_us={}\n",
+            "阻塞面：fan_dropped={} fan_write_timeout={} log_sink_slow={} log_sink_max_us={}\n",
+            rr3_steady_opt(self.fan_dropped),
             rr3_steady_opt(self.fan_wr_timeout),
             rr3_steady_opt(self.log_slow),
             rr3_steady_opt(self.log_max_us)
@@ -154,8 +159,9 @@ impl Rr3SteadyAgg {
             wd = wd.min(e.watchdog_ms);
         }
         format!(
-            "since_max={since}ms peak_max={peak}ms wd_min={}ms wr={} slow={} log_max_us={} boot_max={}",
+            "since_max={since}ms peak_max={peak}ms wd_min={}ms fd={} wr={} slow={} log_max_us={} boot_max={}",
             if wd == u64::MAX { 0 } else { wd },
+            rr3_steady_opt(self.fan_dropped),
             rr3_steady_opt(self.fan_wr_timeout),
             rr3_steady_opt(self.log_slow),
             rr3_steady_opt(self.log_max_us),
@@ -169,14 +175,17 @@ fn rr3_steady_opt(v: Option<u64>) -> String {
     v.map_or("?".to_string(), |n| n.to_string())
 }
 
-/// 扫 status 文本取三读数（缺行点名）。
-fn rr3_steady_scan(status: &str) -> Result<(u64, u64, Option<u64>), String> {
+/// 扫 status 文本取四读数（缺行点名）。
+fn rr3_steady_scan(status: &str) -> Result<(u64, u64, u64, Option<u64>), String> {
+    let mut fd = None;
     let mut wr = None;
     let mut slow = None;
     let mut max_us = None;
     for line in status.lines() {
         let line = line.trim();
-        if let Some(v) = line.strip_prefix("fan_write_timeout = ") {
+        if let Some(v) = line.strip_prefix("fan_dropped = ") {
+            fd = Some(rr3_steady_num(v, line, "fan_dropped")?);
+        } else if let Some(v) = line.strip_prefix("fan_write_timeout = ") {
             wr = Some(rr3_steady_num(v, line, "fan_write_timeout")?);
         } else if let Some((max, s)) = rr3_steady_log_line(line)? {
             max_us = Some(max);
@@ -184,6 +193,7 @@ fn rr3_steady_scan(status: &str) -> Result<(u64, u64, Option<u64>), String> {
         }
     }
     Ok((
+        fd.ok_or("status 缺 fan_dropped 行")?,
         wr.ok_or("status 缺 fan_write_timeout 行")?,
         slow.ok_or("status 缺 log_write 行")?,
         max_us,

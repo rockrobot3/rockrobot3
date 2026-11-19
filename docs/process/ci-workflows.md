@@ -38,12 +38,13 @@ CI 单一事实源在 GitHub Actions（R30 裁定：atomgit 无流水线功能�
 | `platforms.yml`（6） | cross-artifacts ×3 / esp32-gates ×2 / ipct003 / host-windows / host-macos | 跨平台与跨架构面：交叉编译矩阵、ESP32 专用门、ipct003 跨架构对拍（--strict）、宿主等价面（Windows＋macOS；macOS 单腿含 workspace 与独立工程串行） |
 | `integration.yml`（7） | distro-smoke / ota-sign / rk3566-onboard / buildroot-assembly / sim-assemble / sim-chain / matrix | 集成面：deb 装机冒烟、OTA 签名链、板面装配断言、装配与全链闭环演练（含 60s 稳态与阻塞面判据）、点验矩阵出数 |
 
-**数值回传面（续轮二十八）**：job 日志匿名不可读（403 已实证），check-run
-annotation 是唯一无需凭据的取数通道。`sim-chain` 的稳态摘要（`since_max` /
-`peak_max` / `wd_min` / `wr` / `slow` / `log_max_us` / `boot_max`）以 notice 注解回传
-（失败拍以 error + 失败拍摘要回传）；读法 = `GET /repos/{owner}/{repo}/
+**数值回传面（续轮二十八；续轮四十三起加丢帧面）**：job 日志匿名不可读（403 已实证），
+check-run annotation 是唯一无需凭据的取数通道。`sim-chain` 的稳态摘要（`since_max` /
+`peak_max` / `wd_min` / `fd` / `wr` / `slow` / `log_max_us` / `boot_max`）以 notice
+注解回传（失败拍以 error + 失败拍摘要回传）；读法 = `GET /repos/{owner}/{repo}/
 check-runs/{id}/annotations`，无需 token；取数收成单点
-`python3 tools/ci/ci_steady.py [--head <sha>]`（只读，取不到数值即非 0 退出）。
+`python3 tools/ci/ci_steady.py [--head <sha>] [--assert]`（只读；`--assert` 按暂行
+阈值逐键判据，缺键/越界退 3——积压丢帧/写超时/慢写必须为 0）。
 | `publish.yml`（3） | build ×2 / merge / firmware | 发布面：原生架构双腿构建 → merge 去重 → firmware 打包 |
 | `buildroot.yml`（3） | dtb-backport / image / release | Buildroot 装配轨：交叉工具链与装配冒烟、出厂镜像轨 |
 
