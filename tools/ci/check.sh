@@ -88,10 +88,10 @@ run_tests() {
 }
 
 step "① workspace 编译"
-run sh -c 'cd base/runtime && cargo check --all-targets --workspace'
+run sh -c 'cd base/runtime && cargo check --locked --all-targets --workspace'
 
 step "①b workspace 全量测试（含未被点名的守护用例）"
-run_tests sh -c 'cd base/runtime && cargo test --workspace'
+run_tests sh -c 'cd base/runtime && cargo test --locked --workspace'
 
 # ①c/①d 与 CI lint job 同源（.github/workflows/ci.yml lint）。此前本地门禁缺
 # fmt/clippy 两步，手工折行与 clippy 告警一路入库（9390d28 收 ⑱ 文件漂移、
@@ -106,15 +106,15 @@ done < <(find modules tools base/ota -name Cargo.toml \
             -not -path "*/target/*" -not -path "base/runtime/*" -print0 | sort -z)
 
 step "①d 静态 lint 门 clippy -D warnings（base/runtime workspace）"
-run sh -c 'cargo clippy -q --all-targets --manifest-path base/runtime/Cargo.toml --workspace -- -D warnings'
+run sh -c 'cargo clippy --locked -q --all-targets --manifest-path base/runtime/Cargo.toml --workspace -- -D warnings'
 
 step "② manifest schema 校验 + 注册表形状 pin"
-run_tests sh -c 'cd base/runtime && cargo test -p rr-registry --test contract'
+run_tests sh -c 'cd base/runtime && cargo test --locked -p rr-registry --test contract'
 step "②b mkmod 输出即契约用例（方案 P3）"
-run_tests sh -c 'cargo test --manifest-path tools/mkmodule/Cargo.toml'
+run_tests sh -c 'cargo test --locked --manifest-path tools/mkmodule/Cargo.toml'
 
 step "③ 主题前缀归属"
-run_tests sh -c 'cd base/runtime && cargo test -p rr-registry topics_prefix'
+run_tests sh -c 'cd base/runtime && cargo test --locked -p rr-registry topics_prefix'
 
 # ④ 仓内所有**独立** Rust 工程编译。①/①b 的作用域是 base/runtime 那一个 workspace，
 # 模块 crate 与 tools/、base/ota 各自独立成 workspace，不在其覆盖内；没有 ④ 的话
@@ -125,7 +125,7 @@ found=0
 # 而管道里的 while 在子 shell 中执行，fail 计数带不回来。
 while IFS= read -r -d '' manifest; do
   found=1
-  if sh -c "cargo check -q --all-targets --manifest-path '$manifest'"; then
+  if sh -c "cargo check --locked -q --all-targets --manifest-path '$manifest'"; then
     printf 'PASS  cargo check %s\n' "$manifest"
   else
     printf 'FAIL  cargo check %s\n' "$manifest"
@@ -146,7 +146,7 @@ fi
 # 排除口径与 ④ 完全一致，编译执法归各自专用门（SKIP 纪律）。
 step "④b 独立工程 clippy -D warnings（CI lint 同源；esp 条件工程归专用门）"
 while IFS= read -r -d '' manifest; do
-  run sh -c "cargo clippy -q --all-targets --manifest-path '$manifest' -- -D warnings"
+  run sh -c "cargo clippy --locked -q --all-targets --manifest-path '$manifest' -- -D warnings"
 done < <(find modules tools base/ota -name Cargo.toml -not -path "*/target/*" \
                     -not -path "base/runtime/*" -not -path "tools/esp32-uart-echo/*" \
                     -not -path "tools/espidf-std-hello/*" -not -path "tools/espidf-sentinel/*" \
@@ -216,7 +216,7 @@ step "⑥ 格格双达标·独立工程测试接线（每件 tests 真跑 ≥1�
 found_mod=0
 while IFS= read -r -d '' manifest; do
   found_mod=1
-  run_tests sh -c "cargo test -q --manifest-path '$manifest'"
+  run_tests sh -c "cargo test --locked -q --manifest-path '$manifest'"
 done < <(find modules tools base -name Cargo.toml -not -path "*/target/*" \
                     -not -path "base/runtime/*" -not -path "tools/esp32-uart-echo/*" \
                     -not -path "tools/espidf-std-hello/*" -not -path "tools/espidf-sentinel/*" \
@@ -659,13 +659,13 @@ fi
 if [ "$gate_fail" -ne 0 ]; then
   fail=1
 fi
-run_tests sh -c 'cd base/runtime && cargo test -p rr-registry --test contract injection'
+run_tests sh -c 'cd base/runtime && cargo test --locked -p rr-registry --test contract injection'
 
 # —— ⑨-d 生成物一致性门（门 f：重跑生成器 diff 为空；全案 §8/§4.5，批N1 n1-8）
 # 真值点 contracts/topics.toml + contracts/face-expressions.toml → 板侧副本
 # tools/esp32-periph-base/src/topics_gen.rs（rr3-codegen --check 只比对不写）。
 step "⑨-d 生成物一致性（真值点 → 板侧常量表，重跑 rr3-codegen diff 为空）"
-if codegen_out="$(cd tools/rr3-codegen && cargo run -q -- --check 2>&1)"; then
+if codegen_out="$(cd tools/rr3-codegen && cargo run --locked -q -- --check 2>&1)"; then
   printf '%s\n' "$codegen_out"
   printf 'PASS  ⑨-d 生成物一致（topics_gen.rs：三主题串 + 板侧七态白名单，与 contracts/ 真值点同步）\n'
 else
@@ -898,7 +898,7 @@ fi
 #    执法步——显式过滤器 demand_budget 封 fail-open（过滤器打空或用例改名即 0 通过，
 #    run_tests 直接红；新拒链用例命名须带 demand_budget 前缀进本步扫面）。
 step "⑨-c 电流预算装载拒链（校验⑨ per-instance 扩算 + kind=power 覆盖判据，门 c）"
-run_tests sh -c 'cd base/runtime && cargo test -p rrd --lib demand_budget'
+run_tests sh -c 'cd base/runtime && cargo test --locked -p rrd --lib demand_budget'
 
 # —— ⑨-a 基-39 角色覆盖六表对账·执法（门 a 第 ③ 层执法位——2026-11-12 P1 审计件四
 #     起由"报告模式"转执法：红账 21→0 连带基线归零，此后任何新红即 FAIL；全案 §8
