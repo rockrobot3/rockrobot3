@@ -258,6 +258,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rr-audio-mech"
+version = "0.0.1"
+
+[[package]]
 name = "rr-bus"
 version = "0.0.1"
 dependencies = [
@@ -272,6 +276,14 @@ dependencies = [
  "rr-ipc",
  "serde_json",
  "toml",
+]
+
+[[package]]
+name = "rr-cloud-proto"
+version = "0.0.1"
+dependencies = [
+ "rr-audio-mech",
+ "serde_json",
 ]
 
 [[package]]
