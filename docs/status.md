@@ -127,10 +127,10 @@ CI runner 单次 `boot_max=60ms` 佐证同一结论）。跨环境比较只看"�
 
 **判据化（2026-11-19）**：`tools/ci/ci_steady.py --assert` 把同一份稳态摘要逐键对照
 暂行阈值（续命/峰值 ≤500ms、积压丢帧/写超时/慢写恒 0、单次落盘 ≤50ms——与
-`RR3_SINK_SLOW_US` 同源、冷启动 ≤2s），缺键同判不达标、越界退 3；head `d73c112e`
-实测 `since_max=200ms peak_max=201ms wr=0 slow=0 log_max_us=103 boot_max=59`，
-续命余量 2.5×、落盘余量约 485×。阈值口径"暂行"，待跨环境多点后收紧并决定是否接入
-CI 硬门。
+`RR3_SINK_SLOW_US` 同源、冷启动 ≤2s），缺键同判不达标、越界退 3；head `3a1538c6`
+实测 `since_max=200ms peak_max=201ms wd_min=1000ms fd=0 wr=0 slow=0
+log_max_us=66 boot_max=60`，续命余量 2.5×、落盘余量约 750×。阈值口径"暂行"，
+待跨环境多点后收紧并决定是否接入 CI 硬门。
 
 ---
 
