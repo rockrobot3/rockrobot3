@@ -774,6 +774,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rr-audio-mech"
+version = "0.0.1"
+
+[[package]]
 name = "rr-bus-api"
 version = "0.0.1"
 dependencies = [
@@ -830,6 +834,7 @@ version = "0.0.1"
 dependencies = [
  "embuild",
  "esp-idf-sys",
+ "rr-audio-mech",
  "rr-bus-api",
  "rr-core",
  "rr-hal",
