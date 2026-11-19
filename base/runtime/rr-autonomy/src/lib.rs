@@ -1,8 +1,9 @@
 //! 自治运行核（supervisor-lite）：固定任务表、心跳、固定栅格看门狗与健康快照。
 //!
-//! 平台无关机制核（W3-1）：时间由调用方传入，零 IO、零线程、零分配；ESP-IDF
-//! 固件与宿主测试共用。任务表固定六项（net / audio-in / dialog / audio-out /
-//! motion / ui），与 ADR-0029 裁定 2 一致。
+//! 平台无关机制核（W3-1）：时间由调用方传入，核心零 IO、零线程、零分配
+//! （健康 JSON 渲染是纯字符串函数，按 `alloc` 构串）；ESP-IDF 固件与宿主测试
+//! 共用。任务表固定六项（net / audio-in / dialog / audio-out / motion / ui），
+//! 与 ADR-0029 裁定 2 一致。
 //!
 //! 语义：
 //! - 每个任务在 `timeouts_ms[i]` 内必须至少 beat 一次；超时即置 `Dead`，
@@ -13,6 +14,11 @@
 //! - 所有状态迁移都是纯函数可测，不依赖真实时钟。
 
 #![no_std]
+
+extern crate alloc;
+
+use alloc::format;
+use alloc::string::String;
 
 /// 任务表容量（六项固定）。
 pub const RR3_TASK_COUNT: usize = 6;
@@ -239,6 +245,67 @@ fn t_floor(ms: u64) -> u64 {
     ms.max(1)
 }
 
+/// 复位去抖闸门（策略层的"连续 N 拍仍 dead 才动作"机制核）：每拍输入
+/// "是否存在持续 dead 的已接线任务"，连续 `hold` 拍为真才返回 **一次** true
+/// （随后清零，避免同一停摆重复触发）；任一拍为假即清零。
+pub struct Rr3RestartGate {
+    hold: u32,
+    streak: u32,
+}
+
+impl Rr3RestartGate {
+    pub fn rr3_gate_new(hold: u32) -> Self {
+        Self {
+            hold: hold.max(1),
+            streak: 0,
+        }
+    }
+
+    /// 一拍输入；到阈值返回 true（一次性）。
+    pub fn rr3_gate_step(&mut self, dead: bool) -> bool {
+        self.streak = if dead {
+            self.streak.saturating_add(1)
+        } else {
+            0
+        };
+        if self.streak < self.hold {
+            return false;
+        }
+        self.streak = 0;
+        true
+    }
+}
+
+/// 健康快照 → `/api/board/health` JSON（机制件：形状单点，宿主测试可钉）。
+///
+/// `sntp` 词表由调用方给（"unknown"/"synced"/"failed"——时间源是策略面）；
+/// 任务顺序恒为 [`Rr3Task::ALL`]，状态词为四态小写（判别值禁止重排）。
+pub fn rr3_health_json(h: &Rr3SupHealth, sntp: &str) -> String {
+    let mut tasks = String::new();
+    for task in Rr3Task::ALL {
+        let i = task.index();
+        if i > 0 {
+            tasks.push(',');
+        }
+        tasks.push_str(&format!(
+            "{{\"name\":\"{}\",\"state\":\"{}\",\"timeouts\":{}}}",
+            task.name(),
+            rr3_state_word(h.state[i]),
+            h.timeouts[i]
+        ));
+    }
+    format!(
+        "{{\"shell\":\"on\",\"sntp\":\"{sntp}\",\"ticks\":{},\"overruns\":{},\"restarts\":{},\"tasks\":[{tasks}]}}",
+        h.ticks, h.overruns, h.restarts
+    )
+}
+
+/// 任务状态词（四态，判别值即下标；禁止重排）。
+pub fn rr3_state_word(v: Rr3TaskState) -> &'static str {
+    const WORDS: [&str; 4] = ["starting", "running", "degraded", "dead"];
+    WORDS[v as usize]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,6 +442,44 @@ mod tests {
             sup.rr3_sup_health().state[Rr3Task::Net.index()],
             Rr3TaskState::Dead
         );
+    }
+
+    #[test]
+    fn restart_gate_fires_once_after_hold_ticks() {
+        let mut g = Rr3RestartGate::rr3_gate_new(2);
+        assert!(!g.rr3_gate_step(true));
+        assert!(g.rr3_gate_step(true));
+        assert!(!g.rr3_gate_step(true), "触发后清零，不重复放行");
+        assert!(!g.rr3_gate_step(false));
+        assert!(!g.rr3_gate_step(true));
+        assert!(!g.rr3_gate_step(false));
+        assert!(!g.rr3_gate_step(true), "中间一拍恢复即重新计数");
+    }
+
+    #[test]
+    fn health_json_is_shape_stable() {
+        let mut sup = Rr3Supervisor::rr3_sup_new(cfg(), 0);
+        beat_all(&mut sup, 0);
+        sup.rr3_sup_degrade(Rr3Task::Dialog);
+        let j = rr3_health_json(&sup.rr3_sup_health(), "synced");
+        assert!(
+            j.starts_with("{\"shell\":\"on\",\"sntp\":\"synced\",\"ticks\":0,"),
+            "{j}"
+        );
+        assert!(j.contains("\"name\":\"net\",\"state\":\"running\""), "{j}");
+        assert!(
+            j.contains("\"name\":\"dialog\",\"state\":\"degraded\""),
+            "{j}"
+        );
+        assert!(j.ends_with("]}"), "{j}");
+    }
+
+    #[test]
+    fn state_words_cover_all_variants() {
+        assert_eq!(rr3_state_word(Rr3TaskState::Starting), "starting");
+        assert_eq!(rr3_state_word(Rr3TaskState::Running), "running");
+        assert_eq!(rr3_state_word(Rr3TaskState::Degraded), "degraded");
+        assert_eq!(rr3_state_word(Rr3TaskState::Dead), "dead");
     }
 
     #[test]
