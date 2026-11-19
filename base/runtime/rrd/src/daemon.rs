@@ -14,6 +14,7 @@
 
 mod boot;
 mod ctl;
+mod notify;
 mod run;
 mod task;
 mod tick;
