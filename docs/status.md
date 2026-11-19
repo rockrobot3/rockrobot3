@@ -111,8 +111,8 @@ CI runner 单次 `boot_max=60ms` 佐证同一结论）。跨环境比较只看"�
 判据载体：`rr3-sim --chain --hold-ms`（取证后保持稳态，每 500ms 采 `rr3-ctl health`，
 聚合各产品模块 `since_beat_ms` 与 `beat_peak_ms` 峰值；观察者 `rr3-obs` 不计）。
 判据＝四产品模块末拍 `running`、两路峰值不触各自 `watchdog_ms`（sim 档心跳 200ms /
-看门狗 1000ms），且收尾 `rr3-ctl status` 的 `fan_write_timeout` / `log_sink_slow`
-为 0（单调计数收尾为 0 即全程未发生）。CI `sim-chain` 缺省 hold 60s
+看门狗 1000ms），且收尾 `rr3-ctl status` 的 `fan_dropped` / `fan_write_timeout` /
+`log_sink_slow` 为 0（积压丢帧 / 对端不收 / 慢写三条单调计数收尾为 0 即全程未发生）。CI `sim-chain` 缺省 hold 60s
 （`RR3_SIM_HOLD_MS` 可覆写，0 关闭），稳态摘要以 check-run 注解回传（续轮二十八）。
 
 | 环境 | 保持时长 / 采样 | since_beat 峰值（act / brain / interact / sense） | 阻塞面（写超时 / 慢写 / 落盘峰值） | 读法 |
@@ -126,7 +126,7 @@ CI runner 单次 `boot_max=60ms` 佐证同一结论）。跨环境比较只看"�
 不构成心跳延迟来源。
 
 **判据化（2026-11-19）**：`tools/ci/ci_steady.py --assert` 把同一份稳态摘要逐键对照
-暂行阈值（续命/峰值 ≤500ms、写超时与慢写恒 0、单次落盘 ≤50ms——与
+暂行阈值（续命/峰值 ≤500ms、积压丢帧/写超时/慢写恒 0、单次落盘 ≤50ms——与
 `RR3_SINK_SLOW_US` 同源、冷启动 ≤2s），缺键同判不达标、越界退 3；head `d73c112e`
 实测 `since_max=200ms peak_max=201ms wr=0 slow=0 log_max_us=103 boot_max=59`，
 续命余量 2.5×、落盘余量约 485×。阈值口径"暂行"，待跨环境多点后收紧并决定是否接入
