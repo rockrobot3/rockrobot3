@@ -33,6 +33,8 @@ mod profile_default;
 mod profile_esp32;
 #[path = "contract/profile_pi4b.rs"]
 mod profile_pi4b;
+#[path = "contract/profile_pi4b_solo.rs"]
+mod profile_pi4b_solo;
 #[path = "contract/shape.rs"]
 mod shape;
 #[path = "contract/slots.rs"]
