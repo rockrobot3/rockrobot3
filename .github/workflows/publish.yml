@@ -4,6 +4,8 @@
 # tools/deploy/stage-image.sh 的 rr3-pack stage 树——与 deb 装机布局同一份真值，
 # 不另写一套文件摆放。amd64 / arm64 各在**原生 runner** 上构建（Intel/AMD 与
 # 瑞芯微都是该架构的原生面），不引入交叉工具链，避免"编得过、跑不了"。
+# riscv64（进迭时空）无原生 runner：走 ubuntu + apt 交叉 gcc + QEMU 构建，
+# 路径先由 platforms 的 riscv-image 腿在每次 push 验证，发布腿只加 login/push/merge。
 #
 # 触发：打 v* 标签（发版）、main 分支（edge）、手动（自定义 tag）。
 # PR 不触发：发布面不能被未合入的代码覆盖。
@@ -120,8 +122,79 @@ jobs:
           tag="${{ steps.meta.outputs.tag }}"
           bash tools/deploy/image-smoke.sh run "${IMAGE}:${tag}-${{ matrix.arch }}"
 
+  # riscv64 腿（进迭时空）：与 amd64/arm64 产物同源同布局，差异只有工具链——
+  # 交叉 gcc + QEMU。构建、stage 与两段冒烟全走 tools/deploy/build-riscv-image.sh，
+  # 该脚本已由 platforms 的 riscv-image 腿在每次 push 验证，发布面只多推送一步。
+  build-riscv64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+          targets: riscv64gc-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+          cache-all-crates: "true"
+      - name: 安装 riscv64 交叉工具链（3 次有界重试）
+        run: |
+          set -o pipefail
+          ok=0
+          for i in 1 2 3; do
+            sudo apt-get update -qq 2>&1 | tail -3 || true
+            if sudo apt-get install -y -qq gcc-riscv64-linux-gnu 2>&1 | tee /tmp/apt-riscv-pub.log; then
+              ok=1
+              break
+            fi
+            echo "::warning title=apt-riscv-publish::第 ${i} 次安装失败，10s 后重试"
+            sleep 10
+          done
+          if [ "$ok" -ne 1 ]; then
+            why=$(grep -iE "unable to locate|has no installation candidate|depends|conflicts|error" /tmp/apt-riscv-pub.log | tail -3 | tr '\n' ' ')
+            echo "::error title=apt-riscv-publish::${why:0:700}"
+            exit 1
+          fi
+          command -v riscv64-linux-gnu-gcc && command -v riscv64-linux-gnu-ar
+      - uses: docker/setup-qemu-action@v4
+        with:
+          platforms: riscv64
+      - name: 计算发布标签
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          elif [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag=edge
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+      - name: 登录 ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 构建 riscv64 镜像（含两段冒烟）并推送
+        env:
+          RR3_VER: ${{ steps.meta.outputs.version }}
+        run: |
+          set -o pipefail
+          ref="${IMAGE}:${{ steps.meta.outputs.tag }}-riscv64"
+          if ! bash tools/deploy/build-riscv-image.sh "$ref" 2>&1 | tee /tmp/riscv-publish.log; then
+            errs=$(grep -iE "error(\[|:)|failed|FAIL|undefined reference|manifest unknown" /tmp/riscv-publish.log | tail -5 | tr '\n' ' ')
+            echo "::error title=riscv-publish::${errs:0:900}"
+            exit 1
+          fi
+          docker push "$ref"
+          docker manifest inspect "$ref" >/dev/null
+          echo "PASS  已推送 $ref"
+
   merge:
-    needs: build
+    needs: [build, build-riscv64]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -146,14 +219,15 @@ jobs:
             tag=edge
           fi
           docker buildx imagetools create -t "${IMAGE}:${tag}" \
-            "${IMAGE}:${tag}-amd64" "${IMAGE}:${tag}-arm64"
+            "${IMAGE}:${tag}-amd64" "${IMAGE}:${tag}-arm64" "${IMAGE}:${tag}-riscv64"
           # 发版标签同时更新 latest（edge 不更新，避免把开发面当稳定版）
           case "$tag" in
             v*|[0-9]*) docker buildx imagetools create -t "${IMAGE}:latest" \
-                         "${IMAGE}:${tag}-amd64" "${IMAGE}:${tag}-arm64" ;;
+                         "${IMAGE}:${tag}-amd64" "${IMAGE}:${tag}-arm64" \
+                         "${IMAGE}:${tag}-riscv64" ;;
           esac
           docker buildx imagetools inspect "${IMAGE}:${tag}"
-          # 合并结果必须真含两架构：单腿都绿但合并丢一条，是"看起来绿"的经典形态
+          # 合并结果必须真含三架构：单腿都绿但合并丢一条，是"看起来绿"的经典形态
           # （inspect 只打印不判等，所以这里把平台集合当判据）。python3 是 runner 自带面。
           # 判据只数**镜像清单**：buildx 默认给每腿附一条 attestation manifest
           # （provenance/SBOM，platform=unknown/unknown），它合法存在但不能算进架构集
@@ -173,7 +247,7 @@ jobs:
                   continue
               plats.append((m.get("platform") or {}).get("architecture", "?"))
           plats.sort()
-          want = ["amd64", "arm64"]
+          want = ["amd64", "arm64", "riscv64"]
           if plats != want:
               print(f"::error title=manifest-platforms::合并清单架构 {plats}（期望 {want}）")
               sys.exit(1)
