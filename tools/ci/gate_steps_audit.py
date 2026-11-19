@@ -5,6 +5,8 @@
 - 解析 check.sh 的 `step "..."` 与 `printf '\n=== ... ===\n'` 两种出口；
   `汇总` 不是门步骤，排除。
 - 与 `tools/ci/gate_steps.txt` 的非注释行逐项比对：缺失/新增/改名/换序均红。
+- 门号唯一：圈号（①…⑳）是一把门的身份，同一圈号出现两次即双义红
+  （子号 ①b/⑨-a 不冲突；历史实证：⑭ 同时用于装载门与源文件行数门）。
 - 任一侧打空即门禁失效（fail-closed）。
 
 为什么需要它：门禁脚本是唯一真源，但"删掉一个 step"不会让任何现有门变红；
@@ -23,6 +25,7 @@ from pathlib import Path
 
 STEP = re.compile(r'^\s*step "([^"]+)"')
 PRINTF = re.compile(r"^\s*printf '\\n=== (.*) ===\\n'\s*$")
+GATE_ID = re.compile("^([①-⑳][^ ]*)")
 MANIFEST = "tools/ci/gate_steps.txt"
 SCRIPT = "tools/ci/check.sh"
 SUMMARY = "汇总"
@@ -70,11 +73,31 @@ def compare(parsed, manifest):
             fails.append(
                 f"第 {idx} 步漂移：check.sh 第 {got[0]} 行「{got[1]}」≠ 清单「{want}」"
             )
+    fails.extend(check_gate_ids(parsed))
+    return fails
+
+
+def check_gate_ids(parsed):
+    """门号唯一性：同一门号出现两次即双义（子号 ①b/⑨-a 是独立门号）。"""
+    fails = []
+    seen = {}
+    for lineno, title in parsed:
+        m = GATE_ID.match(title)
+        if not m:
+            continue
+        seen.setdefault(m.group(1), []).append(lineno)
+    for gid, linenos in seen.items():
+        if len(linenos) > 1:
+            where = "、".join(str(n) for n in linenos)
+            fails.append(
+                f"门号 {gid} 重复使用（check.sh 第 {where} 行）"
+                "——门号是一把门的身份，先改号再登记"
+            )
     return fails
 
 
 def self_test():
-    """夹具自检：一致/删除/新增/改名/换序/打空六类判定。"""
+    """夹具自检：一致/删除/新增/改名/换序/门号重复/子号放行/打空八类判定。"""
     base_script = 'step "① a"\nprintf \'\\n=== ② b ===\\n\'\n'
     base_manifest = ["① a", "② b"]
     cases = [
@@ -85,6 +108,8 @@ def self_test():
             parse_steps('step "① a2"\nprintf \'\\n=== ② b ===\\n\'\n'), base_manifest), True),
         ("换序即红", compare(
             parse_steps('step "② b"\nprintf \'\\n=== ① a ===\\n\'\n'), base_manifest), True),
+        ("门号重复即红", compare(parse_steps('step "① a"\nstep "① c"\n'), ["① a", "① c"]), True),
+        ("子号不同不误伤", compare(parse_steps('step "① a"\nstep "①b a"\n'), ["① a", "①b a"]), False),
         ("两侧打空即红", compare([], []), True),
     ]
     ok = True
