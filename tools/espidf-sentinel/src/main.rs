@@ -6,8 +6,9 @@
 //! [`Rr3ModuleRuntime`]、收帧分类 [`rr3_dispatch_class`]——**不另写状态机**；
 //! 传输下底只写窄缝 [`Rr3ByteStream`] 两方法（esp-idf-hal UART2 半分体，经
 //! rr-ipc std 单向 adapter + blanket conn 免费获得与 uds/uart 宿主侧同源的
-//! 帧语义）。本文件只做平台事：组帧/发帧/线程/堆采样——与 std 驱动器
-//! （rr-bus client）同构：reader 线程 + 心跳线程 + 一次一答 pending 表。
+//! 帧语义）。本文件只做平台事：UART 装配、注册、线程拉起、堆采样；reader/心跳
+//! 两线程循环与入站分发在 `worker.rs`（std 驱动器 rr-bus client 同构：reader 线程
+//! + 心跳线程 + 一次一答 pending 表）。
 //!
 //! 双证之一（编译面）：`cargo +esp build` 在 xtensa-esp32-espidf 上编译
 //! rr-core + rr-ipc + 本哨兵（专用门 tools/ci/espidf-sentinel-check.sh）；
@@ -31,14 +32,13 @@
 //!   `uart_driver_install`（IDF 一口一装，第二装必败），故整装后
 //!   `Box::leak` + `split()` 出 `'static` 半体；
 //! - 半体驱动的 io 面是 `embedded_io`（固有 `read(buf, delay)` / `write` /
-//!   `flush`，错误面 `EspError`），std::io 的 Read/Write 桥在本文件手写；
+//!   `flush`，错误面 `EspError`），std::io 的 Read/Write 桥在 `uart.rs` 手写；
 //! - 上游只给全双工 `UartDriver` 标了 `unsafe Send + Sync`，半体驱动漏标——
-//!   本文件以两个 `unsafe impl Send` 补齐（安全性论证见各结构体注记）；
+//!   `uart.rs` 以两个 `unsafe impl Send` 补齐（安全性论证见各结构体注记）；
 //! - xtensa LX6 无 64 位原子，`AtomicU64` 不可用，id 发号/task 号/计数全部
 //!   `AtomicU32`。
 
 use std::collections::HashMap;
-use std::io::{self, Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -52,16 +52,15 @@ use esp_idf_hal::units::Hertz;
 use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size, link_patches};
 use serde_json::{json, Value};
 
-use rr_core::control::parity::{rr3_parity_run, RR3_PARITY_VERSION};
-use rr_core::runtime::{
-    rr3_dispatch_class, Rr3Dispatch, Rr3GuardBuf, Rr3GuardEvent, Rr3ModuleRuntime,
-};
+use rr_core::runtime::{Rr3GuardBuf, Rr3GuardEvent, Rr3ModuleRuntime};
 use rr_core::{rr3_frame_compose, RR3_TASK_RRD, RR3_TRACE_ID_DIRECT};
 use rr_ipc::transport::Rr3TransportConn;
-use rr_ipc::{opcode, rr3_body_encode, rr3_body_split, Rr3Frame, Rr3FrameBuf, Rr3PayloadType};
+use rr_ipc::{opcode, rr3_body_encode, Rr3FrameBuf, Rr3PayloadType};
 
 mod uart;
+mod worker;
 use uart::*;
+use worker::*;
 
 /// 模块名（manifest.name 唯一真值——线上注册面）。词干纯小写是命名契约硬规则
 /// （^rr3-[a-z]+$，module.schema.toml rule=module_name）；工程名/目录名
@@ -292,7 +291,7 @@ fn main() {
     // 堆采样②：注册帧应答后（runbook §9.3 ③ 第二点）
     ram_point("2-registered");
 
-    // 心跳线程：拍点真值在机制核状态机（相对节拍）；std 面只做平台事（client.rs 同构）
+    // 心跳线程：拍点真值在机制核状态机（相对节拍）；worker 面只做平台事
     {
         let sh = shared.clone();
         thread::Builder::new()
@@ -319,192 +318,5 @@ fn main() {
             "[sentinel] status online={online} round_trips={} free={free}B",
             shared.round_trips.load(Ordering::Relaxed)
         );
-    }
-}
-
-/// 心跳线程：sleep 等拍点 → due 判定（机制核）→ 发拍 → sent 记账（相对节拍）。
-fn heartbeat_loop(sh: Arc<Shared>) {
-    let mut seq: u64 = 0;
-    loop {
-        let Some(wait_ms) = sh
-            .rt
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .rr3_beat_wait_ms(sh.now_ms())
-        else {
-            return; // Down 即停拍——"不装活着"同一裁定
-        };
-        thread::sleep(Duration::from_millis(wait_ms));
-        if sh.stop.load(Ordering::Relaxed) {
-            return;
-        }
-        let now_ms = sh.now_ms();
-        let due = sh
-            .rt
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .rr3_heartbeat_due(now_ms);
-        if !due {
-            continue; // 提前醒，回睡
-        }
-        match sh.call("rr3.heartbeat", json!({}), RPC_TIMEOUT) {
-            Ok(v) if v.get("error").is_none() => {
-                sh.rt
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .rr3_heartbeat_sent(now_ms);
-                seq += 1;
-                sh.guard_line(Rr3GuardEvent::Feed { seq });
-            }
-            other => sh.rr3_mark_restart(&format!("心跳失败: {other:?}")),
-        }
-    }
-}
-
-/// reader 线程：收帧 → 机制核分类（Response→pending 路由；Request→round-trip 应答；
-/// 其余→inbox 计账）。帧语义全部来自 rr-ipc blanket conn，本函数零帧解析逻辑
-/// （头/payload 拆解走 rr-ipc，分类走 rr-core）。
-fn reader_loop(mut rx: UartRxHalf, sh: Arc<Shared>) {
-    loop {
-        let Some((ty, frame, body)) = next_frame(&mut rx, &sh) else {
-            continue;
-        };
-        match rr3_dispatch_class(ty) {
-            Rr3Dispatch::Pending => deliver_pending(&body, &sh),
-            Rr3Dispatch::Inbox => route_inbox(ty, &frame, &body, &sh),
-        }
-    }
-}
-
-/// 收一帧并做前缀校验：坏帧只打站并回 `None`（下一轮重收）；链路层错误走
-/// `rr3_mark_restart`（重启不返回）。
-fn next_frame(rx: &mut UartRxHalf, sh: &Shared) -> Option<(Rr3PayloadType, Rr3Frame, Vec<u8>)> {
-    // rx 半体 → std adapter → blanket conn：rr3_recv_buf 带全量拒收路径
-    // （半帧/坏 magic/长度不符），错误面与宿主三实现同源
-    let buf = match rx.rr3_recv_buf() {
-        Ok(b) => b,
-        Err(e) => sh.rr3_mark_restart(&format!("收帧失败: {e:?}")),
-    };
-    let frame = match Rr3Frame::try_from(buf) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("[sentinel] 帧还原失败: {e:?}");
-            return None;
-        }
-    };
-    match rr3_body_split(&frame.payload) {
-        Ok((ty, body)) => Some((ty, frame, body)),
-        Err(e) => {
-            eprintln!("[sentinel] payload 前缀非法: {e:?}");
-            None
-        }
-    }
-}
-
-/// 应答帧：按 JSON-RPC id 路由到等待者（std 驱动器 reader 同构）。
-fn deliver_pending(body: &[u8], sh: &Shared) {
-    let v: Value = match serde_json::from_slice(body) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("[sentinel] 应答体非 JSON: {e}");
-            return;
-        }
-    };
-    let id = v.get("id").and_then(Value::as_u64).map(|i| i as u32);
-    let waiter = id.and_then(|i| {
-        sh.pending
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(&i)
-    });
-    match waiter {
-        Some(w) => {
-            let _ = w.send(v);
-        }
-        None => eprintln!("[sentinel] 无等待者的应答帧 id={id:?}"),
-    }
-}
-
-/// 入站面分流：Request 走 round-trip 应答，其余（Event/Stream/Notification）inbox
-/// 计账（哨兵无订阅主题，广播 state 帧是唯一合法来客——按类型点到名即可）。
-fn route_inbox(ty: Rr3PayloadType, frame: &Rr3Frame, body: &[u8], sh: &Shared) {
-    if ty == Rr3PayloadType::Request {
-        handle_request(frame, body, sh);
-    } else {
-        eprintln!("[sentinel] inbox: {ty:?} {}B", body.len());
-    }
-}
-
-/// diag/parity 点名（批G ⑤ 列板上腿）：跑真实原语回 JSON，**不回显期望向量**。
-/// 定长数组 serde_json 有 ≤32 元定长数组/元组的 Serialize impl，json! 直接展开；
-/// 机制核本身零 serde，序列化只落在本 crate（依赖闭包 L1 档位同 rr-bus）。
-fn parity_result_json() -> Value {
-    let o = rr3_parity_run();
-    json!({
-        "v": RR3_PARITY_VERSION,
-        "rate": o.rate,
-        "low": o.low,
-        "sat": o.sat,
-        "plan": o.plan,
-        "wsat": o.wsat,
-        "rhz": o.rhz,
-        "clamp": o.clamp,
-    })
-}
-
-/// 点名 Request 的 round-trip 应答（层③ 判据第三腿）：Response + id 回显 +
-/// result 原样回带 params；method == `rr3-sentinel/diag/parity` 时回安全核
-/// 逐拍向量（批G ⑤）。首次应答触发堆采样③。
-fn handle_request(frame: &Rr3Frame, body: &[u8], sh: &Shared) {
-    let v: Value = match serde_json::from_slice(body) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("[sentinel] 请求体非 JSON: {e}");
-            return;
-        }
-    };
-    let Some(id) = v.get("id").and_then(Value::as_u64) else {
-        eprintln!("[sentinel] 请求缺 id，不应答（不猜）");
-        return;
-    };
-    // 分发判定（形状实锤 conn.rs rr3_route_call L779/L816：rrd 转发是"原始 body
-    // 原样"——模块收到的 method 仍是 "rr3.call"，点名主题在 params.topic，不存在
-    // "主题提为 method" 的改写。按 method==主题名 分发会在真实链路漏接）。
-    let is_parity = v.get("method").and_then(Value::as_str) == Some("rr3.call")
-        && v.pointer("/params/topic").and_then(Value::as_str) == Some("rr3-sentinel/diag/parity");
-    let result = if is_parity {
-        parity_result_json()
-    } else {
-        json!({"echo": v.get("params").cloned().unwrap_or(Value::Null)})
-    };
-    let reply = json!({"jsonrpc": "2.0", "id": id, "result": result});
-    // 回路凭据与投递方向（M3 应答线形状，E6 彩排实锤修正）：trace_id 原样带回
-    // Request 头上的调用方 task——rrd 的 rr3_route_response 按它改道并**自组**下行帧
-    // （src=被调方 task、dst=调用方 task），0 无从投递会被拒（Invalid）；上行帧的
-    // dst 一律为 rrd（conn.rs 上行门：dst≠1 直接按崩溃收尾）——dst=调用方 task 的
-    // 写法过不了这道门（D1 未暴露：harness 扮 rrd 发点名 src=1，reply dst 恰好同值）。
-    let out = rr3_frame_compose(
-        opcode::SEND,
-        0,
-        frame.header.trace_id,
-        sh.now_ns(),
-        sh.task(),
-        RR3_TASK_RRD,
-        rr3_body_encode(Rr3PayloadType::Response, reply.to_string().as_bytes()),
-    );
-    let sent = sh
-        .tx
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .rr3_send_buf(Rr3FrameBuf::from(&out));
-    if let Err(e) = sent {
-        eprintln!("[sentinel] round-trip 应答写出失败: {e:?}");
-        return;
-    }
-    let n = sh.round_trips.fetch_add(1, Ordering::Relaxed) + 1;
-    if n == 1 {
-        println!("[sentinel] round-trip 完成（id={id}）");
-        // 堆采样③：round-trip 完成后（runbook §9.3 ③ 第三点）
-        ram_point("3-roundtrip");
     }
 }
