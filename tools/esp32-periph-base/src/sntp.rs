@@ -6,13 +6,14 @@
 //!
 //! IDF 5.2.2 `esp_sntp_*` 为 lwIP SNTP 的线程安全别名（`esp_sntp.h`）：
 //! `esp_sntp_setoperatingmode(0)` = POLL、`esp_sntp_setservername`、
-//! `esp_sntp_init`、`esp_sntp_get_sync_status() == 1` = 已同步。
+//! `esp_sntp_init`、`sntp_get_sync_status() == 1` = 已同步（`esp_sntp_*` 是宏别名，
+//! 绑定面只生成底层 `sntp_get_sync_status`）。
 
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use esp_idf_sys::{
-    esp_sntp_get_sync_status, esp_sntp_init, esp_sntp_setoperatingmode, esp_sntp_setservername,
+    esp_sntp_init, esp_sntp_setoperatingmode, esp_sntp_setservername, sntp_get_sync_status,
 };
 
 /// 对时服务器（公网 NTP 池；内网部署可由 W3-2b 的配置面覆盖）。
@@ -48,7 +49,7 @@ fn sntp_run() {
     for i in 1..=polls {
         thread::sleep(Duration::from_millis(SNTP_POLL_MS));
         // SAFETY：无参只读查询，返回值为 lwIP 同步状态枚举。
-        let synced = unsafe { esp_sntp_get_sync_status() } as i32 == SNTP_SYNCED;
+        let synced = unsafe { sntp_get_sync_status() } as i32 == SNTP_SYNCED;
         if synced {
             let epoch = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
