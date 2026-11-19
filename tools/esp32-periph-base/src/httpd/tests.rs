@@ -151,6 +151,9 @@ fn state_json_shape() {
         audio_seq: 7,
         audio_sent: 100,
         audio_dropped: 3,
+        tts_gate: false,
+        tts_played: 5,
+        tts_fail: 1,
     };
     let v: serde_json::Value = serde_json::from_str(&rr3_state_json(&s)).unwrap();
     assert_eq!(v["pan_deg"], 90);
@@ -160,7 +163,9 @@ fn state_json_shape() {
     assert_eq!(v["binding_mismatch"], 1);
     assert_eq!(v["audio_sent"], 100);
     assert_eq!(v["expr_mode"], true);
-    assert_eq!(v.as_object().unwrap().len(), 17);
+    assert_eq!(v["tts_played"], 5);
+    assert_eq!(v["tts_fail"], 1);
+    assert_eq!(v.as_object().unwrap().len(), 20);
 }
 
 /// bindings JSON 形状：未注入整体 null；注入态十一键全名＋None→null；GPIO

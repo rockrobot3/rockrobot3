@@ -41,7 +41,17 @@ const SUP_CFG: Rr3SupCfg = Rr3SupCfg {
     timeouts_ms: [15_000, 1_500, 10_000, 1_000, 4_000, 4_000],
 };
 
-/// 板侧已接线任务（心跳真值来源）。
+/// 板侧已接线任务（心跳真值来源）。`audio-out` 只在 tts 档存在（W4-2 播放面）；
+/// 未编入播放面时保持 degraded，不把"没有这条腿"报成故障。
+#[cfg(feature = "tts")]
+const WIRED: [Rr3Task; 5] = [
+    Rr3Task::Net,
+    Rr3Task::AudioIn,
+    Rr3Task::Motion,
+    Rr3Task::Ui,
+    Rr3Task::AudioOut,
+];
+#[cfg(not(feature = "tts"))]
 const WIRED: [Rr3Task; 4] = [Rr3Task::Net, Rr3Task::AudioIn, Rr3Task::Motion, Rr3Task::Ui];
 
 /// 连续判死拍数（200 ms × 2 ≈ 400 ms 去抖，避免瞬态误复位）。
@@ -66,8 +76,9 @@ pub(crate) fn rr3_start() {
         sup.rr3_sup_arm(task, now);
     }
     SUP_ON.store(true, Ordering::Release);
+    let wired = rr3_names(WIRED.iter().fold(0u8, |m, t| m | 1 << t.index()));
     println!(
-        "[autonomy] 监督壳起：栅格 {}ms；已接线 net/audio-in/motion/ui；dialog/audio-out degraded（未落地，不判死）",
+        "[autonomy] 监督壳起：栅格 {}ms；已接线 {wired}；dialog degraded（W6 未落地，不判死）",
         SUP_CFG.tick_ms
     );
     let spawned = thread::Builder::new()

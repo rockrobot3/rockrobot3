@@ -67,9 +67,9 @@ use esp_idf_sys::{
     g_wifi_osi_funcs, http_method_HTTP_GET, http_method_HTTP_POST, httpd_config_t,
     httpd_err_code_t, httpd_err_code_t_HTTPD_400_BAD_REQUEST,
     httpd_err_code_t_HTTPD_401_UNAUTHORIZED, httpd_err_code_t_HTTPD_404_NOT_FOUND, httpd_handle_t,
-    httpd_register_uri_handler, httpd_req_recv, httpd_req_t, httpd_resp_send, httpd_resp_send_err,
-    httpd_resp_set_type, httpd_start, httpd_uri_t, nvs_flash_init,
-    wifi_auth_mode_t_WIFI_AUTH_WPA2_PSK, wifi_config_t, wifi_init_config_t,
+    httpd_register_uri_handler, httpd_req_get_hdr_value_str, httpd_req_recv, httpd_req_t,
+    httpd_resp_send, httpd_resp_send_err, httpd_resp_set_type, httpd_start, httpd_uri_t,
+    nvs_flash_init, wifi_auth_mode_t_WIFI_AUTH_WPA2_PSK, wifi_config_t, wifi_init_config_t,
     wifi_interface_t_WIFI_IF_AP, wifi_interface_t_WIFI_IF_STA, wifi_mode_t_WIFI_MODE_APSTA, ESP_OK,
     WIFI_INIT_CONFIG_MAGIC,
 };
@@ -113,7 +113,8 @@ fn rr3_token_check(body: &[u8]) -> bool {
 // ---------------------------------------------------------------------------
 
 /// 端点白名单（与 host `RR3_PANEL_ROUTES` 四列同构：method / path / covers / applies）。
-/// 批N14 件二起四行：两读（GET state/bindings）＋两写（POST wifi/reboot）。
+/// 批N14 件二起四行：两读（GET state/bindings）＋两写（POST wifi/reboot）；
+/// W4-2 增 play（raw PCM/WAV 播放写口，仅 `tts` 档在册）。
 /// covers 列＝该端点读的 ⑩ 配置模型字段（`<路>/<字段>`）；本表端点读的是板侧
 /// 运行态/注入绑定（**不在** ⑩ 分母五路——绑定十一键是 rr-ipc 注入键非配置模型
 /// [[pin]] 词表）/写的是板侧 NVS 凭据（同样不在五路），covers 全空如实登记；
@@ -130,6 +131,9 @@ pub(crate) const RR3_BOARD_ROUTES: &[(&str, &str, &[&str], &str)] = &[
     ("GET", "/api/board/bindings", &[], ""),
     ("POST", "/api/board/wifi", &[], "live"),
     ("POST", "/api/board/reboot", &[], ""),
+    // W4-2 播放写口：raw PCM/WAV body，令牌走 `X-RR3-Token` 头（非 JSON）。
+    #[cfg(feature = "tts")]
+    ("POST", "/api/board/play", &[], ""),
 ];
 
 /// 路由分派产物（表内端点；`None` = 白名单外，fail-closed 回 404）。
@@ -150,6 +154,9 @@ pub(crate) enum Rr3BoardRoute {
     WifiWrite,
     /// POST /api/board/reboot——动作面（应答先行落链再重启）
     Reboot,
+    /// POST /api/board/play——W4-2 播放写口（WAV/裸 16k PCM 入播放队列）
+    #[cfg(feature = "tts")]
+    Play,
 }
 
 /// 路由纯函数：method + path → 分派。**白名单 = [`RR3_BOARD_ROUTES`]**——
@@ -163,6 +170,8 @@ pub(crate) fn rr3_board_route(method: &str, path: &str) -> Option<Rr3BoardRoute>
         ("GET", "/api/board/bindings") => Some(Rr3BoardRoute::Bindings),
         ("POST", "/api/board/wifi") => Some(Rr3BoardRoute::WifiWrite),
         ("POST", "/api/board/reboot") => Some(Rr3BoardRoute::Reboot),
+        #[cfg(feature = "tts")]
+        ("POST", "/api/board/play") => Some(Rr3BoardRoute::Play),
         _ => None,
     }
 }
@@ -186,6 +195,9 @@ pub(crate) struct Rr3BoardStateSnapshot {
     pub(crate) audio_seq: u32,
     pub(crate) audio_sent: u64,
     pub(crate) audio_dropped: u64,
+    pub(crate) tts_gate: bool,
+    pub(crate) tts_played: u64,
+    pub(crate) tts_fail: u32,
 }
 
 /// 快照取窗（锁内只 Copy/查名，不组串）。
@@ -214,6 +226,9 @@ fn rr3_state_snapshot(bus: &Arc<Mutex<Bus>>) -> Rr3BoardStateSnapshot {
         audio_seq: st.audio_seq,
         audio_sent: st.audio_sent,
         audio_dropped: st.audio_dropped,
+        tts_gate: st.tts_gate,
+        tts_played: st.tts_played,
+        tts_fail: st.tts_fail,
     }
 }
 
@@ -237,6 +252,9 @@ pub(crate) fn rr3_state_json(s: &Rr3BoardStateSnapshot) -> String {
         "audio_seq": s.audio_seq,
         "audio_sent": s.audio_sent,
         "audio_dropped": s.audio_dropped,
+        "tts_gate": s.tts_gate,
+        "tts_played": s.tts_played,
+        "tts_fail": s.tts_fail,
     })
     .to_string()
 }

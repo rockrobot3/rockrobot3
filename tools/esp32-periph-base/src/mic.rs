@@ -346,18 +346,20 @@ impl MicRun {
         self.stats.reads += 1;
         self.dump_count += 1;
         dump_watch(buf, n, &mut self.last_dump, self.dump_count);
-        let (audio_on, host_ms) = {
+        let (audio_on, host_ms, gated) = {
             let b = lock_bus(bus);
-            (b.st.audio_on, b.st.audio_host_ms)
+            (b.st.audio_on, b.st.audio_host_ms, b.st.tts_gate)
         };
-        let audio_on = host_watchdog(bus, audio_on, host_ms);
-        if !audio_on {
+        // 半双工（W4-2）：TTS 播放期停攒上行，但**不改**用户的 audio_on 偏好；
+        // 播放结束自动恢复，故与看门狗的两条停流路分开判。
+        let live = host_watchdog(bus, audio_on, host_ms) && !gated;
+        if !live {
             self.chunk.clear();
             self.dc.reset();
         }
         let nframes = n / 8;
         self.stats.frames += nframes as u64;
-        self.frames(buf, nframes, audio_on, bus);
+        self.frames(buf, nframes, live, bus);
         self.stats.window_line();
     }
 
