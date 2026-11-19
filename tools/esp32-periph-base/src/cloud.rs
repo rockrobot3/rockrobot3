@@ -351,14 +351,14 @@ fn rr3_http_read(client: esp_http_client_handle_t) -> Result<Vec<u8>, String> {
 /// 取一条 TTS PCM：读配置 → 组请求体（共享纯函数）→ 至多两次尝试。
 fn rr3_tts_fetch(text: &str) -> Result<Vec<u8>, String> {
     let cfg = rr3_cloud_cfg().map_err(|e| format!("云配置缺席: {e}"))?;
-    let body = rr3_cloud_proto::rr3_tts_body(&cfg.model, text, &cfg.voice, 16_000);
+    let body = rr_cloud_proto::rr3_tts_body(&cfg.model, text, &cfg.voice, 16_000);
     let url = cfg.url();
     let mut last = String::new();
     for _ in 0..2 {
         match rr3_http_post(&url, &cfg.key, &body) {
             Ok(pcm) => return Ok(pcm),
             Err(e) => {
-                let true = rr3_cloud_proto::rr3_cloud_retryable("TTS接口", &e) else {
+                let true = rr_cloud_proto::rr3_cloud_retryable("TTS接口", &e) else {
                     return Err(e);
                 };
                 last = e;
@@ -437,8 +437,9 @@ mod tests {
         let c = rr3_cloud_body(&b).unwrap();
         assert_eq!(c.base, "https://api.example.com");
         assert!(c.key.is_none(), "key 缺席＝保留旧值");
-        assert!(rr3_cloud_body(b"{}").unwrap_err().contains("base"));
-        assert!(rr3_cloud_body(b"not json").unwrap_err().contains("JSON"));
+        // 不用 unwrap_err：Rr3CloudWrite 故意不派生 Debug（key 零回显墙）。
+        assert!(matches!(rr3_cloud_body(b"{}"), Err(e) if e.contains("base")));
+        assert!(matches!(rr3_cloud_body(b"not json"), Err(e) if e.contains("JSON")));
     }
 
     #[test]
