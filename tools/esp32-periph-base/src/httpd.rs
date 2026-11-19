@@ -25,11 +25,11 @@
 //! ＝回退生效——砖路径消灭实证语义）；reboot＝复位后 boot 横幅「凭据源=…」点名。
 //!
 //! 分层（机制与策略分离）：
-//! - **纯逻辑层**（单测可钉）：白名单路由表 [`RR3_BOARD_ROUTES`]（与 host
-//!   `RR3_PANEL_ROUTES` 四列同构）＋路由纯函数 [`rr3_board_route`]＋快照 JSON
-//!   组包纯函数＋写口 body 解析/应答组包纯函数。表↔分派零漂移由
-//!   `route_table_matches_dispatch` 单测钉死（同 host `route_table_matches_dispatch`
-//!   形状）。
+//! - **纯逻辑层**（单测可钉）：白名单路由表 [`RR3_BOARD_ROUTES`]（前四列与
+//!   host `RR3_PANEL_ROUTES` 同构，第五列处理臂）＋查表函数
+//!   [`rr3_route_lookup`]＋快照 JSON 组包纯函数＋写口 body 解析/应答组包纯函数。
+//!   表即分派真值（无表↔臂第二份），method/path 交叉拒由
+//!   `route_table_is_dispatch_truth` 单测钉死。
 //! - **unsafe 壳层**（[`rr3_httpd_spawn`]）：WiFi STA 起栈（裸 sys——
 //!   [`wifi_init_config_t`] 手抄 v5.2.2 `WIFI_INIT_CONFIG_DEFAULT()` 宏展开，
 //!   字段真值逐项对表本项目生成 sdkconfig，见 [`wifi_default_config`]）＋
@@ -112,68 +112,38 @@ fn rr3_token_check(body: &[u8]) -> bool {
 // 纯逻辑层：白名单路由表 + 路由纯函数 + 快照 JSON 组包（单测可钉）
 // ---------------------------------------------------------------------------
 
-/// 端点白名单（与 host `RR3_PANEL_ROUTES` 四列同构：method / path / covers / applies）。
-/// 批N14 件二起四行：两读（GET state/bindings）＋两写（POST wifi/reboot）；
-/// W4-2 增 play（raw PCM/WAV 播放写口，仅 `tts` 档在册）。
+/// 板侧处理臂统一签名：请求 + 总线（不读总线的臂忽略第二参）。
+pub(crate) type Rr3Handler = unsafe fn(*mut httpd_req_t, &Arc<Mutex<Bus>>) -> i32;
+
+/// 端点白名单（前四列与 host `RR3_PANEL_ROUTES` 同构：method / path / covers /
+/// applies；第五列是**处理臂**——表即分派真值，表加行＝分派生效，结构上不存在
+/// "表加行忘加臂"的漂移面）。
 /// covers 列＝该端点读的 ⑩ 配置模型字段（`<路>/<字段>`）；本表端点读的是板侧
 /// 运行态/注入绑定（**不在** ⑩ 分母五路——绑定十一键是 rr-ipc 注入键非配置模型
 /// [[pin]] 词表）/写的是板侧 NVS 凭据（同样不在五路），covers 全空如实登记；
 /// applies 列＝该端点改的配置对象（词表 `live`/空）：配网写口改的是"活配置"
-/// （STA 立即重连）＝`live`；reboot 是动作面（不改任何配置对象）＝空，同 host
-/// 面板 POST /api/relay 动作面先例。申报面进 check.sh ⑩ 扫描（批N13 件二
-/// 已把本表区段扩进扫描源），执法位＝未来板侧端点读五路字段而不申报即红
-/// （对拍判据 ⊆ 分母五路并集）。
+/// （STA 立即重连）＝`live`；其余写口是动作面（不改任何配置对象）＝空。申报面
+/// 进 check.sh ⑩ 扫描（批N13 件二已把本表区段扩进扫描源）。
 #[rustfmt::skip]
-pub(crate) const RR3_BOARD_ROUTES: &[(&str, &str, &[&str], &str)] = &[
-    ("GET", "/", &[], ""),
-    ("GET", "/api/board/state", &[], ""),
-    ("GET", "/api/board/health", &[], ""),
-    ("GET", "/api/board/bindings", &[], ""),
-    ("POST", "/api/board/wifi", &[], "live"),
-    ("POST", "/api/board/reboot", &[], ""),
+pub(crate) const RR3_BOARD_ROUTES: &[(&str, &str, &[&str], &str, Rr3Handler)] = &[
+    ("GET", "/", &[], "", serve::handle_index),
+    ("GET", "/api/board/state", &[], "", serve::handle_state),
+    ("GET", "/api/board/health", &[], "", serve::handle_health),
+    ("GET", "/api/board/bindings", &[], "", serve::handle_bindings),
+    ("POST", "/api/board/wifi", &[], "live", serve::handle_wifi_write),
+    ("POST", "/api/board/reboot", &[], "", serve::handle_reboot),
     // W4-2 播放写口：raw PCM/WAV body，令牌走 `X-RR3-Token` 头（非 JSON）。
     #[cfg(feature = "tts")]
-    ("POST", "/api/board/play", &[], ""),
+    ("POST", "/api/board/play", &[], "", serve::handle_play),
 ];
 
-/// 路由分派产物（表内端点；`None` = 白名单外，fail-closed 回 404）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Rr3BoardRoute {
-    /// GET /——板端配网/状态网页（2026-10-31：手机连 SoftAP 即可配网，无需 curl）
-    Index,
-    /// GET /api/board/state——板侧运行态观测快照（`PeriphState` 观测字段，
-    /// 批N12 件一观测面含其中）
-    State,
-    /// GET /api/board/health——自治监督壳快照（W3-2b：任务状态/超时/栅格计数
-    /// 与 SNTP 状态；shell=off 时如实报未启动）
-    Health,
-    /// GET /api/board/bindings——注入绑定十一键读数（批N9 件五对账锚同源；批N17
-    /// 件四 cred_store 随键——非 GPIO 存储源标记，读数面可见）
-    Bindings,
-    /// POST /api/board/wifi——事务性配网写口（批N14 件二，N-10 ② 配网半边）
-    WifiWrite,
-    /// POST /api/board/reboot——动作面（应答先行落链再重启）
-    Reboot,
-    /// POST /api/board/play——W4-2 播放写口（WAV/裸 16k PCM 入播放队列）
-    #[cfg(feature = "tts")]
-    Play,
-}
-
-/// 路由纯函数：method + path → 分派。**白名单 = [`RR3_BOARD_ROUTES`]**——
-/// method 或 path 任一不在表内即 `None`（fail-closed，同 host 面板语义；
+/// 路由查表：method + path 全等才命中（fail-closed，同 host 面板语义；
 /// 405 细分不做——method 不在表内一律白名单外）。
-pub(crate) fn rr3_board_route(method: &str, path: &str) -> Option<Rr3BoardRoute> {
-    match (method, path) {
-        ("GET", "/api/board/state") => Some(Rr3BoardRoute::State),
-        ("GET", "/api/board/health") => Some(Rr3BoardRoute::Health),
-        ("GET", "/") => Some(Rr3BoardRoute::Index),
-        ("GET", "/api/board/bindings") => Some(Rr3BoardRoute::Bindings),
-        ("POST", "/api/board/wifi") => Some(Rr3BoardRoute::WifiWrite),
-        ("POST", "/api/board/reboot") => Some(Rr3BoardRoute::Reboot),
-        #[cfg(feature = "tts")]
-        ("POST", "/api/board/play") => Some(Rr3BoardRoute::Play),
-        _ => None,
-    }
+pub(crate) fn rr3_route_lookup(method: &str, path: &str) -> Option<Rr3Handler> {
+    RR3_BOARD_ROUTES
+        .iter()
+        .find(|(m, p, _, _, _)| *m == method && *p == path)
+        .map(|(_, _, _, _, handler)| *handler)
 }
 
 /// 板侧运行态快照（锁窗内 Copy 出，出锁组 JSON——**不持锁出 JSON** 纪律）。

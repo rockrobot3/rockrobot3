@@ -85,17 +85,22 @@ unsafe fn req_uri(req: *mut httpd_req_t) -> String {
 /// http_method=u32——比较处 as i32 对齐）。
 /// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
 unsafe fn req_method(req: *mut httpd_req_t) -> &'static str {
-    match (*req).method {
-        m if m == http_method_HTTP_GET as i32 => "GET",
-        m if m == http_method_HTTP_POST as i32 => "POST",
-        _ => "?",
-    }
+    // 注册面只挂 GET/POST 两行；词表外判 "?"（查表必不命中 → 404 fail-closed）。
+    const WORDS: [(i32, &str); 2] = [
+        (http_method_HTTP_GET as i32, "GET"),
+        (http_method_HTTP_POST as i32, "POST"),
+    ];
+    let m = (*req).method;
+    WORDS
+        .iter()
+        .find(|(code, _)| *code == m)
+        .map_or("?", |(_, w)| *w)
 }
 
 /// GET /——板端配网页。
 ///
 /// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
-unsafe fn handle_index(req: *mut httpd_req_t) -> i32 {
+pub(crate) unsafe fn handle_index(req: *mut httpd_req_t, _bus: &Arc<Mutex<Bus>>) -> i32 {
     httpd_resp_set_type(req, c"text/html; charset=utf-8".as_ptr());
     httpd_resp_send(
         req,
@@ -107,21 +112,21 @@ unsafe fn handle_index(req: *mut httpd_req_t) -> i32 {
 /// GET /api/board/state——出锁组 JSON（快照取窗内不组串，模块文档纪律）。
 ///
 /// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
-unsafe fn handle_state(req: *mut httpd_req_t, bus: &Arc<Mutex<Bus>>) -> i32 {
+pub(crate) unsafe fn handle_state(req: *mut httpd_req_t, bus: &Arc<Mutex<Bus>>) -> i32 {
     resp_json(req, &rr3_state_json(&rr3_state_snapshot(bus)))
 }
 
 /// GET /api/board/health——自治监督壳快照（W3-2b）。
 ///
 /// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
-unsafe fn handle_health(req: *mut httpd_req_t) -> i32 {
+pub(crate) unsafe fn handle_health(req: *mut httpd_req_t, _bus: &Arc<Mutex<Bus>>) -> i32 {
     resp_json(req, &crate::autonomy::rr3_health_json())
 }
 
 /// GET /api/board/bindings——注入绑定读数。
 ///
 /// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
-unsafe fn handle_bindings(req: *mut httpd_req_t) -> i32 {
+pub(crate) unsafe fn handle_bindings(req: *mut httpd_req_t, _bus: &Arc<Mutex<Bus>>) -> i32 {
     let snap = rr3_bindings_snap();
     resp_json(req, &rr3_bindings_json(snap.as_ref()))
 }
@@ -131,7 +136,7 @@ unsafe fn handle_bindings(req: *mut httpd_req_t) -> i32 {
 /// JSON 如实应答。
 ///
 /// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
-unsafe fn handle_wifi_write(req: *mut httpd_req_t) -> i32 {
+pub(crate) unsafe fn handle_wifi_write(req: *mut httpd_req_t, _bus: &Arc<Mutex<Bus>>) -> i32 {
     let body = match req_body_read(req) {
         Ok(b) => b,
         Err(BodyErr::Bounds) => {
@@ -159,13 +164,18 @@ unsafe fn handle_wifi_write(req: *mut httpd_req_t) -> i32 {
             b"admin token missing or invalid\0",
         );
     }
-    let result = match rr3_wifi_write_body(&body) {
-        Ok((s, p)) => match crate::cred::rr3_cred_form_check(&s, &p) {
-            Ok(()) => rr3_wifi_write_apply(&s, &p),
-            Err(_) => Rr3WifiWriteResult::rejected("form"),
-        },
-        Err(_) => Rr3WifiWriteResult::rejected("body"),
-    };
+    // 阶段名保持契约词（"body"/"form"）：解析/形制错误各自映射，不把详细文案
+    // 漏进 `stage` 字段（应答四字段是客户端判据）。
+    let result = rr3_wifi_write_body(&body)
+        .map_err(|_| "body")
+        .and_then(|(s, p)| {
+            crate::cred::rr3_cred_form_check(&s, &p)
+                .map(|()| (s, p))
+                .map_err(|_| "form")
+        })
+        .map_or_else(Rr3WifiWriteResult::rejected, |(s, p)| {
+            rr3_wifi_write_apply(&s, &p)
+        });
     resp_json(req, &rr3_wifi_write_json(&result))
 }
 
@@ -178,7 +188,7 @@ const RR3_PLAY_BODY_MAX: usize = 131_072;
 ///
 /// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
 #[cfg(feature = "tts")]
-unsafe fn handle_play(req: *mut httpd_req_t) -> i32 {
+pub(crate) unsafe fn handle_play(req: *mut httpd_req_t, _bus: &Arc<Mutex<Bus>>) -> i32 {
     if !req_hdr_token_ok(req) {
         println!("[periph] 写口 play 拒收：admin token 缺失或错误");
         return resp_err(
@@ -239,7 +249,7 @@ unsafe fn req_hdr_token_ok(req: *mut httpd_req_t) -> bool {
 /// 重启即断链，故先 send 后 restart）。鉴权失败一律 401。
 ///
 /// # Safety: req 为有效请求指针；esp_restart 不返回，调用后不再依赖本次请求。
-unsafe fn handle_reboot(req: *mut httpd_req_t) -> i32 {
+pub(crate) unsafe fn handle_reboot(req: *mut httpd_req_t, _bus: &Arc<Mutex<Bus>>) -> i32 {
     let authed = req_body_read(req)
         .map(|b| rr3_token_check(&b))
         .unwrap_or(false);
@@ -270,24 +280,17 @@ unsafe extern "C" fn rr3_httpd_dispatch(req: *mut httpd_req_t) -> i32 {
     };
     let method = req_method(req);
     let path = req_uri(req);
-    let Some(route) = rr3_board_route(method, &path) else {
-        println!("[periph] HTTP 白名单外拒收 method={method} path={path}");
-        return resp_err(
-            req,
-            httpd_err_code_t_HTTPD_404_NOT_FOUND,
-            b"not in board route whitelist\0",
-        );
-    };
-    match route {
-        Rr3BoardRoute::Index => handle_index(req),
-        Rr3BoardRoute::State => handle_state(req, bus),
-        Rr3BoardRoute::Health => handle_health(req),
-        Rr3BoardRoute::Bindings => handle_bindings(req),
-        Rr3BoardRoute::WifiWrite => handle_wifi_write(req),
-        Rr3BoardRoute::Reboot => handle_reboot(req),
-        #[cfg(feature = "tts")]
-        Rr3BoardRoute::Play => handle_play(req),
-    }
+    rr3_route_lookup(method, &path).map_or_else(
+        || {
+            println!("[periph] HTTP 白名单外拒收 method={method} path={path}");
+            resp_err(
+                req,
+                httpd_err_code_t_HTTPD_404_NOT_FOUND,
+                b"not in board route whitelist\0",
+            )
+        },
+        |handler| handler(req, bus),
+    )
 }
 
 /// 起板侧配置腿（main 挂载点；**fail-honest**——任何一步失败点名后返回，
@@ -307,33 +310,35 @@ pub(crate) fn rr3_httpd_spawn(bus: &Arc<Mutex<Bus>>) {
         return;
     }
     // ② 凭据读链：NVS 优先（读取窄缝 [`crate::cred::rr3_cred_read`]，读时现取）
-    let (ssid, pass, cred_source) = match crate::cred::rr3_cred_read() {
-        Some(c) => {
+    let (ssid, pass, cred_source) = crate::cred::rr3_cred_read()
+        .map(|c| {
             let pass = c.pass().to_string(); // 先经窄缝取密码（借用），再 move ssid
             (c.ssid, pass, "nvs")
-        }
+        })
         // 编译期回落（option_env! 需字面量——构建期烘焙 .rodata，值不落仓）
-        None => match (
-            option_env!("RR3_BOARD_WIFI_SSID"),
-            option_env!("RR3_BOARD_WIFI_PASS"),
-        ) {
-            (Some(s), p) if !s.is_empty() => {
-                (s.to_string(), p.unwrap_or_default().to_string(), "编译期")
-            }
-            _ => {
-                // **2026-10-31 SoftAP 配网面**：原实现在"两源都缺"时直接返回（配置腿
-                // 缺席），板因此无法自身上线——必须先有 WiiFi 凭据才能用面板配网，
-                // 而配网入口本身要网络，构成鸡生蛋死锁。改为 AP-only 起栈：无凭据
-                // 也起 SoftAP（SSID 见 [`wifi_ap_configure`]），手机/笔记本可连上板
-                // 自己的面板完成配网（`POST /api/board/wifi`），配网成功即 STA 上线。
-                // 凭据来源如实点名 "ap-only"（boot 横幅可辨，永不冒领已配网）。
-                println!(
-                    "[periph] 无 WiFi 凭据（NVS 空且 RR3_BOARD_WIFI_SSID 未注入）→ 转 SoftAP 配网模式（AP-only，配置腿照常可达）"
-                );
-                (String::new(), String::new(), "ap-only")
-            }
-        },
-    };
+        .or_else(|| {
+            option_env!("RR3_BOARD_WIFI_SSID")
+                .filter(|s| !s.is_empty())
+                .map(|s| {
+                    (
+                        s.to_string(),
+                        option_env!("RR3_BOARD_WIFI_PASS")
+                            .unwrap_or_default()
+                            .to_string(),
+                        "编译期",
+                    )
+                })
+        })
+        // **2026-10-31 SoftAP 配网面**：两源都缺时改用 AP-only 起栈——原实现直接
+        // 返回（配置腿缺席），板因此无法自身上线（配网入口要网络，构成鸡生蛋死锁）。
+        // 无凭据也起 SoftAP（SSID 见 [`wifi_ap_configure`]），手机/笔记本连上板自己
+        // 的面板即可配网；来源如实点名 "ap-only"，永不冒领已配网。
+        .unwrap_or_else(|| {
+            println!(
+                "[periph] 无 WiFi 凭据（NVS 空且 RR3_BOARD_WIFI_SSID 未注入）→ 转 SoftAP 配网模式（AP-only，配置腿照常可达）"
+            );
+            (String::new(), String::new(), "ap-only")
+        });
     // ③ 形制校验（两源同门——[`crate::cred::rr3_cred_form_check`]；错误不出值只出长度）。
     // ap-only 档无凭据可校，跳过（STA 侧不配置、不连接）。
     if !ssid.is_empty() {
@@ -422,7 +427,7 @@ unsafe fn httpd_register(bus: &Arc<Mutex<Bus>>) -> Result<(), i32> {
     };
     esp_ok(httpd_start(&mut h, &conf))?;
     let _ = HTTPD_BUS.set(Arc::clone(bus));
-    for (method, path, _, _) in RR3_BOARD_ROUTES {
+    for (method, path, _, _, _) in RR3_BOARD_ROUTES {
         let cpath = CString::new(*path).expect("白名单 path 不含 NUL");
         let m = match *method {
             "GET" => http_method_HTTP_GET,
