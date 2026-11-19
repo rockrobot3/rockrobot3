@@ -9,10 +9,11 @@
 #   生成数据，不是可复用缺陷。测试面判定：cfg 谓词**测试专用**（`test` 裸项/
 #   `all(…test…)`），`any(…)`/`not(…)` 门是生产件不剔除（backend.rs 613 行教训）。
 # - 圈复杂度：均值与单函数最大值按 `tools/ci/metrics-baseline.json` **钉基线、
-#   只降不升**（与仓内红账基线门同款纪律）。目标均值 2.5 尚未达到，红账在账；
+#   只降不升**（与仓内红账基线门同款纪律）。目标均值 2.5，当前 2.49 已达标；
 #   基线只能随重构下调，上调须在评审里说明理由。
 # - 生产 panic 落点：生产面 `.unwrap()` / `.expect(` 计数（测试面按上面的同一口径
-#   截除），基线 71、**只钉不回涨**。它不是"越少越好"的绝对值判据——启动期
+#   截除；独立成文件的 `test_support.rs` / `test_fixtures.rs` 由 `#[cfg(test)]`
+#   挂载，同样不计），基线 60、**只钉不回涨**。它不是"越少越好"的绝对值判据——启动期
 #   fail-fast 与外键自证式 expect 是合理形态；这条钉的是"新增 panic 必须被看见"。
 # - 生产函数名：>20 字节计红；FFI 外部符号（AudioQueue*，名字由平台 ABI 决定）
 #   豁免。基线 = 存量 14 个 rr3_reg_* 域 API（21–25B），只降不升——新代码必须
@@ -35,6 +36,9 @@ import sys
 WINDOW = 10
 NAME_MAX = 20
 FFI_PREFIXES = ("AudioQueue",)
+# 独立成文件的测试夹具：由 `#[cfg(test)]` / `#[cfg(all(test, …))]` 挂载，
+# `git ls-files` 会单独列出；不按文件名排除，panic/CC/重复率口径就会被测试面污染。
+TEST_ONLY_FILES = ("test_support.rs", "test_fixtures.rs")
 # 长睡门槛：≥1000ms 的字面量 sleep 在模块/守护生产路径上计红。
 LONG_SLEEP_MS = 1000
 SLEEP_LITERAL = re.compile(
@@ -279,7 +283,9 @@ def measure(root):
     unwrap_sites = 0
     long_sleeps = []
     for rel in rust_files(root):
-        if "/tests/" in rel or rel.startswith("tests/") or os.path.basename(rel) == "tests.rs":
+        base_name = os.path.basename(rel)
+        if ("/tests/" in rel or rel.startswith("tests/")
+                or base_name == "tests.rs" or base_name in TEST_ONLY_FILES):
             continue
         path = os.path.join(root, rel)
         try:
@@ -339,7 +345,70 @@ def load_baseline(root):
         return json.load(f)
 
 
+def _selftest_repo(td):
+    """自检夹具：生产/测试/夹具/生成物四类文件各就位，并纳入临时 git 索引。"""
+    files = {
+        "base/prod.rs": (
+            "fn short() { let _ = 1; }\n"
+            "fn rr3_this_name_is_way_too_long_for_limit() {}\n"
+            "fn long_one() {\n"
+            "    let x = foo().unwrap();\n"
+            "    let _ = x;\n"
+            "}\n"
+        ),
+        "base/tests/t.rs": "fn t() { let x = foo().unwrap(); }\n",
+        "base/src/tests.rs": "fn t() { let x = foo().unwrap(); }\n",
+        "base/src/test_support.rs": "fn s() { let x = foo().unwrap(); }\n",
+        "base/src/test_fixtures.rs": "fn f() { let x = foo().unwrap(); }\n",
+        "base/src/gen.rs": "// @generated\nfn g() { let x = foo().unwrap(); }\n",
+        "modules/rr3-demo/src/lib.rs": (
+            "fn wait() {\n"
+            "    let _ = foo().unwrap();\n"
+            "    std::thread::sleep(std::time::Duration::from_millis(1500));\n"
+            "}\n"
+        ),
+        "modules/rr3-demo/tests/t.rs": (
+            "fn t() {\n"
+            "    std::thread::sleep(std::time::Duration::from_millis(1500));\n"
+            "}\n"
+        ),
+    }
+    dup = "".join(f"const D{i}: u8 = {i};\n" for i in range(WINDOW))
+    files["base/src/dup_a.rs"] = dup
+    files["base/src/dup_b.rs"] = dup
+    for rel, text in files.items():
+        path = os.path.join(td, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+    subprocess.run(["git", "init", "-q"], cwd=td, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=td, check=True)
+
+
+def self_test():
+    """夹具自检：生产面计数、测试面剔除、长睡扫面与重复窗口各一条判据。"""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        _selftest_repo(td)
+        total, dup_lines, ccs, long_names, unwrap_sites, long_sleeps = measure(td)
+
+    checks = [
+        (f"生产面 unwrap=2（实得 {unwrap_sites}）", unwrap_sites == 2),
+        (f"生产长睡=1（实得 {len(long_sleeps)}）", len(long_sleeps) == 1),
+        (f"超长函数名=1（实得 {len(long_names)}）", len(long_names) == 1),
+        (f"重复行=20（实得 {dup_lines}）", dup_lines == 2 * WINDOW),
+        (f"函数数=4（实得 {len(ccs)}）", len(ccs) == 4),
+        (f"有效行>0（实得 {total}）", total > 0),
+    ]
+    for name, ok in checks:
+        print(("PASS  " if ok else "FAIL  ") + "⑫ 自检：" + name)
+    return 0 if all(ok for _, ok in checks) else 1
+
+
 def main():
+    if "--self-test" in sys.argv[1:]:
+        return self_test()
     root = repo_root()
     base = load_baseline(root)
     total, dup_lines, ccs, long_names, unwrap_sites, long_sleeps = measure(root)
@@ -362,7 +431,7 @@ def main():
 
     if mean_cc <= base["cc_mean_max"] + 1e-9 and max_cc <= base["cc_max_fn"]:
         print(f"PASS  ⑫ 圈复杂度 均值 {mean_cc} ≤ 基线 {base['cc_mean_max']:.2f}，"
-              f"最大 {max_cc} ≤ 基线 {base['cc_max_fn']}（目标均值 2.5，红账在账）")
+              f"最大 {max_cc} ≤ 基线 {base['cc_max_fn']}（目标均值 2.5，已达标）")
     else:
         print(f"FAIL  ⑫ 圈复杂度回归：均值 {mean_cc}（基线 {base['cc_mean_max']:.2f}）、"
               f"最大 {max_cc}（基线 {base['cc_max_fn']}）——拆函数或下调基线须评审",
