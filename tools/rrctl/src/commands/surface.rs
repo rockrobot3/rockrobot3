@@ -80,6 +80,165 @@ fn rr3_pass_count(rows: &[Vec<String>]) -> usize {
         .count()
 }
 
+/// `wiring` 各段表头与行映射（段序 = 引脚 → 供电域 → 接线 → 轴 → 角色 →
+/// 交叉判据）；表头是渲染契约，行映射只取字段、不改判据真值。
+const RR3_PIN_HEAD: [&str; 12] = [
+    "PIN_ID",
+    "ROLE",
+    "INSTANCE",
+    "CONTROLLER",
+    "CHANNEL",
+    "PHYSICAL",
+    "DIRECTION",
+    "RAIL",
+    "ADDR",
+    "DEVICE",
+    "FAILSAFE",
+    "MUX_GROUP",
+];
+const RR3_DOM_HEAD: [&str; 12] = [
+    "NAME",
+    "NOMINAL_MV",
+    "MILD_MV",
+    "SEVERE_MV",
+    "CAP_MA",
+    "SENSE",
+    "CURRENT_SENSE",
+    "SWITCH",
+    "SWITCHABLE",
+    "ARMED",
+    "MAX_AGE_MS",
+    "EVIDENCE",
+];
+const RR3_WIRE_HEAD: [&str; 9] = [
+    "CONNECTOR",
+    "HDR_PIN",
+    "SIGNAL",
+    "NET",
+    "FEEDS",
+    "MATE",
+    "KEYED",
+    "RATED_A",
+    "GND",
+];
+const RR3_AXIS_HEAD: [&str; 13] = [
+    "PIN",
+    "CENTER",
+    "LO",
+    "HI",
+    "DIR",
+    "SLEW",
+    "SETTLE_MS",
+    "HOLD",
+    "CEIL_MA",
+    "WARMUP",
+    "HARD_STOP",
+    "CALIBRATED",
+    "SOURCE",
+];
+const RR3_ROLE_HEAD: [&str; 5] = ["NAME", "SLOT", "DIRECTION", "REQUIRES", "DERIVES"];
+
+fn rr3_pin_rows(result: &Value) -> Result<Vec<Vec<String>>, String> {
+    Ok(rr3_entries(result, "pins")?
+        .iter()
+        .map(|p| {
+            vec![
+                cell(p, "pin_id"),
+                cell(p, "role"),
+                cell(p, "instance"),
+                cell(p, "controller"),
+                cell(p, "channel"),
+                cell(p, "physical"),
+                cell(p, "direction"),
+                cell(p, "rail"),
+                cell(p, "addr"),
+                cell(p, "device"),
+                cell_bool(p, "failsafe"),
+                cell(p, "mux_group"),
+            ]
+        })
+        .collect())
+}
+
+fn rr3_dom_rows(result: &Value) -> Result<Vec<Vec<String>>, String> {
+    Ok(rr3_entries(result, "domains")?
+        .iter()
+        .map(|d| {
+            vec![
+                cell(d, "name"),
+                cell(d, "nominal_mv"),
+                cell(d, "mild_mv"),
+                cell(d, "severe_mv"),
+                cell(d, "current_cap_ma"),
+                cell(d, "sense"),
+                cell(d, "current_sense"),
+                cell(d, "switch"),
+                cell_bool(d, "switchable"),
+                cell_bool(d, "armed"),
+                cell(d, "max_age_ms"),
+                cell(d, "evidence"),
+            ]
+        })
+        .collect())
+}
+
+fn rr3_wire_rows(result: &Value) -> Result<Vec<Vec<String>>, String> {
+    Ok(rr3_entries(result, "wires")?
+        .iter()
+        .map(|w| {
+            vec![
+                cell(w, "connector"),
+                cell(w, "hdr_pin"),
+                cell(w, "signal"),
+                cell(w, "net"),
+                cell(w, "feeds"),
+                cell(w, "mate"),
+                cell_bool(w, "keyed"),
+                cell(w, "rated_a"),
+                cell_bool(w, "gnd_common"),
+            ]
+        })
+        .collect())
+}
+
+fn rr3_axis_rows(result: &Value) -> Result<Vec<Vec<String>>, String> {
+    Ok(rr3_entries(result, "axis")?
+        .iter()
+        .map(|a| {
+            vec![
+                cell(a, "pin"),
+                cell(a, "center_deg"),
+                cell(a, "lo_deg"),
+                cell(a, "hi_deg"),
+                cell(a, "dir_sign"),
+                cell(a, "slew_deg_s"),
+                cell(a, "settle_ms"),
+                cell(a, "hold"),
+                cell(a, "current_ceil_ma"),
+                cell(a, "warmup_ms"),
+                cell(a, "hard_stop"),
+                cell_bool(a, "calibrated"),
+                cell(a, "source"),
+            ]
+        })
+        .collect())
+}
+
+fn rr3_role_rows(result: &Value) -> Result<Vec<Vec<String>>, String> {
+    Ok(rr3_entries(result, "roles")?
+        .iter()
+        .map(|r| {
+            vec![
+                cell(r, "name"),
+                cell(r, "slot"),
+                cell(r, "direction"),
+                cell_join(r, "requires"),
+                cell_join(r, "derives"),
+            ]
+        })
+        .collect())
+}
+
 /// `wiring` 装配快照读口（批N4 件九笔4 实装，续轮十五补 CLI）：段序 = 引脚 →
 /// 供电域 → 接线 → 轴 → 角色 → 交叉判据；判据真值在 rrd 的装配面，CLI 只透传。
 pub(super) fn format_wiring(envelope: &Value) -> Result<String, String> {
@@ -88,168 +247,11 @@ pub(super) fn format_wiring(envelope: &Value) -> Result<String, String> {
         return Ok(format_unavailable(result));
     }
     let mut out = String::new();
-    let pins = rr3_entries(result, "pins")?;
-    rr3_section(
-        &mut out,
-        "PINS",
-        &[
-            "PIN_ID",
-            "ROLE",
-            "INSTANCE",
-            "CONTROLLER",
-            "CHANNEL",
-            "PHYSICAL",
-            "DIRECTION",
-            "RAIL",
-            "ADDR",
-            "DEVICE",
-            "FAILSAFE",
-            "MUX_GROUP",
-        ],
-        &pins
-            .iter()
-            .map(|p| {
-                vec![
-                    cell(p, "pin_id"),
-                    cell(p, "role"),
-                    cell(p, "instance"),
-                    cell(p, "controller"),
-                    cell(p, "channel"),
-                    cell(p, "physical"),
-                    cell(p, "direction"),
-                    cell(p, "rail"),
-                    cell(p, "addr"),
-                    cell(p, "device"),
-                    cell_bool(p, "failsafe"),
-                    cell(p, "mux_group"),
-                ]
-            })
-            .collect::<Vec<_>>(),
-    );
-    rr3_section(
-        &mut out,
-        "DOMAINS",
-        &[
-            "NAME",
-            "NOMINAL_MV",
-            "MILD_MV",
-            "SEVERE_MV",
-            "CAP_MA",
-            "SENSE",
-            "CURRENT_SENSE",
-            "SWITCH",
-            "SWITCHABLE",
-            "ARMED",
-            "MAX_AGE_MS",
-            "EVIDENCE",
-        ],
-        &rr3_entries(result, "domains")?
-            .iter()
-            .map(|d| {
-                vec![
-                    cell(d, "name"),
-                    cell(d, "nominal_mv"),
-                    cell(d, "mild_mv"),
-                    cell(d, "severe_mv"),
-                    cell(d, "current_cap_ma"),
-                    cell(d, "sense"),
-                    cell(d, "current_sense"),
-                    cell(d, "switch"),
-                    cell_bool(d, "switchable"),
-                    cell_bool(d, "armed"),
-                    cell(d, "max_age_ms"),
-                    cell(d, "evidence"),
-                ]
-            })
-            .collect::<Vec<_>>(),
-    );
-    rr3_section(
-        &mut out,
-        "WIRES",
-        &[
-            "CONNECTOR",
-            "HDR_PIN",
-            "SIGNAL",
-            "NET",
-            "FEEDS",
-            "MATE",
-            "KEYED",
-            "RATED_A",
-            "GND",
-        ],
-        &rr3_entries(result, "wires")?
-            .iter()
-            .map(|w| {
-                vec![
-                    cell(w, "connector"),
-                    cell(w, "hdr_pin"),
-                    cell(w, "signal"),
-                    cell(w, "net"),
-                    cell(w, "feeds"),
-                    cell(w, "mate"),
-                    cell_bool(w, "keyed"),
-                    cell(w, "rated_a"),
-                    cell_bool(w, "gnd_common"),
-                ]
-            })
-            .collect::<Vec<_>>(),
-    );
-    rr3_section(
-        &mut out,
-        "AXIS",
-        &[
-            "PIN",
-            "CENTER",
-            "LO",
-            "HI",
-            "DIR",
-            "SLEW",
-            "SETTLE_MS",
-            "HOLD",
-            "CEIL_MA",
-            "WARMUP",
-            "HARD_STOP",
-            "CALIBRATED",
-            "SOURCE",
-        ],
-        &rr3_entries(result, "axis")?
-            .iter()
-            .map(|a| {
-                vec![
-                    cell(a, "pin"),
-                    cell(a, "center_deg"),
-                    cell(a, "lo_deg"),
-                    cell(a, "hi_deg"),
-                    cell(a, "dir_sign"),
-                    cell(a, "slew_deg_s"),
-                    cell(a, "settle_ms"),
-                    cell(a, "hold"),
-                    cell(a, "current_ceil_ma"),
-                    cell(a, "warmup_ms"),
-                    cell(a, "hard_stop"),
-                    cell_bool(a, "calibrated"),
-                    cell(a, "source"),
-                ]
-            })
-            .collect::<Vec<_>>(),
-    );
-    rr3_section(
-        &mut out,
-        "ROLES",
-        &["NAME", "SLOT", "DIRECTION", "REQUIRES", "DERIVES"],
-        &rr3_entries(result, "roles")?
-            .iter()
-            .map(|r| {
-                vec![
-                    cell(r, "name"),
-                    cell(r, "slot"),
-                    cell(r, "direction"),
-                    cell_join(r, "requires"),
-                    cell_join(r, "derives"),
-                ]
-            })
-            .collect::<Vec<_>>(),
-    );
+    rr3_section(&mut out, "PINS", &RR3_PIN_HEAD, &rr3_pin_rows(result)?);
+    rr3_section(&mut out, "DOMAINS", &RR3_DOM_HEAD, &rr3_dom_rows(result)?);
+    rr3_section(&mut out, "WIRES", &RR3_WIRE_HEAD, &rr3_wire_rows(result)?);
+    rr3_section(&mut out, "AXIS", &RR3_AXIS_HEAD, &rr3_axis_rows(result)?);
+    rr3_section(&mut out, "ROLES", &RR3_ROLE_HEAD, &rr3_role_rows(result)?);
     let checks = rr3_check_rows(result)?;
     rr3_section(
         &mut out,
