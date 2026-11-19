@@ -219,10 +219,17 @@ impl Rr3BusClient {
     pub fn rr3_connect(manifest_text: &str) -> Result<Self, String> {
         let path =
             std::env::var(RR3_BUS_PATH_ENV).unwrap_or_else(|_| RR3_UDS_PATH_DEFAULT.to_string());
+        Self::rr3_connect_at(&path, manifest_text)
+    }
+
+    /// 显式端点的一站式连接（`rr3_connect` 的路径注入口）：默认路径的选取策略
+    /// 仍只在上面一处，工具按 `--bus-path` 指定端点时走本函数，不复制身份/entry
+    /// 的装配流程。
+    pub fn rr3_connect_at(path: &str, manifest_text: &str) -> Result<Self, String> {
         let identity = rr3_manifest_ident(manifest_text)?;
         let exe = std::env::current_exe().map_err(|e| format!("取 current_exe 失败: {e}"))?;
         let wire = rr3_entry_absolutize(manifest_text, &exe)?;
-        Self::rr3_connect_with(&path, identity, &wire)
+        Self::rr3_connect_with(path, identity, &wire)
     }
 
     /// 测试与特殊部署的注入口：路径、身份、线上 manifest 三者显式给定。
