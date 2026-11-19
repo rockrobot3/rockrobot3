@@ -11,6 +11,9 @@
 | `rr-ota` | 升级"双轨"的类型形状：整镜像 A/B 与模块级 staging |
 | `rrd` | 主守护进程装配层（supervisor / health / config），事件总线的宿主：CLI 参数、主题装载、manifest 运行期事实、在册表、上行 RPC、UDS 监听与连接处理 |
 | `rr3mod` | 模块公共骨架（0.0.8 W-A 批0）：bootstrap 收敛序列 / serve 主循环骨架 / Dispatcher 注册面——只编排不重写，总线语义真值在 rr-bus-api / rr-core / rr-ipc；六消费方同批改（0.0.8 方案 §5） |
+| `rr-audio-mech` | 语音机制核：VAD 边沿、双麦 TDOA 判向、多通道下混、WAV 头（`no_std` + alloc，零平台依赖） |
+| `rr-cloud-proto` | 云对话协议机制核：ASR multipart / LLM / TTS 请求体与应答解析、重试判据（`no_std` + alloc，零 IO） |
+| `rr-autonomy` | 自治运行核：六任务表、心跳监督、固定栅格看门狗与健康快照（`no_std`，零 IO） |
 
 每个 crate 内部的文件级事实见各自 `README.md`；**做到哪一步、还缺哪一手不写在 README**，
 唯一落点 [`docs/status.md`](../../docs/status.md)。测试条数只登记在
