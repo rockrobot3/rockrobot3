@@ -246,9 +246,14 @@ struct Rr3SteadyRow {
     fan_dropped: u64,
 }
 
+/// 非模块行：表头、空行与运行级汇总（`restart_exhausted=… watchdog_overruns=…`）。
+fn rr3_steady_skip(line: &str) -> bool {
+    line.starts_with("NAME") || line.starts_with("restart_exhausted=") || line.trim().is_empty()
+}
+
 /// 解析一行 health；`beat_peak_ms` 列缺位按 0（旧格式兼容，不静默当健康）。
 fn rr3_steady_row(line: &str) -> Result<Option<Rr3SteadyRow>, String> {
-    if line.starts_with("NAME") || line.trim().is_empty() {
+    if rr3_steady_skip(line) {
         return Ok(None);
     }
     let f: Vec<&str> = line.split_whitespace().collect();

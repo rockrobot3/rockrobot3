@@ -239,6 +239,18 @@ fn steady_feed_takes_peak_and_skips_observer() {
     assert!(!agg.mods.contains_key("rr3-obs"), "观察者不计入稳态判据");
 }
 
+#[test]
+fn steady_feed_skips_health_footer() {
+    let mut agg = Rr3SteadyAgg::default();
+    agg.rr3_steady_feed(&format!(
+        "NAME  TASK  PHASE  HB_MS  WD_MS  SINCE_BEAT_MS\n{}restart_exhausted=0 watchdog_overruns=0\n",
+        steady_row("rr3-sense", "running", 200, 1000, 120),
+    ))
+    .unwrap();
+    assert_eq!(agg.samples, 1);
+    assert!(agg.mods.contains_key("rr3-sense"));
+}
+
 /// 收尾 status 的健康读数（三个单调计数为 0）。
 fn steady_tail_ok(agg: &mut Rr3SteadyAgg) {
     agg.rr3_steady_tail("fan_dropped = 0\nfan_write_timeout = 0\nlog_write = max_us=120 slow=0\n")
