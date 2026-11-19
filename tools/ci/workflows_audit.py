@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""GitHub 流水线结构审计：并发组 / job 超时 / action 版本矩阵 / 权限与失败显形。
+"""GitHub 流水线结构审计：并发组 / job 超时 / action 版本矩阵 / 权限与失败显形 /
+五芯片覆盖。
 
 判据（文本扫描，不做 YAML 解析——workflow 由本仓独占维护，形状稳定）：
 - 每个 workflow 必须有顶层 `concurrency:`（同 ref 重复跑互相踩是历史事故源）；
@@ -10,6 +11,8 @@
   `contents: read`，不得 `write-all`；job 级额外授权另写，不在本门范围。
 - 任何 `continue-on-error` 非 false 即红：失败必须显形，不能把红掩成绿
   （漂红巡检与门禁都靠退出码，掩码等于把治理面掏空）。
+- platforms.yml 的五芯片矩阵腿（英特尔/AMD x86_64、瑞芯微 aarch64、进迭时空
+  riscv64、esp32、esp32s3）缺任一即红：覆盖缩水不能只靠评审记得。
 
 用法：
     workflows_audit.py [--root <仓根>]
@@ -48,6 +51,17 @@ TOOLCHAIN = "1.100.0"
 MAX_JOBS = 10
 # 跨多清单共写仓根 target-dir 的作业：rust-cache 必须全量缓存共享依赖
 CACHE_ALL_JOBS = {"conventions", "lint", "sim-assemble", "sim-chain", "matrix"}
+
+# 五芯片验证面（platforms.yml）：每条矩阵腿都是独立开发板环境的回执，
+# 删除/改名任何一条即"某芯片不再被流水线验证"——用显式清单钉住。
+CHIP_MATRIX = {
+    "cross-artifacts": [
+        "x86_64-unknown-linux-gnu",       # 英特尔 / AMD
+        "aarch64-unknown-linux-musl",     # 瑞芯微 RK3566/RK3588
+        "riscv64gc-unknown-linux-gnu",    # 进迭时空 SpacemiT K1/K3
+    ],
+    "esp32-gates": ["chip: esp32", "chip: esp32s3"],
+}
 
 
 def step_block(lines, i):
@@ -287,12 +301,31 @@ def graph_cycle(graph):
     return None
 
 
+def chip_problems(text, rel):
+    """五芯片验证面：platforms.yml 的矩阵腿缺一条即红（覆盖不得缩水）。"""
+    if rel.name != "platforms.yml":
+        return []
+    jobs = dict(jobs_of(text))
+    bad = []
+    for job, needles in CHIP_MATRIX.items():
+        block = jobs.get(job)
+        if block is None:
+            bad.append(f"{rel} 缺 job {job}（五芯片验证面被删）")
+            continue
+        joined = "\n".join(block)
+        for needle in needles:
+            if needle not in joined:
+                bad.append(f"{rel} job {job} 缺 {needle}（五芯片覆盖不得缩水）")
+    return bad
+
+
 def workflow_problems(path, root):
     text = path.read_text(encoding="utf-8")
     rel = path.relative_to(root)
     bad = uses_problems(text, str(rel))
     bad.extend(trigger_problems(text, rel))
     bad.extend(paths_ignore_problems(text, rel))
+    bad.extend(chip_problems(text, rel))
     if not re.search(r"^concurrency:\s*$", text, re.M):
         bad.append(f"{rel} 缺顶层 concurrency（同 ref 并发组）")
     if rel.name == "publish.yml" and not re.search(r"cancel-in-progress:\s*false", text):
@@ -389,6 +422,14 @@ def self_test():
             "  b:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    needs: [a]\n",
             encoding="utf-8",
         )
+        (wf / "platforms.yml").write_text(
+            "name: platforms\non:\n  push:\n    branches: [main]\n"
+            "permissions:\n  contents: read\n"
+            "concurrency:\n  group: p\njobs:\n"
+            "  cross-artifacts:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    steps:\n      - run: echo x86_64-unknown-linux-gnu\n",
+            encoding="utf-8",
+        )
         bad = audit(root)
 
     cases = [
@@ -405,6 +446,8 @@ def self_test():
         ("job 超限被抓", any("> 上限" in b for b in bad)),
         ("continue-on-error 被抓", any("continue-on-error" in b for b in bad)),
         ("缺 permissions 被抓", any("缺顶层 permissions" in b for b in bad)),
+        ("芯片矩阵缩水被抓", any("五芯片覆盖不得缩水" in b for b in bad)),
+        ("芯片 job 缺失被抓", any("缺 job esp32-gates" in b for b in bad)),
         ("好例零误报", not any("good.yml" in b for b in bad)),
     ]
     for name, ok in cases:
@@ -425,7 +468,7 @@ def main():
     if bad:
         print(f"FAIL  流水线结构缺口 {len(bad)} 处（修法见 tools/ci/README.md）")
         return 1
-    print("PASS  流水线结构审计通过（并发组 / job 超时 / action 版本矩阵 / 权限与失败显形）")
+    print("PASS  流水线结构审计通过（并发组 / job 超时 / action 版本矩阵 / 权限与失败显形 / 五芯片覆盖）")
     return 0
 
 
