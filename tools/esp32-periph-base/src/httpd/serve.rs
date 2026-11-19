@@ -276,6 +276,25 @@ pub(crate) fn rr3_httpd_spawn(bus: &Arc<Mutex<Bus>>) {
     thread_spawn(bus, cred_source, ssid, pass);
 }
 
+/// net 任务心跳线程（W3-3）：只读网络面在位真值（[`wifi::rr3_net_up`]），
+/// 每 1 s 一次；起线程失败只点名——net 任务随后按 timeout 判死，健康面可见。
+#[cfg(feature = "autonomy")]
+fn net_watch_spawn() {
+    let spawned = std::thread::Builder::new()
+        .name("net-watch".into())
+        .stack_size(crate::board::THREAD_STACK)
+        .spawn(|| loop {
+            std::thread::sleep(Duration::from_secs(1));
+            // SAFETY：rr3_net_up 只读启动期写一次的 netif 单例（见 wifi 模块）。
+            if unsafe { wifi::rr3_net_up() } {
+                crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Net);
+            }
+        });
+    if let Err(e) = spawned {
+        println!("[periph] net 监控线程起失败: {e:?}（net 任务将按 timeout 判死）");
+    }
+}
+
 /// 起栈线程（与控制/运行面同 16KB 口径；短命——起完 httpd 即退；
 /// `cred_source`＝凭据来源点名串（"nvs"/"编译期"），boot 日志用，永不出值）。
 fn thread_spawn(bus: Arc<Mutex<Bus>>, cred_source: &'static str, ssid: Vec<u8>, pass: Vec<u8>) {
@@ -361,6 +380,10 @@ unsafe fn start_httpd(
 ) -> Result<(), i32> {
     let ap_ssid = wifi_bringup(ssid, pass)?;
     httpd_register(bus)?;
+    // ---- W3-3 net 任务接线：网络服务可达即心跳（1 s 一拍）；仅自治档起线程，
+    // 默认固件零行为变化。判死/复位归 [`crate::autonomy`] 监督壳，本线程不决策。
+    #[cfg(feature = "autonomy")]
+    net_watch_spawn();
     println!(
         "[periph] 配置腿起（N-13，凭据源={cred_source}）: SoftAP SSID={ap_ssid}（WPA2，口令见 wifi_ap_configure 注）+ http://0.0.0.0:{}/api/board/*（白名单 {} 端点＝GET state/bindings＋POST wifi/reboot）",
         HTTPD_SERVER_PORT,

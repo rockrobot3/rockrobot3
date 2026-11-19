@@ -1,34 +1,75 @@
-//! 自治壳（W3-2b）：把 `rr-autonomy` 监督核接到板侧，提供 `/api/board/health` 真状态。
+//! 自治壳（W3-2b 起，W3-3 接线）：把 `rr-autonomy` 监督核接到板侧，提供
+//! `/api/board/health` 真状态与"接线任务心跳 → 判死 → 整机复位"闭环。
 //!
-//! 本阶段只启动监督壳与健康快照；六个任务尚未接线，统一显式标为 `degraded`
-//! （`rr3_sup_degrade` = 不参与判死），避免"未接线任务被当成超时"的假红。
-//! W3-3 接线后逐个 `rr3_sup_beat`，健康面自然转为 running。
+//! 接线范围（W3-3 裁定）：**net / audio-in / motion / ui 四项**为真心跳；
+//! `dialog`（云对话主循环，W6）与 `audio-out`（PCM 播放，W4-2）尚未落地，
+//! 显式 `rr3_sup_degrade` 不参与判死——不伪造心跳，也不把"未实现"报成故障。
+//!
+//! 心跳通道：按任务**位图**（[`BEATS`]）合并——生产者只做一次原子 OR，不排队、
+//! 不丢拍、不取锁；监督线程每 200 ms 栅格 `swap` 清零后逐位续命。音频与运行
+//! 线程的心跳成本与耗时无关，不会把音频路径拖进锁竞争。
+//!
+//! 重启策略（机制与策略分离：判死归 `rr-autonomy`，动作归本壳）：
+//! - **有过心跳**的已接线任务持续 dead 才复位（`ever` 闸门）——从未起过的
+//!   任务（如 I2S 装配失败）如实留在 dead，不制造重启环；
+//! - 连续 [`DEAD_TICKS`] 拍（≈400 ms）仍 dead 才动作，瞬态卡顿由恢复心跳
+//!   自然清账；
+//! - Rust 无法安全终止卡在 IDF 阻塞调用里的线程，故重启粒度是整机
+//!   `esp_restart`，不做线程级强杀。
 //!
 //! 与 HTTP 的关系：`httpd` 的 `/api/board/health` 只读本模块的静态快照；
 //! 锁只护快照读写，不跨 HTTP 组包持有。
 
-use std::sync::atomic::{AtomicI8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI8, AtomicU8, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
-use rr_autonomy::{Rr3SupCfg, Rr3SupHealth, Rr3Supervisor, Rr3Task, Rr3TaskState};
+use rr_autonomy::{Rr3SupCfg, Rr3SupHealth, Rr3Supervisor, Rr3Task, Rr3TaskState, RR3_TASK_COUNT};
 
 /// SNTP 状态（未知/已同步/失败）。
 pub(crate) const SNTP_UNKNOWN: i8 = 0;
 pub(crate) const SNTP_SYNCED: i8 = 1;
 pub(crate) const SNTP_FAILED: i8 = -1;
 
+/// 监督策略量（板侧）：栅格 200 ms；超时按各任务真实节拍留裕量。
+/// net 15 s（含 boot 窗内 DHCP 等连）；audio-in 1.5 s（read 批 ≈32 ms）；
+/// motion/ui 4 s（SCAN 单点 2.4 s，进度点心跳见 runtime）；dialog/audio-out
+/// 的超时在 degraded 下不参与判死。
+const SUP_CFG: Rr3SupCfg = Rr3SupCfg {
+    tick_ms: 200,
+    timeouts_ms: [15_000, 1_500, 10_000, 1_000, 4_000, 4_000],
+};
+
+/// 板侧已接线任务（心跳真值来源）。
+const WIRED: [Rr3Task; 4] = [Rr3Task::Net, Rr3Task::AudioIn, Rr3Task::Motion, Rr3Task::Ui];
+
+/// 连续判死拍数（200 ms × 2 ≈ 400 ms 去抖，避免瞬态误复位）。
+const DEAD_TICKS: u32 = 2;
+
 static SNTP_STATE: AtomicI8 = AtomicI8::new(SNTP_UNKNOWN);
 static SNAP: Mutex<Option<Rr3SupHealth>> = Mutex::new(None);
+/// 心跳位图：bit = 任务下标。生产者 `fetch_or`，监督线程 `swap(0)` 取走。
+static BEATS: AtomicU8 = AtomicU8::new(0);
+/// 监督壳是否在跑——默认固件不跑，`rr3_beat` 直接短路（零原子写）。
+static SUP_ON: AtomicBool = AtomicBool::new(false);
 
-/// 起自治监督壳：六任务先标 degraded（未接线），按 200ms 栅格 tick。
+/// 起自治监督壳：六任务先标 degraded，再接 `WIRED`（`Starting`，首窗起算）；
+/// 按 [`SUP_CFG`] 栅格 tick，健康快照供 `/api/board/health`。
 pub(crate) fn rr3_start() {
     let now = crate::state::now_ms();
-    let mut sup = Rr3Supervisor::rr3_sup_new(Rr3SupCfg::default(), now);
+    let mut sup = Rr3Supervisor::rr3_sup_new(SUP_CFG, now);
     for task in Rr3Task::ALL {
         sup.rr3_sup_degrade(task);
     }
+    for task in WIRED {
+        sup.rr3_sup_arm(task, now);
+    }
+    SUP_ON.store(true, Ordering::Release);
+    println!(
+        "[autonomy] 监督壳起：栅格 {}ms；已接线 net/audio-in/motion/ui；dialog/audio-out degraded（未落地，不判死）",
+        SUP_CFG.tick_ms
+    );
     let spawned = thread::Builder::new()
         .name("autonomy".into())
         .stack_size(crate::board::THREAD_STACK)
@@ -38,21 +79,120 @@ pub(crate) fn rr3_start() {
     }
 }
 
+/// 单任务心跳（任意线程可调）：置位图，永不阻塞；监督壳未启动时为空操作。
+pub(crate) fn rr3_beat(task: Rr3Task) {
+    if !SUP_ON.load(Ordering::Acquire) {
+        return;
+    }
+    BEATS.fetch_or(1 << task.index(), Ordering::Release);
+}
+
+/// 运行面（motion + ui 同居一线程）联合心跳：该线程的任一进度点都代表两任务在位。
+pub(crate) fn rr3_beat_rt() {
+    rr3_beat(Rr3Task::Motion);
+    rr3_beat(Rr3Task::Ui);
+}
+
 /// SNTP 线程回写状态（供 `/health` 读）。
 pub(crate) fn rr3_sntp_set(state: i8) {
     SNTP_STATE.store(state, Ordering::Relaxed);
 }
 
-/// 监督栅格：每拍更新快照（锁窗只做 Copy，不组串）。
+/// 监督栅格：先排空心跳，再 tick 判死并发布快照，最后走去抖复位判定。
 fn rr3_tick_loop(mut sup: Rr3Supervisor) {
+    let mut ever = [false; RR3_TASK_COUNT];
+    let mut dead_ticks = 0u32;
     loop {
-        thread::sleep(Duration::from_millis(200));
-        sup.rr3_sup_tick(crate::state::now_ms());
-        let health = sup.rr3_sup_health();
-        if let Ok(mut slot) = SNAP.lock() {
-            *slot = Some(health);
+        thread::sleep(Duration::from_millis(SUP_CFG.tick_ms));
+        rr3_drain(&mut sup, &mut ever);
+        let ev = sup.rr3_sup_tick(crate::state::now_ms());
+        rr3_log_timeout(ev.timed_out);
+        health_publish(sup.rr3_sup_health());
+        dead_ticks = rr3_dead_step(&sup.rr3_sup_health(), &ever, dead_ticks);
+    }
+}
+
+/// 心跳排空：位图一次性取走、逐位续命；`Dead → Running` 打恢复行（每次停摆
+/// 恰一行，不刷屏）。
+fn rr3_drain(sup: &mut Rr3Supervisor, ever: &mut [bool; RR3_TASK_COUNT]) {
+    let bits = BEATS.swap(0, Ordering::AcqRel);
+    if bits == 0 {
+        return;
+    }
+    let now = crate::state::now_ms();
+    for task in Rr3Task::ALL {
+        if bits & (1 << task.index()) == 0 {
+            continue;
+        }
+        ever[task.index()] = true;
+        if sup.rr3_sup_beat(task, now) {
+            println!("[autonomy] 心跳恢复 task={} now={now}ms", task.name());
         }
     }
+}
+
+/// 把快照写入静态槽（锁窗只做 Copy，不组串）。
+fn health_publish(h: Rr3SupHealth) {
+    if let Ok(mut slot) = SNAP.lock() {
+        *slot = Some(h);
+    }
+}
+
+/// 超时点名（仅在 Dead 迁移那一拍触发）。
+fn rr3_log_timeout(bits: u8) {
+    if bits == 0 {
+        return;
+    }
+    println!(
+        "[autonomy] 心跳超时 task={}（已标 dead；连续 {DEAD_TICKS} 拍不恢复即整机复位）",
+        rr3_names(bits)
+    );
+}
+
+/// 复位去抖：已接线且**曾有过心跳**的 dead 任务连续 [`DEAD_TICKS`] 拍 → 复位；
+/// 否则计数清零。从未起过的任务留在 dead 供观测，不触发重启环。
+fn rr3_dead_step(h: &Rr3SupHealth, ever: &[bool; RR3_TASK_COUNT], ticks: u32) -> u32 {
+    let bits = rr3_dead_bits(h, ever);
+    if bits == 0 {
+        return 0;
+    }
+    if ticks + 1 < DEAD_TICKS {
+        return ticks + 1;
+    }
+    println!(
+        "[autonomy] 已接线任务持续 dead {DEAD_TICKS} 拍: {} → esp_restart",
+        rr3_names(bits)
+    );
+    // SAFETY：esp_restart 是 IDF 全局复位调用，不返回到调用点；调用前日志与
+    // 快照已落，不跨复位持有任何 Rust 状态。
+    unsafe { esp_idf_sys::esp_restart() }
+}
+
+/// dead 且曾有心跳的已接线任务位图（0＝无需复位）。
+fn rr3_dead_bits(h: &Rr3SupHealth, ever: &[bool; RR3_TASK_COUNT]) -> u8 {
+    let mut bits = 0u8;
+    for task in WIRED {
+        let i = task.index();
+        if h.state[i] == Rr3TaskState::Dead && ever[i] {
+            bits |= 1 << i;
+        }
+    }
+    bits
+}
+
+/// 任务位图 → 逗号分隔名串（顺序按任务表；空串＝空位图）。
+fn rr3_names(bits: u8) -> String {
+    let mut names = String::new();
+    for task in Rr3Task::ALL {
+        if bits & (1 << task.index()) == 0 {
+            continue;
+        }
+        if !names.is_empty() {
+            names.push(',');
+        }
+        names.push_str(task.name());
+    }
+    names
 }
 
 /// `/api/board/health` 的 JSON 体（无快照时 `shell=off`，不虚构任务状态）。
@@ -102,6 +242,16 @@ fn state_word(v: Rr3TaskState) -> &'static str {
 mod tests {
     use super::*;
 
+    fn health_with(state: Rr3TaskState, timeouts: u32) -> Rr3SupHealth {
+        Rr3SupHealth {
+            state: [state; RR3_TASK_COUNT],
+            timeouts: [timeouts; RR3_TASK_COUNT],
+            ticks: 0,
+            overruns: 0,
+            restarts: 0,
+        }
+    }
+
     #[test]
     fn state_words_cover_all_variants() {
         assert_eq!(state_word(Rr3TaskState::Starting), "starting");
@@ -122,5 +272,26 @@ mod tests {
         let j = rr3_health_json();
         assert!(j.contains("\"shell\":\"off\""), "{j}");
         assert!(!j.contains("tasks"), "无快照不得虚构任务状态");
+    }
+
+    #[test]
+    fn dead_bits_only_cover_wired_tasks_with_real_beat() {
+        let h = health_with(Rr3TaskState::Dead, 1);
+        let all = rr3_dead_bits(&h, &[true; RR3_TASK_COUNT]);
+        assert_eq!(rr3_names(all), "net,audio-in,motion,ui");
+        let mut ever = [true; RR3_TASK_COUNT];
+        ever[Rr3Task::AudioIn.index()] = false; // 从未起过 → 不触发复位
+        assert_eq!(rr3_names(rr3_dead_bits(&h, &ever)), "net,motion,ui");
+        let running = health_with(Rr3TaskState::Running, 0);
+        assert_eq!(rr3_dead_bits(&running, &ever), 0);
+    }
+
+    #[test]
+    fn dead_step_needs_two_consecutive_ticks() {
+        let h = health_with(Rr3TaskState::Dead, 1);
+        let ever = [true; RR3_TASK_COUNT];
+        assert_eq!(rr3_dead_step(&h, &ever, 0), 1);
+        let alive = health_with(Rr3TaskState::Running, 0);
+        assert_eq!(rr3_dead_step(&alive, &ever, 1), 0);
     }
 }
