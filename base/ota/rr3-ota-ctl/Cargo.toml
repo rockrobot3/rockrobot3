@@ -19,3 +19,8 @@ rr-ota = { path = "../../runtime/rr-ota" }
 # 原子写序的单点（独占建 → fsync → rename → 父目录 fsync）：manifest/签名/公钥
 # 与 staging 安装复用同一份，不另写第二条写路径（rr-ipc/src/persist.rs 头注）。
 rr-ipc = { path = "../../runtime/rr-ipc" }
+
+# 生产稳定性：release 档也开算术溢出检查——静默回绕是最难定位的缺陷；
+# 代价是个位数百分比性能，换"溢出即 panic 可定位"。
+[profile.release]
+overflow-checks = true

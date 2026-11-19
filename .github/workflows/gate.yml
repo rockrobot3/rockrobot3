@@ -66,6 +66,29 @@ jobs:
             exit 1
           fi
 
+  # release 档测试：debug 测试覆盖不到溢出/优化相关行为；生产清单的
+  # [profile.release] 已开 overflow-checks，这一腿让"溢出即 panic"在 CI 可见。
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      - name: workspace release 测试（overflow-checks）
+        run: |
+          set -o pipefail
+          if ! cargo test --locked --release --workspace \
+               --manifest-path base/runtime/Cargo.toml 2>&1 | tee /tmp/release-test.log; then
+            bash tools/ci/log-digest.sh --title release-test --log /tmp/release-test.log \
+              --sig 'FAILED|panicked at|error(\[|:)' --tail 12
+            exit 1
+          fi
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 25
