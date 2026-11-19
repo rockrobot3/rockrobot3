@@ -42,8 +42,8 @@ const PLAY_Q_CAP: usize = 2;
 const PLAY_STACK: usize = 16_384;
 /// I2S 写阻塞上限（portMAX_DELAY 同义）。
 const PLAY_TIMEOUT: TickType_t = u32::MAX;
-/// 空转心跳周期。
-const PLAY_IDLE_MS: u64 = 1_000;
+/// 空转心跳周期（自治壳的 audio-out 看门狗窗按它留余量，见 `autonomy.rs`）。
+pub(crate) const PLAY_IDLE_MS: u64 = 1_000;
 
 /// 播放队列发送端（未装配 = None；锁只护取端，`try_send` 不阻塞）。
 static PLAY_TX: Mutex<Option<SyncSender<Vec<u8>>>> = Mutex::new(None);

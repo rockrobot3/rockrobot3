@@ -444,15 +444,6 @@ fn thread_spawn(bus: Arc<Mutex<Bus>>, cred_source: &'static str, ssid: Vec<u8>, 
         .expect("起配置腿线程失败");
 }
 
-/// esp_err → Result（fail-honest 逐步：非 ESP_OK 即 Err，点名在调用方）。
-fn esp_ok(r: i32) -> Result<(), i32> {
-    if r == ESP_OK {
-        Ok(())
-    } else {
-        Err(r)
-    }
-}
-
 /// httpd 起 + 白名单注册（手填 config：HTTPD_DEFAULT_CONFIG 真值——宏默认也是
 /// false/null/0 的字段由全零起底等价覆盖，差异字段逐项对表 esp_http_server.h :53；
 /// OnceLock 先写——handler 可达即 bus 在位；method 映射随表行 GET/POST，表内词表
