@@ -55,16 +55,15 @@ fn spk_run(
     ws: impl Peripheral<P = impl InputPin + OutputPin> + 'static,
 ) {
     let cfg = StdConfig::philips(SPK_SR_HZ, DataBitWidth::Bits16);
-    let mut tx: I2sDriver<'static, I2sTx> =
-        match I2sDriver::new_std_tx(i2s1, &cfg, bclk, dout, None::<AnyIOPin>, ws) {
-            Ok(d) => d,
-            Err(e) => {
-                println!("[spk] I2S1 TX 驱动安装失败: {e:?}（查功放三线与供电/共地）");
-                return;
-            }
-        };
-    if let Err(e) = tx.tx_enable() {
-        println!("[spk] I2S1 tx_enable 失败: {e:?}");
+    let opened: Result<I2sDriver<'static, I2sTx>, _> =
+        I2sDriver::new_std_tx(i2s1, &cfg, bclk, dout, None::<AnyIOPin>, ws);
+    let Ok(mut tx) =
+        opened.map_err(|e| println!("[spk] I2S1 TX 驱动安装失败: {e:?}（查功放三线与供电/共地）"))
+    else {
+        return;
+    };
+    if tx.tx_enable().is_err() {
+        println!("[spk] I2S1 tx_enable 失败（tx 通道未启动）");
         return;
     }
     let pcm = tone_pcm();
@@ -75,13 +74,11 @@ fn spk_run(
         pcm.len()
     );
     for round in 1..=2 {
-        match tx.write_all(&pcm, SPK_TIMEOUT) {
-            Ok(()) => println!("[spk] 第 {round}/2 次写入完成"),
-            Err(e) => {
-                println!("[spk] 第 {round}/2 次写入失败: {e:?}");
-                return;
-            }
+        if let Err(e) = tx.write_all(&pcm, SPK_TIMEOUT) {
+            println!("[spk] 第 {round}/2 次写入失败: {e:?}");
+            return;
         }
+        println!("[spk] 第 {round}/2 次写入完成");
         let silence = vec![0u8; (SPK_SR_HZ as usize / 10) * 4];
         if let Err(e) = tx.write_all(&silence, SPK_TIMEOUT) {
             println!("[spk] 间隔静音写入失败: {e:?}");

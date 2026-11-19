@@ -13,45 +13,28 @@ fn admin_token_check() {
     assert!(!rr3_token_check(br#"{"token":123}"#), "非串 token 应拒");
 }
 
-/// 表 ↔ 分派零漂移（同 host `route_table_matches_dispatch` 形状）：表内每行
-/// 必命中、表外 path/method 必 None——防"表加行忘加臂/臂漂移"。
+/// 表即分派真值：表内每行可查、method/path 交叉必拒（防"GET 走写口"的
+/// 白名单越界——W4-2 起第五列处理臂就是分派本身，结构上无表臂漂移）。
 #[test]
-fn route_table_matches_dispatch() {
-    for (method, path, _, _) in RR3_BOARD_ROUTES {
-        let hit = rr3_board_route(method, path);
-        assert!(hit.is_some(), "表内行未命中分派: {method} {path}");
+fn route_table_is_dispatch_truth() {
+    for (method, path, _, _, _) in RR3_BOARD_ROUTES {
+        assert!(
+            rr3_route_lookup(method, path).is_some(),
+            "表内行查不到: {method} {path}"
+        );
     }
-    assert_eq!(rr3_board_route("GET", "/api/board/nope"), None);
-    assert_eq!(
-        rr3_board_route("POST", "/api/board/state"),
-        None,
+    assert!(rr3_route_lookup("GET", "/api/board/nope").is_none());
+    assert!(
+        rr3_route_lookup("POST", "/api/board/state").is_none(),
         "读端点不受 POST——写口白名单外 fail-closed"
     );
-    assert_eq!(
-        rr3_board_route("GET", "/api/board/wifi"),
-        None,
+    assert!(
+        rr3_route_lookup("GET", "/api/board/wifi").is_none(),
         "写端点不受 GET"
     );
-    assert_eq!(rr3_board_route("PUT", "/api/board/wifi"), None);
-    assert_eq!(rr3_board_route("GET", "/api/brain/ops"), None);
-    assert_eq!(rr3_board_route("GET", "/api/board/state/extra"), None);
-    // 分派产物点名（enum 变体 ↔ 表行一一对应）
-    assert_eq!(
-        rr3_board_route("GET", "/api/board/state"),
-        Some(Rr3BoardRoute::State)
-    );
-    assert_eq!(
-        rr3_board_route("GET", "/api/board/bindings"),
-        Some(Rr3BoardRoute::Bindings)
-    );
-    assert_eq!(
-        rr3_board_route("POST", "/api/board/wifi"),
-        Some(Rr3BoardRoute::WifiWrite)
-    );
-    assert_eq!(
-        rr3_board_route("POST", "/api/board/reboot"),
-        Some(Rr3BoardRoute::Reboot)
-    );
+    assert!(rr3_route_lookup("PUT", "/api/board/wifi").is_none());
+    assert!(rr3_route_lookup("GET", "/api/brain/ops").is_none());
+    assert!(rr3_route_lookup("GET", "/api/board/state/extra").is_none());
 }
 
 /// covers 形制（同 check.sh ⑩ 扫描执法语义）：带斜杠且不以 `/` 开头；
@@ -59,7 +42,7 @@ fn route_table_matches_dispatch() {
 /// 识别共用同一词表——批N14 件二扩 POST 行时钉死）。
 #[test]
 fn covers_wordform_shape() {
-    for (method, path, covers, applies) in RR3_BOARD_ROUTES {
+    for (method, path, covers, applies, _) in RR3_BOARD_ROUTES {
         assert!(
             *method == "GET" || *method == "POST",
             "method 词表外: {path} {method}"
