@@ -287,6 +287,9 @@ jobs:
         run: python3 tools/ci/baselines_audit.py --self-test
       - name: 基线只降不升（对比 base ref）
         run: python3 tools/ci/baselines_audit.py
+      # SKIP 纪律单点：本地缺工具链退 0，CI 内缺工具链退 1（覆盖缺口不得冒充绿）。
+      - name: SKIP 纪律自检（本地 SKIP / CI 即红）
+        run: bash tools/ci/skip.sh --self-test
       # 流水线自身的结构面也要有门：并发组 / job 超时 / action 版本矩阵。
       # 版本升级 = 显式改 ACTION_MATRIX，防同一工作流里两版 action 并存。
       - name: 流水线审计自检（好例 + 缺并发/缺超时/版本漂移三负例）

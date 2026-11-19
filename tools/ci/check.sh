@@ -13,21 +13,21 @@
 # ④ 是独立工程编译步（不是测试步）：modules/、tools/、base/ota 各自成 workspace，①/①b 覆盖不到。
 #    例外：tools/esp32-uart-echo 是 ESP32 固件工程（xtensa-esp32-none-elf 目标），编译需 esp fork
 #    工具链（cargo +esp）+ Xtensa esp-gcc，宿主工具链 check 必红——它由专用门
-#    tools/ci/esp-uart-echo-check.sh 覆盖（工具链缺位时 SKIP 明说，编译成功还断言 ELF 出树）。
+#    tools/ci/esp-uart-echo-check.sh 覆盖（工具链缺位时本地 SKIP / CI 即红，编译成功还断言 ELF 出树）。
 #    同例：tools/espidf-std-hello（0.0.5 增补轮四 批W1，xtensa-esp32-espidf 目标 + build-std +
 #    esp-idf-sys，还须 ESP-IDF 克隆与乐鑫 esp-clang）——专用门 tools/ci/espidf-std-check.sh，
-#    SKIP 纪律同上。同例：tools/espidf-sentinel（0.0.7 批D1 层③ 哨兵，同款 espidf 工具链
+#    SKIP 纪律同上（本地 SKIP / CI 即红）。同例：tools/espidf-sentinel（0.0.7 批D1 层③ 哨兵，同款 espidf 工具链
 #    + 主仓 rr-core/rr-ipc path 依赖）——专用门 tools/ci/espidf-sentinel-check.sh（甲面
-#    xtensa 构建 = 双证之①），SKIP 纪律同上；其宿主对手件是普通独立工程
+#    xtensa 构建 = 双证之①），SKIP 纪律同上（本地 SKIP / CI 即红）；其宿主对手件是普通独立工程
 #    tools/rr3-sentinel-harness（不在哨兵目录内的原因见其 Cargo.toml 注记），照常进 ④/⑥。
 #    同例：tools/esp32-periph-base（0.0.5 增补轮五 批B 外设底座档，同款 espidf
 #    工具链，OLED/舵机/UART2 指令面）——专用门 tools/ci/esp32-periph-base-check.sh，
-#    SKIP 纪律同上。
+#    SKIP 纪律同上（本地 SKIP / CI 即红）。
 #    同例（0.0.5 增补轮六 批N8 件三）：modules/rr3-act、modules/rr3-sense 是
 #    **双档工程**——espidf 档专属依赖挂 Cargo.toml target 表（宿主构建不解析），
 #    宿主 linux 档照常进本门 ④/⑥，**不**整目录排除（与上述 tools/ 专用工程不同）；
 #    espidf 档编译面由专用门 tools/ci/rr3-act-sense-espidf-check.sh 执法（显式
-#    --target，SKIP 纪律同上）。
+#    --target，SKIP 纪律同上（本地 SKIP / CI 即红）。
 # ⑧ 件级判据三门（0.0.5 批K H2）：⑧-a 两腿对拍计数门（slots.toml status 三态 join
 #    atom.toml provides，normal 格须 fn parity_leg1_+parity_leg2_ 各 ≥1，C10 stub 反例
 #    自证内置）；⑧-b 依赖闭包 grep 门（L0=std::（含 use/extern crate/全限定内联）、

@@ -14,7 +14,7 @@ export CARGO_HTTP_LOW_SPEED_LIMIT="${CARGO_HTTP_LOW_SPEED_LIMIT:-1}"
 # ldproxy + 乐鑫 LLVM fork esp-clang），宿主工具链 check 必红，本脚本显式
 # --target 单独覆盖（与 tools/ 专用门"整目录排除"的形状不同：那类工程 config
 # 写死 target，本门不写死、按双档工程显式传）。SKIP 纪律同 espidf-sentinel-check.sh：
-# 工具链缺位 = SKIP（退出 0 并明说）；工具链在位但编译失败 = FAIL；编译退出 0
+# 工具链缺位 = 本地 SKIP / CI 即红（tools/ci/skip.sh）；工具链在位但编译失败 = FAIL；编译退出 0
 # 但产物不在树 = FAIL。板侧固件 crate 收编与 [hardware] 进位归真板批（批N9），
 # 本件范围红线 = 只建编译面。
 #
@@ -31,6 +31,7 @@ export CARGO_TERM_COLOR=never
 # 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
 # crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
 . "$root/tools/ci/cargo-artifact.sh"
+. "$root/tools/ci/skip.sh"
 fail=0
 
 # 芯片档解析放在工具链五查之前：参数笔误要立刻报错，不能先花时间查工具链。
@@ -45,29 +46,23 @@ esac
 
 # ---- 工具链缺位五查（缺一 = 整门 SKIP，同 espidf-sentinel-check.sh 口径）----
 if ! rustup toolchain list 2>/dev/null | grep -q '^esp'; then
-  echo "SKIP  esp 工具链未安装（rustup toolchain list 无 'esp'）——rr3-act/rr3-sense espidf 门不执行"
-  exit 0
+  rr3_skip "esp 工具链未安装（rustup toolchain list 无 'esp'）——rr3-act/rr3-sense espidf 门不执行"
 fi
 esp_sysroot="$(rustc +esp --print sysroot 2>/dev/null)" || {
-  echo "SKIP  esp 工具链 rustc 不可用（rustc +esp 失败）——rr3-act/rr3-sense espidf 门不执行"
-  exit 0
+  rr3_skip "esp 工具链 rustc 不可用（rustc +esp 失败）——rr3-act/rr3-sense espidf 门不执行"
 }
 if [ ! -d "$esp_sysroot/lib/rustlib/src/rust" ]; then
-  echo "SKIP  esp 工具链缺 rust-src 源码树（build-std 依赖）——rr3-act/rr3-sense espidf 门不执行"
-  exit 0
+  rr3_skip "esp 工具链缺 rust-src 源码树（build-std 依赖）——rr3-act/rr3-sense espidf 门不执行"
 fi
 if ! command -v ldproxy >/dev/null 2>&1; then
-  echo "SKIP  ldproxy 未安装（cargo install ldproxy）——rr3-act/rr3-sense espidf 门不执行"
-  exit 0
+  rr3_skip "ldproxy 未安装（cargo install ldproxy）——rr3-act/rr3-sense espidf 门不执行"
 fi
 if [ ! -f "$HOME/.espressif/frameworks/esp-idf-v5.2.2/tools/idf.py" ]; then
-  echo "SKIP  ESP-IDF v5.2.2 本地克隆缺位——rr3-act/rr3-sense espidf 门不执行"
-  exit 0
+  rr3_skip "ESP-IDF v5.2.2 本地克隆缺位——rr3-act/rr3-sense espidf 门不执行"
 fi
 export IDF_PATH="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
 if ! rr3_esp_clang_lib >/dev/null; then
-  echo "SKIP  esp-clang 缺位（~/.espup/esp-clang 无 libclang.dylib/.so）——rr3-act/rr3-sense espidf 门不执行"
-  exit 0
+  rr3_skip "esp-clang 缺位（~/.espup/esp-clang 无 libclang.dylib/.so）——rr3-act/rr3-sense espidf 门不执行"
 fi
 # 镜像注入（仓库源不硬编码镜像，同 espidf-sentinel-check.sh）
 export IDF_GITHUB_ASSETS=dl.espressif.com/github_assets
@@ -111,7 +106,7 @@ for mod in rr3-act rr3-sense; do
   fi
   # S3 编译面（W1/T2 另一芯片档）：check 不链接，只验 target 无关代码在
   # xtensa-esp32s3-espidf 同样可编；esp-idf-sys 按 MCU=esp32s3 选 sdkconfig。
-  # 工具链不认该目标 = SKIP 该腿（与整门 SKIP 纪律同口径）；classic 腿跳过。
+  # 工具链不认该目标 = 本地 SKIP 该腿 / CI 即红；classic 腿跳过。
   if [ "${chip}" != esp32 ]; then
     if rustc +esp --print target-list 2>/dev/null | grep -qx 'xtensa-esp32s3-espidf'; then
       if MCU=esp32s3 cargo +esp check --target xtensa-esp32s3-espidf \
@@ -123,7 +118,12 @@ for mod in rr3-act rr3-sense; do
         fail=1
       fi
     else
-      echo "SKIP  esp 工具链不认 xtensa-esp32s3-espidf——$mod 的 S3 腿不执行"
+      if [ "${CI:-}" = "true" ] || [ "${RR3_CI_STRICT:-}" = "1" ]; then
+        echo "FAIL  esp 工具链不认 xtensa-esp32s3-espidf——$mod 的 S3 腿未执行（CI 内 SKIP 即红）" >&2
+        fail=1
+      else
+        echo "SKIP  esp 工具链不认 xtensa-esp32s3-espidf——$mod 的 S3 腿不执行"
+      fi
     fi
   fi
 done
