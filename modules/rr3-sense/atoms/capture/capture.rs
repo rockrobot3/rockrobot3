@@ -32,20 +32,10 @@ pub struct Rr3AudioConfig {
     pub frame_ms: u64,
 }
 
-/// DoA 判向窗配置形状（B批 b3b，config `[rr3-sense.doa]`）：TDOA 机制面所需
+/// DoA 判向窗配置形状（config `[rr3-sense.doa]`）：TDOA 机制面所需
 /// 的全部策略量一次注入（机制件零策略载荷，ADR-0019 裁定 5 L3）。
-/// - `sample_rate_hz`/`frame_ms`：能量门按采集帧评的定标参数（与 audio 段同源）；
-/// - `mic_baseline_mm`：双麦间距（物理 lag 上限与 sinθ 反演的几何量）；
-/// - `window_rms_min`：窗能量门（任一采集帧 rms ≥ 此值才算有声窗，0 = 门全开）；
-/// - `bin_threshold_deg`：三档分档边界（S-5 策略数据化延续）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Rr3DoaCfg {
-    pub sample_rate_hz: u32,
-    pub frame_ms: u64,
-    pub mic_baseline_mm: u32,
-    pub window_rms_min: i64,
-    pub bin_threshold_deg: i32,
-}
+/// 形状自 W1-2 起由 `rr-audio-mech` 持有，本件只 re-export 保持件面路径不变。
+pub use rr_audio_mech::Rr3DoaCfg;
 
 pub(crate) use mech::rr3_pcm_best_channel;
 /// `Rr3DoaBin` 仅被 composite 测试按名构造（bin 目标面无读者，pub use 在 bin 编译

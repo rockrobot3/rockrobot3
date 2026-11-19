@@ -1,18 +1,30 @@
-//! 本地 VAD（语音活动检测）机制核：静音/起音边沿检测，整数运算，零平台依赖。
+//! 本地语音机制核：VAD 边沿检测 + 双麦 TDOA 判向 + 多通道下混，整数运算，
+//! 零平台依赖。VAD 自 `rr3-sense` 的 vad 原子件抽出（W1-1），DoA/下混自
+//! capture 原子件抽出（W1-2），行为与 golden 向量逐字保留。
 //!
-//! 从 `rr3-sense` 的 vad 原子件抽出（W1-1），行为与 golden 向量逐字保留：
-//! 每帧（20ms）调用一次 [`Rr3VadState::rr3_vad_feed`]，状态机只在**边沿**时刻
-//! 返回 `Some`，其余帧返回 `None`：
+//! VAD：每帧（20ms）调用一次 [`Rr3VadState::rr3_vad_feed`]，状态机只在**边沿**
+//! 时刻返回 `Some`，其余帧返回 `None`：
 //!
 //! ```text
 //! （未在语音中）rms ≥ rms_start 连续 ≥ min_speech_ms ──→ Onset{rms_peak, speech_ms}
 //! （在语音中）rms <  rms_start 连续 ≥ silence_tail_ms ──→ Offset{speech_ms}
 //! ```
 //!
-//! 整数纪律：RMS 走 `isqrt(sum_sq / n)`，不用浮点——golden 向量要求任何机器
-//! 逐位一致，浮点在跨平台上没有这个保证。
+//! DoA：判向窗上做 plain 时域互相关，lag>0 = 右麦先到 = 声源在右；Q7 亚样本
+//! 抛物线 + 256 格 asin 查表，出整度与三档离散。
+//!
+//! 整数纪律：RMS 走 `isqrt(sum_sq / n)`，DoA 全程整数——golden 向量要求任何
+//! 机器逐位一致，浮点在跨平台上没有这个保证。
 
 #![no_std]
+
+extern crate alloc;
+
+mod doa;
+
+pub use doa::{
+    rr3_doa_fix, rr3_frames_per_tick, rr3_pcm_best_channel, Rr3DoaBin, Rr3DoaCfg, Rr3DoaFix,
+};
 
 /// VAD 参数（策略量由装配注入；机制件零策略载荷）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
