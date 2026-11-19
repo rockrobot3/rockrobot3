@@ -28,6 +28,8 @@ rr3mod = { path = "../../base/runtime/rr3mod" }
 rr-ipc = { path = "../../base/runtime/rr-ipc" }
 # 语音机制核（W1-3）：WAV 头等音频容器纯逻辑，三形态共用；no_std、零平台依赖。
 rr-audio-mech = { path = "../../base/runtime/rr-audio-mech" }
+# 云协议机制核（W2-1）：ASR/LLM/TTS 请求体与应答解析纯函数，Pi/MCU 共用。
+rr-cloud-proto = { path = "../../base/runtime/rr-cloud-proto" }
 serde_json = "1"
 toml = "0.8"
 # 云端 HTTP/TLS 客户端（批N32 裁定 5：同步 API＋rustls 系——零异步栈，本仓全同步面，

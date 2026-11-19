@@ -12,23 +12,9 @@ const RR3_CLOUD_ATTEMPTS: u32 = 2;
 /// 两次尝试之间的固定短歇（对话轮内同步调用，不能长睡）。
 const RR3_CLOUD_RETRY_PAUSE: Duration = Duration::from_millis(500);
 
-/// 可重试判据（纯函数，单测钉域）：传输层「云端不可达 …」与 HTTP 429/5xx 重试；
-/// 其余（4xx/坏应答/缺密钥/缺字段）不重试。`interface` 是各云端错误文案的接口
-/// 前缀词（"识别接口"/"合成接口"/"大模型接口"），用于解析
-/// `"{interface} HTTP {code}"`。
-pub(crate) fn rr3_cloud_retryable(interface: &str, err: &str) -> bool {
-    if err.starts_with("云端不可达") {
-        return true;
-    }
-    rr3_http_code_of(interface, err).is_some_and(rr3_retry_code)
-}
-
-/// 从 `"{interface} HTTP {code}"` 解析状态码（形状不符即 None）。
-fn rr3_http_code_of(interface: &str, err: &str) -> Option<u16> {
-    let prefix = format!("{interface} HTTP ");
-    err.strip_prefix(&prefix)
-        .and_then(|s| s.parse::<u16>().ok())
-}
+/// 可重试判据的真值迁至 `rr-cloud-proto`（W2-1，Pi/MCU 共用）；本层只
+/// re-export，供 [`rr3_http_try`] 与云端用例消费。
+pub(crate) use rr_cloud_proto::rr3_cloud_retryable;
 
 /// 200 应答体直通，其余按接口前缀点名（业务失败；重试判据见 [`rr3_cloud_retryable`]）。
 pub(super) fn rr3_ok_resp(interface: &str, status: u16, resp: Vec<u8>) -> Result<Vec<u8>, String> {
@@ -37,11 +23,6 @@ pub(super) fn rr3_ok_resp(interface: &str, status: u16, resp: Vec<u8>) -> Result
     } else {
         Err(format!("{interface} HTTP {status}"))
     }
-}
-
-/// 可重试状态码：限流（429）与服务端（5xx）。
-fn rr3_retry_code(code: u16) -> bool {
-    code == 429 || (500..=599).contains(&code)
 }
 
 /// 有界重试机制（策略由调用方注入：接口前缀词＋台账标签＋单次尝试闭包）。三家
