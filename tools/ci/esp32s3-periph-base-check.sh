@@ -164,6 +164,22 @@ else
   fail=1
 fi
 
+# ⑧b W4-2b 云 TTS/播放面测试码编译（tts 与 spk-tone 互斥，故单列一条）
+s3_tts_test_log=/tmp/rr3-esp32s3-periph-tts-test.log
+if RUSTFLAGS="$s3_test_rf" cargo +esp test --no-run \
+     --target xtensa-esp32s3-espidf \
+     --no-default-features --features esp32s3,autonomy,tts \
+     --config 'source.crates-io.replace-with="rsproxy-sparse"' \
+     --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
+     >"$s3_tts_test_log" 2>&1; then
+  echo "PASS  甲面 S3 tts 档单测编译（--no-run）：cloud/playout 测试码在编"
+else
+  errs=$(grep -E "error(\[|:)|panicked at" "$s3_tts_test_log" | head -4 | tr '\n' ' ')
+  echo "FAIL  esp32-periph-base S3 tts 单测编译失败: ${errs:0:900}" >&2
+  tail -3 "$s3_tts_test_log" >&2
+  fail=1
+fi
+
 # ⑨ release 构建面（生产烧录档）：dev 档 opt-level=2 只代表开发构建，
 # release 的 codegen/LTO 差异必须独立出产物证据（W1/T2 构建面）。
 rel_elf="$(rr3_cargo_artifact xtensa-esp32s3-espidf release esp32-periph-base)" || {

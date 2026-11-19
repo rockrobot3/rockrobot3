@@ -113,6 +113,7 @@ fn rr3_token_check(body: &[u8]) -> bool {
 // ---------------------------------------------------------------------------
 
 /// 板侧处理臂统一签名：请求 + 总线（不读总线的臂忽略第二参）。
+/// SAFETY: 仅在 esp_http_server 回调内调用；`req` 非空且只活到本次回调结束。
 pub(crate) type Rr3Handler = unsafe fn(*mut httpd_req_t, &Arc<Mutex<Bus>>) -> i32;
 
 /// 端点白名单（前四列与 host `RR3_PANEL_ROUTES` 同构：method / path / covers /
@@ -135,6 +136,11 @@ pub(crate) const RR3_BOARD_ROUTES: &[(&str, &str, &[&str], &str, Rr3Handler)] = 
     // W4-2 播放写口：raw PCM/WAV body，令牌走 `X-RR3-Token` 头（非 JSON）。
     #[cfg(feature = "tts")]
     ("POST", "/api/board/play", &[], "", serve::handle_play),
+    // W4-2b 云 TTS：配置写口（NVS）+ 朗读写口（云取数→播放队列）。
+    #[cfg(feature = "tts")]
+    ("POST", "/api/board/cloud", &[], "", serve::handle_cloud),
+    #[cfg(feature = "tts")]
+    ("POST", "/api/board/say", &[], "", serve::handle_say),
 ];
 
 /// 路由查表：method + path 全等才命中（fail-closed，同 host 面板语义；
