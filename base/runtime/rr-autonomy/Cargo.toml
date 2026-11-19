@@ -1,0 +1,12 @@
+[package]
+name = "rr-autonomy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "自治运行核：固定任务表、心跳监督、固定栅格看门狗与健康快照（no_std，零 IO）"
+
+[lib]
+name = "rr_autonomy"
+path = "src/lib.rs"
