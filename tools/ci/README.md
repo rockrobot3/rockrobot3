@@ -10,7 +10,9 @@
 **步骤体拆分（2026-11-20）**：`check.sh` 保留 `step` 标题与调用序；各步实现按族放
 `tools/ci/steps/<id>.sh`，由入口显式 source。`gate_steps_audit.py` 仍解析入口的
 `step` 行，步骤清单与顺序不因搬文件而失锚。当前已拆：`7`（§13 静态断言五门）、
-`9y`（跨平台可编面）、`9a`（角色覆盖）、`9n`/`9c`/`9r`/`9z`（四个静态门）。
+`8`（件级判据三门）、`9y`（跨平台可编面）、`9a`（角色覆盖）、
+`9n`/`9c`/`9r`/`9z`（四个静态门）、`9w`（依赖面禁令）、`10`（门 d 面板覆盖率）、
+`13`（仓面卫生门）。
 
 | 步 | 命令 | 覆盖 |
 |---|---|---|
@@ -28,9 +30,9 @@
 | ⑨-w | 三判据静态扫描（详见脚本 ⑨-w 段注释） | 依赖面禁令（基-35，0.0.5 增补轮六第 0.5 步建门，全 **fail-closed**、枚举打空即门禁失效）：① 逐单元 `modules/*/Cargo.toml` 必须直依 `rr-hal-api`——契约符号的依赖面在 Cargo 清单可证，不经 rr-hal re-export 隐性传递；② `modules/**` 全部 `.rs` 的 use 面（行注释先剥）`rr_hal::` 引用仅许**冻结白名单四类**（`backend::*` 装配选择函数／`sim` 承载／`provision_store` 第 8 能力面 trait 住实现 crate／`Rr3PcmStream` std 侧承载类型），白名单外（含 crate 根花括号多导 `rr_hal::{`——多导可把契约符号与白名单混进一行，扫描面不可分词）逐行点名即 FAIL；③ 板侧 `tools/esp32-periph-base/Cargo.toml` 禁实现 crate `rr-hal`/`rr-bus`/`rrd`（`名 =` 键形状匹配，不误伤 `rr-hal-api`；architecture §14 全量口径；`tools/sim` 是 CI/无头开发承载工具，豁免）。窄化两敞口（装配上移／`rr-bus` 契约面化）随收口行入 [status.md](../../docs/status.md) 敞口表 |
 | ⑨-n | 判据静态扫描（详见脚本 ⑨-n 段注释） | 注入路径唯一门 n 静态面执法位（n1-11，全案 §8 门 n / 施工图 Task 8 Step 2）：键名单自代码常量 `RR3_PIN_DERIVED_KEYS`（`rrd/src/profile.rs`）awk 导出——单真值点不抄第二份，键集扩缩自动跟随；扫面前件 fail-closed 四查（声明数非空 / 实解析数非零 / 两数判等 / profiles 份数非零，任一不成立即"门禁失效，不放行"）；逐 `profiles/*.toml` 扫 `[hardware]` 段（行注释先剥）出现物理键任一即逐行点名（file:line）后 FAIL——稳态＝物理键一律 `[pins]` 派生，`[hardware]` 只留非引脚键 `alsa_device`/`link_ifname`（批N3 件六 SPI 词形收口：`spi_device` 已进派生键集、扫面 8 键，敞口 18 行已结）；装载期判据实体与反例用例在 `rrd/src/profile.rs` 门 n 段（经步 ①b 进 CI） |
 
-| ⑩ | `check.sh` ⑩ 段（读 contracts 快照与分母基线） | 面板覆盖率对账（门 d）：分子 = covers 申报 + applies 生效路径，分母 = 字段级五路并集；红账 0、分母下限 83，缩分母即红 |
+| ⑩ | `steps/10.sh`（读 contracts 快照与分母基线） | 面板覆盖率对账（门 d）：分子 = covers 申报 + applies 生效路径，分母 = 字段级五路并集；红账 0、分母下限 83，缩分母即红 |
 | ⑫ | `python3 tools/ci/metrics.py`（真值 `metrics-baseline.json`） | 质量度量门：重复率 ≤3%、CC 均值 ≤2.50 / 最大 ≤11、生产函数 >80 行 ≤5、生产 panic ≤60、>20B 生产函数名 0、≥1000ms 长睡 0；基线只降不升 |
-| ⑬ | `check.sh` ⑬ 段（git grep + git status） | 仓面卫生门：追踪文件无本机绝对路径、无构建目录、源码类新件必须入册、shell `$name` 后接非 ASCII 即红 |
+| ⑬ | `steps/13.sh`（git grep + git status） | 仓面卫生门：追踪文件无本机绝对路径、无构建目录、源码类新件必须入册、shell `$name` 后接非 ASCII 即红 |
 | ⑭ | `check.sh` ⑭ 段 | 源文件行数门：每个 `.rs` <600 行；超标文件数按 `gate-lines-baseline.txt` 只降不升 |
 | ⑮ | `python3 tools/ci/lockio_audit.py`（先 `--self-test`） | 锁内 I/O 门：`lock·log` 同行 / 条件位临时 guard 延寿到块体 / 直调会写待落盘日志的 registry 方法；扫面打空即门禁失效；gate `scripts` 同源执法 |
 
