@@ -100,7 +100,17 @@ else
   fail=1
 fi
 
-# ⑦ 纯逻辑单测编译面（批N13 件一：httpd 路由/漂移/JSON 形状单测；批N14 cred
+# ⑦b W4-1 I2S TX 验收档编译面（spk-tone feature；默认固件零行为变化）
+if cargo +esp build --features spk-tone \
+     --config 'source.crates-io.replace-with="rsproxy-sparse"' \
+     --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
+  echo "PASS  classic spk-tone 档构建（W4-1 I2S TX 验收面）"
+else
+  echo "FAIL  classic spk-tone 档构建失败" >&2
+  fail=1
+fi
+
+# ⑧ 纯逻辑单测编译面（批N13 件一：httpd 路由/漂移/JSON 形状单测；批N14 cred
 #    零回显契约单测；批N23 件一起 atoms/<名>/mech.rs 机制核单测——xtensa 目标
 #    本机不可跑，--no-run 只验测试码编译；xtensa 测试 harness 执行面归真板批）
 esp_test_log=/tmp/rr3-esp32-periph-test.log
@@ -109,7 +119,7 @@ esp_test_log=/tmp/rr3-esp32-periph-test.log
 # `-Zpanic_abort_tests`：panic=abort 下测试 harness 的唯一合法形状，缺失时 rustc
 # 直接拒编（"building tests with panic=abort is not supported"）。
 esp_test_rf="--cfg espidf_time64 -Zunstable-options -Cpanic=immediate-abort -Zpanic_abort_tests"
-if RUSTFLAGS="$esp_test_rf" cargo +esp test --no-run \
+if RUSTFLAGS="$esp_test_rf" cargo +esp test --no-run --features spk-tone \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
      >"$esp_test_log" 2>&1; then
@@ -123,7 +133,7 @@ else
   fail=1
 fi
 
-# ⑧ release 构建面（生产烧录档）：dev 档 opt-level=2 只代表开发构建，
+# ⑨ release 构建面（生产烧录档）：dev 档 opt-level=2 只代表开发构建，
 # release 的 codegen 差异必须独立出产物证据（与 S3 门 ⑨ 同口径）。
 rel_elf="$(rr3_cargo_artifact xtensa-esp32-espidf release esp32-periph-base)" || {
   echo "FAIL  无法解析 cargo target_directory（metadata 不可用）" >&2

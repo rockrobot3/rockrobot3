@@ -108,14 +108,26 @@ else
   fail=1
 fi
 
-# ⑧ 纯逻辑单测编译面（同 classic 门 ⑦；xtensa 目标本机不可跑，--no-run 只验编译）
+# ⑦b W4-1 I2S TX 验收档编译面（spk-tone feature；默认固件零行为变化）
+if cargo +esp build \
+     --target xtensa-esp32s3-espidf \
+     --no-default-features --features esp32s3,spk-tone \
+     --config 'source.crates-io.replace-with="rsproxy-sparse"' \
+     --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
+  echo "PASS  S3 spk-tone 档构建（W4-1 I2S TX 验收面）"
+else
+  echo "FAIL  S3 spk-tone 档构建失败" >&2
+  fail=1
+fi
+
+# ⑧ 纯逻辑单测编译面（同 classic 门 ⑧；xtensa 目标本机不可跑，--no-run 只验编译）
 # panic=abort 下测试 harness 必须显式 `-Zpanic_abort_tests`；RUSTFLAGS 会覆盖
 # config 的 target rustflags，故整条重写（与 [target.xtensa-esp32s3-espidf] 同值）。
 s3_test_log=/tmp/rr3-esp32s3-periph-test.log
 s3_test_rf="--cfg espidf_time64 -Zunstable-options -Cpanic=immediate-abort -Zpanic_abort_tests"
 if RUSTFLAGS="$s3_test_rf" cargo +esp test --no-run \
      --target xtensa-esp32s3-espidf \
-     --no-default-features --features esp32s3 \
+     --no-default-features --features esp32s3,spk-tone \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
      >"$s3_test_log" 2>&1; then
