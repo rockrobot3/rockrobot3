@@ -45,9 +45,9 @@
 | ⑩ | 面板覆盖率对账（门 d）：分子 = covers 申报 + applies 生效路径，分母 = 字段级五路并集；红账 0、分母下限 83，缩分母即红 | `check.sh` ⑩ 段（读 contracts 快照与分母基线） |
 | ⑫ | 质量度量门：重复率 ≤3%（W=10 有效行）、CC 均值 ≤2.50 / 最大 ≤11、生产函数 >80 行 ≤5、生产 panic ≤60、>20B 生产函数名 0、≥1000ms 长睡 0；基线只降不升 | `python3 tools/ci/metrics.py`（真值 `tools/ci/metrics-baseline.json`） |
 | ⑬ | 仓面卫生门：追踪文件无本机绝对路径、无 `target/`/`build/`/`node_modules/`、源码类新件必须入册（`??` 即红）、shell `$name` 后接非 ASCII 即红 | `check.sh` ⑬ 段（git grep + git status 扫描） |
-| ⑯ | 源文件行数门：每个 `.rs` <600 行；超标文件数按 `tools/ci/gate-lines-baseline.txt` 只降不升 | `check.sh` ⑯ 段 |
-| ⑭ | 装载门体量基线门：装配单锚函数的块行数、`read_to_string` 样板数、rr-registry 同形函数数按 `tools/ci/gate-size-baseline.txt` 只降不升；锚函数缺失或基线形状坏即红（fail-closed） | `check.sh` ⑭ 段 |
+| ⑭ | 装载门体量基线门：装配单锚函数的块行数、`read_to_string` 样板数、rr-registry 同形函数数按 `tools/ci/gate-size-baseline.txt` 只降不升；锚函数缺失或基线形状坏即红（fail-closed） | `steps/14.sh` |
 | ⑮ | 锁内 I/O 门：`lock·log` 同行 / 条件位临时 guard 延寿到块体 / 直调会写待落盘日志的 registry 方法（fanout/shadow/ctr_merge）；扫面打空即门禁失效 | `python3 tools/ci/lockio_audit.py`（先 `--self-test` 三负例） |
+| ⑯ | 源文件行数门：每个 `.rs` <600 行；超标文件数按 `tools/ci/gate-lines-baseline.txt` 只降不升 | `steps/16.sh` |
 
 **⑨-a…⑨-z 各门**（门 a/c/r/y/z 等，后续批次续增）：判据以 `check.sh` 各 `step`
 段注释为唯一真值，本表不逐行抄录——抄一份就多一处漂移面。

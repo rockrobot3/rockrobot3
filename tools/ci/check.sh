@@ -96,6 +96,9 @@ mod_lang() {
 }
 
 # 步骤体（按族拆）：标题与调用序留在本文件，实现体在 tools/ci/steps/。
+. "$root/tools/ci/steps/4b.sh"
+. "$root/tools/ci/steps/5.sh"
+. "$root/tools/ci/steps/6.sh"
 . "$root/tools/ci/steps/7.sh"
 . "$root/tools/ci/steps/8.sh"
 . "$root/tools/ci/steps/9a.sh"
@@ -107,6 +110,8 @@ mod_lang() {
 . "$root/tools/ci/steps/9z.sh"
 . "$root/tools/ci/steps/10.sh"
 . "$root/tools/ci/steps/13.sh"
+. "$root/tools/ci/steps/14.sh"
+. "$root/tools/ci/steps/16.sh"
 
 step "① workspace 编译"
 run sh -c 'cd base/runtime && cargo check --locked --all-targets --workspace'
@@ -166,13 +171,7 @@ fi
 # 编译照跑），此处只补独立工程的 clippy。esp 条件工程宿主 stable clippy 必红，
 # 排除口径与 ④ 完全一致，编译执法归各自专用门（SKIP 纪律）。
 step "④b 独立工程 clippy -D warnings（CI lint 同源；esp 条件工程归专用门）"
-while IFS= read -r -d '' manifest; do
-  run sh -c "cargo clippy --locked -q --all-targets --manifest-path '$manifest' -- -D warnings"
-done < <(find modules tools base/ota -name Cargo.toml -not -path "*/target/*" \
-                    -not -path "base/runtime/*" -not -path "tools/esp32-uart-echo/*" \
-                    -not -path "tools/espidf-std-hello/*" -not -path "tools/espidf-sentinel/*" \
-                    -not -path "tools/esp32-periph-base/*" \
-                    -print0 | sort -z)
+rr3_step_4b
 
 # ⑤ 文档门：已跟踪的 md 不得为空、相对链接不得断。
 #    空文档判据用 `-s`（字节数为 0 即空），断链判据只取 `](...)` 里的相对路径
@@ -184,46 +183,8 @@ done < <(find modules tools base/ota -name Cargo.toml -not -path "*/target/*" \
 #    `git ls-files` 显式关掉 core.quotepath：默认 true 时非 ASCII 文件名（如
 #    docs/process/dev/0.0.1版本…）会被转义成八进制串，`-s`/`-e` 检的是那个不存在的名字，
 #    门禁会在别人机器上凭空报一条假红。
-check_docs() {
-  local list bad nav f d l
-  list="$(mktemp)" || return 1; bad="$(mktemp)" || return 1
-  git -c core.quotepath=false ls-files '*.md' > "$list" || true
-  if [ ! -s "$list" ]; then
-    printf 'FAIL  ⑤ md 列表打空（ls-files 无结果属门禁失效，不放行）\n'
-    rm -f "$list" "$bad"; return 1
-  fi
-  while IFS= read -r f; do
-    [ -s "$f" ] || printf '空文档  %s\n' "$f" >> "$bad"
-    d="$(dirname "$f")"
-    while IFS= read -r l; do
-      [ -e "$d/$l" ] || printf '断链    %s -> %s\n' "$f" "$l" >> "$bad"
-    done < <(grep -ohE '\]\([^)]+\)' "$f" 2>/dev/null \
-             | sed 's/^](//; s/)$//; s/#.*//; s/ .*//' \
-             | grep -vE '^(https?:|mailto:|/|$)')
-  done < "$list"
-  # 导航覆盖：把 docs/README.md 里的相对链接按 docs/ 归一成仓根路径后，逐个 README 对号。
-  # 本索引住在 docs/ 下，链接里的 `../` 只可能出现在开头，故一次折叠即够。
-  nav="$(mktemp)" || return 1
-  while IFS= read -r l; do
-    printf '%s\n' "docs/$l" | sed 's#^docs/\./##; s#^docs/\.\./##' >> "$nav"
-  done < <(grep -ohE '\]\([^)]+\)' docs/README.md 2>/dev/null \
-           | sed 's/^](//; s/)$//; s/#.*//; s/ .*//' \
-           | grep -vE '^(https?:|mailto:|/|$)')
-  if [ ! -s "$nav" ]; then
-    printf 'FAIL  ⑤ 导航链接列表打空（docs/README.md 读不到链接属门禁失效，不放行）\n'
-    rm -f "$list" "$bad" "$nav"; return 1
-  fi
-  while IFS= read -r f; do
-    case "$f" in
-      *README.md) [ "$f" = "docs/README.md" ] || grep -qxF "$f" "$nav" \
-                    || printf '导航漏链  %s\n' "$f" >> "$bad" ;;
-    esac
-  done < "$list"
-  if [ -s "$bad" ]; then cat "$bad"; rm -f "$list" "$bad" "$nav"; return 1; fi
-  rm -f "$list" "$bad" "$nav"
-}
 step "⑤ 文档门（已跟踪 md 不得为空、相对链接不得断、README 不得漏进导航）"
-run check_docs
+rr3_step_5
 
 # ⑥ 格格双达标·接线 CI（architecture §13，0.0.5 批E；收口批 E' 扩全量）："双达标"
 #    之 tests 侧必须真跑在门禁里，"有测试未接线 = 未达标"。批E 只扫 modules/——
@@ -234,19 +195,7 @@ run check_docs
 #    也是 Rust 工程，自然进本步扫面（其 Python tests/ 与 CI brain-unittest job
 #    已随批N32 件四退役）。
 step "⑥ 格格双达标·独立工程测试接线（每件 tests 真跑 ≥1，§13）"
-found_mod=0
-while IFS= read -r -d '' manifest; do
-  found_mod=1
-  run_tests sh -c "cargo test --locked -q --manifest-path '$manifest'"
-done < <(find modules tools base -name Cargo.toml -not -path "*/target/*" \
-                    -not -path "base/runtime/*" -not -path "tools/esp32-uart-echo/*" \
-                    -not -path "tools/espidf-std-hello/*" -not -path "tools/espidf-sentinel/*" \
-                    -not -path "tools/esp32-periph-base/*" \
-                    -print0 | sort -z)
-if [ "$found_mod" -eq 0 ]; then
-  printf 'FAIL  ⑥ 未发现任何独立 Rust 工程（find 打空属门禁失效，不放行）\n'
-  fail=1
-fi
+rr3_step_6
 
 # ⑥b 部署面配置漂移门的**工具自检**（批N38 件二；2026-11-16 扩面到装配单与 unit）。
 # 真板比对要 ssh 与装机树，CI/本机不可达；可机械判的是**判据本身**——工具用临时夹具跑
@@ -443,94 +392,15 @@ rr3_step_13
 # 静默跳过）。计数命令与基线行尾注同源；钉数解析按 "^<名> = <纯整数>"，
 # 形状坏照 ⑩ 纪律 fail-closed。
 printf '\n=== ⑭ 装载门体量基线（块行数 / 读表样板 / 同形函数） ===\n'
-gs_base=tools/ci/gate-size-baseline.txt
-gs_fail=0
-gs_pin() { sed -n "s/^$1 *= *\([0-9][0-9]*\).*/\1/p" "$gs_base" | head -1; }
-if [ ! -f "$gs_base" ]; then
-  printf 'FAIL  ⑭ 基线文件缺失: %s\n' "$gs_base"
-  gs_fail=1
-else
-  gs_fn='pub fn rr3_boot_with_probe('
-  gs_file=$(grep -lF "$gs_fn" $prof_src 2>/dev/null | head -1)
-  gs_start=$(grep -nF "$gs_fn" "$gs_file" 2>/dev/null | head -1 | cut -d: -f1)
-  if [ -z "$gs_start" ]; then
-    printf 'FAIL  ⑭ 基线锚函数缺失: 装配单模块中找不到 %s——装载门被改名/搬走须同批改基线，不许静默\n' "$gs_fn"
-    gs_fail=1
-  else
-    gs_end=$(awk -v s="$gs_start" 'NR>=s && /^}/ {print NR; exit}' "$gs_file")
-    gs_fn_lines=$((gs_end - gs_start + 1))
-    gs_reads=$(awk -v s="$gs_start" -v e="$gs_end" \
-      'NR>=s && NR<=e && /read_to_string/' "$gs_file" | wc -l | tr -d ' ')
-    # 扫描面 = rr-registry 全树（按内容、不按文件名）：结构拆分后同形小函数可能
-    # 住在子模块里，只扫 src/*.rs 会让计数随搬文件"假降"，门也就此失明。
-    gs_shapes=$(find base/runtime/rr-registry/src -name '*.rs' -not -path '*/tests/*' -print0 \
-      | xargs -0 grep -hoE 'fn rr3_[a-z_0-9]*(from_text|is_empty|contains|check)[a-z_0-9]*\(' \
-      | sort -u | wc -l | tr -d ' ')
-    gs_check() {
-      gs_name=$1
-      gs_got=$2
-      gs_p=$(gs_pin "$gs_name")
-      case "$gs_p" in
-        ''|*[!0-9]*)
-          printf 'FAIL  ⑭ 基线行形状坏: %s 的 "%s" 须为 "名 = 纯整数"（实得 "%s"）\n' \
-            "$gs_base" "$gs_name" "${gs_p:-<缺>}"
-          gs_fail=1
-          ;;
-        *)
-          if [ "$gs_got" -gt "$gs_p" ]; then
-            printf 'FAIL  ⑭ %s 回涨: %s > 钉数 %s（体量纪律只降不升；确须增长走评审并同批动基线）\n' \
-              "$gs_name" "$gs_got" "$gs_p"
-            gs_fail=1
-          elif [ "$gs_got" -lt "$gs_p" ]; then
-            printf 'PASS  ⑭ %s %s ≤ 钉数 %s（**下降 %s：须同批下调 %s**）\n' \
-              "$gs_name" "$gs_got" "$gs_p" "$((gs_p - gs_got))" "$gs_base"
-          else
-            printf 'PASS  ⑭ %s %s = 钉数 %s\n' "$gs_name" "$gs_got" "$gs_p"
-          fi
-          ;;
-      esac
-    }
-    gs_check gate_fn_lines "$gs_fn_lines"
-    gs_check read_table_boilerplate "$gs_reads"
-    gs_check same_shape_fns "$gs_shapes"
-  fi
-fi
-if [ "$gs_fail" -ne 0 ]; then
-  fail=1
-fi
+rr3_step_14
 
 # ⑯ 源文件行数门（2026-11-13 立规）：每个 .rs 源文件必须 <600 行。
+# 门号 ⑯ 是身份不是序位：原号 ⑭ 与装载门双义（2026-11-20 订正），执行序以本文件调用序为准。
 # 存量超标文件先立低水位基线 tools/ci/gate-lines-baseline.txt（只降不升）：
 # 新增超标文件即红；拆完一个就同批下调基线。判据面 = git ls-files（追踪面即
 # 执法面），测试文件同样计入——"测试代码不是代码"是自欺。
 step "⑯ 源文件行数门（.rs ≥600 行违规，基线只降不升）"
-lines_base_file="tools/ci/gate-lines-baseline.txt"
-if [ ! -f "$lines_base_file" ]; then
-  printf 'FAIL  ⑯ 缺基线文件 %s（fail-closed）\n' "$lines_base_file"
-  fail=1
-else
-  base_n="$(grep -E '^[0-9]+$' "$lines_base_file" | head -1)"
-  if [ -z "$base_n" ]; then
-    printf 'FAIL  ⑯ 基线文件无整数计数（fail-closed）\n'
-    fail=1
-  else
-    over="$(git -c core.quotepath=false ls-files '*.rs' | while IFS= read -r f; do
-      n="$(wc -l < "$f")"
-      [ "$n" -ge 600 ] && printf '%s\t%s\n' "$n" "$f"
-    done | sort -rn)"
-    cnt="$(printf '%s\n' "$over" | grep -c . || true)"
-    printf '⑯ 超标文件 %s 个（上限 %s，阈值 600 行）\n' "$cnt" "$base_n"
-    if [ "$cnt" -gt "$base_n" ]; then
-      printf '%s\n' "$over" | head -10 | sed 's/^/  超标  /'
-      printf 'FAIL  ⑯ 超标文件数回涨（%s > %s）：先拆再评审，不许直接上调基线\n' "$cnt" "$base_n"
-      fail=1
-    elif [ "$cnt" -lt "$base_n" ]; then
-      printf 'PASS  ⑯ 超标 %s < 上限 %s（拆完同批下调 %s）\n' "$cnt" "$base_n" "$lines_base_file"
-    else
-      printf 'PASS  ⑯ 超标 %s = 上限 %s（只降不升）\n' "$cnt" "$base_n"
-    fi
-  fi
-fi
+rr3_step_16
 
 # ⑮ 锁内 I/O 门（续轮二十二）：人工巡检三轮归零后改为机器判据——拦三类已实证
 # 回潮：lock 与 log 同行 / 条件位临时 guard 延寿到块体 / 直调会写待落盘日志的
