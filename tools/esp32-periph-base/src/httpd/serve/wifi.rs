@@ -185,7 +185,9 @@ pub(super) unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWrit
     };
     // 回退写成功——apply 旧凭据重连（原空态＝停在断态，不 connect）
     old.as_ref().map_or_else(
-        || esp_wifi_disconnect(),
+        || {
+            esp_wifi_disconnect();
+        },
         |c| {
             esp_wifi_disconnect();
             if wifi_sta_set_cred(c.ssid.as_bytes(), c.pass().as_bytes()) == ESP_OK {
