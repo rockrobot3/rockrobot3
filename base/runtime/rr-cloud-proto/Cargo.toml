@@ -1,0 +1,16 @@
+[package]
+name = "rr-cloud-proto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "云对话协议机制核：ASR/LLM/TTS 请求体与应答解析纯函数（no_std+alloc，零 IO）"
+
+[lib]
+name = "rr_cloud_proto"
+path = "src/lib.rs"
+
+[dependencies]
+rr-audio-mech = { path = "../rr-audio-mech" }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }

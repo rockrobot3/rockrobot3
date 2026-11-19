@@ -4,13 +4,11 @@ use std::io::Read;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use serde_json::json;
-
 use crate::boot::Rr3LlmMode;
 
 use super::cfg::{
     rr3_cloud_api_key, rr3_cloud_mode, rr3_ref_key, Rr3CloudMode, RR3_ASR_INPUT_GAIN,
-    RR3_ASR_LANGUAGE, RR3_SAY_VOICE, RR3_SYSTEM_PROMPT, RR3_TTS_BACKEND_ENV,
+    RR3_ASR_LANGUAGE, RR3_LLM_MAX_TOKENS, RR3_SAY_VOICE, RR3_SYSTEM_PROMPT, RR3_TTS_BACKEND_ENV,
     RR3_TTS_BACKEND_MAC_SAY,
 };
 use super::payload::{rr3_asr_text, rr3_chat_body, rr3_mock_text, rr3_ping_body, rr3_reply_text};
@@ -252,7 +250,11 @@ impl Rr3LlmClient {
         }
         let key = self.rr3_resolve_key()?;
         self.history.rr3_user_turn(prompt);
-        let body = rr3_chat_body(&self.history, &self.model_id);
+        let body = rr3_chat_body(
+            &self.model_id,
+            self.history.rr3_messages(),
+            RR3_LLM_MAX_TOKENS,
+        );
         // base_url = 完整 OpenAI 兼容 API 根（含版本段，模型行配置承载），客户端
         // 只拼 `/chat/completions`——GLM `/api/paas/v4`、Qwen `/compatible-mode/v1`
         // 与 DeepSeek `/v1` 同形接入，不按厂商猜版本段（ADR-0023）。
@@ -347,15 +349,12 @@ impl Rr3TtsClient {
 
     /// 合成请求体（模型/文本/音色/格式/采样率）。
     fn rr3_tts_body(&self, text: &str, sample_rate: u32) -> Vec<u8> {
-        json!({
-            "model": self.model,
-            "input": text,
-            "voice": crate::tts::rr3_tts_voice(&self.model),
-            "response_format": "pcm",
-            "sample_rate": sample_rate,
-        })
-        .to_string()
-        .into_bytes()
+        rr_cloud_proto::rr3_tts_body(
+            &self.model,
+            text,
+            &crate::tts::rr3_tts_voice(&self.model),
+            sample_rate,
+        )
     }
 }
 

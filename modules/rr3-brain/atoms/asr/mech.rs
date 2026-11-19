@@ -5,49 +5,12 @@
 //! 策略供给，机制只做装配）。
 //!
 //! W1-3：WAV 头形状迁至 `rr-audio-mech`（三形态共用），本件只 re-export；
-//! multipart 装配仍属云协议面，留待 W2 抽取。
+//! W2-1：multipart 装配迁至 `rr-cloud-proto`（Pi/MCU 共用请求字节），本件只
+//! re-export。本件保留 ASR 输入增益机制与两腿对拍锚。
 
+#[cfg(test)]
 pub use rr_audio_mech::rr3_wav_header;
-
-/// multipart 请求体装配：model 字段 + file 字段（filename="a.wav"，WAV 头仓内
-/// 自建）+ PCM + 收尾 boundary——对位 asr.py 上传体形状（整段 WAV 一次上传，
-/// ADR-0014 裁定 2；流式是 legacy 内存约束的产物，本机不复刻）。
-pub fn rr3_multipart_body(
-    model: &str,
-    pcm: &[u8],
-    sample_rate: u32,
-    boundary: &str,
-    language: Option<&str>,
-) -> Vec<u8> {
-    let header = rr3_wav_header(sample_rate, pcm.len() as u32);
-    let mut body = Vec::new();
-    body.extend_from_slice(
-        format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n{model}\r\n"
-        )
-        .as_bytes(),
-    );
-    // 语言策略段（2026-10-31 实机）：短中文唤醒词偶发被误判语种（曾返回韩语
-    // "안녕"），显式指定中文可稳定；`None` = 不传（旧体逐字节等价）。
-    if let Some(lang) = language {
-        body.extend_from_slice(
-            format!(
-                "--{boundary}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n{lang}\r\n"
-            )
-            .as_bytes(),
-        );
-    }
-    body.extend_from_slice(
-        format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.wav\"\r\nContent-Type: audio/wav\r\n\r\n"
-        )
-        .as_bytes(),
-    );
-    body.extend_from_slice(&header);
-    body.extend_from_slice(pcm);
-    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
-    body
-}
+pub use rr_cloud_proto::rr3_multipart_body;
 
 /// PCM 增益（s16le，带钳位）：ASR 输入电平补偿（2026-10-31 实机——ESP32 板麦
 /// 语音 RMS 仅 ~1000/32767，云端 ASR 的 VAD 对短句偶发判空/幻觉；增益实验
