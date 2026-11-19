@@ -122,6 +122,10 @@ fn ctl_health_echoes_heartbeat_and_watchdog_numbers() {
             .is_empty(),
         "无模块达上限时终态列表必须为空: {v}"
     );
+    assert_eq!(
+        v["result"]["watchdog_overruns"], 0,
+        "新起守护的拍超时累计必须为 0: {v}"
+    );
     assert_eq!(r["phase"], "registered");
     rr3_assert_ctl_closed(&mut ctl);
 }
