@@ -137,16 +137,21 @@ impl RrdRegistry {
         let mut v: Vec<Rr3HealthRow> = self
             .modules
             .values()
-            .map(|e| Rr3HealthRow {
-                name: e.name.clone(),
-                src_task: e.src_task,
-                phase: e.phase,
-                heartbeat_ms: e.facts.heartbeat_ms,
-                watchdog_ms: e.facts.watchdog_ms,
-                since_beat_ms: now_ms.saturating_sub(e.last_beat_ms),
-                boot_ms: self.boot_ms.map(|b| e.registered_at_ms.saturating_sub(b)),
-                fan_dropped: e.fan_dropped,
-                beat_peak_ms: e.beat_peak_ms,
+            .map(|e| {
+                let streak = self.crash_streak.get(&e.name).copied().unwrap_or(0);
+                Rr3HealthRow {
+                    name: e.name.clone(),
+                    src_task: e.src_task,
+                    phase: e.phase,
+                    heartbeat_ms: e.facts.heartbeat_ms,
+                    watchdog_ms: e.facts.watchdog_ms,
+                    since_beat_ms: now_ms.saturating_sub(e.last_beat_ms),
+                    boot_ms: self.boot_ms.map(|b| e.registered_at_ms.saturating_sub(b)),
+                    fan_dropped: e.fan_dropped,
+                    beat_peak_ms: e.beat_peak_ms,
+                    crash_streak: streak,
+                    restart_exhausted: streak >= RR3_RESTART_FAILURE_CAP,
+                }
             })
             .collect();
         v.sort_by_key(|r| r.src_task);

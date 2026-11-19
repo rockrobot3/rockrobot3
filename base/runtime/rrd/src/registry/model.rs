@@ -164,6 +164,10 @@ pub struct Rr3HealthRow {
     /// 稳态心跳间隔峰值（实时性长尾）：点读 `since_beat_ms` 会错过两次采样之间的
     /// 抖动，峰值把"曾经逼近看门狗"这件事留在表里（首拍不计，见 Entry 注释）。
     pub beat_peak_ms: u64,
+    /// 连续崩溃连击（跨重注册）：达 `RR3_RESTART_FAILURE_CAP` 即永久停止重启。
+    pub crash_streak: u32,
+    /// 是否已达重启上限：运行级终态（不再自动拉起），外部据此判定"永久降级"。
+    pub restart_exhausted: bool,
 }
 
 /// 心跳的三态回报（D-6）：11b 要"广播一次 running"，而"一次"必须建立在

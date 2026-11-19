@@ -113,6 +113,15 @@ fn ctl_health_echoes_heartbeat_and_watchdog_numbers() {
         r["beat_peak_ms"], 0,
         "未发过续命拍时峰值必须为 0（首拍不计，不造假值）: {v}"
     );
+    assert_eq!(r["crash_streak"], 0, "未崩溃时连击必须为 0: {v}");
+    assert_eq!(r["restart_exhausted"], false, "未达上限: {v}");
+    assert!(
+        v["result"]["restart_exhausted"]
+            .as_array()
+            .expect("health 应带 result.restart_exhausted")
+            .is_empty(),
+        "无模块达上限时终态列表必须为空: {v}"
+    );
     assert_eq!(r["phase"], "registered");
     rr3_assert_ctl_closed(&mut ctl);
 }
