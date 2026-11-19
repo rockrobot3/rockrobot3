@@ -90,6 +90,10 @@ run_tests() {
 # 步骤体（按族拆）：标题与调用序留在本文件，实现体在 tools/ci/steps/。
 . "$root/tools/ci/steps/9y.sh"
 . "$root/tools/ci/steps/9a.sh"
+. "$root/tools/ci/steps/9n.sh"
+. "$root/tools/ci/steps/9c.sh"
+. "$root/tools/ci/steps/9r.sh"
+. "$root/tools/ci/steps/9z.sh"
 
 step "① workspace 编译"
 run sh -c 'cd base/runtime && cargo check --locked --all-targets --workspace'
@@ -856,159 +860,15 @@ fi
 # 扫面 8 键，敞口 18 行已结）。键名单从代码常量导出（单真值点，不抄第二份）：解析
 # 装配单模块的 RR3_PIN_DERIVED_KEYS 数组（profile/model.rs），声明数量与实解析数量不等即门禁失效。
 step "⑨-n 注入路径唯一（[hardware] 禁物理键——[pins] 派生稳态判据静态面，门 n）"
-gate_n_fail=0
-keys_file="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
-awk '/const RR3_PIN_DERIVED_KEYS/{f=1} f{print} f && /\];/{exit}' $prof_src \
-  | grep -oE '"[^"]+"' | tr -d '"' > "$keys_file"
-decl_n="$(grep -h -m1 -oE 'RR3_PIN_DERIVED_KEYS: \[&str; [0-9]+\]' $prof_src | grep -oE '[0-9]+\]' | tr -d ']')"
-real_n="$(grep -c . "$keys_file" || true)"
-prof_n="$(find profiles -maxdepth 1 -name '*.toml' 2>/dev/null | wc -l | tr -d ' ')"
-if [ -z "$decl_n" ] || [ "$real_n" -eq 0 ] || [ "$decl_n" -ne "$real_n" ] || [ "$prof_n" -eq 0 ]; then
-  printf 'FAIL  ⑨-n 扫面前件不成立（键名单声明数=%s 实解析数=%s，profiles 份数=%s）——门禁失效，不放行\n' \
-    "${decl_n:-空}" "$real_n" "$prof_n"
-  gate_n_fail=1
-else
-  printf 'PASS  ⑨-n 扫面前件（键名单自代码常量 RR3_PIN_DERIVED_KEYS 导出 %s 键 × profiles %s 份）\n' "$real_n" "$prof_n"
-fi
-if [ "$gate_n_fail" -eq 0 ]; then
-  hits_file="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
-  key_alt="$(tr '\n' '|' < "$keys_file")"; key_alt="${key_alt%|}"
-  for f in profiles/*.toml; do
-    awk -v alt="$key_alt" '
-      /^[[:space:]]*#/ {next}                       # TOML 注释先剥（键名住注释是合法表述，同 ⑨-w 口径）
-      /^\[/ {in_hw = ($0 ~ /^\[hardware\]/); next}  # 段界：进 [hardware]，遇下一节头（含 [[…]]）即出
-      in_hw && $0 ~ "^(" alt ")[[:space:]]*=" {print FILENAME ":" FNR ": " $0}
-    ' "$f" >> "$hits_file"
-  done
-  if [ -s "$hits_file" ]; then
-    cat "$hits_file"
-    printf 'FAIL  ⑨-n [hardware] 出现物理键（门 n 稳态判据：物理键一律 [pins] 派生；迁移期判据见 profile/model.rs 门 n 段）\n'
-    gate_n_fail=1
-  else
-    printf 'PASS  ⑨-n [hardware] 零物理键（%s 份 profile 全扫，[hardware] 只留非引脚键）\n' "$prof_n"
-  fi
-  rm -f "$hits_file"
-fi
-rm -f "$keys_file"
-if [ "$gate_n_fail" -ne 0 ]; then
-  fail=1
-fi
-
-# —— ⑨-c 电流预算装载拒链（校验⑨ 专属执法步，门 c；全案 §5 ⑨ 行 / §16.4 计数，
-#    批N2 本体 件一）。三层判据（实-14）：①装载期判据（rrd rr3_demand_budget_check
-#    ＋ rr3_demand_declared_expand per-instance 扩算 ＋ rr3_demand_kind_power_gaps
-#    kind=power 覆盖判据，接 boot 链致命汇合点）与 ②反例用例（demand_budget_check_nine
-#    并发三态 ＋ demand_budget_chain_* 装载拒链三用例）经 ①b 全量进 CI，本步补 ③专属
-#    执法步——显式过滤器 demand_budget 封 fail-open（过滤器打空或用例改名即 0 通过，
-#    run_tests 直接红；新拒链用例命名须带 demand_budget 前缀进本步扫面）。
+rr3_step_9n
 step "⑨-c 电流预算装载拒链（校验⑨ per-instance 扩算 + kind=power 覆盖判据，门 c）"
-run_tests sh -c 'cd base/runtime && cargo test --locked -p rrd --lib demand_budget'
-
-# —— ⑨-a 基-39 角色覆盖六表对账·执法（门 a 第 ③ 层执法位——2026-11-12 P1 审计件四
-#     起由"报告模式"转执法：红账 21→0 连带基线归零，此后任何新红即 FAIL；全案 §8
-#     门 a / §24.1 第 5 条 + 裁-6，批N2 件六建步、P1 件四转执法）。
-#     四腿键集全部自代码常量/契约表导出（单真值点，不抄第二份；⑨-n 先例）：
-#       slots ← contracts/slots.toml；roles ← contracts/roles.toml；
-#       TRAITS/DESC_KEYS ← rr-registry/src/assemble.rs 两在册表；
-#       PIN_KEYS ← 装配单模块 RR3_PIN_KEYS（profile/model.rs）（声明数/实解析数判等）。
-#     报告三段（裁定配套 (a)：走 stdout 可见面，不走被 Stdio::null() 吞掉的面）：
-#       A 段 = 未覆盖 normal 格（status=normal 且无任何 role.slot 指向）；
-#       B 段 = roles 侧悬空（slot/iface/requires/derives 任一不在对方真值集——**应恒 0**，
-#              悬空外键是错不是账，>0 即硬红、不进基线）；
-#       C 段 = TRAITS 未被 roles.iface 引用差集 ＋ RR3_PIN_KEYS 未被 roles.requires 引用差集；
-#       D 段 = iface 实现者缺位（裁-17：iface 在册 ≠ 有实现者——role.iface 须 ≥1 个
-#              prod 实现（`impl <iface> for` 文本命中，扫 base/modules/tools 产码、
-#              排除 /tests/，口径同 ⑨-z 门；占位后端 Rr3UnavailableSource 是发布面
-#              产码"能力缺失显式回错"，命中算数），否则该角色须显式标 status="planned"
-#              且 planned_until 非空（终点登记）——**应恒 0**，硬红不进基线；
-#              sensor.env/imu 两角色 planned 终点 = D9 器件到货转自动可判）。
-#     门 a 数学（§24.1 第 5 条 + 裁-17）：置红 ＝ A + B + C + D。
-#     机器判据（裁定配套 (c)）：低水位基线文件 tools/ci/gate-a-baseline.txt——
-#       count > 基线即 FAIL（防红账回涨）；文件缺/坏/非整数即 FAIL（fail-closed）；
-#       count < 基线 PASS 并打印"须同批下调基线"提醒。
-#       **2026-11-12 转执法**：基线已降至 0（基-39 转绿收口件落地），故 count>0 即
-#       FAIL；文件保留为低水位锚（0），不再随批下调。
-#     A 段分母口径（P1 件四裁定）：只判 layer=body 的 normal 格；base 内建四族与
-#       cognition 软件四格无 [pins] 角色域，不计入（设计原文"logic 内建格覆盖口径
-#       归转红收口件另裁"即本步）。C 段分母口径同批：Rr3DigitalIn（S-10 未立项的
-#       能力面前置件）与四枚永不进 requires 的 pin 键豁免，理由见 C 段内注。
-#     六表之第 5 表（件 handles[].desc_key × DESC_KEYS）已由 ② parse 层执法；第 6 表
-#     （平台 role→具名构造）归门 a 转红收口件——本步如实不判、不抄第二份。
-#     TRAITS/DESC_KEYS 是 &[&str] 切片无常量 N，提取打空的护栏＝B 段全悬空硬红＋扫面前件四查。
+rr3_step_9c
 step "⑨-a 基-39 角色覆盖六表对账·执法（A 未覆盖 body normal 格 / B roles 悬空 / C trait·键差集 / D iface 实现者缺位，门 a）"
 rr3_step_9a
 step "⑨-r 留痕不进被丢弃的流（六模块生产码 stdout 留痕零命中，门 r）"
-gate_r_fail=0
-gr_rs="$(grep -rnE '(^|[^A-Za-z_])(println|print)!\(' \
-  modules/rr3-act/src modules/rr3-brain/src modules/rr3-connect/src \
-  modules/rr3-interact/src modules/rr3-power/src modules/rr3-sense/src \
-  --include='*.rs' 2>/dev/null || true)"
-if [ -n "$gr_rs" ]; then
-  gate_r_fail=1
-  printf '%s\n' "$gr_rs"
-  printf 'FAIL  ⑨-r 模块生产码 stdout 留痕命中（见上行号）——stdout 被 supervisor 接成 Stdio::null()，留痕按设计不可达：改 eprintln!（stderr 落 per-unit 日志 <socket>.log/<unit>.log，门 r 定形批N4 件八）\n'
-fi
-if [ "$gate_r_fail" -ne 0 ]; then
-  fail=1
-else
-  printf 'PASS  ⑨-r 留痕不进被丢弃的流（六 Rust 模块 stdout 宏全零命中；stderr 通道 = per-unit 日志 <socket>.log/<unit>.log，append 保留重启历史）\n'
-fi
-
-# —— ⑨-z 真值集三方成员判等（门 z 静态面执法位；基-40 / 模块设计索引 §14.7，批N8
-#     件一）。病根（自检五腿全绿而机器起不来）：三份"该带哪些文件"清单不同源——
-#     装载面 rr3_truth_set（七 files+一 dir）vs 判据面 RR3_CONTRACT_FILES
-#     （曾只四册）vs 打包面手抄。修法定形（件一 b2cc925/bda7fda）：成员名单点生成
-#     （profile.rs rr3_truth_set_member_names ← RR3_CONTRACT_BOOKS 字面唯一份），
-#     三面共读；成员集相等由判据保证（单测 truth_set_members_and_boot_locations_
-#     are_the_same_set 判等实体＋运行时 truth_set 自检逐枚点名），不再靠注释声称。
-#     本门四条执法（静态面，逐条点名，任一缺失即红）：
-#       1) 单点在位：装配单模块（profile/boot.rs）定义 pub const RR3_CONTRACT_BOOKS（字面唯一份）；
-#       2) 判据面共读：contracts.rs 的 RR3_CONTRACT_FILES 定义必须引用该常量
-#          （判据面再现字面数组 = 第二份清单 = 红）；
-#       3) 打包面共读：rr3-pack（src/ 全树，含拆分后的 pack/ 子模块）必须调 rrd::profile::rr3_truth_set 照单
-#          收口（打包面自带清单 = 块-15 同病 = 红）；
-#       4) 第二份字面零命中：全仓 .rs 产码不得再现四册并列清单字面（单点定义行
-#          与 tests/ 判据面豁免——判据钉四册点名是判据不是清单）。
-#     运行时半边（非空差逐枚点名）住 rrd 自检 truth_set check 与 boot 记账
-#     fail-closed，本门只执法静态面——两半合成 ⑨-z 全貌。
+rr3_step_9r
 step "⑨-z 真值集三方成员判等（单点在位＋判据面/打包面共读＋第二份字面零命中，门 z）"
-gate_z_fail=0
-if ! printf '%s\n' "$prof_src" | xargs grep -q 'pub const RR3_CONTRACT_BOOKS'; then
-  gate_z_fail=1
-  printf 'FAIL  ⑨-z 契约四册名单单点缺席（装配单模块须定义 pub const RR3_CONTRACT_BOOKS（profile/boot.rs）——字面唯一份，基-40）\n'
-fi
-if ! grep -q 'pub const RR3_CONTRACT_FILES: \[&str; 4\] = crate::profile::RR3_CONTRACT_BOOKS' base/runtime/rrd/src/contracts.rs; then
-  gate_z_fail=1
-  printf 'FAIL  ⑨-z 判据面清单未共读单点（base/runtime/rrd/src/contracts.rs 的 RR3_CONTRACT_FILES 须引用 crate::profile::RR3_CONTRACT_BOOKS——自检判据面不得自带第二份字面，基-40）\n'
-fi
-if ! grep -rq 'rrd::profile::rr3_truth_set(' tools/rr3-pack/src; then
-  gate_z_fail=1
-  printf 'FAIL  ⑨-z 打包面未共读真值点（tools/rr3-pack 须调 rrd::profile::rr3_truth_set 照单收口——打包面自带清单即块-15 同病，基-25/实-12）\n'
-fi
-gz_lit="$(grep -rn --include='*.rs' '"topics.toml", "slots.toml", "roles.toml", "devices.toml"' \
-  base modules tools 2>/dev/null \
-  | grep -v '/tests/' | grep -v 'pub const RR3_CONTRACT_BOOKS' || true)"
-if [ -n "$gz_lit" ]; then
-  gate_z_fail=1
-  printf '%s\n' "$gz_lit"
-  printf 'FAIL  ⑨-z 第二份四册清单字面命中（见上行号）——成员名单点在 profile.rs RR3_CONTRACT_BOOKS，消费方一律引用常量，手抄清单即成员集漂移温床（基-40）\n'
-fi
-if [ "$gate_z_fail" -ne 0 ]; then
-  fail=1
-else
-  printf 'PASS  ⑨-z 真值集三方成员判等（单点 RR3_CONTRACT_BOOKS 在位；判据面/打包面共读；产码第二份字面零命中；成员集判等实体 = profile.rs 单测 truth_set_members_and_boot_locations_are_the_same_set）\n'
-fi
-
-# —— ⑨-y 跨平台可编面（base 层 Windows 红 crate 数基线钉数，门 y；裁-19/基-33 /
-#    §25.8 #9，批N8 件六）。判据：cargo check --target x86_64-pc-windows-msvc
-#    （check 不链接，宿主无需 MSVC）--keep-going 尽量多编，base/runtime 十成员的
-#    **红 crate 数**（按 crate 名去重——同 crate lib/bin 双单元红只计一）不得超过
-#    tools/ci/gate-win-baseline.txt 的钉数（只降不升）。
-#    fail-closed 三查：基线文件缺/坏/首个非注释行非纯整数即红（gate-a 同款）；
-#    Windows target 未装即红（附安装命令，**不设 SKIP**——裁-10 同族理由：能跑的
-#    机器越少，漂移越没人发现，ci.yml conventions job 同批装 target）；count < 基线
-#    PASS 并打印"须同批下调基线"提醒。转绿终点 = 基-33 拆修全落 count=0，届时本门
-#    转红、基线退役。
+rr3_step_9z
 step "⑨-y 跨平台可编面（base 层 Windows 红 crate 数基线钉数，门 y）"
 rr3_step_9y
 # —— ⑩ 门 d 面板覆盖率对账·基线钉数门（当前上限 0）（基-19↔本步；interact I-19，批N4 件三；全案 §8
