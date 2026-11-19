@@ -11,11 +11,18 @@
 # 自带 dpkg-deb）→ 巡检——步骤见 base/os/distro/boards/raspberry-pi-64.md。
 # 与 CI distro-smoke 的分工：那边容器内 x86 本机构建真装 deb（结构验证），
 # 本脚本宿主交叉出 arm64 staging（真板部署用）——两者共用 rr3-pack 与注入约定。
+# 机型选择：RR3_PROFILE=<name>（缺省 distro）；Pi 单板全链用 RR3_PROFILE=pi4b-solo。
 set -euo pipefail
 
 cd "$(dirname "$0")/../.." # 仓根
 
 TARGET=aarch64-unknown-linux-musl
+PROFILE="${RR3_PROFILE:-distro}"
+PROFILE_TOML="profiles/$PROFILE.toml"
+if [ ! -f "$PROFILE_TOML" ]; then
+  echo "缺装配单 ${PROFILE_TOML}（RR3_PROFILE=${PROFILE}）" >&2
+  exit 2
+fi
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/rr3-arm64-target}"
 REL="$CARGO_TARGET_DIR/$TARGET/release"
 OUT="${1:-/tmp/rr3-arm64-deploy}"
@@ -65,7 +72,7 @@ bash "$(dirname "$0")/build-onboard.sh" "$RR3_ONBOARD_HOST" "$OUT"
 
 echo "== ④ rr3-pack --stage-only（staging deb 布局树）=="
 mkdir -p "$OUT"
-"$RR3_PACK" --payload "$PAY" --repo "$(pwd)" --arch arm64 \
+"$RR3_PACK" --payload "$PAY" --repo "$(pwd)" --arch arm64 --profile "$PROFILE" \
   --out "$OUT/rockrobot3_${VER}_arm64.deb" --stage-only
 
 STAGE="$OUT/rockrobot3_${VER}_arm64.deb.stage"
@@ -74,7 +81,7 @@ test -x "$STAGE/usr/bin/rrd"
 test -x "$STAGE/usr/bin/rr3-ctl"
 test -x "$STAGE/usr/bin/rr3-ota-ctl"
 test -f "$STAGE/usr/lib/systemd/system/rrd.service"
-test -f "$STAGE/usr/lib/rockrobot3/profiles/distro.toml"
+test -f "$STAGE/usr/lib/rockrobot3/profiles/$PROFILE.toml"
 test -f "$STAGE/usr/lib/rockrobot3/contracts/topics.toml"
 test -f "$STAGE/usr/lib/rockrobot3/contracts/slots.toml"
 for m in act brain connect interact sense power; do
