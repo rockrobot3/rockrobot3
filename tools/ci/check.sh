@@ -103,6 +103,8 @@ mod_lang() {
 . "$root/tools/ci/steps/8.sh"
 . "$root/tools/ci/steps/9a.sh"
 . "$root/tools/ci/steps/9c.sh"
+. "$root/tools/ci/steps/9d.sh"
+. "$root/tools/ci/steps/9e.sh"
 . "$root/tools/ci/steps/9n.sh"
 . "$root/tools/ci/steps/9r.sh"
 . "$root/tools/ci/steps/9w.sh"
@@ -246,14 +248,7 @@ rr3_step_8
 # 真值点 contracts/topics.toml + contracts/face-expressions.toml → 板侧副本
 # tools/esp32-periph-base/src/topics_gen.rs（rr3-codegen --check 只比对不写）。
 step "⑨-d 生成物一致性（真值点 → 板侧常量表，重跑 rr3-codegen diff 为空）"
-if codegen_out="$(cd tools/rr3-codegen && cargo run --locked -q -- --check 2>&1)"; then
-  printf '%s\n' "$codegen_out"
-  printf 'PASS  ⑨-d 生成物一致（topics_gen.rs：三主题串 + 板侧七态白名单，与 contracts/ 真值点同步）\n'
-else
-  printf '%s\n' "$codegen_out"
-  printf 'FAIL  ⑨-d 生成物漂移（tools/esp32-periph-base/src/topics_gen.rs 与 contracts/ 真值点不一致；在仓根跑 cd tools/rr3-codegen && cargo run 重生成并审阅）\n'
-  fail=1
-fi
+rr3_step_9d
 
 # —— ⑨-e 行程真值单点门（门 g：全案 §8，批N3 件五；读者集合定义随 act A-17）。
 # 行程唯一真值点 = 执行轴档案 hardware/<形态>/axis/<instance>.toml 的
@@ -269,19 +264,7 @@ fi
 #   .embuild/ —— esp-idf SDK 树（⑨-c/⑨-d 的 ESP32 构建依赖，批N5 件二笔2 补豁免：
 #   同 target 同性质的构建产物，几十万文件的全树扫描还让本门在冷缓存下拖数分钟）。
 step "⑨-e 行程真值单点（门 g：旧行程键名与板侧旧行程常量名全仓零命中，档案是唯一真值）"
-travel_hits="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
-grep -rn --exclude-dir=.git --exclude-dir=target --exclude-dir=docs --exclude-dir=.embuild \
-     --exclude=check.sh \
-     -e 'angle_limit_deg' -e 'AXIS_CENTER_DEG' -e 'PAN_LIMIT_DEG' -e 'TILT_LIMIT_DEG' \
-     . > "$travel_hits" 2>/dev/null
-if [ -s "$travel_hits" ]; then
-  cat "$travel_hits"
-  printf 'FAIL  ⑨-e 行程字面零命中被击穿（见上行号）——行程唯一真值点 = hardware/<形态>/axis/*.toml 的 center/lo/hi，出现即读者回流：撤字面量改引注入/生成表\n'
-  fail=1
-else
-  printf 'PASS  ⑨-e 行程真值单点（旧行程键名与板侧旧行程常量名全仓零命中，读者仅档案→装配注入/生成表两路）\n'
-fi
-rm -f "$travel_hits"
+rr3_step_9e
 
 # —— ⑨-w 依赖面禁令（基-35，裁定 12；全案 §24.4 C 组 / architecture §14，0.0.5 增补轮六
 #     第 0.5 步建门）。判据（可施工面，窄化已登记 decisions.md 基-35 行）：
