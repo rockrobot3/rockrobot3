@@ -48,6 +48,8 @@ DoA 标定直接取 `.body.doa.deg`：
     cargo run -q --manifest-path tools/rrctl/Cargo.toml --bin rr3-ctl -- status
     cargo test --manifest-path tools/rrctl/Cargo.toml
 
-编译由 `tools/ci/check.sh` 第 ④ 步覆盖（独立 workspace 不在 ①/①b 的作用域内）；
-单测含真 UDS 往返用例（fake rrd：status/counters/wiring 实答渲染、ota/reboot 恒拒
-回显），**不在门禁步序内**，收口时按 conventions §2 备注本地跑。
+编译由 `tools/ci/check.sh` 第 ④ 步覆盖（独立 workspace 不在 ①/①b 的作用域内），
+测试由第 ⑥ 步（独立工程测试接线）执行：`src/commands/tests.rs` 的 UDS 往返用例
+（fake rrd：status/counters/wiring 实答渲染、ota/reboot 恒拒回显），以及
+`tests/tail_bus.rs` 的 tail 端到端四例（真起 `rr3-ctl` 子进程：注册→主题过滤→
+收满退出 / 超时 / 断链 / 注册失败）——两者都随门禁在 CI 真跑。
