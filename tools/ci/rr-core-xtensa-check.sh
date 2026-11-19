@@ -9,7 +9,7 @@
 #   裸机面：xtensa 编译过，且 rr-ipc golden 头 `const _` 断言随依赖链在该目标编译期
 #           重求值（0.0.7 层① 免费资产，批D① 起 rr-core 依赖 rr-ipc 同链生效）；
 #   宿主面：cargo test -p rr-core 真跑（golden 形状 / 控制图逐拍一致用例，本门内断言）。
-# 纪律：工具链缺位 = SKIP（退出 0 并明说，同 espidf-std-check.sh 口径）；
+# 纪律：工具链缺位 = 本地 SKIP / CI 即红（tools/ci/skip.sh）；
 #       工具链在位但编译失败 = FAIL；tripwire（全局分配器 / std 逃逸）命中 = FAIL；
 #       宿主测试 0 通过 = FAIL（fail-open 封死，同 check.sh run_tests 口径）。
 # rr-mech 零外部依赖、rr-ipc 零外部依赖、rr-core 仅依赖 rr-mech + rr-ipc，本门全程无网络。
@@ -22,24 +22,22 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "ERROR: git rev-parse --show-toplevel 失败——当前目录不在 git 仓库内。" >&2
   exit 1
 }
+. "$root/tools/ci/skip.sh"
 cd "$root/base/runtime" || { echo "ERROR: 无法进入 base/runtime" >&2; exit 1; }
 
 export PATH="$HOME/.cargo/bin:$PATH"
 
 # ① SKIP 判据：esp fork 工具链（rustup alias esp → esp-1.90.0.0，0.0.7 批A'）
 if ! rustup toolchain list 2>/dev/null | grep -q '^esp'; then
-  echo "SKIP  esp 工具链未安装（rustup toolchain list 无 'esp'）——机制核 xtensa 对拍门不执行，安装方式见 0.0.7 方案批A'"
-  exit 0
+  rr3_skip "esp 工具链未安装（rustup toolchain list 无 'esp'）——机制核 xtensa 对拍门不执行，安装方式见 0.0.7 方案批A'"
 fi
 # build-std 依赖 rust-src 源码树（esp fork 的 rust-src 不走 rustup component 注册，
 # 判据用 sysroot 内源码目录，同 espidf-std-check.sh）
 esp_sysroot="$(rustc +esp --print sysroot 2>/dev/null)" || {
-  echo "SKIP  esp 工具链 rustc 不可用（rustc +esp 失败）——机制核 xtensa 对拍门不执行"
-  exit 0
+  rr3_skip "esp 工具链 rustc 不可用（rustc +esp 失败）——机制核 xtensa 对拍门不执行"
 }
 if [ ! -d "$esp_sysroot/lib/rustlib/src/rust" ]; then
-  echo "SKIP  esp 工具链缺 rust-src 源码树（$esp_sysroot/lib/rustlib/src/rust 不在，build-std 依赖）——机制核 xtensa 对拍门不执行"
-  exit 0
+  rr3_skip "esp 工具链缺 rust-src 源码树（$esp_sysroot/lib/rustlib/src/rust 不在，build-std 依赖）——机制核 xtensa 对拍门不执行"
 fi
 
 fail=0

@@ -10,7 +10,7 @@ export CARGO_HTTP_LOW_SPEED_LIMIT="${CARGO_HTTP_LOW_SPEED_LIMIT:-1}"
 # xtensa-esp32-espidf 目标编译需 esp fork 工具链（cargo +esp）+ build-std + esp-idf-sys
 # （ESP-IDF v5.2.2 本地克隆 + ldproxy + 乐鑫 LLVM fork esp-clang——上游 libclang 无 Xtensa
 # 后端，bindgen 会报 unknown target triple 'xtensa'），宿主工具链 check 必红，本脚本单独覆盖。
-# 纪律：工具链缺位 = SKIP（退出 0 并明说，同 esp-uart-echo-check.sh 口径）；
+# 纪律：工具链缺位 = 本地 SKIP / CI 即红（tools/ci/skip.sh）；
 #       工具链在位但编译失败 = FAIL；编译退出 0 但 ELF 不在树 = FAIL。
 set -uo pipefail
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -21,43 +21,38 @@ cd "$root/tools/espidf-std-hello" || { echo "ERROR: 无法进入 tools/espidf-st
 # 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
 # crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
 . "$root/tools/ci/cargo-artifact.sh"
+. "$root/tools/ci/skip.sh"
 
 export PATH="$HOME/.cargo/bin:$PATH"
 
 # ① esp fork 工具链（rustup alias esp → esp-1.90.0.0，0.0.7 批A'）
 if ! rustup toolchain list 2>/dev/null | grep -q '^esp'; then
-  echo "SKIP  esp 工具链未安装（rustup toolchain list 无 'esp'）——espidf std 冒烟门不执行，安装方式见 0.0.7 方案批A'"
-  exit 0
+  rr3_skip "esp 工具链未安装（rustup toolchain list 无 'esp'）——espidf std 冒烟门不执行，安装方式见 0.0.7 方案批A'"
 fi
 # esp fork 工具链的 rust-src 不走 rustup component 注册（espup 直装源码树，
 # `rustup component list` 查不到），判据用 sysroot 内的 std 源码目录
 esp_sysroot="$(rustc +esp --print sysroot 2>/dev/null)" || {
-  echo "SKIP  esp 工具链 rustc 不可用（rustc +esp 失败）——espidf std 冒烟门不执行"
-  exit 0
+  rr3_skip "esp 工具链 rustc 不可用（rustc +esp 失败）——espidf std 冒烟门不执行"
 }
 if [ ! -d "$esp_sysroot/lib/rustlib/src/rust" ]; then
-  echo "SKIP  esp 工具链缺 rust-src 源码树（$esp_sysroot/lib/rustlib/src/rust 不在，build-std 依赖）——espidf std 冒烟门不执行"
-  exit 0
+  rr3_skip "esp 工具链缺 rust-src 源码树（$esp_sysroot/lib/rustlib/src/rust 不在，build-std 依赖）——espidf std 冒烟门不执行"
 fi
 
 # ② ldproxy（链接代理：--ldproxy-linker 注入 xtensa gcc，见本目录 build.rs 注释）
 if ! command -v ldproxy >/dev/null 2>&1; then
-  echo "SKIP  ldproxy 未安装（cargo install ldproxy）——espidf std 冒烟门不执行"
-  exit 0
+  rr3_skip "ldproxy 未安装（cargo install ldproxy）——espidf std 冒烟门不执行"
 fi
 
 # ③ ESP-IDF 本地克隆（裁定 Q5：IDF 不进仓，版本钉死登记见本目录 README.md）
 if [ ! -f "$HOME/.espressif/frameworks/esp-idf-v5.2.2/tools/idf.py" ]; then
-  echo "SKIP  ESP-IDF v5.2.2 本地克隆缺位（~/.espressif/frameworks/esp-idf-v5.2.2）——espidf std 冒烟门不执行，克隆方式见本目录 README.md"
-  exit 0
+  rr3_skip "ESP-IDF v5.2.2 本地克隆缺位（~/.espressif/frameworks/esp-idf-v5.2.2）——espidf std 冒烟门不执行，克隆方式见本目录 README.md"
 fi
 export IDF_PATH="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
 
 # ④ esp-clang（乐鑫 LLVM fork：bindgen 需 Xtensa 后端；esp-idf-sys 经 espup 惯例
 #    symlink ~/.espup/esp-clang 自动发现并覆盖 LIBCLANG_PATH，见 common.rs setup_clang_env）
 if ! rr3_esp_clang_lib >/dev/null; then
-  echo "SKIP  esp-clang 缺位（~/.espup/esp-clang 无 libclang.dylib/.so）——espidf std 冒烟门不执行，安装方式见本目录 README.md"
-  exit 0
+  rr3_skip "esp-clang 缺位（~/.espup/esp-clang 无 libclang.dylib/.so）——espidf std 冒烟门不执行，安装方式见本目录 README.md"
 fi
 
 # ⑤ 镜像注入（仓库源不硬编码镜像，他人环境各异，随本机；缺失时 embuild 走官方源）

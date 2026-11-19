@@ -8,7 +8,7 @@ export CARGO_HTTP_TIMEOUT="${CARGO_HTTP_TIMEOUT:-120}"
 export CARGO_HTTP_LOW_SPEED_LIMIT="${CARGO_HTTP_LOW_SPEED_LIMIT:-1}"
 # ESP32-S3 外设底座构建门（W1/T2，批N35 件八）。与 esp32-periph-base-check.sh
 # 同款门禁形态：宿主工具链 check 必红（xtensa + build-std + esp-idf-sys），本脚本
-# 单独覆盖。SKIP 纪律同款：工具链缺位 = SKIP（退出 0 并明说）；在位但编译失败 = FAIL；
+# 单独覆盖。SKIP 纪律同款：工具链缺位 = 本地 SKIP / CI 即红（tools/ci/skip.sh）；在位但编译失败 = FAIL；
 # 退出 0 但产物不在树 = FAIL。
 #
 # 与 classic 门的差异只有三处：MCU=esp32s3、--target xtensa-esp32s3-espidf、ELF 路径；
@@ -35,41 +35,35 @@ cd "$root/tools/esp32-periph-base" || { echo "ERROR: 无法进入 tools/esp32-pe
 # 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
 # crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
 . "$root/tools/ci/cargo-artifact.sh"
+. "$root/tools/ci/skip.sh"
 
 # ① esp fork 工具链（rustup alias esp，0.0.7 批A'）
 if ! rustup toolchain list 2>/dev/null | grep -q '^esp'; then
-  echo "SKIP  esp 工具链未安装（rustup toolchain list 无 'esp'）——esp32s3-periph-base 门不执行"
-  exit 0
+  rr3_skip "esp 工具链未安装（rustup toolchain list 无 'esp'）——esp32s3-periph-base 门不执行"
 fi
 esp_sysroot="$(rustc +esp --print sysroot 2>/dev/null)" || {
-  echo "SKIP  esp 工具链 rustc 不可用（rustc +esp 失败）——esp32s3-periph-base 门不执行"
-  exit 0
+  rr3_skip "esp 工具链 rustc 不可用（rustc +esp 失败）——esp32s3-periph-base 门不执行"
 }
 if [ ! -d "$esp_sysroot/lib/rustlib/src/rust" ]; then
-  echo "SKIP  esp 工具链缺 rust-src 源码树（build-std 依赖）——esp32s3-periph-base 门不执行"
-  exit 0
+  rr3_skip "esp 工具链缺 rust-src 源码树（build-std 依赖）——esp32s3-periph-base 门不执行"
 fi
 # S3 目标由 esp fork rustc 内置 target spec 提供（build-std 从 rust-src 编译，
 # 自定义工具链不会出现 lib/rustlib/<target> 目录，故查 target-list）。
 if ! rustc +esp --print target-list 2>/dev/null | grep -qx 'xtensa-esp32s3-espidf'; then
-  echo "SKIP  esp 工具链不认 xtensa-esp32s3-espidf 目标——esp32s3-periph-base 门不执行"
-  exit 0
+  rr3_skip "esp 工具链不认 xtensa-esp32s3-espidf 目标——esp32s3-periph-base 门不执行"
 fi
 # ② ldproxy
 if ! command -v ldproxy >/dev/null 2>&1; then
-  echo "SKIP  ldproxy 未安装（cargo install ldproxy）——esp32s3-periph-base 门不执行"
-  exit 0
+  rr3_skip "ldproxy 未安装（cargo install ldproxy）——esp32s3-periph-base 门不执行"
 fi
 # ③ ESP-IDF 本地克隆（版本钉死登记见 tools/espidf-std-hello/README.md）
 if [ ! -f "$HOME/.espressif/frameworks/esp-idf-v5.2.2/tools/idf.py" ]; then
-  echo "SKIP  ESP-IDF v5.2.2 本地克隆缺位——esp32s3-periph-base 门不执行"
-  exit 0
+  rr3_skip "ESP-IDF v5.2.2 本地克隆缺位——esp32s3-periph-base 门不执行"
 fi
 export IDF_PATH="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
 # ④ esp-clang（bindgen 需 Xtensa 后端）
 if ! rr3_esp_clang_lib >/dev/null; then
-  echo "SKIP  esp-clang 缺位（~/.espup/esp-clang 无 libclang.dylib/.so）——esp32s3-periph-base 门不执行"
-  exit 0
+  rr3_skip "esp-clang 缺位（~/.espup/esp-clang 无 libclang.dylib/.so）——esp32s3-periph-base 门不执行"
 fi
 # ⑤ 镜像注入（仓库源不硬编码镜像，同 espidf-sentinel-check.sh）
 export IDF_GITHUB_ASSETS=dl.espressif.com/github_assets
