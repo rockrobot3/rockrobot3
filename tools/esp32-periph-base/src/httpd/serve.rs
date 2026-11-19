@@ -104,6 +104,13 @@ unsafe fn handle_state(req: *mut httpd_req_t, bus: &Arc<Mutex<Bus>>) -> i32 {
     resp_json(req, &rr3_state_json(&rr3_state_snapshot(bus)))
 }
 
+/// GET /api/board/health——自治监督壳快照（W3-2b）。
+///
+/// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
+unsafe fn handle_health(req: *mut httpd_req_t) -> i32 {
+    resp_json(req, &crate::autonomy::rr3_health_json())
+}
+
 /// GET /api/board/bindings——注入绑定读数。
 ///
 /// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
@@ -201,6 +208,7 @@ unsafe extern "C" fn rr3_httpd_dispatch(req: *mut httpd_req_t) -> i32 {
     match route {
         Rr3BoardRoute::Index => handle_index(req),
         Rr3BoardRoute::State => handle_state(req, bus),
+        Rr3BoardRoute::Health => handle_health(req),
         Rr3BoardRoute::Bindings => handle_bindings(req),
         Rr3BoardRoute::WifiWrite => handle_wifi_write(req),
         Rr3BoardRoute::Reboot => handle_reboot(req),

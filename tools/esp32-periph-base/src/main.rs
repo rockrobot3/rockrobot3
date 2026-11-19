@@ -64,6 +64,8 @@
 //! [`AXIS_SETTLE_MS`] → 再 tilt**（任一时刻只驱动一轴，削峰值）；单轴命令直动。
 //! SCAN 同守此律（每点 pan/tilt 两段），WANDER 扫摆**同拍只动一轴**（pan/tilt 错拍）。
 
+// 自治壳（W3-2b）：健康快照与监督核接线；/api/board/health 常驻。
+mod autonomy;
 mod board;
 // capture 原子件机制核（批N23 件三收编：atoms/capture/mech.rs——audio.capture
 // 板侧执行面的采集变换纯算术：帧解析/增益钳位/DC 抑制分片变换/背压入队；接线
@@ -426,6 +428,9 @@ fn main() {
     //「NVS 优先（cred 模块）→ 编译期 option_env! 注入回落（RR3_BOARD_WIFI_SSID/PASS，
     //值不落仓）」，都缺 fail-honest 点名后缺席，板其余功能照常；细节见 [httpd]/[cred]
     //模块文档。（clone 同前——须在 cmd_loop move 前）
+    // ---- W3-2b：自治监督壳（仅 autonomy 档启动；/api/board/health 常驻）----
+    #[cfg(feature = "autonomy")]
+    autonomy::rr3_start();
     httpd::rr3_httpd_spawn(&bus);
     // ---- W3-2a：自治形态开机 SNTP 对时（仅 autonomy 档；失败显式点名）----
     #[cfg(feature = "autonomy")]

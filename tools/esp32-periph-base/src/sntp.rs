@@ -37,6 +37,7 @@ pub(crate) fn spawn_sntp() {
 
 /// 对时主体：启动 SNTP POLL → 有界等待 → 成功/失败各一行。
 fn sntp_run() {
+    crate::autonomy::rr3_sntp_set(crate::autonomy::SNTP_UNKNOWN);
     // SAFETY：四个 esp_sntp_* 都是 lwIP 线程安全封装；参数为常量与栈上 NUL
     // 结尾字符串，调用期间有效；POLL 模式值为 0（esp_sntp.h 枚举首项）。
     unsafe {
@@ -56,8 +57,10 @@ fn sntp_run() {
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
             println!("[sntp] 对时成功（第 {i} 次轮询）epoch={epoch}s");
+            crate::autonomy::rr3_sntp_set(crate::autonomy::SNTP_SYNCED);
             return;
         }
     }
     println!("[sntp] 对时失败：{SNTP_WAIT_S}s 内未同步（查 WiFi/DNS/UDP123）；云请求必须显式拒绝");
+    crate::autonomy::rr3_sntp_set(crate::autonomy::SNTP_FAILED);
 }
