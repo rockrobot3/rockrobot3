@@ -73,8 +73,17 @@ jobs:
         if: matrix.mode == 'gnu'
         run: |
           set -o pipefail
-          sudo apt-get update -qq 2>&1 | tail -3 || true
-          if ! sudo apt-get install -y -qq gcc-riscv64-linux-gnu qemu-user 2>&1 | tee /tmp/apt.log; then
+          ok=0
+          for i in 1 2 3; do
+            sudo apt-get update -qq 2>&1 | tail -3 || true
+            if sudo apt-get install -y -qq gcc-riscv64-linux-gnu qemu-user 2>&1 | tee /tmp/apt.log; then
+              ok=1
+              break
+            fi
+            echo "::warning title=apt-riscv::第 ${i} 次安装失败，10s 后重试"
+            sleep 10
+          done
+          if [ "$ok" -ne 1 ]; then
             why=$(grep -iE "unable to locate|has no installation candidate|depends|conflicts|error" /tmp/apt.log | tail -3 | tr '\n' ' ')
             echo "::error title=apt-riscv::${why:0:700}"
             exit 1
