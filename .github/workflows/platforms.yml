@@ -195,6 +195,53 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # RISC-V 运行镜像构建门（2026-11-20，无 ghcr 推送）：把发布镜像的
+  # 交叉构建 → rr3-pack stage → Containerfile → QEMU 两段冒烟在每次 push 真跑。
+  # 发布腿随后只加 login/push/merge，形状已被本门证明（改判据不必等 tag）。
+  riscv-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+          targets: riscv64gc-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+          cache-all-crates: "true"
+      - name: 安装 riscv64 交叉工具链（3 次有界重试）
+        run: |
+          set -o pipefail
+          ok=0
+          for i in 1 2 3; do
+            sudo apt-get update -qq 2>&1 | tail -3 || true
+            if sudo apt-get install -y -qq gcc-riscv64-linux-gnu 2>&1 | tee /tmp/apt-riscv-img.log; then
+              ok=1
+              break
+            fi
+            echo "::warning title=apt-riscv-image::第 ${i} 次安装失败，10s 后重试"
+            sleep 10
+          done
+          if [ "$ok" -ne 1 ]; then
+            why=$(grep -iE "unable to locate|has no installation candidate|depends|conflicts|error" /tmp/apt-riscv-img.log | tail -3 | tr '\n' ' ')
+            echo "::error title=apt-riscv-image::${why:0:700}"
+            exit 1
+          fi
+          command -v riscv64-linux-gnu-gcc && command -v riscv64-linux-gnu-ar
+      - uses: docker/setup-qemu-action@v4
+        with:
+          platforms: riscv64
+      - name: 构建 riscv64 运行镜像并两段冒烟
+        run: |
+          set -o pipefail
+          if ! bash tools/deploy/build-riscv-image.sh 2>&1 | tee /tmp/riscv-image.log; then
+            errs=$(grep -iE "error(\[|:)|failed|FAIL|undefined reference|manifest unknown" /tmp/riscv-image.log | tail -5 | tr '\n' ' ')
+            echo "::error title=riscv-image::${errs:0:900}"
+            exit 1
+          fi
+
   # 重工具链 ESP 构建档（A 任务构建面）：espup 钉版 v0.17.1 + ESP-IDF v5.2.2 克隆 +
   # 乐鑫 esp-clang + ldproxy——冷跑 20 分钟量级，靠 action 内三处 cache 压到分钟级。
   # 安装面与"失败压注解"模板分别收在 .github/actions/{esp-toolchain,guarded-run}
