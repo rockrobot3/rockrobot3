@@ -66,6 +66,7 @@ fn default_profile_binds_module_slots_to_real_modules() {
             "pi4b-host-esp32-classic.toml".to_string(),
             "pi4b-host-esp32s3.toml".to_string(),
             "pi4b-host.toml".to_string(),
+            "pi4b-solo.toml".to_string(),
         ],
         "profiles/ 机型集合漂移（新增机型须同批改本 pin 与该机型的形状测试，C2 批K）"
     );

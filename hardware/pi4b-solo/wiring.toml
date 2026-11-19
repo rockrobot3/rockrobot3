@@ -1,0 +1,44 @@
+# RockRobot3 装机接线档：pi4b-solo 机型（W5-1：Pi 4B 单板全链）。
+# 装载期按 profiles/<形态> 推导本档定位；九字段语义、校验⑦ 判据见
+# hardware/default/wiring.toml 头注。
+#
+# 本档记 Pi 本体供电、舵机独立 5V 主干与 pan 舵机线：Pi 由官方 5V/3A USB-C
+# 供电；SG90 由独立 5V/3A UBEC 供电（禁接 Pi 5V，UBEC/Pi/舵机单点共地）。
+# MAX7219 是本地 SPI 模块（spidev0.0）、USB 声卡与麦阵列是 USB 枚举设备，
+# 都不是可控电源线组，故不立 [[wire]]。
+
+[[wire]]
+# J-PWR：官方 5V/3A USB-C 适配器 → Pi 5V 轨（3A 主干 ≥ Pi 4B + USB 声卡峰值）。
+connector = "J-PWR"
+hdr_pin = [1, 2]
+signal = ["vcc", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "none"
+keyed = true
+rated_a = 3.0
+gnd_common = "star-1"
+
+[[wire]]
+# J-UBEC：舵机独立 5V/3A 输出 → 舵机电源母线（与 Pi 供电分离，单点共地）。
+connector = "J-UBEC"
+hdr_pin = [1, 2]
+signal = ["vcc", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "none"
+keyed = true
+rated_a = 3.0
+gnd_common = "star-1"
+
+[[wire]]
+# J-PAN：SG90 三线（vcc 挂 rail5v，信号线写 [[pin]] pin_id）。
+connector = "J-PAN"
+hdr_pin = [1, 2, 3]
+signal = ["vcc", "act.axis.pwm.pan", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "SG90-3P"
+keyed = true
+rated_a = 1.0
+gnd_common = "star-1"
