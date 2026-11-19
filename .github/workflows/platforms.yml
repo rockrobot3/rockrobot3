@@ -28,9 +28,11 @@ jobs:
   #   英特尔 / AMD → x86_64 原生（同一 ISA/ABI，一腿覆盖两家，不用交叉）；
   #   瑞芯微 RK3566/RK3588 → aarch64-musl（cargo + rust-lld 全静态）；
   #   进迭时空 SpacemiT K1/K3 → riscv64-musl（cross 镜像提供 musl 交叉工具链）。
-  # 每条腿三件事同口径：① 七件产物构建 + ELF 断言；② 目标 ISA 真执行（native 直跑 /
-  # musl 进 alpine 容器 / riscv-gnu 经 qemu-user-static）并断言用法输出；③ 上传产物。
-  # brain 的 ureq+ring 需目标 C 工具链，归板上原生构建（pack-bundle ③ 同一分工）。
+  # 每条腿三件事同口径：① 七件产物构建 + ELF 断言（有目标 C 工具链的腿再带
+  # brain——ureq+rustls(ring) 需 CC/AR，原生 x86_64 与 apt 交叉 riscv64 满足，
+  # 瑞芯微 musl 腿走 rust-lld 无目标 C 工具链，brain 归板上原生构建）；② 目标 ISA
+  # 真执行（native 直跑 / musl 进 alpine 容器 / riscv-gnu 经 qemu-user-static）并
+  # 断言用法输出；③ 上传产物。
   cross-artifacts:
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -43,18 +45,21 @@ jobs:
             arch: "x86-64"
             mode: native
             assert: any
+            extra: with-brain
             platform: linux/amd64
           - chip: 瑞芯微（RK3566/RK3588）
             triple: aarch64-unknown-linux-musl
             arch: "ARM aarch64"
             mode: musl
             assert: static
+            extra: ""
             platform: linux/arm64
           - chip: 进迭时空（SpacemiT K1/K3）
             triple: riscv64gc-unknown-linux-gnu
             arch: "RISC-V"
             mode: gnu
             assert: any
+            extra: with-brain
             platform: linux/riscv64
     name: cross / ${{ matrix.chip }}
     steps:
@@ -103,14 +108,17 @@ jobs:
             echo "::error title=riscv-std::rustup target list 无 riscv64"
             exit 1
           }
-      - name: 目标平台构建（七件产物 + ELF 断言；失败压成单行注解）
+      - name: 目标平台构建（七件产物 + brain 视工具链 + ELF 断言；失败压成单行注解）
         env:
           # gnu 交叉腿的链接器：cargo 按目标三元组读该变量，其他腿目标名不同不读取。
           # 原生腿与 musl 腿不受影响（musl 走 rust-lld，原生走系统 cc）。
           CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
+          # brain 的 ring 需要目标 C 编译器与归档器（只有 with-brain 腿构建 brain）。
+          CC_riscv64_unknown_linux_gnu: riscv64-linux-gnu-gcc
+          AR_riscv64_unknown_linux_gnu: riscv64-linux-gnu-ar
         run: |
           set -o pipefail
-          if ! bash tools/ci/cross-artifacts.sh "${{ matrix.triple }}" "${{ matrix.arch }}" "${{ matrix.assert }}" 2>&1 | tee /tmp/cross.log; then
+          if ! bash tools/ci/cross-artifacts.sh "${{ matrix.triple }}" "${{ matrix.arch }}" "${{ matrix.assert }}" "${{ matrix.extra }}" 2>&1 | tee /tmp/cross.log; then
             # 链接错误的关键行不在 "error"/"failed" 上（undefined reference / collect2 /
             # cannot find），只抓前四行会丢掉真因——关键词按实测补全。
             errs=$(grep -iE "error(\[|:)|failed|FAIL|undefined reference|cannot find|collect2|ld returned" /tmp/cross.log | tail -5 | tr '\n' ' ')
@@ -174,6 +182,16 @@ jobs:
             /tmp/rr3-build/${{ matrix.triple }}/release/rr3-interact
             /tmp/rr3-build/${{ matrix.triple }}/release/rr3-sense
             /tmp/rr3-build/${{ matrix.triple }}/release/rr3-power
+          if-no-files-found: error
+          retention-days: 7
+      # brain 只在带 C 工具链的腿构建（原生 x86_64 / apt 交叉 riscv64）：
+      # 单独一条上传步，避免 musl 腿因缺件被 if-no-files-found 判红。
+      - name: 上传 brain 产物（with-brain 腿）
+        if: matrix.extra == 'with-brain'
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-${{ matrix.triple }}-brain
+          path: /tmp/rr3-build/${{ matrix.triple }}/release/rr3-brain
           if-no-files-found: error
           retention-days: 7
 

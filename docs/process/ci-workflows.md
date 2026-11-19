@@ -68,6 +68,10 @@ with 入参），不依赖 runner 镜像预装版本；交叉 job 同时显式�
 英特尔/AMD `x86_64-unknown-linux-gnu`、瑞芯微 `aarch64-unknown-linux-musl`、
 进迭时空 `riscv64gc-unknown-linux-gnu` 三条腿；`esp32-gates` 必须含 `esp32` 与
 `esp32s3` 两腿。矩阵腿是"该芯片环境仍被验证"的唯一回执，删除/改名即红。
+**brain 产物面（同日）**：有目标 C 工具链的腿（原生 x86_64、apt 交叉 riscv64）
+带 `with-brain` 构建 `rr3-brain` 并单独上传；瑞芯微 musl 腿走 rust-lld 无目标 C
+工具链，brain 的 ureq+rustls(ring) 归板上原生构建——覆盖差异由矩阵 `extra`
+数据位表达，脚本机制只有一份。
 
 **权限与失败显形（2026-11-18 续轮十六）**：
 
