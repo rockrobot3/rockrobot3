@@ -33,7 +33,8 @@
 | ⑩ | `steps/10.sh`（读 contracts 快照与分母基线） | 面板覆盖率对账（门 d）：分子 = covers 申报 + applies 生效路径，分母 = 字段级五路并集；红账 0、分母下限 83，缩分母即红 |
 | ⑫ | `python3 tools/ci/metrics.py`（真值 `metrics-baseline.json`） | 质量度量门：重复率 ≤3%、CC 均值 ≤2.50 / 最大 ≤11、生产函数 >80 行 ≤5、生产 panic ≤60、>20B 生产函数名 0、≥1000ms 长睡 0；基线只降不升 |
 | ⑬ | `steps/13.sh`（git grep + git status） | 仓面卫生门：追踪文件无本机绝对路径、无构建目录、源码类新件必须入册、shell `$name` 后接非 ASCII 即红 |
-| ⑭ | `check.sh` ⑭ 段 | 源文件行数门：每个 `.rs` <600 行；超标文件数按 `gate-lines-baseline.txt` 只降不升 |
+| ⑯ | `check.sh` ⑯ 段 | 源文件行数门：每个 `.rs` <600 行；超标文件数按 `gate-lines-baseline.txt` 只降不升 |
+| ⑭ | `check.sh` ⑭ 段 | 装载门体量基线门（裁-13/基-38）：装配单锚函数的块行数、`read_to_string` 样板数、rr-registry 同形函数数按 `gate-size-baseline.txt` 只降不升；锚函数缺失或基线形状坏即红 |
 | ⑮ | `python3 tools/ci/lockio_audit.py`（先 `--self-test`） | 锁内 I/O 门：`lock·log` 同行 / 条件位临时 guard 延寿到块体 / 直调会写待落盘日志的 registry 方法；扫面打空即门禁失效；gate `scripts` 同源执法 |
 
 **基线只降不升审计（`baselines_audit.py`，gate `scripts` job）**：把 `tools/ci/*-baseline.*`
@@ -47,7 +48,8 @@
 
 **门禁步骤清单（`gate_steps_audit.py`，gate `scripts` job）**：把 `check.sh` 的
 `step`/`printf` 出口解析成有序清单，与 `gate_steps.txt` 逐字比对——删除、新增、
-改名、换序任一发生即红。它是"删掉一个 step 不会红"这个盲区的机器判据。
+改名、换序任一发生即红；并断言门号唯一（同一 token 两次即双义红，子号 `①b`/`⑨-a`
+各有独立身份）。它是"删掉一个 step 不会红"与"一号两门"两个盲区的机器判据。
 
 **⑨-a…⑨-z 各门**（门 a/c/r/y/z 等，后续批次续增）：判据以 `check.sh` 各 `step`
 段注释为唯一真值，本表不逐行抄录——抄一份就多一处漂移面。
