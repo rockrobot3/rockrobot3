@@ -25,7 +25,9 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
-use rr_autonomy::{Rr3SupCfg, Rr3SupHealth, Rr3Supervisor, Rr3Task, Rr3TaskState, RR3_TASK_COUNT};
+use rr_autonomy::{
+    Rr3RestartGate, Rr3SupCfg, Rr3SupHealth, Rr3Supervisor, Rr3Task, Rr3TaskState, RR3_TASK_COUNT,
+};
 
 /// SNTP 状态（未知/已同步/失败）。
 pub(crate) const SNTP_UNKNOWN: i8 = 0;
@@ -112,14 +114,14 @@ pub(crate) fn rr3_sntp_set(state: i8) {
 /// 监督栅格：先排空心跳，再 tick 判死并发布快照，最后走去抖复位判定。
 fn rr3_tick_loop(mut sup: Rr3Supervisor) {
     let mut ever = [false; RR3_TASK_COUNT];
-    let mut dead_ticks = 0u32;
+    let mut gate = Rr3RestartGate::rr3_gate_new(DEAD_TICKS);
     loop {
         thread::sleep(Duration::from_millis(SUP_CFG.tick_ms));
         rr3_drain(&mut sup, &mut ever);
         let ev = sup.rr3_sup_tick(crate::state::now_ms());
         rr3_log_timeout(ev.timed_out);
         health_publish(sup.rr3_sup_health());
-        dead_ticks = rr3_dead_step(&sup.rr3_sup_health(), &ever, dead_ticks);
+        rr3_dead_step(&mut gate, &sup.rr3_sup_health(), &ever);
     }
 }
 
@@ -161,14 +163,11 @@ fn rr3_log_timeout(bits: u8) {
 }
 
 /// 复位去抖：已接线且**曾有过心跳**的 dead 任务连续 [`DEAD_TICKS`] 拍 → 复位；
-/// 否则计数清零。从未起过的任务留在 dead 供观测，不触发重启环。
-fn rr3_dead_step(h: &Rr3SupHealth, ever: &[bool; RR3_TASK_COUNT], ticks: u32) -> u32 {
+/// 否则闸门清零。从未起过的任务留在 dead 供观测，不触发重启环。
+fn rr3_dead_step(gate: &mut Rr3RestartGate, h: &Rr3SupHealth, ever: &[bool; RR3_TASK_COUNT]) {
     let bits = rr3_dead_bits(h, ever);
-    if bits == 0 {
-        return 0;
-    }
-    if ticks + 1 < DEAD_TICKS {
-        return ticks + 1;
+    if !gate.rr3_gate_step(bits != 0) {
+        return;
     }
     println!(
         "[autonomy] 已接线任务持续 dead {DEAD_TICKS} 拍: {} → esp_restart",
@@ -210,30 +209,10 @@ fn rr3_names(bits: u8) -> String {
 pub(crate) fn rr3_health_json() -> String {
     let sntp = SNTP_STATE.load(Ordering::Relaxed);
     let snap = SNAP.lock().ok().and_then(|s| *s);
-    let Some(h) = snap else {
-        return format!("{{\"shell\":\"off\",\"sntp\":\"{}\"}}", sntp_word(sntp));
-    };
-    let mut tasks = String::new();
-    for task in Rr3Task::ALL {
-        let i = task.index();
-        if i > 0 {
-            tasks.push(',');
-        }
-        tasks.push_str(&format!(
-            "{{\"name\":\"{}\",\"state\":\"{}\",\"timeouts\":{}}}",
-            task.name(),
-            state_word(h.state[i]),
-            h.timeouts[i]
-        ));
+    match snap {
+        Some(h) => rr_autonomy::rr3_health_json(&h, sntp_word(sntp)),
+        None => format!("{{\"shell\":\"off\",\"sntp\":\"{}\"}}", sntp_word(sntp)),
     }
-    format!(
-        "{{\"shell\":\"on\",\"sntp\":\"{}\",\"ticks\":{},\"overruns\":{},\"restarts\":{},\"tasks\":[{}]}}",
-        sntp_word(sntp),
-        h.ticks,
-        h.overruns,
-        h.restarts,
-        tasks
-    )
 }
 
 fn sntp_word(v: i8) -> &'static str {
@@ -242,11 +221,6 @@ fn sntp_word(v: i8) -> &'static str {
         SNTP_FAILED => "failed",
         _ => "unknown",
     }
-}
-
-fn state_word(v: Rr3TaskState) -> &'static str {
-    const WORDS: [&str; 4] = ["starting", "running", "degraded", "dead"];
-    WORDS[v as usize]
 }
 
 #[cfg(test)]
@@ -265,10 +239,19 @@ mod tests {
 
     #[test]
     fn state_words_cover_all_variants() {
-        assert_eq!(state_word(Rr3TaskState::Starting), "starting");
-        assert_eq!(state_word(Rr3TaskState::Running), "running");
-        assert_eq!(state_word(Rr3TaskState::Degraded), "degraded");
-        assert_eq!(state_word(Rr3TaskState::Dead), "dead");
+        assert_eq!(
+            rr_autonomy::rr3_state_word(Rr3TaskState::Starting),
+            "starting"
+        );
+        assert_eq!(
+            rr_autonomy::rr3_state_word(Rr3TaskState::Running),
+            "running"
+        );
+        assert_eq!(
+            rr_autonomy::rr3_state_word(Rr3TaskState::Degraded),
+            "degraded"
+        );
+        assert_eq!(rr_autonomy::rr3_state_word(Rr3TaskState::Dead), "dead");
     }
 
     #[test]
@@ -298,11 +281,16 @@ mod tests {
     }
 
     #[test]
-    fn dead_step_needs_two_consecutive_ticks() {
+    fn dead_gate_needs_two_consecutive_ticks() {
         let h = health_with(Rr3TaskState::Dead, 1);
         let ever = [true; RR3_TASK_COUNT];
-        assert_eq!(rr3_dead_step(&h, &ever, 0), 1);
+        let mut gate = Rr3RestartGate::rr3_gate_new(DEAD_TICKS);
+        assert!(!gate.rr3_gate_step(rr3_dead_bits(&h, &ever) != 0));
         let alive = health_with(Rr3TaskState::Running, 0);
-        assert_eq!(rr3_dead_step(&alive, &ever, 1), 0);
+        assert!(!gate.rr3_gate_step(rr3_dead_bits(&alive, &ever) != 0));
+        assert!(
+            !gate.rr3_gate_step(rr3_dead_bits(&h, &ever) != 0),
+            "清零后重新计数"
+        );
     }
 }

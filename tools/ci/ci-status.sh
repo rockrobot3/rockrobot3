@@ -29,7 +29,10 @@ done
 
 qlocal=$(git rev-parse HEAD 2>/dev/null || true)
 enc=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$branch")
-url="https://api.github.com/repos/${repo}/actions/runs?branch=${enc}&per_page=40"
+# per_page=10 足够（同分支同 workflow 只取最新一条），并把响应压到 ~150KB——
+# per_page=40 时 588KB 的响应在弱网/网关限速下会半包截断（curl 18/56），本脚本
+# 因此偶发"API 请求失败"（2026-11-19 实测三取一败）。小包 + 有界重试。
+url="https://api.github.com/repos/${repo}/actions/runs?branch=${enc}&per_page=10"
 hdr=(-H "Accept: application/vnd.github+json")
 if [ -n "${GITHUB_TOKEN:-}" ]; then
   hdr+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
@@ -37,8 +40,16 @@ fi
 
 tmp=$(mktemp "${TMPDIR:-/tmp}/rr3-ci-runs.XXXXXX")
 trap 'rm -f "$tmp"' EXIT INT TERM
-if ! curl -s -m 25 "${hdr[@]}" -o "$tmp" "$url"; then
-  echo "ci-status: API 请求失败（网络或限流）" >&2
+ok=0
+for _ in 1 2 3; do
+  if curl -s -m 25 "${hdr[@]}" -o "$tmp" "$url"; then
+    ok=1
+    break
+  fi
+  sleep 2
+done
+if [ "$ok" != 1 ]; then
+  echo "ci-status: API 请求失败（网络或限流，已重试 3 次）" >&2
   exit 2
 fi
 

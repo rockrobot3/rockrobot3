@@ -35,7 +35,7 @@ CI 单一事实源在 GitHub Actions（R30 裁定：atomgit 无流水线功能�
 | 工作流 | 作业 | 职责 |
 |---|---|---|
 | `gate.yml`（6） | conventions / lint / supply / alsa / ota-bundle / scripts | 门禁主线（与本地 `tools/ci/check.sh` 同一入口）：规约全步（含质量度量与仓面卫生）、rustfmt＋clippy 全工程、supply 供应链审计（cargo-deny --strict，周程定时复核公告）、ALSA 真后端编译门、OTA bundle 装配门、脚本卫生三自检 |
-| `platforms.yml`（6） | cross-artifacts ×3 / esp32-gates ×2 / ipct003 / host-windows / host-macos | 跨平台与跨架构面：交叉编译矩阵、ESP32 专用门、ipct003 跨架构对拍（--strict）、宿主等价面（Windows＋macOS；macOS 单腿含 workspace 与独立工程串行） |
+| `platforms.yml`（7） | cross-artifacts ×3 / esp32-gates ×2 / autonomy-face / ipct003 / host-windows / host-macos | 跨平台与跨架构面：交叉编译矩阵、ESP32 专用门（含 autonomy/tts 双档构建腿）、自治健康面真跑（30 s 模拟 + 复位闸门）、ipct003 跨架构对拍（--strict）、宿主等价面（Windows＋macOS；macOS 单腿含 workspace 与独立工程串行） |
 | `integration.yml`（7） | distro-smoke / ota-sign / rk3566-onboard / buildroot-assembly / sim-assemble / sim-chain / matrix | 集成面：deb 装机冒烟、OTA 签名链、板面装配断言、装配与全链闭环演练（含 60s 稳态与阻塞面判据）、点验矩阵出数 |
 
 **数值回传面（续轮二十八；续轮四十三起加丢帧面）**：job 日志匿名不可读（403 已实证），

@@ -243,6 +243,19 @@ jobs:
           prelude: ~/export-esp.sh
           command: bash tools/ci/rr3-act-sense-espidf-check.sh ${{ matrix.chip }}
 
+  # 自治健康面集成腿（W3-3/W4-2）：host 真跑监督核状态迁移（30 s 模拟 + 复位
+  # 闸门），不占 ESP 工具链；双芯片 autonomy/tts 构建面仍归 esp32-gates。
+  autonomy-face:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - name: 自治健康面集成（真跑）
+        run: bash tools/ci/autonomy-face.sh
+
   # IPC-T-003 跨架构对拍（ADR-0006 后果项，平台条件脚本——不进门禁步序，
   # 但 ubuntu runner 恰好具备全部平台条件：x86_64 宿主 + QEMU arm64 仿真 +
   # Docker + espup 装的 esp 工具链（第④路 xtensa 对拍））。--strict：任何
