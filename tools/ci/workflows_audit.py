@@ -63,6 +63,18 @@ CHIP_MATRIX = {
     "esp32-gates": ["chip: esp32", "chip: esp32s3"],
 }
 
+# 矩阵腿的验证步骤（脚本名即判据锚）：腿在而步骤被删，等于覆盖名存实亡。
+JOB_STEPS = {
+    "cross-artifacts": ["cross-artifacts.sh", "ipct003_dump"],
+    "esp32-gates": [
+        "periph-base-check.sh",
+        "esp-uart-echo-check.sh",
+        "espidf-std-check.sh",
+        "espidf-sentinel-check.sh",
+        "rr3-act-sense-espidf-check.sh",
+    ],
+}
+
 
 def step_block(lines, i):
     """第 i 行（`- uses:`）之后的步骤块（缩进更深的行）。"""
@@ -302,7 +314,7 @@ def graph_cycle(graph):
 
 
 def chip_problems(text, rel):
-    """五芯片验证面：platforms.yml 的矩阵腿缺一条即红（覆盖不得缩水）。"""
+    """五芯片验证面：platforms.yml 的矩阵腿缺一条即红，腿内验证步骤缺一即红。"""
     if rel.name != "platforms.yml":
         return []
     jobs = dict(jobs_of(text))
@@ -316,6 +328,9 @@ def chip_problems(text, rel):
         for needle in needles:
             if needle not in joined:
                 bad.append(f"{rel} job {job} 缺 {needle}（五芯片覆盖不得缩水）")
+        for script in JOB_STEPS.get(job, []):
+            if script not in joined:
+                bad.append(f"{rel} job {job} 缺验证步骤 {script}（矩阵腿名存实亡）")
     return bad
 
 
@@ -448,6 +463,7 @@ def self_test():
         ("缺 permissions 被抓", any("缺顶层 permissions" in b for b in bad)),
         ("芯片矩阵缩水被抓", any("五芯片覆盖不得缩水" in b for b in bad)),
         ("芯片 job 缺失被抓", any("缺 job esp32-gates" in b for b in bad)),
+        ("芯片验证步骤缺失被抓", any("验证步骤" in b for b in bad)),
         ("好例零误报", not any("good.yml" in b for b in bad)),
     ]
     for name, ok in cases:
