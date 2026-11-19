@@ -177,6 +177,7 @@ fn rr3_ctl_health(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
     Ok(json!({
         "modules": modules,
         "restart_exhausted": exhausted,
+        "watchdog_overruns": crate::daemon::rr3_wd_overruns(),
         "degraded": crate::rr3_degrade_get(),
     }))
 }

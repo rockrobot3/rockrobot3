@@ -1,5 +1,6 @@
 //! 时钟、心跳与看门狗节拍：到期判死、广播与降级传播。
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -13,6 +14,14 @@ use crate::supervisor::Rr3Supervisor;
 use crate::{rr3_lock, rr3_log};
 
 use super::notify::{rr3_notify_watchdog, NOTIFY_MS};
+
+/// 看门狗拍超时累计（进程级）：health 读回，避免"只有日志、没有数字"。
+static WD_OVERRUNS: AtomicU64 = AtomicU64::new(0);
+
+/// 看门狗拍超时累计（ctl.health 的顶层列）。
+pub fn rr3_wd_overruns() -> u64 {
+    WD_OVERRUNS.load(Ordering::Relaxed)
+}
 
 /// 相对进程起点的单调毫秒：在册表的时钟单位（Task 5"时钟约定"）
 pub fn rr3_now_ms(t0: Instant) -> u64 {
@@ -115,9 +124,10 @@ fn rr3_watchdog_loop(
         }
         let done = Instant::now();
         if rr3_tick_over(started, done, tick) {
+            let total = WD_OVERRUNS.fetch_add(1, Ordering::Relaxed) + 1;
             if over_streak % 60 == 0 {
                 rr3_log(&format!(
-                    "watchdog 拍超时：本拍扫描耗时 {}ms > tick={}ms——判死按实际扫描时刻，下一拍按固定栅格重排",
+                    "watchdog 拍超时：本拍扫描耗时 {}ms > tick={}ms——判死按实际扫描时刻，下一拍按固定栅格重排（累计 {total} 次）",
                     done.saturating_duration_since(started).as_millis(),
                     tick.as_millis()
                 ));

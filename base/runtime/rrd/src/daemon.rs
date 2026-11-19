@@ -23,4 +23,4 @@ mod tick;
 mod tests;
 
 pub use run::rr3_daemon_run;
-pub use tick::{rr3_now_ms, rr3_now_ns, rr3_power_frame, rr3_state_frame};
+pub use tick::{rr3_now_ms, rr3_now_ns, rr3_power_frame, rr3_state_frame, rr3_wd_overruns};
