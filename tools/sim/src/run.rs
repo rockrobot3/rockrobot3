@@ -1,0 +1,447 @@
+//! 默认演练编排（`--manifest` + 外部 sim_peer + rr3-ctl 四命令巡检）。
+//!
+//! 由 `main` 在 Unix 下调用；四个模式的分派也在这里（`--brain` / `--profile` /
+//! `--chain` 各归自己的子模块，本文件只做默认路径与公共收尾）。
+
+use std::path::Path;
+use std::process::{Command, Stdio};
+use std::time::Duration;
+
+use crate::assemble::{
+    rr3_ctl_maybe_fail, rr3_ctl_out, rr3_ctl_status_rows as rr3_ctl_rows, rr3_with_log_tail,
+};
+use crate::drill::{
+    rr3_default_bins, rr3_manifest_text, rr3_require_bins, rr3_section, rr3_wait_modules,
+    RR3_DRILL_PUBLISHER, RR3_DRILL_RESIDENT, RR3_SIM_B_TOPIC,
+};
+
+/// 巡检轮询的上界：冷启动（首次加载契约 + 起子进程）在慢机器上也要够用
+const RR3_READY_DEADLINE: Duration = Duration::from_secs(15);
+/// 模块健康参数：心跳 200ms / 看门狗 1000ms——比生产紧、比测试宽，演练看得见心跳数
+const RR3_SIM_HB_MS: u64 = 200;
+const RR3_SIM_WD_MS: u64 = 1000;
+
+pub fn rr3_sim_main(args: &[String]) -> i32 {
+    let a = match crate::drill::rr3_sim_args_parse(args) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("rr3-sim: {e}");
+            return 2;
+        }
+    };
+    rr3_drill_exit(rr3_sim_route(&a))
+}
+
+/// 演练路由：--chain / --brain / --profile 各证一面（互斥已由参数面裁定），
+/// 缺省走两面演练。
+fn rr3_sim_route(a: &crate::drill::Rr3SimArgs) -> Result<String, String> {
+    // --chain 走批F4 全链闭环演练（判据 10 的 sim 档）
+    if a.chain {
+        return crate::chain::rr3_chain_drill(a);
+    }
+    // --brain 走 M4 四真进程演练（ADR-0014 裁定 4）
+    if a.brain {
+        return crate::brain::rr3_brain_drill(a);
+    }
+    // --profile 走 D9 装配演练（装配单驱动 boot + 全模块真进程巡检）
+    if a.profile.is_some() {
+        return crate::assemble::rr3_assemble_drill(a);
+    }
+    rr3_sim_drill(a)
+}
+
+/// 演练报告统一出口（各演练分支同款底座）：报告上 stdout 退 0，报错上 stderr 退 1。
+fn rr3_drill_exit(r: Result<String, String>) -> i32 {
+    match r {
+        Ok(report) => {
+            println!("{report}");
+            0
+        }
+        Err(e) => {
+            eprintln!("rr3-sim: {e}");
+            1
+        }
+    }
+}
+
+/// 起 rrd 之后的全部有界等待与巡检（3–6 段）：等 resident running → 外部发布者
+/// 一次性发布并退场 → rr3-ctl 四命令巡检 → sim 设备源不变量。rrd 收尾归调用方。
+fn rr3_sim_wait(
+    rrctl: &Path,
+    peer: &Path,
+    socket: &Path,
+    m_b: &Path,
+    log_path: &Path,
+    report: &mut String,
+) -> Result<(), String> {
+    rr3_sim_bring_up(rrctl, peer, socket, m_b, log_path, report)?;
+    rr3_ctl_audit(rrctl, socket, log_path, report)?;
+    rr3_prove_stream(report);
+    Ok(())
+}
+
+/// 前两段：等 resident running → 外部发布者一次性发布并退场。
+fn rr3_sim_bring_up(
+    rrctl: &Path,
+    peer: &Path,
+    socket: &Path,
+    m_b: &Path,
+    log_path: &Path,
+    report: &mut String,
+) -> Result<(), String> {
+    rr3_wait_ready(rrctl, socket, log_path, report)?;
+    rr3_publish_once(peer, socket, m_b, log_path, report)
+}
+
+/// 3. 轮询等 resident 到 running（rr3-ctl 尚未就绪时连接失败按"还没好"重试）。
+fn rr3_wait_ready(
+    rrctl: &Path,
+    socket: &Path,
+    log_path: &Path,
+    report: &mut String,
+) -> Result<(), String> {
+    rr3_wait_modules(
+        || rr3_ctl_rows(rrctl, socket),
+        &[(RR3_DRILL_RESIDENT, "running")],
+        RR3_READY_DEADLINE,
+    )
+    .map_err(|e| rr3_with_log_tail(&e, log_path))?;
+    report.push_str(rr3_section("模块 A（boot spawn → running）已就绪").as_str());
+    Ok(())
+}
+
+/// 4. 外部起发布者（publish_once：发布一条真事件后退场）。
+fn rr3_publish_once(
+    peer: &Path,
+    socket: &Path,
+    m_b: &Path,
+    log_path: &Path,
+    report: &mut String,
+) -> Result<(), String> {
+    let st = rr3_peer_cmd(peer, socket, m_b)
+        .status()
+        .map_err(|e| format!("起 {RR3_DRILL_PUBLISHER} 失败: {e}"))?;
+    rr3_pub_ready(st, log_path)?;
+    report.push_str(&format!(
+        "{RR3_DRILL_PUBLISHER} 已发布 {RR3_SIM_B_TOPIC} 并退场（exit {st}）\n"
+    ));
+    Ok(())
+}
+
+/// 发布者命令面（一次性 publish_once 角色的环境与输出接线）。
+fn rr3_peer_cmd(peer: &Path, socket: &Path, m_b: &Path) -> Command {
+    let mut cmd = Command::new(peer);
+    cmd.env("RR3_BUS_PATH", socket)
+        .env("RR3_MANIFEST", m_b)
+        .env("RR3_SIM_PEER_ROLE", "publish_once")
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    cmd
+}
+
+/// 发布者必须以 0 退场。
+fn rr3_pub_ready(st: std::process::ExitStatus, log_path: &Path) -> Result<(), String> {
+    if !st.success() {
+        return Err(rr3_pub_fail(st, log_path));
+    }
+    Ok(())
+}
+
+/// 发布者非 0 退出的点名文案（原始输出在上方）。
+fn rr3_pub_fail(st: std::process::ExitStatus, log_path: &Path) -> String {
+    format!("{RR3_DRILL_PUBLISHER} 退出码 {st}（详见上方输出与 {log_path:?}）")
+}
+
+/// 5. rr3-ctl 四命令巡检：status 断言 → 状态表断言 → health/logs/ota 报告。
+fn rr3_ctl_audit(
+    rrctl: &Path,
+    socket: &Path,
+    log_path: &Path,
+    report: &mut String,
+) -> Result<(), String> {
+    rr3_audit_status(rrctl, socket, log_path, report)?;
+    let rows = rr3_ctl_rows(rrctl, socket);
+    rr3_rows_audit(&rows, report)?;
+    rr3_ctl_reports(rrctl, socket, report)?;
+    Ok(())
+}
+
+/// status 巡检：输出入报告 + denied_publish 归零门。
+fn rr3_audit_status(
+    rrctl: &Path,
+    socket: &Path,
+    log_path: &Path,
+    report: &mut String,
+) -> Result<(), String> {
+    report.push_str(rr3_section("rr3-ctl status 巡检").as_str());
+    let status_out = rr3_ctl_out(rrctl, socket, "status")?;
+    report.push_str(&status_out);
+    // denied_publish = 0 是"事件真被接受"的线上证据：发布被拒会在这里现形
+    rr3_denied_gate(&status_out, log_path)
+}
+
+/// denied_publish = 0 是"事件真被接受"的线上证据（发布被拒即红）。
+fn rr3_denied_gate(status_out: &str, log_path: &Path) -> Result<(), String> {
+    if !status_out.contains("denied_publish = 0") {
+        return Err(format!(
+            "denied_publish ≠ 0：{RR3_SIM_B_TOPIC} 的发布被 rrd 拒了，见日志 {log_path:?}\n{status_out}"
+        ));
+    }
+    Ok(())
+}
+
+/// 状态表断言：resident 必须仍在 running；发布者若出现，终相不许是 running。
+/// 发布者退场后的终相**不作死断言**：sim_peer 的 publish_once 退场不排空接收
+/// 队列，未读广播帧会让对端把 FIN 变 RST（sim_peer.rs 的 abort 支注释记了同一
+/// 形状），终相随收尾路径在 unregistered/failed 两可——只断言"不在 running 了"。
+fn rr3_rows_audit(rows: &[(String, u64, String)], report: &mut String) -> Result<(), String> {
+    rr3_resident_running(rows)?;
+    rr3_publisher_audit(rows, report)
+}
+
+/// resident 必须仍在 running（巡检期间掉线即红）。
+fn rr3_resident_running(rows: &[(String, u64, String)]) -> Result<(), String> {
+    if !rows
+        .iter()
+        .any(|(n, _, p)| n == RR3_DRILL_RESIDENT && p == "running")
+    {
+        return Err(format!(
+            "{RR3_DRILL_RESIDENT} 不在 running（巡检期间掉线？）：{rows:?}"
+        ));
+    }
+    Ok(())
+}
+
+/// 发布者若出现，终相不许是 running；退场后两可，只登记注记。
+fn rr3_publisher_audit(rows: &[(String, u64, String)], report: &mut String) -> Result<(), String> {
+    let Some((n, _, p)) = rows.iter().find(|(n, _, _)| n == RR3_DRILL_PUBLISHER) else {
+        return Ok(());
+    };
+    if p == "running" {
+        return Err(format!("{n} 退场后仍 running（EOF 没被记账？）：{rows:?}"));
+    }
+    report.push_str(&format!(
+        "注：{n} 终相 = {p}（退场未排空 → 终相两可，见 sim_peer.rs）\n"
+    ));
+    Ok(())
+}
+
+/// health/logs 原样入报告（取不到即整体报错）；ota 随 M6 恒拒，非 0 退出才是预期。
+fn rr3_ctl_reports(rrctl: &Path, socket: &Path, report: &mut String) -> Result<(), String> {
+    report.push_str(rr3_section("rr3-ctl health").as_str());
+    report.push_str(&rr3_ctl_out(rrctl, socket, "health")?);
+    report.push_str(rr3_section("rr3-ctl logs（rrd 日志环尾部）").as_str());
+    report.push_str(&rr3_ctl_out(rrctl, socket, "logs")?);
+    report.push_str(rr3_section("rr3-ctl ota（预期恒拒，随 M6）").as_str());
+    rr3_ota_report(rrctl, socket, report);
+    Ok(())
+}
+
+/// ota 预期恒拒：成功反而是意外，两种形态都写进报告。
+fn rr3_ota_report(rrctl: &Path, socket: &Path, report: &mut String) {
+    let text = rr3_ctl_maybe_fail(rrctl, socket, "ota").map_or_else(
+        |(code, out)| format!("按预期被拒（exit {code}）:\n{out}"),
+        |out| format!("意外成功：\n{out}"),
+    );
+    report.push_str(&text);
+}
+
+/// 6. sim 设备源不变量（rr-hal 同一种流）。
+fn rr3_prove_stream(report: &mut String) {
+    let stream = crate::devices::rr3_sim_silence(1600);
+    report.push_str(rr3_section("sim 设备源不变量").as_str());
+    report.push_str(&format!(
+        "backend=sim，1600 帧 @16kHz → {}ms（与 linux 后端同一种流）\n",
+        stream.rr3_pcm_duration_ms()
+    ));
+}
+
+fn rr3_sim_drill(a: &crate::drill::Rr3SimArgs) -> Result<String, String> {
+    // ---- 0. 定位：仓根与三个二进制 ----
+    let (rrd, peer, rrctl) = rr3_sim_bins(a)?;
+
+    // ---- 1. 夹具：套接字 + 两份 manifest（entry 用 sim_peer 的绝对路径）。
+    // C14① 换位：resident = rr3-interact（不发布），外部发布者 = rr3-sense
+    //（演练主题 vad_start 的 owner 前缀归属要求发布方叫 rr3-sense）。 ----
+    // ---- 2. 起 rrd：boot spawn 模块 A（resident） ----
+    let (fx, mut rrd_child, log_path) = rr3_sim_boot(a, &rrd, &peer)?;
+
+    let mut report = String::new();
+    let outcome = rr3_sim_wait(&rrctl, &peer, &fx.socket, &fx.m_b, &log_path, &mut report);
+    let result = outcome.map(|()| rr3_sim_ok(report));
+    // ---- 收尾：杀 rrd；resident 模块喂狗失败自退；--keep 保留现场 ----
+    rr3_cleanup(a, &mut rrd_child, &fx, &log_path);
+    result
+}
+
+/// 成功结论：分节标题 + 全链路结论（报告原样带回）。
+fn rr3_sim_ok(mut report: String) -> String {
+    report.push_str(rr3_section("演练结论").as_str());
+    report.push_str("全链路 OK：rrd + boot spawn + 外部发布 + rr3-ctl 巡检\n");
+    report
+}
+
+/// 夹具与 rrd 起跑（两段：落盘 manifest → 起 rrd boot spawn）。
+fn rr3_sim_boot(
+    a: &crate::drill::Rr3SimArgs,
+    rrd: &Path,
+    peer: &Path,
+) -> Result<(SimFx, std::process::Child, std::path::PathBuf), String> {
+    let fx = rr3_fixture(a, peer)?;
+    let (child, log_path) = rr3_spawn_rrd(rrd, &fx)?;
+    Ok((fx, child, log_path))
+}
+
+/// 仓根定位与三个二进制（缺省随 target-dir 同层；存在性一次校验）。
+fn rr3_sim_bins(
+    a: &crate::drill::Rr3SimArgs,
+) -> Result<(std::path::PathBuf, std::path::PathBuf, std::path::PathBuf), String> {
+    let repo = crate::drill::rr3_repo_locate(a)?;
+    let (d_rrd, d_peer, d_rrctl) = rr3_default_bins(&repo);
+    let rrd = a.rrd.clone().unwrap_or(d_rrd);
+    let peer = a.sim_peer.clone().unwrap_or(d_peer);
+    let rrctl = a.rrctl.clone().unwrap_or(d_rrctl);
+    rr3_require_bins(&rrd, &peer, &rrctl)?;
+    Ok((rrd, peer, rrctl))
+}
+
+/// 演练夹具：工作目录/套接字/两份 manifest 的落点与内容。
+struct SimFx {
+    workdir: std::path::PathBuf,
+    socket: std::path::PathBuf,
+    m_a: std::path::PathBuf,
+    m_b: std::path::PathBuf,
+}
+
+/// 建工作目录与两份 manifest；`entry` 一律用 sim_peer 绝对路径。
+fn rr3_fixture(a: &crate::drill::Rr3SimArgs, peer: &Path) -> Result<SimFx, String> {
+    let workdir = rr3_workdir(a);
+    std::fs::create_dir_all(&workdir).map_err(|e| format!("建 {workdir:?} 失败: {e}"))?;
+    let socket = rr3_fixture_socket(a, &workdir);
+    let m_a = workdir.join(format!("{RR3_DRILL_RESIDENT}.toml"));
+    let m_b = workdir.join(format!("{RR3_DRILL_PUBLISHER}.toml"));
+    let fx = SimFx {
+        workdir,
+        socket,
+        m_a,
+        m_b,
+    };
+    rr3_fixture_mans(&fx, peer)?;
+    Ok(fx)
+}
+
+/// 两份 manifest 落点与内容（resident / 发布者）。
+fn rr3_fixture_mans(fx: &SimFx, peer: &Path) -> Result<(), String> {
+    rr3_write_manifest(&fx.m_a, RR3_DRILL_RESIDENT, peer, "always", &[])?;
+    rr3_write_manifest(
+        &fx.m_b,
+        RR3_DRILL_PUBLISHER,
+        peer,
+        "never",
+        &[RR3_SIM_B_TOPIC],
+    )
+}
+
+/// 夹具套接字：显式 `--socket` 优先，否则落在工作目录；旧文件先清掉。
+fn rr3_fixture_socket(
+    a: &crate::drill::Rr3SimArgs,
+    workdir: &std::path::Path,
+) -> std::path::PathBuf {
+    let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
+    let _ = std::fs::remove_file(&socket);
+    socket
+}
+
+/// 夹具工作目录：显式 `--socket` 取其父目录，否则按 pid 落 tmp。
+fn rr3_workdir(a: &crate::drill::Rr3SimArgs) -> std::path::PathBuf {
+    match &a.socket {
+        Some(s) => s.parent().unwrap_or(Path::new(".")).to_path_buf(),
+        None => std::env::temp_dir().join(format!("rr3-sim-{}", std::process::id())),
+    }
+}
+
+/// 写一份 manifest（健康参数固定为演练档；写失败带路径点名）。
+fn rr3_write_manifest(
+    path: &Path,
+    role: &str,
+    peer: &Path,
+    mode: &str,
+    topics: &[&str],
+) -> Result<(), String> {
+    std::fs::write(
+        path,
+        rr3_manifest_text(role, peer, RR3_SIM_HB_MS, RR3_SIM_WD_MS, mode, topics),
+    )
+    .map_err(|e| format!("写 {path:?} 失败: {e}"))
+}
+
+/// 起 rrd（stdout 落 rrd.log），并把 pid/socket/manifest 三点打进 stdout。
+fn rr3_spawn_rrd(
+    rrd: &Path,
+    fx: &SimFx,
+) -> Result<(std::process::Child, std::path::PathBuf), String> {
+    let log_path = fx.workdir.join("rrd.log");
+    let log = rr3_rrd_log(&log_path)?;
+    let rrd_child = rr3_rrd_cmd(rrd, fx)
+        .stdout(Stdio::from(log))
+        .spawn()
+        .map_err(|e| format!("起 rrd 失败: {e}"))?;
+    println!(
+        "rr3-sim: rrd 已起 pid={}，socket={}",
+        rrd_child.id(),
+        fx.socket.display()
+    );
+    println!(
+        "rr3-sim: boot manifest {}（resident，等 running）",
+        fx.m_a.display()
+    );
+    Ok((rrd_child, log_path))
+}
+
+/// rrd 命令面（boot spawn resident；stdout 由调用方接日志文件）。
+fn rr3_rrd_cmd(rrd: &Path, fx: &SimFx) -> Command {
+    let mut cmd = Command::new(rrd);
+    cmd.arg("--socket")
+        .arg(&fx.socket)
+        .arg("--manifest")
+        .arg(&fx.m_a)
+        .arg("--boot-role")
+        .arg("resident")
+        .args(["--pre-register-timeout-ms", "3000"])
+        .stderr(Stdio::inherit());
+    cmd
+}
+
+/// rrd 日志文件（stdout 落盘；建失败点名路径）。
+fn rr3_rrd_log(log_path: &Path) -> Result<std::fs::File, String> {
+    std::fs::File::create(log_path).map_err(|e| format!("建 {log_path:?} 失败: {e}"))
+}
+
+/// 收尾：`--keep` 保留现场并打印手动命令，否则杀 rrd 并等其退出。
+fn rr3_cleanup(
+    a: &crate::drill::Rr3SimArgs,
+    rrd_child: &mut std::process::Child,
+    fx: &SimFx,
+    log_path: &Path,
+) {
+    if a.keep {
+        rr3_cleanup_keep(rrd_child, fx, log_path);
+        return;
+    }
+    let _ = rrd_child.kill();
+    let _ = rrd_child.wait();
+}
+
+/// `--keep`：打印现场保留与手动收尾指引（不杀 rrd）。
+fn rr3_cleanup_keep(rrd_child: &std::process::Child, fx: &SimFx, log_path: &Path) {
+    println!(
+        "rr3-sim: --keep 保留现场：socket={} log={}",
+        fx.socket.display(),
+        log_path.display()
+    );
+    println!(
+        "rr3-sim: 手动收尾：kill {}；rm -rf {:?}",
+        rrd_child.id(),
+        fx.workdir
+    );
+}
