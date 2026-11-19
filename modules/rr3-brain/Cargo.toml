@@ -37,3 +37,8 @@ toml = "0.8"
 # default-features 关掉 gzip（最小依赖面，三家端点无解压需求）；tls feature = rustls
 # ＋内置根证书（webpki-roots，板上无系统 CA 库亦可复现）。mock 路径纯 std 零 HTTP。
 ureq = { version = "2", default-features = false, features = ["tls"] }
+
+# 生产稳定性：release 档也开算术溢出检查——静默回绕是最难定位的缺陷；
+# 代价是个位数百分比性能，换"溢出即 panic 可定位"。
+[profile.release]
+overflow-checks = true

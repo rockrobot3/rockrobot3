@@ -30,3 +30,8 @@ rr-hal-api = { path = "../../base/runtime/rr-hal-api" }
 rr-core = { path = "../../base/runtime/rr-core" }
 serde_json = "1"
 toml = "0.8"
+
+# 生产稳定性：release 档也开算术溢出检查——静默回绕是最难定位的缺陷；
+# 代价是个位数百分比性能，换"溢出即 panic 可定位"。
+[profile.release]
+overflow-checks = true
