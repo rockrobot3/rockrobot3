@@ -2,39 +2,16 @@
 
 use serde_json::{json, Value};
 
-use crate::boot::{
-    rr3_base_url_check, rr3_brain_cfg_parse, rr3_cloud_cfg_of, Rr3BrainCfg, Rr3LlmMode,
-};
-use crate::cloud::{rr3_key_set_of, Rr3LlmClient};
+use crate::boot::{rr3_brain_cfg_parse, rr3_cloud_cfg_of, Rr3BrainCfg, Rr3LlmMode};
+use crate::cloud::Rr3LlmClient;
 use crate::config_store::{rr3_block_rewrite, rr3_config_persist};
 
 // ---------- 模型行面（ADR-0023：面板 CRUD + 切换 active + 连通性测试） ----------
 
-/// 模型行表快照（doc 内，缺表 = 空表；非数组点名拒——与 boot 同一文案）
-fn rr3_model_rows(doc: &Value) -> Result<Vec<Value>, String> {
-    match doc.get("rr3-brain").and_then(|b| b.get("model")) {
-        None | Some(Value::Null) => Ok(Vec::new()),
-        Some(Value::Array(rows)) => Ok(rows.clone()),
-        Some(_) => Err("config [[rr3-brain.model]] 须为行表（数组）".to_string()),
-    }
-}
-
-/// 行内字符串字段（缺键/Null 回落空串；非串点名行号与键名）
-fn rr3_row_str<'a>(row: &'a Value, key: &str, idx: usize) -> Result<&'a str, String> {
-    match row.get(key) {
-        None | Some(Value::Null) => Ok(""),
-        Some(Value::String(s)) => Ok(s.as_str()),
-        Some(_) => Err(format!("模型行 #{idx}.{key} 须字符串")),
-    }
-}
-
-/// 表内 active 行名（无 → None：空表走 cloud fallback，没有行可点名）
-fn rr3_row_active_name(rows: &[Value]) -> Option<String> {
-    rows.iter()
-        .find(|r| r.get("active").and_then(Value::as_bool) == Some(true))
-        .and_then(|r| r.get("name").and_then(Value::as_str))
-        .map(|s| s.to_string())
-}
+mod input;
+mod row;
+use input::{rr3_model_row_input, Rr3ModelRowInput};
+use row::{rr3_model_row, rr3_model_rows, rr3_row_active_name};
 
 /// 模型行列表（`rr3-brain/model/list` 应答体）：每行回 名称/API 根/模型/格式/
 /// 模式/key_ref/key 是否就位/active——**只回 `key_set` 布尔，永无密钥明文**。
@@ -46,165 +23,6 @@ pub(crate) fn rr3_model_list(cfg: &Rr3BrainCfg) -> Result<Value, String> {
         .map(|(i, row)| rr3_model_row(row, i))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(json!({ "models": models, "active": rr3_row_active_name(&rows) }))
-}
-
-/// 单行投影（B9 自 list 抽出）：名称/API 根/模型/格式/模式/key_ref/key 就位/
-/// active——只回 `key_set` 布尔，永无密钥明文。
-fn rr3_model_row(row: &Value, i: usize) -> Result<Value, String> {
-    let v = rr3_row_view(row, i)?;
-    let mode_enum = Some(if v.mode == "local" {
-        Rr3LlmMode::Local
-    } else {
-        Rr3LlmMode::Api
-    });
-    Ok(json!({
-        "name": v.name,
-        "base_url": rr3_row_str(row, "base_url", i)?,
-        "model_id": rr3_row_str(row, "model_id", i)?,
-        "api_format": v.api_format,
-        "mode": v.mode,
-        "key_ref": v.key_ref,
-        "key_set": rr3_key_set_of(&v.key_ref, mode_enum),
-        "active": row.get("active").and_then(Value::as_bool).unwrap_or(false),
-    }))
-}
-
-/// 行视图（B9 自 model_row 抽出）：name/mode/api_format 的缺省归一与 key_ref
-/// 三态读取同址——投影面只做拼装。
-struct Rr3RowView<'a> {
-    name: &'a str,
-    mode: &'a str,
-    api_format: &'a str,
-    key_ref: Option<String>,
-}
-
-fn rr3_row_view<'a>(row: &'a Value, i: usize) -> Result<Rr3RowView<'a>, String> {
-    let name = rr3_row_str(row, "name", i)?;
-    if name.trim().is_empty() {
-        return Err(format!("模型行 #{i} 缺 name"));
-    }
-    let mode = rr3_row_str(row, "mode", i)?.trim();
-    let mode = if mode.is_empty() { "api" } else { mode };
-    let api_format = rr3_row_str(row, "api_format", i)?.trim();
-    let api_format = if api_format.is_empty() {
-        "openai"
-    } else {
-        api_format
-    };
-    let key_ref = Some(rr3_row_str(row, "api_key_ref", i)?.trim())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string());
-    Ok(Rr3RowView {
-        name,
-        mode,
-        api_format,
-        key_ref,
-    })
-}
-
-/// upsert 入参（一次解析；`key_ref` 三态：缺席 = 保留现值、空串 = 清除、
-/// 有值 = 校验后写——`key_ref_clear` 承载"空串清除"这一态）。
-struct Rr3ModelRowInput<'a> {
-    base_url: &'a str,
-    model_id: &'a str,
-    api_format: &'a str,
-    mode: &'a str,
-    key_ref: Option<String>,
-    key_ref_clear: bool,
-    active: Option<bool>,
-}
-
-/// `api_format` 词表核（缺省 openai；本批仅 openai）。
-fn rr3_api_format_of<'a>(name: &str, args: &'a Value) -> Result<&'a str, String> {
-    let api_format = args
-        .get("api_format")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("openai");
-    if api_format != "openai" {
-        return Err(format!(
-            "模型行 {name} api_format 暂不支持: {api_format}（本批仅 openai）"
-        ));
-    }
-    Ok(api_format)
-}
-
-/// `mode` 词表核（缺省 api；允许 api/local）。
-fn rr3_mode_of<'a>(name: &str, args: &'a Value) -> Result<&'a str, String> {
-    let mode = args
-        .get("mode")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("api");
-    if mode != "api" && mode != "local" {
-        return Err(format!("模型行 {name} mode 不认: {mode}（允许 api/local）"));
-    }
-    Ok(mode)
-}
-
-/// `api_key_ref` 三态核：缺席 = 保留现值（None,false）；空串 = 清除（None,true）；
-/// 有值 = 无空白且 `env:` 前缀后是合法变量名后写入（Some(s),false）。
-fn rr3_key_ref_input(name: &str, args: &Value) -> Result<(Option<String>, bool), String> {
-    let Some(v) = args.get("api_key_ref") else {
-        return Ok((None, false));
-    };
-    let s = v
-        .as_str()
-        .map(str::trim)
-        .ok_or_else(|| format!("模型行 {name} api_key_ref 须字符串"))?;
-    if s.is_empty() {
-        return Ok((None, true));
-    }
-    if s.chars().any(char::is_whitespace) {
-        return Err(format!("模型行 {name} api_key_ref 不得含空白: '{s}'"));
-    }
-    if s.strip_prefix(crate::cloud::RR3_KEY_REF_ENV_PREFIX)
-        .is_some_and(|var| var.is_empty() || var.chars().any(char::is_whitespace))
-    {
-        return Err(format!(
-            "模型行 {name} api_key_ref 的 env: 后须变量名（非空、无空白）: '{s}'"
-        ));
-    }
-    Ok((Some(s.to_string()), false))
-}
-
-/// 模型行进参解析：必填/域名/键引用/active 逐项按旧文案 fail-closed。
-fn rr3_model_row_input<'a>(name: &str, args: &'a Value) -> Result<Rr3ModelRowInput<'a>, String> {
-    let base_url = args
-        .get("base_url")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .unwrap_or("");
-    let model_id = args
-        .get("model_id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .unwrap_or("");
-    if base_url.is_empty() || model_id.is_empty() {
-        return Err("upsert 须同时给 base_url 与 model_id（非空）".to_string());
-    }
-    rr3_base_url_check(base_url).map_err(|e| format!("模型行 {name} {e}"))?;
-    let api_format = rr3_api_format_of(name, args)?;
-    let mode = rr3_mode_of(name, args)?;
-    let (key_ref, key_ref_clear) = rr3_key_ref_input(name, args)?;
-    let active = args
-        .get("active")
-        .map(|v| {
-            v.as_bool()
-                .ok_or_else(|| format!("模型行 {name} active 须布尔"))
-        })
-        .transpose()?;
-    Ok(Rr3ModelRowInput {
-        base_url,
-        model_id,
-        api_format,
-        mode,
-        key_ref,
-        key_ref_clear,
-        active,
-    })
 }
 
 /// upsert 一行（同名即更新；新行在表内无 active 时自动接任）
