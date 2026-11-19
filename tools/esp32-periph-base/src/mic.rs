@@ -300,7 +300,12 @@ fn mic_run(
     let mut run = MicRun::new();
     loop {
         match rx.read(&mut buf, MIC_I2C_TIMEOUT) {
-            Ok(n) if n >= 8 => run.batch(&buf, n, &bus),
+            Ok(n) if n >= 8 => {
+                run.batch(&buf, n, &bus);
+                // W3-3 audio-in 心跳：成功读批即续命；read 永久阻塞＝采集面
+                // 停摆，由监督壳判死（恢复后心跳自然清零）。
+                crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::AudioIn);
+            }
             Ok(_) => {}
             Err(e) => {
                 println!("[mic] I2S read 失败: {e:?}");

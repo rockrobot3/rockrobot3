@@ -165,6 +165,17 @@ impl Rr3Supervisor {
         }
     }
 
+    /// 登记为已接线（`Starting`，以 `now_ms` 起算首个超时窗）：与
+    /// [`Self::rr3_sup_degrade`] 互逆；**不置 `Running`、不伪造心跳**——首次
+    /// 真实心跳到达前仍会被判死，`Dead` 也不因 arm 复活。
+    pub fn rr3_sup_arm(&mut self, task: Rr3Task, now_ms: u64) {
+        let i = task.index();
+        if self.state[i] != Rr3TaskState::Dead {
+            self.state[i] = Rr3TaskState::Starting;
+            self.last_beat_ms[i] = now_ms;
+        }
+    }
+
     /// 显式致命：置 `Dead` 并计一次重启请求（不重复计数已死的任务）。
     pub fn rr3_sup_dead(&mut self, task: Rr3Task) {
         let i = task.index();
@@ -335,6 +346,35 @@ mod tests {
         let h = sup.rr3_sup_health();
         assert_eq!(h.state[Rr3Task::Ui.index()], Rr3TaskState::Degraded);
         assert_eq!(h.timeouts[Rr3Task::Ui.index()], 0);
+    }
+
+    #[test]
+    fn arm_moves_degraded_to_starting_without_faking_running() {
+        let mut sup = Rr3Supervisor::rr3_sup_new(cfg_only(Rr3Task::AudioIn, 1_000), 0);
+        sup.rr3_sup_degrade(Rr3Task::AudioIn);
+        sup.rr3_sup_arm(Rr3Task::AudioIn, 500);
+        assert_eq!(
+            sup.rr3_sup_health().state[Rr3Task::AudioIn.index()],
+            Rr3TaskState::Starting
+        );
+        let ev = sup.rr3_sup_tick(1_600);
+        assert_eq!(ev.timed_out, 1 << Rr3Task::AudioIn.index());
+        assert_eq!(
+            sup.rr3_sup_health().state[Rr3Task::AudioIn.index()],
+            Rr3TaskState::Dead
+        );
+    }
+
+    #[test]
+    fn arm_does_not_revive_dead_task() {
+        let mut sup = Rr3Supervisor::rr3_sup_new(cfg_only(Rr3Task::Net, 1_000), 0);
+        beat_all(&mut sup, 0);
+        sup.rr3_sup_tick(1_200);
+        sup.rr3_sup_arm(Rr3Task::Net, 1_300);
+        assert_eq!(
+            sup.rr3_sup_health().state[Rr3Task::Net.index()],
+            Rr3TaskState::Dead
+        );
     }
 
     #[test]

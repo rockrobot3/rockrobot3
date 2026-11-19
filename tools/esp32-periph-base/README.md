@@ -154,7 +154,7 @@ classic 用 `--features spk-tone` 烧录后应听到两声 440 Hz。模块丝印
 - 无声排查顺序：Vin/GND → SD 是否使能 → LRC/BCLK/DIN 是否与丝印一致 → 扬声器 JST。
 - 固件入口：[`speaker.rs`](src/speaker.rs)；默认固件不编译该模块。
 
-## 自治健康面（W3-2b）
+## 自治健康面（W3-2b / W3-3）
 
 烧 `--features autonomy` 后，`GET /api/board/health` 返回监督壳快照：
 
@@ -167,7 +167,12 @@ curl http://<实际板IP>/api/board/health
 
 - `<板IP>` 是占位符，**不能原样敲**（zsh 会把 `<` 当输入重定向）。
 - AP-only 无外网，SNTP 30 s 后报 `failed` 属预期；先配网再测 `synced`。
-- W3-3 接线前六任务显示 `degraded`（显式未接线），不是故障；`shell=off` 表示固件未开 `autonomy` 档。
+- W3-3 接线范围：`net` / `audio-in` / `motion` / `ui` 为**真心跳**（net 1 s、mic 每读批、
+  motion/ui 运行面每轮 + SCAN 逐点）；`dialog`（W6）与 `audio-out`（W4-2）仍显式
+  `degraded`，不是故障。`shell=off` 表示固件未开 `autonomy` 档。
+- 已接线任务超时：串口打 `[autonomy] 心跳超时 task=...`，恢复打 `心跳恢复`；连续
+  2 拍（≈400 ms）不恢复即整机复位。**从未起过的任务**（如 I2S 装配失败）留在
+  `dead` 供观测，不触发重启环。
 
 ## 烧录与验收 runbook
 

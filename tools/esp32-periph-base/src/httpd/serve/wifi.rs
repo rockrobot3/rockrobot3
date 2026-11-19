@@ -16,6 +16,9 @@ use super::*;
 /// 存 `usize` 绕裸指针非 Send，解引用处均在 unsafe 集中段）。
 static STA_NETIF: OnceLock<usize> = OnceLock::new();
 
+/// AP netif 句柄（起栈时写一次）：AP-only 档"网络面在位"判据（W3-3 net 心跳）。
+static AP_NETIF: OnceLock<usize> = OnceLock::new();
+
 /// v5.2.2 `WIFI_INIT_CONFIG_DEFAULT()` 宏展开手抄（[`wifi_init_config_t`]）——
 /// 宏不进绑定，裸 sys 必须手抄；字段真值逐项对表**本项目生成 sdkconfig**
 /// （target …/esp-idf-sys out/sdkconfig，版本组合已钉 v5.2.2）＋ esp_wifi.h
@@ -70,9 +73,11 @@ pub(super) unsafe fn wifi_ap_configure() -> Result<&'static str, i32> {
     if s.is_empty() || s.len() > 32 || p.len() < 8 || p.len() > 63 {
         return Err(-1);
     }
-    if esp_netif_create_default_wifi_ap().is_null() {
+    let ap = esp_netif_create_default_wifi_ap();
+    if ap.is_null() {
         return Err(-1);
     }
+    let _ = AP_NETIF.set(ap as usize);
     let mut cfg: wifi_config_t = std::mem::zeroed();
     cfg.ap.ssid[..s.len()].copy_from_slice(s);
     cfg.ap.password[..p.len()].copy_from_slice(p);
@@ -236,4 +241,29 @@ pub(super) unsafe fn wifi_bringup(ssid: &[u8], pass: &[u8]) -> Result<&'static s
         esp_ok(esp_wifi_connect())?;
     }
     Ok(ap_ssid)
+}
+
+/// 网络面在位判据（W3-3 net 任务心跳真值）：STA 已得 IP（DHCP 完成）**或**
+/// SoftAP 在跑（AP-only 配网面可达）即为真；两者皆无＝网络服务确实不可达。
+///
+/// 与 [`wifi_sta_wait_conn`] 分工不同：那里判"新 STA 凭据是否连上"，这里判
+/// "板侧网络服务是否可达"——AP-only 档必须为真，否则无凭据板会把 net 判死。
+///
+/// # Safety
+///
+/// 只读 IDF netif 状态；两 handle 均为启动期写一次的进程级单例，未写入即
+/// 返回 false（时序防御），不解引用空指针。
+#[cfg(feature = "autonomy")]
+pub(super) unsafe fn rr3_net_up() -> bool {
+    netif_has_ip(STA_NETIF.get()) || netif_has_ip(AP_NETIF.get())
+}
+
+/// # Safety: 同 [`rr3_net_up`]；`esp_netif_get_ip_info` 只读传入 netif。
+#[cfg(feature = "autonomy")]
+unsafe fn netif_has_ip(h: Option<&usize>) -> bool {
+    let Some(p) = h else {
+        return false;
+    };
+    let mut info: esp_netif_ip_info_t = std::mem::zeroed();
+    esp_netif_get_ip_info(*p as *mut esp_netif_t, &mut info) == ESP_OK && info.ip.addr != 0
 }

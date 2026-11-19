@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use crate::autonomy::rr3_beat_rt;
 use crate::board::{
     AXIS_SETTLE_MS, DUTY_MAX, DUTY_MIN, RAIL_GATE_ARMED, RAIL_SAMPLE_PERIOD_MS, RUNTIME_TICK_MS,
     SCAN_POINT_MS,
@@ -35,6 +36,9 @@ pub(crate) fn runtime_loop(mut ph: RtPeriph, bus: Arc<Mutex<Bus>>) {
                 thread::sleep(Duration::from_millis(RUNTIME_TICK_MS));
             }
         }
+        // W3-3 运行面心跳（motion + ui）：每完成一件作业/一拍自主节拍即续命。
+        // 长作业（SCAN ≈12 s）另有逐点心跳，见 [`rt_scan`]。
+        rr3_beat_rt();
         // 供电分时仲裁收尾：每次动作（作业/自主节拍）结束即释放舵机，把 5V 轨整段
         // 让给 OLED——见 [`RtPeriph::servo_release`]。这一步是"OLED 表情稳定"的根因
         // 修复点：舵机只在"正在移动/扫描"的窗口里激磁，其余时间不占轨。
@@ -284,6 +288,9 @@ fn rt_scan(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
             }
         };
         thread::sleep(Duration::from_millis(SCAN_POINT_MS));
+        // 整轮扫描 ≈12 s，高于 motion/ui 的 4 s 超时窗——每个点是一次真实进度，
+        // 在此续命（心跳语义 = 线程仍在推进，不是"结果已产出"）。
+        rr3_beat_rt();
         // 回读闭环：LEDC 寄存器实际 duty 换算回角度（duty_to_deg），与设定角并打
         // ——判据②"目视 + 串口回读一致"的硬件侧证据
         let (pr, tr) = (
