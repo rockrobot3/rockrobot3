@@ -29,6 +29,10 @@
 | ⑭ | `check.sh` ⑭ 段 | 源文件行数门：每个 `.rs` <600 行；超标文件数按 `gate-lines-baseline.txt` 只降不升 |
 | ⑮ | `python3 tools/ci/lockio_audit.py`（先 `--self-test`） | 锁内 I/O 门：`lock·log` 同行 / 条件位临时 guard 延寿到块体 / 直调会写待落盘日志的 registry 方法；扫面打空即门禁失效；gate `scripts` 同源执法 |
 
+**基线只降不升审计（`baselines_audit.py`，gate `scripts` job）**：把 `tools/ci/*-baseline.*`
+与 base ref 的同名文件逐键比对——已存在的键上调即红；新键/缺键告警；未登记基线文件即红。
+比对点取 `merge-base(HEAD, base)`，避免把 base 分支自身的前进误判成回涨。
+
 **⑨-a…⑨-z 各门**（门 a/c/r/y/z 等，后续批次续增）：判据以 `check.sh` 各 `step`
 段注释为唯一真值，本表不逐行抄录——抄一份就多一处漂移面。
 

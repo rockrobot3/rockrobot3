@@ -257,6 +257,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          # 基线审计要读 base ref 的同名文件；浅克隆会让 git show 失败。
+          fetch-depth: 0
+      # PR 的 base ref 默认不在 checkout 的 refs 里；显式取一次，供审计比对。
+      - name: 取 base ref（基线审计比对点）
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
       - name: bash 语法检查（全部追踪 .sh）
         run: |
           fail=0
@@ -274,6 +281,12 @@ jobs:
         run: python3 tools/ci/unsafe_audit.py --self-test
       - name: unsafe 注释审计（基线只降不升）
         run: python3 tools/ci/unsafe_audit.py
+      # 基线只降不升：所有 *-baseline.* 与 base ref 同名文件逐键比对；
+      # 上调即红，新键/缺键告警，未登记基线文件即红。
+      - name: 基线只降不升自检（上调/下调/新键/未登记四例）
+        run: python3 tools/ci/baselines_audit.py --self-test
+      - name: 基线只降不升（对比 base ref）
+        run: python3 tools/ci/baselines_audit.py
       # 流水线自身的结构面也要有门：并发组 / job 超时 / action 版本矩阵。
       # 版本升级 = 显式改 ACTION_MATRIX，防同一工作流里两版 action 并存。
       - name: 流水线审计自检（好例 + 缺并发/缺超时/版本漂移三负例）
