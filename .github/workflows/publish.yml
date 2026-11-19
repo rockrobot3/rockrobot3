@@ -257,19 +257,21 @@ jobs:
           # 指向的层都在（清单指向丢失层是"看起来发布成功"的经典形态）。
           bash tools/deploy/image-smoke.sh file "${IMAGE}:${tag}"
 
-  # 板侧固件制品（2026-11-16）：classic periph-base 的 release ELF 作为 tag
-  # release 的公开资产。为什么放发布流水线：固件常量（如 SCAN 驻留）改了必须
-  # 重编烧录，而 CI 产物要无凭据可下载；release asset 是公开、可审计、不引第三方
-  # 托管的载体。开发令牌档显式带 -dev 后缀，不冒充生产凭据。
+  # 板侧固件制品（2026-11-16 立，2026-11-20 扩双芯片 + ghcr）：
+  # classic 与 S3 的 release ELF 同时作为 tag release 资产与 ghcr OCI 制品。
+  # 为什么双载体：release asset 无凭据可下载、便于烧录；ghcr 是"正式发布制品"
+  # 的统一托管面（与运行镜像/OTA/buildroot 同址），审计与拉取走同一凭据面。
+  # 开发令牌档显式带 -dev 后缀，不冒充生产凭据。
   #
   # 资产是 ELF 而非裸 bin：ESP-IDF ELF 自带 bootloader/partition-table 段，
-  # 烧录侧 `espflash flash --chip esp32 <elf>` 直接生成并写入 app 镜像，保留 NVS。
+  # 烧录侧 `espflash flash --chip <esp32|esp32s3> <elf>` 直接生成并写入 app 镜像，保留 NVS。
   firmware:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: write
+      packages: write
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -277,8 +279,8 @@ jobs:
           toolchain: "1.100.0"
       - uses: ./.github/actions/esp-toolchain
         with:
-          targets: esp32
-      - name: 构建 classic release 固件
+          targets: esp32,esp32s3
+      - name: 构建 classic / S3 release 固件
         env:
           RR3_ALLOW_DEV_ADMIN_TOKEN: "1"
         run: |
@@ -288,27 +290,67 @@ jobs:
           export IDF_GITHUB_ASSETS=dl.espressif.com/github_assets
           export PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.cloud.tencent.com/pypi/simple}"
           export PIP_DEFAULT_TIMEOUT=60
-          cd tools/esp32-periph-base
-          if ! cargo +esp build --release \
-               --config 'source.crates-io.replace-with="rsproxy-sparse"' \
-               --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
-               > /tmp/fw-build.log 2>&1; then
-            errs=$(grep -E "error(\[|:)|panicked at" /tmp/fw-build.log | head -5 | tr '\n' ' ')
+          . "$GITHUB_WORKSPACE/tools/ci/cargo-artifact.sh"
+          cd "$GITHUB_WORKSPACE/tools/esp32-periph-base"
+          fw_args=(
+            --release
+            --config 'source.crates-io.replace-with="rsproxy-sparse"'
+            --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'
+          )
+          if ! cargo +esp build "${fw_args[@]}" > /tmp/fw-classic.log 2>&1; then
+            errs=$(grep -E "error(\[|:)|panicked at" /tmp/fw-classic.log | head -5 | tr '\n' ' ')
             echo "::error title=fw-build::classic release 构建失败：${errs:0:800}"
             exit 1
           fi
-          . "$GITHUB_WORKSPACE/tools/ci/cargo-artifact.sh"
-          elf="$(rr3_cargo_artifact xtensa-esp32-espidf release esp32-periph-base)"
-          if [ ! -f "$elf" ]; then
-            echo "::error title=fw-elf::release ELF 不在树: $elf"
+          if ! MCU=esp32s3 cargo +esp build "${fw_args[@]}" \
+               --target xtensa-esp32s3-espidf \
+               --no-default-features --features esp32s3 \
+               > /tmp/fw-s3.log 2>&1; then
+            errs=$(grep -E "error(\[|:)|panicked at" /tmp/fw-s3.log | head -5 | tr '\n' ' ')
+            echo "::error title=fw-build-s3::S3 release 构建失败：${errs:0:800}"
             exit 1
           fi
-          cp "$elf" "$GITHUB_WORKSPACE/rr3-periph-base-esp32-dev.elf"
-          ls -l "$GITHUB_WORKSPACE/rr3-periph-base-esp32-dev.elf"
-          sha256sum "$GITHUB_WORKSPACE/rr3-periph-base-esp32-dev.elf"
-      - name: 上传 release 资产
+          classic="$(rr3_cargo_artifact xtensa-esp32-espidf release esp32-periph-base)"
+          s3="$(rr3_cargo_artifact xtensa-esp32s3-espidf release esp32-periph-base)"
+          for f in "$classic" "$s3"; do
+            [ -f "$f" ] || { echo "::error title=fw-elf::release ELF 不在树: $f"; exit 1; }
+          done
+          cp "$classic" "$GITHUB_WORKSPACE/rr3-periph-base-esp32-dev.elf"
+          cp "$s3" "$GITHUB_WORKSPACE/rr3-periph-base-esp32s3-dev.elf"
+          cd "$GITHUB_WORKSPACE"
+          ls -l rr3-periph-base-esp32-dev.elf rr3-periph-base-esp32s3-dev.elf
+          sha256sum rr3-periph-base-esp32-dev.elf rr3-periph-base-esp32s3-dev.elf \
+            | tee firmware-sha256.txt
+      - name: 上传 release 资产（双芯片）
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          files: rr3-periph-base-esp32-dev.elf
+          files: |
+            rr3-periph-base-esp32-dev.elf
+            rr3-periph-base-esp32s3-dev.elf
           fail_on_unmatched_files: true
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: oras-project/setup-oras@v2
+      - name: 不可变标签检查 + 推送固件到 ghcr
+        run: |
+          set -euo pipefail
+          ref="ghcr.io/${{ github.repository_owner }}/rockrobot3-firmware:${{ github.ref_name }}"
+          if out=$(oras manifest fetch "$ref" 2>&1); then
+            echo "::error title=fw-immutable::已存在：$ref（拒绝覆盖）"
+            exit 1
+          fi
+          if ! printf '%s' "$out" | grep -qiE 'not found|404|manifest unknown'; then
+            echo "::error title=fw-immutable::读 $ref 失败且非 404：${out:0:400}"
+            exit 1
+          fi
+          oras push "$ref" \
+            --artifact-type application/vnd.rr3.firmware.v1+json \
+            rr3-periph-base-esp32-dev.elf:application/octet-stream \
+            rr3-periph-base-esp32s3-dev.elf:application/octet-stream \
+            firmware-sha256.txt:text/plain
+          oras manifest fetch "$ref" >/dev/null
+          echo "PASS  已推送 $ref（classic + S3 ELF 与 sha256 清单）"
