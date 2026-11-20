@@ -7,7 +7,7 @@
 use std::time::{Duration, Instant};
 
 use rr_core::RR3_METHOD_CALL;
-use rr_ipc::{opcode, Rr3PayloadType};
+use rr_ipc::{opcode, Rr3Frame, Rr3PayloadType};
 use serde_json::{json, Value};
 
 use crate::{BusHandle, Dispatcher};
@@ -28,41 +28,58 @@ pub fn serve(
         if !bus.client.rr3_connected() {
             return Err("总线已断开（reader EOF）：交 supervisor 按 restart_policy 裁定".into());
         }
-        // 步骤 2：分帧——opcode != SEND 跳过；rr3_frame_body 解不开只排空。
+        // 步骤 2：分帧——单帧分派见 [`rr3_handle_frame`]。
         for frame in bus.client.rr3_poll_wait(poll_wait) {
-            if frame.header.opcode != opcode::SEND {
-                continue;
-            }
-            let Ok((ty, body)) = rr_bus_api::Rr3BusClient::rr3_frame_body(&frame) else {
-                continue;
-            };
-            if ty == Rr3PayloadType::Request {
-                // 步骤 3：RPC 面——Request 且 method == rr3.call → 剥 id /
-                // params.topic / params.args → on_rpc；Err 折 {"error": …}；
-                // `?` 即传输性失败上抛——应答写不出去不装活着。
-                if body.get("method").and_then(Value::as_str) != Some(RR3_METHOD_CALL) {
-                    continue;
-                }
-                let id = body.get("id").and_then(Value::as_u64).unwrap_or(0);
-                let params = body.get("params").cloned().unwrap_or(Value::Null);
-                let topic = params.get("topic").and_then(Value::as_str).unwrap_or("");
-                let args = params.get("args").cloned().unwrap_or(Value::Null);
-                let reply = dispatcher
-                    .on_rpc(topic, &args, &bus)
-                    .unwrap_or_else(|e| json!({ "error": e }));
-                bus.client
-                    .rr3_reply_call(frame.header.trace_id, id, reply)?;
-            } else if ty == Rr3PayloadType::Event {
-                // 步骤 4：订阅面——Event 交 on_event（topic 本地过滤是 Dispatcher
-                // 的职责）；其余 payload（Notification/Stream 等）只排空。
-                let topic = body.get("topic").and_then(Value::as_str).unwrap_or("");
-                dispatcher.on_event(topic, &body, &bus)?;
-            }
+            rr3_handle_frame(&bus, dispatcher, frame)?;
         }
         // 步骤 5：节拍——每圈一次（帧无关节拍）。
         dispatcher.on_tick(Instant::now(), &bus)?;
         // 步骤 6：回到 1。
     }
+}
+
+/// 单帧分派（步骤 2–4）：非 SEND 或解不开只排空；Request 走 RPC 面，Event 走
+/// 订阅面（topic 本地过滤是 Dispatcher 的职责），其余 payload 只排空。
+fn rr3_handle_frame(
+    bus: &BusHandle,
+    dispatcher: &mut impl Dispatcher,
+    frame: Rr3Frame,
+) -> Result<(), String> {
+    if frame.header.opcode != opcode::SEND {
+        return Ok(());
+    }
+    let Ok((ty, body)) = rr_bus_api::Rr3BusClient::rr3_frame_body(&frame) else {
+        return Ok(());
+    };
+    if ty == Rr3PayloadType::Request {
+        rr3_handle_rpc(bus, dispatcher, &frame, &body)
+    } else if ty == Rr3PayloadType::Event {
+        let topic = body.get("topic").and_then(Value::as_str).unwrap_or("");
+        dispatcher.on_event(topic, &body, bus)
+    } else {
+        Ok(())
+    }
+}
+
+/// RPC 面（步骤 3）：method == rr3.call → 剥 id / params.topic / params.args →
+/// on_rpc；Err 折 `{"error": …}`；应答写不出去即传输性失败上抛。
+fn rr3_handle_rpc(
+    bus: &BusHandle,
+    dispatcher: &mut impl Dispatcher,
+    frame: &Rr3Frame,
+    body: &Value,
+) -> Result<(), String> {
+    if body.get("method").and_then(Value::as_str) != Some(RR3_METHOD_CALL) {
+        return Ok(());
+    }
+    let id = body.get("id").and_then(Value::as_u64).unwrap_or(0);
+    let params = body.get("params").cloned().unwrap_or(Value::Null);
+    let topic = params.get("topic").and_then(Value::as_str).unwrap_or("");
+    let args = params.get("args").cloned().unwrap_or(Value::Null);
+    let reply = dispatcher
+        .on_rpc(topic, &args, bus)
+        .unwrap_or_else(|e| json!({ "error": e }));
+    bus.client.rr3_reply_call(frame.header.trace_id, id, reply)
 }
 
 #[cfg(all(test, unix))]
