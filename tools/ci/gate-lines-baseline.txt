@@ -43,5 +43,6 @@
 # 二拆 ESP httpd/serve.rs 593→423+179（endpoint/起栈分层），存量 8→7。
 # 三拆 rr-bus-api client/conn.rs 503→397+114（心跳驱动器子模块），存量 7→6。
 # 四拆 rrd assembly.rs 506→353+158（渲染面与判据面分层），存量 6→5。
+# 五拆 workflows workflow_rules.py 520→464+63（needs 图审计子模块），存量 5→4。
 hard_600 = 0
-tier_500 = 5
+tier_500 = 4
