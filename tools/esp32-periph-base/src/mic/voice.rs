@@ -14,7 +14,8 @@
 use std::sync::{Arc, Mutex};
 
 use rr_audio_mech::{
-    rr3_doa_fix, rr3_pcm_best_channel, Rr3DoaBin, Rr3DoaCfg, Rr3VadConfig, Rr3VadEdge, Rr3VadState,
+    rr3_doa_fix, rr3_frame_rms, rr3_pcm_best_channel, Rr3DoaBin, Rr3DoaCfg, Rr3VadConfig,
+    Rr3VadEdge, Rr3VadState,
 };
 
 use crate::board::MIC_SR_HZ;
@@ -64,6 +65,10 @@ pub(crate) struct VoiceRun {
     enabled: bool,
     /// 入队失败计数（dialog 未装配/队列满；串口抽样点名）。
     dropped: u32,
+    /// 诊断窗（100 块 = 2 s）：VAD 域 mono RMS 均值 + 最近一次播放门状态。
+    blocks: u32,
+    rms_acc: u64,
+    last_gate: bool,
 }
 
 impl VoiceRun {
@@ -92,11 +97,15 @@ impl VoiceRun {
             recording: false,
             enabled,
             dropped: 0,
+            blocks: 0,
+            rms_acc: 0,
+            last_gate: false,
         }
     }
 
     /// 一次 I2S read：原始帧 → DC/增益 → 20 ms 块 → VAD/DoA/分段。
     pub(crate) fn batch(&mut self, buf: &[u8], nbytes: usize, bus: &Arc<Mutex<Bus>>, gated: bool) {
+        self.last_gate = gated;
         if gated || !self.enabled {
             self.reset();
             return;
@@ -124,6 +133,7 @@ impl VoiceRun {
     /// 单块：预滚 → VAD 边沿（起音开录 / 判停收段）→ 录音累积。
     fn block(&mut self, block: &[i16], bus: &Arc<Mutex<Bus>>) {
         let mono = rr3_pcm_best_channel(block, 2);
+        self.voice_stats(&mono);
         let edge = self.vad.rr3_vad_feed(&mono);
         self.pre_extend(block);
         match edge {
@@ -132,6 +142,22 @@ impl VoiceRun {
             None if self.recording => self.append(block, bus),
             None => {}
         }
+    }
+
+    /// VAD 域诊断窗（100 块 = 2 s 一行）：mono RMS 均值与播放门状态，供现场
+    /// 标定 rms_start / 排查"麦克风有没有进 VAD"。
+    fn voice_stats(&mut self, mono: &[i16]) {
+        self.blocks = self.blocks.wrapping_add(1);
+        self.rms_acc += rr3_frame_rms(mono).max(0) as u64;
+        if self.blocks % 100 != 0 {
+            return;
+        }
+        let avg = self.rms_acc / 100;
+        self.rms_acc = 0;
+        println!(
+            "[mic] voice mono_rms={avg} gate={} blocks={}",
+            self.last_gate, self.blocks
+        );
     }
 
     /// 起音：预滚窗作段头（含本块）→ DoA 转头/聆听表情。
