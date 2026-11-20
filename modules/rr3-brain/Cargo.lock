@@ -305,6 +305,10 @@ name = "rr-hal-api"
 version = "0.0.1"
 
 [[package]]
+name = "rr-intent-mech"
+version = "0.0.1"
+
+[[package]]
 name = "rr-ipc"
 version = "0.0.1"
 
@@ -320,6 +324,7 @@ dependencies = [
  "rr-bus-api",
  "rr-cloud-proto",
  "rr-hal-api",
+ "rr-intent-mech",
  "rr-ipc",
  "rr3mod",
  "serde_json",
