@@ -32,7 +32,7 @@ use serde_json::{json, Value};
 
 use rr3mod::{BusHandle, Dispatcher};
 
-use crate::boot::{rr3_cloud_cfg_of, Rr3BrainCfg, Rr3WakeCfg};
+use crate::boot::{rr3_cloud_cfg_of, Rr3BrainCfg};
 use crate::cloud::{Rr3AsrClient, Rr3LlmClient, Rr3TtsClient};
 use crate::dialog::{Rr3Dialog, Rr3DialogTurn};
 use crate::intent::rr3_extract_actions;

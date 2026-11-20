@@ -1,6 +1,7 @@
 //! 文本规则机制核（自 `rr3-brain` 抽出，W6-1）：
 //! - 意图：user_text → 结构化动作清单；
 //! - 唤醒：ASR 文本 → 唤醒判决（Ack / Command / FollowUp / Ignore）。
+//!
 //! Pi 与 MCU 共用同一份词表、否定护栏与唤醒归一/编辑距，板侧不再另写第二份规则。
 //!
 //! 策略层唯一归属仍在 brain（architecture §2 原则 3"brain 是唯一编排者"）：本
