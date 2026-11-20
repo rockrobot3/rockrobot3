@@ -7,7 +7,7 @@
 //! - I2S0  = GPIO4 BCLK / GPIO27 SD / GPIO26 WS（INMP441 双麦）
 //! - ADC   = GPIO34（ADC1_CH6，5V 轨测点，input-only）
 //!
-//! 这些常量只作**装配对账与打印自证**，不进消费路径；具名装配仍在 main.rs
+//! 这些常量只作**装配对账与打印自证**，不进消费路径；具名装配仍在 boot.rs
 //! （esp-idf-hal 要求 `peripherals.pins.gpioNN` 具体类型）。
 
 /// I2C SDA 装配对账锚（= GPIO21，SDA 装配 `peripherals.pins.gpio21`）。
