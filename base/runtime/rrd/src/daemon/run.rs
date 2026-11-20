@@ -27,6 +27,29 @@ fn rr3_panic_log() {
     }));
 }
 
+/// 监督面装配（自 [`rr3_daemon_run`] 抽出）：重启计划队列 + supervisor 线程 +
+/// 扫尸线程。次序有意义：supervisor 先起，watchdog 次之（注册完成前不收心跳、
+/// 但监视线程必须已在跑）；句柄不 join——daemon 永不 shutdown，join 等于卡死主循环。
+fn rr3_daemon_sup(cfg: &RrdConfig, shared: &Arc<Mutex<RrdRegistry>>, t0: Instant) -> Rr3Supervisor {
+    // `Rr3Supervisor` 是 `Sender` 的一层薄壳（可 clone）：一份进 conn 收尾、一份进
+    // watchdog，两条路交出的重启计划在这里汇成一条队列。
+    let (sup_tx, sup_rx) = mpsc::channel::<Rr3SuperMsg>();
+    let sup = Rr3Supervisor::rr3_new(sup_tx);
+    // E-5：扫尸节拍复用 `--watchdog-tick-ms`，不新增 CLI 旋钮。
+    // E-6 的 `RR3_BUS_PATH` 用 `cfg.socket`——`main.rs` 已按 CLI 原词绝对化过
+    // （横幅、bind、注入子进程必须是同一个值，否则子进程按自己的 CWD 连错路径）。
+    let _ = rr3_spawn_supervisor(
+        sup_rx,
+        shared.clone(),
+        t0,
+        Duration::from_millis(cfg.watchdog_tick_ms),
+        cfg.socket.clone(),
+        cfg.boot_role.clone(),
+    );
+    rr3_spawn_watchdog(shared.clone(), t0, cfg.watchdog_tick_ms, sup.clone());
+    sup
+}
+
 /// 守护主循环：永不返回（除非 bind 失败）。集成测试靠父进程 kill 收尾。
 ///
 /// 线程与投递的次序**有意义**，别重排（三件事各不相同）：
@@ -61,25 +84,9 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     let topics = Arc::new(topics);
     let (ctr_store, counters_gate) = rr3_ctr_wire(&shared, t0);
 
-    // `Rr3Supervisor` 是 `Sender` 的一层薄壳（可 clone）：一份进 conn 收尾、一份进 watchdog，
-    // 两条路交出的重启计划在这里汇成一条队列。
-    let (sup_tx, sup_rx) = mpsc::channel::<Rr3SuperMsg>();
-    let sup = Rr3Supervisor::rr3_new(sup_tx);
-    // E-5：扫尸节拍复用 `--watchdog-tick-ms`，不新增 CLI 旋钮。
-    // E-6 的 `RR3_BUS_PATH` 用 `cfg.socket` —— 它在 `main.rs` 里已按 CLI 原词**绝对化**过
-    // （横幅回显、bind、注入给子进程的必须是同一个值，否则子进程会按自己的 CWD 去连一个
-    // 不存在的路径）。
-    // 句柄不 join：daemon 永不 shutdown（`incoming()` 不返回），join 它等于把主循环卡死。
-    let _ = rr3_spawn_supervisor(
-        sup_rx,
-        shared.clone(),
-        t0,
-        Duration::from_millis(cfg.watchdog_tick_ms),
-        cfg.socket.clone(),
-        cfg.boot_role.clone(),
-    );
-
-    rr3_spawn_watchdog(shared.clone(), t0, cfg.watchdog_tick_ms, sup.clone());
+    // 监督面先于 boot 队列起：boot 的第一个子进程可能同毫秒注册完，
+    // 监视线程必须在跑才有东西扫它（详见 [`rr3_daemon_sup`]）。
+    let sup = rr3_daemon_sup(cfg, &shared, t0);
 
     // E-7 启动序：先全部装载，再交 rr-registry 仲裁，最后按裁定投递
     rr3_daemon_queue(&boot, &shared, &sup)?;
