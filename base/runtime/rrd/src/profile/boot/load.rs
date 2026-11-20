@@ -84,12 +84,7 @@ pub fn rr3_boot_with_probe(
     let platform = rr3_load_platform(platform_dir, &profile.platform_chip)?;
 
     let pin_ids: BTreeSet<String> = profile.pins.iter().map(|p| p.rr3_pin_id()).collect();
-    let root = abs.parent().and_then(Path::parent).ok_or_else(|| {
-        format!(
-            "装配单 {} 无法定位 modules-root（须在 <root>/profiles/ 下）",
-            abs.display()
-        )
-    })?;
+    let root = rr3_profile_root(&abs)?;
     // 装载期校验族整段交 [`rr3_boot_checks`]（追加序即判据序，与逐条写在本处等价）。
     let (errs, derived, assemble_broken) = rr3_boot_checks(
         &profile, &table, &roles, &devices, &platform, &wiring, root, &pin_ids,
@@ -117,18 +112,7 @@ pub fn rr3_boot_with_probe(
     // 世界"唯一收账点——clone 进快照交给 daemon 定格 OnceLock；boot 函数自身不碰
     // 全局态（纯构造，住处由调用方拍）。快照与 boot 返回值同生命周期，装载面之后
     // 对文件的改动进不了本进程的 ctl 应答（快照语义，assembly.rs 模块头注）。
-    let snapshot = crate::assembly::Rr3AssemblySnapshot {
-        profile_name: abs
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default()
-            .to_string(),
-        profile: profile.clone(),
-        wiring: wiring.clone(),
-        peak_by_mate: devices.rr3_dev_peak_by_mate(),
-        axis: axis_files,
-        roles: roles.clone(),
-    };
+    let snapshot = rr3_boot_snapshot(&abs, &profile, &wiring, &devices, &roles, axis_files);
 
     Ok(Rr3ProfileBoot {
         manifests,
@@ -147,6 +131,40 @@ pub fn rr3_boot_with_probe(
         platform_tier: profile.platform_tier.clone(),
         snapshot: Some(snapshot),
     })
+}
+
+/// modules-root：装配单须在 `<root>/profiles/` 下（manifest entry 的相对根）。
+fn rr3_profile_root(abs: &Path) -> Result<&Path, String> {
+    abs.parent().and_then(Path::parent).ok_or_else(|| {
+        format!(
+            "装配单 {} 无法定位 modules-root（须在 <root>/profiles/ 下）",
+            abs.display()
+        )
+    })
+}
+
+/// 装配快照构造（纯值、不碰全局态）：四路装载件与派生面 clone 进同生命周期的快照，
+/// 住处由调用方拍（daemon 定格 OnceLock，见 [`crate::assembly`] 模块头注）。
+fn rr3_boot_snapshot(
+    abs: &Path,
+    profile: &Rr3Profile,
+    wiring: &crate::wiring::Rr3Wiring,
+    devices: &Rr3DeviceTable,
+    roles: &Rr3RoleTable,
+    axis: Vec<crate::axis::Rr3AxisFile>,
+) -> crate::assembly::Rr3AssemblySnapshot {
+    crate::assembly::Rr3AssemblySnapshot {
+        profile_name: abs
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string(),
+        profile: profile.clone(),
+        wiring: wiring.clone(),
+        peak_by_mate: devices.rr3_dev_peak_by_mate(),
+        axis,
+        roles: roles.clone(),
+    }
 }
 
 /// 装配单装载：绝对化 → 读文本 → 解析（形状不合逐条点名，一条不静默放行）
