@@ -25,14 +25,29 @@ use crate::state::Bus;
 /// （不 erase——不毁既有分区）；真机 env 永远缺席的机制订正见模块文档凭据节。
 pub(crate) fn rr3_httpd_spawn(bus: &Arc<Mutex<Bus>>) {
     let bus = Arc::clone(bus);
-    // ① NVS init 前移（批N14 件一）：凭据读链前件，兼 WiFi 校准数据存储
+    if !nvs_ready() {
+        return;
+    }
+    match cred_read() {
+        Ok((cred_source, ssid, pass)) => thread_spawn(bus, cred_source, ssid, pass),
+        Err(e) => println!("[periph] 配置腿装配失败（{e}）——缺席照常"),
+    }
+}
+
+/// NVS init 前件（批N14 件一）：凭据读链前件，兼 WiFi 校准数据存储。
+fn nvs_ready() -> bool {
     // SAFETY：nvs_flash_init 是 IDF 的一次性初始化，配置腿线程起栈前调用；
     // 失败即返回，不重复调用、不 erase 既有分区。
     if unsafe { nvs_flash_init() } != ESP_OK {
         println!("[periph] 配置腿未装配（nvs_flash_init 失败）——N-13 服务面缺席，板其余功能照常");
-        return;
+        return false;
     }
-    // ② 凭据读链：NVS 优先（读取窄缝 [`crate::cred::rr3_cred_read`]，读时现取）
+    true
+}
+
+/// 凭据读链：NVS 优先（读取窄缝 [`crate::cred::rr3_cred_read`]）→ 编译期回落 →
+/// 都缺转 AP-only；形制校验两源同门（错误不出值只出长度）。返回（来源点名、SSID、密码）。
+fn cred_read() -> Result<(&'static str, Vec<u8>, Vec<u8>), String> {
     let (ssid, pass, cred_source) = crate::cred::rr3_cred_read()
         .map(|c| {
             let pass = c.pass().to_string(); // 先经窄缝取密码（借用），再 move ssid
@@ -62,21 +77,12 @@ pub(crate) fn rr3_httpd_spawn(bus: &Arc<Mutex<Bus>>) {
             );
             (String::new(), String::new(), "ap-only")
         });
-    // ③ 形制校验（两源同门——[`crate::cred::rr3_cred_form_check`]；错误不出值只出长度）。
-    // ap-only 档无凭据可校，跳过（STA 侧不配置、不连接）。
     if !ssid.is_empty() {
         if let Err(e) = crate::cred::rr3_cred_form_check(&ssid, &pass) {
-            println!(
-                "[periph] 配置腿装配失败（{e}：SSID {}B/密码 {}B）——缺席照常",
-                ssid.len(),
-                pass.len()
-            );
-            return;
+            return Err(format!("{e}：SSID {}B/密码 {}B", ssid.len(), pass.len()));
         }
     }
-    let ssid = ssid.as_bytes().to_vec();
-    let pass = pass.as_bytes().to_vec();
-    thread_spawn(bus, cred_source, ssid, pass);
+    Ok((cred_source, ssid.into_bytes(), pass.into_bytes()))
 }
 
 /// net 任务心跳线程（W3-3）：只读网络面在位真值（[`wifi::rr3_net_up`]），
