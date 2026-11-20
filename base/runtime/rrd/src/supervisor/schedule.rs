@@ -35,6 +35,33 @@ pub(super) fn rr3_low_power_retry(name: &str, attempt: u32, entry: &str) -> Rr3R
 ///
 /// 锁纪律就在下面第一行：`verdict` 由调用方 `let` 绑好后传进来，本函数体内每次
 /// `rr3_lock` 都单独成句，臂内不再取第二把锁。
+/// 崩溃收尸（自 [`rr3_absorb_exit`] 抽出）：相位广播 → 降级传播 → 计划原样带回。
+fn rr3_absorb_crash(
+    shared: &Arc<Mutex<RrdRegistry>>,
+    name: &str,
+    status: &str,
+    src_task: u64,
+    clean_exit: bool,
+    plan: Option<Rr3RestartPlan>,
+) -> Option<Rr3RestartPlan> {
+    let phase = rr3_phase_for_exit(clean_exit);
+    // E-9：这里的排除项是 `src_task`（它的 tx 已是 None，排除属形式，与 expire 那一路
+    // 同形）；conn 收尾那一路排的是 `RR3_TASK_RRD`（等于不排除）。两种口径是**已知**的
+    // 第三/第四种口径，归 Task 13 的 A-3 文档化，此处不"统一"——统一成哪一种都无判据支持。
+    let n = crate::registry::rr3_reg_with(shared, |g| {
+        g.rr3_reg_fanout(&rr3_state_frame(name, phase, src_task), src_task)
+    });
+    rr3_log(&format!(
+        "{name} 子进程退出 status={status} → 广播 {phase} 到 {n} 个连接"
+    ));
+    // ADR-0009 裁定 3：本路刚记完收尸账（`rr3_reg_child_exit` 已置 Failed），死者若是
+    // 某能力的提供者且再无人在位 → 下游逐个置 Degraded 并广播。EarlyExit / Silent
+    // 两路不传播：前者从未注册过，后者的死亡已由别人记过、传播也归那一拍。
+    let degraded = rr3_lock(shared).rr3_reg_degrade(name);
+    rr3_degrade_fanout(shared, name, degraded);
+    plan
+}
+
 pub(super) fn rr3_absorb_exit(
     shared: &Arc<Mutex<RrdRegistry>>,
     name: &str,
@@ -47,26 +74,7 @@ pub(super) fn rr3_absorb_exit(
             src_task,
             clean_exit,
             plan,
-        } => {
-            let phase = rr3_phase_for_exit(clean_exit);
-            // E-9：这里的排除项是 `crashed.src_task`（它的 tx 已是 None，排除属形式，
-            // 与 expire 那一路同形）；conn 收尾那一路排的是 `RR3_TASK_RRD`（等于不排除）。
-            // 两种口径是**已知**的第三/第四种口径，归 Task 13 的 A-3 文档化，此处不"统一"——
-            // 统一成哪一种都没有判据支持。
-            let n = crate::registry::rr3_reg_with(shared, |g| {
-                g.rr3_reg_fanout(&rr3_state_frame(name, phase, src_task), src_task)
-            });
-            rr3_log(&format!(
-                "{name} 子进程退出 status={status} → 广播 {phase} 到 {n} 个连接"
-            ));
-            // ADR-0009 裁定 3：本路刚记完收尸账（`rr3_reg_child_exit` 已置 Failed），
-            // 死者若是某能力的提供者且再无人在位 → 下游逐个置 Degraded 并广播。
-            // EarlyExit / Silent 两路不传播：前者从未注册过（没有"离开 Running"的相位
-            // 事件），后者的死亡已由别人记过、传播也归那一拍。
-            let degraded = rr3_lock(shared).rr3_reg_degrade(name);
-            rr3_degrade_fanout(shared, name, degraded);
-            plan
-        }
+        } => rr3_absorb_crash(shared, name, status, src_task, clean_exit, plan),
         Rr3ChildExit::EarlyExit { plan } => {
             rr3_log(&format!(
                 "{name} 未注册即退出 status={status}（无 state 可广播）"
