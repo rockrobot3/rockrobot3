@@ -1,6 +1,6 @@
 //! 装配装载：装配单/契约册装载、装载期校验编排与 boot 输入构造。
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use rr_registry::{
@@ -57,41 +57,25 @@ pub fn rr3_boot_with_probe(
     platform_dir: &Path,
     probe: &dyn crate::probe::Rr3Probe,
 ) -> Result<Rr3ProfileBoot, String> {
-    let (abs, profile) = rr3_load_profile(profile_path)?;
-
-    // 查册门（裁定 5②）：格位真值只有 rr-registry 那一册，CI 全集层与本入口共用。
-    let table = rr3_load_slots(slots_path)?;
-
-    // 角色契约装载（增补轮六 §4.1，校验①②判据源）：与格位契约同一 fail-closed
-    // 口径——读不到 / 解析空 / 形状越界都是契约事故，拒启动（空角色表不是放行许可证）。
-    let roles = rr3_load_roles(roles_path)?;
-
-    // 器件词表装载（增补轮六 §4.1b，校验⑦-d 的 mate 集判定源）：与格位/角色契约
-    // 同一 fail-closed 口径——空器件表是契约事故，不是放行许可证。装载期只查
-    // mate 外键闭合，不认型号能力（D10a：addrs/baud_ok 是探测期/出厂自检判据）。
-    let devices = rr3_load_devices(devices_path)?;
-
-    // 接线档装载（增补轮六 §4.3，校验⑦ 判据面）：装机档必在——读不到/空表/
-    // 形状不合/闭合面破都是装配事故，拒启动（接线闭合是校验⑦的前提，没有
-    // "无线的机器"）。
-    let (wiring_abs, wiring) = rr3_load_wiring(wiring_path)?;
-
-    // 平台事实表装载（增补轮六 §4.6，批N1 基-22；校验③④⑤⑧的判据前件）：按
-    // [platform].chip 在 platform_dir 下选册（daemon 传 contracts/platform/，与
-    // roles/devices 同源）。fail-closed 与 roles 同口径但更严——platform.rs 解析本就
-    // 回 Err 版（roles/devices 宽容回空表走"表为空"点名，那是集合词表；平台表宽容 =
-    // ④⑤⑧ 静默不判，§18 F-6 同病），读不到/形状坏都逐条点名拒 boot，不降级。
-    let platform = rr3_load_platform(platform_dir, &profile.platform_chip)?;
-
-    let pin_ids: BTreeSet<String> = profile.pins.iter().map(|p| p.rr3_pin_id()).collect();
-    let root = rr3_profile_root(&abs)?;
-    // 装载期校验族整段交 [`rr3_boot_checks`]（追加序即判据序，与逐条写在本处等价）。
-    let (errs, derived, assemble_broken) = rr3_boot_checks(
-        &profile, &table, &roles, &devices, &platform, &wiring, root, &pin_ids,
-    );
-    if !errs.is_empty() {
-        return Err(errs.join("; "));
-    }
+    let f = rr3_boot_load(
+        profile_path,
+        slots_path,
+        roles_path,
+        devices_path,
+        wiring_path,
+        platform_dir,
+    )?;
+    let Rr3BootFacts {
+        abs,
+        profile,
+        table,
+        roles,
+        devices,
+        wiring_abs,
+        wiring,
+        platform,
+    } = f;
+    let g = rr3_boot_gate(&profile, &table, &roles, &devices, &platform, &wiring, &abs)?;
     // 装载期校验②（后果 = 降不拒）：present ∩ enabled_slots 的缺角色清单
     let role_missing = rr3_role_gaps(&profile, &roles);
 
@@ -99,9 +83,9 @@ pub fn rr3_boot_with_probe(
     // 基础层恒在位，跳过（slots.toml 注记：net.online / power.battery boot 即在位、恒不降级）。
     let missing = rr3_slot_gaps(&profile, &table, &roles, probe);
 
-    let manifests = rr3_manifests(&profile, root);
-    let hal_bindings = rr3_hal_bindings(derived, &profile.hardware);
-    let (axis_files, axis_state, axis_notes) = rr3_axis_load(&wiring_abs, &pin_ids);
+    let manifests = rr3_manifests(&profile, &g.root);
+    let hal_bindings = rr3_hal_bindings(g.derived, &profile.hardware);
+    let (axis_files, axis_state, axis_notes) = rr3_axis_load(&wiring_abs, &g.pin_ids);
 
     // G4 装配段校验（ADR-0019 修订 1 ③）已在门 c 段随装配扫描一次完成：缺文件/
     // 坏形/ops 注入缺逐条点名进 assemble_broken，该模块 boot 入 Degraded（不 fatal；
@@ -118,7 +102,7 @@ pub fn rr3_boot_with_probe(
         manifests,
         missing,
         hal_bindings,
-        assemble_broken,
+        assemble_broken: g.assemble_broken,
         role_missing,
         axis_state,
         axis_notes,
@@ -130,6 +114,95 @@ pub fn rr3_boot_with_probe(
         platform_chip: profile.platform_chip.clone(),
         platform_tier: profile.platform_tier.clone(),
         snapshot: Some(snapshot),
+    })
+}
+
+/// 装载门产物：校验门通过后的派生面与两个定位锚。
+struct Rr3BootGate {
+    pin_ids: BTreeSet<String>,
+    root: PathBuf,
+    derived: BTreeMap<String, String>,
+    assemble_broken: Vec<(String, String)>,
+}
+
+/// 装载期校验门（①③④⑤⑥⑦⑧⑨⑩）：先定位 modules-root / pin_id 集，再交校验族；
+/// 错误非空即拒 boot（追加序即判据序）。坏件点名不是 fatal（G4 该格 Degraded）。
+fn rr3_boot_gate(
+    profile: &Rr3Profile,
+    table: &Rr3SlotTable,
+    roles: &Rr3RoleTable,
+    devices: &Rr3DeviceTable,
+    platform: &Rr3PlatformTable,
+    wiring: &crate::wiring::Rr3Wiring,
+    abs: &Path,
+) -> Result<Rr3BootGate, String> {
+    let pin_ids: BTreeSet<String> = profile.pins.iter().map(|p| p.rr3_pin_id()).collect();
+    let root = rr3_profile_root(abs)?.to_path_buf();
+    let (errs, derived, assemble_broken) = rr3_boot_checks(
+        profile, table, roles, devices, platform, wiring, &root, &pin_ids,
+    );
+    if !errs.is_empty() {
+        return Err(errs.join("; "));
+    }
+    Ok(Rr3BootGate {
+        pin_ids,
+        root,
+        derived,
+        assemble_broken,
+    })
+}
+
+/// 装载件集合（全部已过各自 fail-closed 门；后续校验/派生只消费这一份）。
+struct Rr3BootFacts {
+    abs: PathBuf,
+    profile: Rr3Profile,
+    table: Rr3SlotTable,
+    roles: Rr3RoleTable,
+    devices: Rr3DeviceTable,
+    wiring_abs: PathBuf,
+    wiring: crate::wiring::Rr3Wiring,
+    platform: Rr3PlatformTable,
+}
+
+/// 契约与装配单装载（顺序 = 报错优先级）：装配单 → 格位 → 角色 → 器件 →
+/// 接线档 → 平台事实表，任一失败即 fail-closed 拒 boot。
+fn rr3_boot_load(
+    profile_path: &Path,
+    slots_path: &Path,
+    roles_path: &Path,
+    devices_path: &Path,
+    wiring_path: &Path,
+    platform_dir: &Path,
+) -> Result<Rr3BootFacts, String> {
+    let (abs, profile) = rr3_load_profile(profile_path)?;
+    // 查册门（裁定 5②）：格位真值只有 rr-registry 那一册，CI 全集层与本入口共用。
+    let table = rr3_load_slots(slots_path)?;
+    // 角色契约装载（增补轮六 §4.1，校验①②判据源）：与格位契约同一 fail-closed
+    // 口径——读不到 / 解析空 / 形状越界都是契约事故，拒启动（空角色表不是放行许可证）。
+    let roles = rr3_load_roles(roles_path)?;
+    // 器件词表装载（增补轮六 §4.1b，校验⑦-d 的 mate 集判定源）：与格位/角色契约
+    // 同一 fail-closed 口径——空器件表是契约事故，不是放行许可证。装载期只查
+    // mate 外键闭合，不认型号能力（D10a：addrs/baud_ok 是探测期/出厂自检判据）。
+    let devices = rr3_load_devices(devices_path)?;
+    // 接线档装载（增补轮六 §4.3，校验⑦ 判据面）：装机档必在——读不到/空表/
+    // 形状不合/闭合面破都是装配事故，拒启动（接线闭合是校验⑦的前提，没有
+    // "无线的机器"）。
+    let (wiring_abs, wiring) = rr3_load_wiring(wiring_path)?;
+    // 平台事实表装载（增补轮六 §4.6，批N1 基-22；校验③④⑤⑧的判据前件）：按
+    // [platform].chip 在 platform_dir 下选册（daemon 传 contracts/platform/，与
+    // roles/devices 同源）。fail-closed 与 roles 同口径但更严——platform.rs 解析本就
+    // 回 Err 版（roles/devices 宽容回空表走"表为空"点名，那是集合词表；平台表宽容 =
+    // ④⑤⑧ 静默不判，§18 F-6 同病），读不到/形状坏都逐条点名拒 boot，不降级。
+    let platform = rr3_load_platform(platform_dir, &profile.platform_chip)?;
+    Ok(Rr3BootFacts {
+        abs,
+        profile,
+        table,
+        roles,
+        devices,
+        wiring_abs,
+        wiring,
+        platform,
     })
 }
 

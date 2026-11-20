@@ -3,7 +3,7 @@
   "cc_mean_max": 2.5,
   "cc_max_fn": 11,
   "fn_over_max": 0,
-  "fn_over60_max": 6,
+  "fn_over60_max": 5,
   "long_names_max": 0,
   "long_sleep_max": 0,
   "unwrap_max": 60
