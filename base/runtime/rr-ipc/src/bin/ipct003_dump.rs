@@ -58,41 +58,36 @@ fn main() {
     println!("header {}", hex(&golden_hdr.to_bytes()));
 
     // 五种 payload 类型各一帧，体为定长定值字节（字面量，无任何运行期来源）
-    println!(
-        "request {}",
-        hex(&frame_bytes(
+    let frames: [(&str, Rr3PayloadType, &[u8]); 5] = [
+        (
+            "request",
             Rr3PayloadType::Request,
-            b"{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ping\"}"
-        ))
-    );
-    println!(
-        "response {}",
-        hex(&frame_bytes(
+            b"{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ping\"}",
+        ),
+        (
+            "response",
             Rr3PayloadType::Response,
-            b"{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":\"pong\"}"
-        ))
-    );
-    println!(
-        "event {}",
-        hex(&frame_bytes(
+            b"{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":\"pong\"}",
+        ),
+        (
+            "event",
             Rr3PayloadType::Event,
-            b"{\"topic\":\"rr3-sim/ping\",\"n\":1}"
-        ))
-    );
-    println!(
-        "stream {}",
-        hex(&frame_bytes(
+            b"{\"topic\":\"rr3-sim/ping\",\"n\":1}",
+        ),
+        (
+            "stream",
             Rr3PayloadType::Stream,
-            &[0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-        ))
-    );
-    println!(
-        "notification {}",
-        hex(&frame_bytes(
+            &[0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        ),
+        (
+            "notification",
             Rr3PayloadType::Notification,
-            b"{\"topic\":\"rr3-sim/beat\",\"seq\":1}"
-        ))
-    );
+            b"{\"topic\":\"rr3-sim/beat\",\"seq\":1}",
+        ),
+    ];
+    for (name, ty, body) in frames {
+        println!("{name} {}", hex(&frame_bytes(ty, body)));
+    }
 
     println!("version {RR3_CONTRACT_SCHEMA_VERSION}");
 }
