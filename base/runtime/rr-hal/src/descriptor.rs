@@ -331,57 +331,36 @@ fn rr3_desc_base(descriptor: Option<&str>) -> Result<Rr3HalBindings, String> {
 /// 读进程环境的 `RR3_HAL_*` 应急键，映射成描述符键名（compose 的 overrides 供数）。
 /// role 线偏移只认白名单 `led`/`relay`（与 `[hardware]` 键集一致，R11 闭合）。
 pub fn rr3_env_override_map() -> BTreeMap<String, String> {
-    fn put(m: &mut BTreeMap<String, String>, key: &str, env: &str) {
+    // 描述符为底、env 应急：表 = 绑定键 → 环境变量名（顺序只影响可读性，结果入 BTreeMap）。
+    let vars = [
+        ("alsa_device", crate::backend::RR3_HAL_ALSA_DEVICE_ENV),
+        ("pwm_chip", crate::backend::RR3_HAL_PWM_CHIP_ENV),
+        ("pwm_channel", crate::backend::RR3_HAL_PWM_CHANNEL_ENV),
+        ("gpio_chip", crate::backend::RR3_HAL_GPIO_CHIP_ENV),
+        ("gpio_led_line", "RR3_HAL_GPIO_LED_LINE"),
+        ("gpio_relay_line", "RR3_HAL_GPIO_RELAY_LINE"),
+        ("i2c_bus", crate::backend::RR3_HAL_I2C_BUS_ENV),
+        ("ina219_addr", crate::backend::RR3_HAL_INA219_ADDR_ENV),
+        (
+            "ina219_shunt_mohm",
+            crate::backend::RR3_HAL_INA219_SHUNT_ENV,
+        ),
+        ("ina219_ilsb_ua", crate::backend::RR3_HAL_INA219_ILSB_ENV),
+        ("link_ifname", crate::backend::RR3_HAL_LINK_IFNAME_ENV),
+        ("spi_device", crate::backend::RR3_HAL_SPI_DEVICE_ENV),
+        // ESP32 外设桥 UART 路径：常量直引（不经过 cfg 门控的 esp32_uart 模块，
+        // 保证 Windows 等非宿主平台也能编译描述符）。
+        (
+            "periph_uart",
+            rr_periph_proto::consts::RR3_HAL_PERIPH_UART_ENV,
+        ),
+    ];
+    let mut m = BTreeMap::new();
+    for (key, env) in vars {
         if let Some(v) = std::env::var_os(env) {
             m.insert(key.to_string(), v.to_string_lossy().into_owned());
         }
     }
-    let mut m = BTreeMap::new();
-    put(
-        &mut m,
-        "alsa_device",
-        crate::backend::RR3_HAL_ALSA_DEVICE_ENV,
-    );
-    put(&mut m, "pwm_chip", crate::backend::RR3_HAL_PWM_CHIP_ENV);
-    put(
-        &mut m,
-        "pwm_channel",
-        crate::backend::RR3_HAL_PWM_CHANNEL_ENV,
-    );
-    put(&mut m, "gpio_chip", crate::backend::RR3_HAL_GPIO_CHIP_ENV);
-    put(&mut m, "gpio_led_line", "RR3_HAL_GPIO_LED_LINE");
-    put(&mut m, "gpio_relay_line", "RR3_HAL_GPIO_RELAY_LINE");
-    put(&mut m, "i2c_bus", crate::backend::RR3_HAL_I2C_BUS_ENV);
-    put(
-        &mut m,
-        "ina219_addr",
-        crate::backend::RR3_HAL_INA219_ADDR_ENV,
-    );
-    put(
-        &mut m,
-        "ina219_shunt_mohm",
-        crate::backend::RR3_HAL_INA219_SHUNT_ENV,
-    );
-    put(
-        &mut m,
-        "ina219_ilsb_ua",
-        crate::backend::RR3_HAL_INA219_ILSB_ENV,
-    );
-    put(
-        &mut m,
-        "link_ifname",
-        crate::backend::RR3_HAL_LINK_IFNAME_ENV,
-    );
-    put(&mut m, "spi_device", crate::backend::RR3_HAL_SPI_DEVICE_ENV);
-    // P0-3/P0-4：ESP32 外设桥 UART 设备路径——描述符 [hardware].periph_uart 为主，
-    // 应急 env RR3_HAL_PERIPH_UART 可覆盖（同"描述符为底、env 应急"纪律）。
-    // 常量从 rr-periph-proto 直引（不经过 cfg 门控的 esp32_uart 模块），保证 Windows
-    // 等非宿主平台也能编译描述符。
-    put(
-        &mut m,
-        "periph_uart",
-        rr_periph_proto::consts::RR3_HAL_PERIPH_UART_ENV,
-    );
     m
 }
 
