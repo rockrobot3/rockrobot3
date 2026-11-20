@@ -42,5 +42,6 @@
 # 首拆 metrics.py 542→367+193（测量核/CLI），存量 9→8。
 # 二拆 ESP httpd/serve.rs 593→423+179（endpoint/起栈分层），存量 8→7。
 # 三拆 rr-bus-api client/conn.rs 503→397+114（心跳驱动器子模块），存量 7→6。
+# 四拆 rrd assembly.rs 506→353+158（渲染面与判据面分层），存量 6→5。
 hard_600 = 0
-tier_500 = 6
+tier_500 = 5
