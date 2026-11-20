@@ -65,38 +65,41 @@ pub fn rr3_boot_with_probe(
         wiring_path,
         platform_dir,
     )?;
-    let Rr3BootFacts {
-        abs,
-        profile,
-        table,
-        roles,
-        devices,
-        wiring_abs,
-        wiring,
-        platform,
-    } = f;
-    let g = rr3_boot_gate(&profile, &table, &roles, &devices, &platform, &wiring, &abs)?;
+    rr3_boot_build(f, probe)
+}
+
+/// 装载事实 → boot 结果（自 [`rr3_boot_with_probe`] 抽出）：校验门、缺格/缺角色、
+/// manifest/绑定/轴档案与装配快照同址收账（纯构造，不碰全局态）。
+fn rr3_boot_build(
+    f: Rr3BootFacts,
+    probe: &dyn crate::probe::Rr3Probe,
+) -> Result<Rr3ProfileBoot, String> {
+    let g = rr3_boot_gate(
+        &f.profile,
+        &f.table,
+        &f.roles,
+        &f.devices,
+        &f.platform,
+        &f.wiring,
+        &f.abs,
+    )?;
     // 装载期校验②（后果 = 降不拒）：present ∩ enabled_slots 的缺角色清单
-    let role_missing = rr3_role_gaps(&profile, &roles);
+    let role_missing = rr3_role_gaps(&f.profile, &f.roles);
 
     // 缺格判定：enabled_slots 声明的非基础层格位没有指向本模块的有效 binding（或探测不到）。
     // 基础层恒在位，跳过（slots.toml 注记：net.online / power.battery boot 即在位、恒不降级）。
-    let missing = rr3_slot_gaps(&profile, &table, &roles, probe);
+    let missing = rr3_slot_gaps(&f.profile, &f.table, &f.roles, probe);
 
-    let manifests = rr3_manifests(&profile, &g.root);
-    let hal_bindings = rr3_hal_bindings(g.derived, &profile.hardware);
-    let (axis_files, axis_state, axis_notes) = rr3_axis_load(&wiring_abs, &g.pin_ids);
+    let manifests = rr3_manifests(&f.profile, &g.root);
+    let hal_bindings = rr3_hal_bindings(g.derived, &f.profile.hardware);
+    let (axis_files, axis_state, axis_notes) = rr3_axis_load(&f.wiring_abs, &g.pin_ids);
 
-    // G4 装配段校验（ADR-0019 修订 1 ③）已在门 c 段随装配扫描一次完成：缺文件/
-    // 坏形/ops 注入缺逐条点名进 assemble_broken，该模块 boot 入 Degraded（不 fatal；
-    // 修数据 + 重启是唯一解除路）。此处只消费上文的 assemble_broken。
-
-    // 装配快照（批N4 件九笔4，`rr3.ctl.wiring` 判据源）：至此装配单/接线档/轴
-    // 档案/角色表四路全部过完装载期校验（fatal 面早已逐条拒净），这是"验收通过的
-    // 世界"唯一收账点——clone 进快照交给 daemon 定格 OnceLock；boot 函数自身不碰
-    // 全局态（纯构造，住处由调用方拍）。快照与 boot 返回值同生命周期，装载面之后
-    // 对文件的改动进不了本进程的 ctl 应答（快照语义，assembly.rs 模块头注）。
-    let snapshot = rr3_boot_snapshot(&abs, &profile, &wiring, &devices, &roles, axis_files);
+    // G4：assemble_broken 由门 c 段随装配扫描产出，本层只消费（不重复扫描、不 fatal）。
+    // 装配快照（`rr3.ctl.wiring` 判据源）：四路装载期校验全部过完后的唯一收账点；
+    // clone 进快照交给 daemon 定格 OnceLock，装载面之后的文件改动进不了本进程应答。
+    let snapshot = rr3_boot_snapshot(
+        &f.abs, &f.profile, &f.wiring, &f.devices, &f.roles, axis_files,
+    );
 
     Ok(Rr3ProfileBoot {
         manifests,
@@ -106,13 +109,13 @@ pub fn rr3_boot_with_probe(
         role_missing,
         axis_state,
         axis_notes,
-        log_ring_cap: profile.log_ring_cap,
-        hal_backend: profile.hal_backend.clone(),
-        audio_backend: profile.audio_backend.clone(),
-        servo_backend: profile.servo_backend.clone(),
-        display_backend: profile.display_backend.clone(),
-        platform_chip: profile.platform_chip.clone(),
-        platform_tier: profile.platform_tier.clone(),
+        log_ring_cap: f.profile.log_ring_cap,
+        hal_backend: f.profile.hal_backend.clone(),
+        audio_backend: f.profile.audio_backend.clone(),
+        servo_backend: f.profile.servo_backend.clone(),
+        display_backend: f.profile.display_backend.clone(),
+        platform_chip: f.profile.platform_chip.clone(),
+        platform_tier: f.profile.platform_tier.clone(),
         snapshot: Some(snapshot),
     })
 }
