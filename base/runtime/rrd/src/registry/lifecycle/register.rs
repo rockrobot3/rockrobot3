@@ -17,6 +17,12 @@ impl RrdRegistry {
         tx: SyncSender<Rr3Frame>,
         now_ms: u64,
     ) -> Result<u64, Rr3RegisterError> {
+        let superseded = self.rr3_add_gate(facts)?;
+        Ok(self.rr3_add_slot(facts, tx, now_ms, superseded))
+    }
+
+    /// 三条拒绝门 + 入库断言（全过才允许动表）：保留名 → 容量 → watchdog 下界。
+    fn rr3_add_gate(&mut self, facts: &Rr3ManifestFacts) -> Result<Option<u64>, Rr3RegisterError> {
         if facts.name == crate::topics_load::RR3_RESERVED_OWNER {
             return Err(Rr3RegisterError::ReservedName {
                 name: facts.name.clone(),
@@ -53,8 +59,18 @@ impl RrdRegistry {
             "watchdog_ms = 0 的模块 {} 一入库就会被到期扫描判死",
             facts.name
         );
-        // 到这里门与断言全过，才动表：先摘旧 Failed 条目（task→name 映射与条目本体），
-        // 再插入新条目。panic 路径在上面就返回了，走不到这一步。
+        Ok(superseded)
+    }
+
+    /// 落表：摘旧 Failed 条目 → 分配 task → 写映射/条目/exposes（门与断言已过）。
+    fn rr3_add_slot(
+        &mut self,
+        facts: &Rr3ManifestFacts,
+        tx: SyncSender<Rr3Frame>,
+        now_ms: u64,
+        superseded: Option<u64>,
+    ) -> u64 {
+        // 先摘旧 Failed 条目（task→name 映射与条目本体），再插入新条目。
         if let Some(t) = superseded {
             if let Some(old) = self.modules.remove(&facts.name) {
                 self.rr3_drop_exposes(&old.facts, old.src_task);
@@ -90,7 +106,7 @@ impl RrdRegistry {
             },
         );
         self.rr3_add_exposes(facts, task);
-        Ok(task)
+        task
     }
 
     /// exposes 索引登记：逐主题挂 task（同一主题重复声明由集合去重）。
