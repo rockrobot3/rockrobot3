@@ -141,6 +141,10 @@ pub(crate) const RR3_BOARD_ROUTES: &[(&str, &str, &[&str], &str, Rr3Handler)] = 
     ("POST", "/api/board/cloud", &[], "", serve::handle_cloud),
     #[cfg(feature = "tts")]
     ("POST", "/api/board/say", &[], "", serve::handle_say),
+    // W6 对话轮手动触发：raw 16 kHz mono WAV/PCM → ASR→LLM→TTS→播放（VAD 未接时
+    // 的逐跳验收入口；令牌同 play 走 `X-RR3-Token` 头）。
+    #[cfg(feature = "tts")]
+    ("POST", "/api/board/dialog", &[], "", serve::handle_dialog),
 ];
 
 /// 路由查表：method + path 全等才命中（fail-closed，同 host 面板语义；

@@ -332,7 +332,8 @@ fn spawn_planes(ctl: CtlUart, rt: RtPeriph, bus: Arc<Mutex<Bus>>) {
 
 /// 板侧服务面起序（W3-2b/W4-2b）：自治监督 → 云 TTS worker → httpd → SNTP。
 /// TTS worker 先于 httpd 起（`/say` 不撞"未装配"窗）；SNTP 在 httpd 之后（对时
-/// 失败不拖慢面板）；全部按 feature 档条件编译，默认固件零行为变化。
+/// 失败不拖慢面板）；dialog worker 由调用方在音频面之前起（W6）；全部按 feature
+/// 档条件编译，默认固件零行为变化。
 fn start_services(bus: &Arc<Mutex<Bus>>) {
     #[cfg(feature = "autonomy")]
     crate::autonomy::rr3_start();
@@ -469,6 +470,10 @@ pub(crate) fn rr3_boot() {
     let bus = bus_seed();
     ram_point("2-periph-ready");
     start_services(&bus);
+    // 对话 worker 先于音频面起：mic 切出的首段不撞"未装配"窗（播放面随后在
+    // spawn_audio 内起，VAD 起音至少 200ms，播放面必已就绪）。
+    #[cfg(feature = "tts")]
+    crate::dialog::spawn_dialog(bus.clone());
     spawn_planes(ctl, rt, bus.clone());
     spawn_audio(audio, &bus);
     status_loop();

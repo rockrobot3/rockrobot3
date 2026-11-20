@@ -58,15 +58,17 @@ const SUP_CFG: Rr3SupCfg = Rr3SupCfg {
     timeouts_ms: [15_000, 1_500, 10_000, AUDIO_OUT_TIMEOUT_MS, 4_000, 4_000],
 };
 
-/// 板侧已接线任务（心跳真值来源）。`audio-out` 只在 tts 档存在（W4-2 播放面）；
-/// 未编入播放面时保持 degraded，不把"没有这条腿"报成故障。
+/// 板侧已接线任务（心跳真值来源）。`audio-out`/`dialog` 只在 tts 档存在
+/// （W4-2 播放面 + W6 对话 worker）；未编入时保持 degraded，不把"没有这条腿"
+/// 报成故障。
 #[cfg(feature = "tts")]
-const WIRED: [Rr3Task; 5] = [
+const WIRED: [Rr3Task; 6] = [
     Rr3Task::Net,
     Rr3Task::AudioIn,
+    Rr3Task::Dialog,
+    Rr3Task::AudioOut,
     Rr3Task::Motion,
     Rr3Task::Ui,
-    Rr3Task::AudioOut,
 ];
 #[cfg(not(feature = "tts"))]
 const WIRED: [Rr3Task; 4] = [Rr3Task::Net, Rr3Task::AudioIn, Rr3Task::Motion, Rr3Task::Ui];
@@ -94,8 +96,12 @@ pub(crate) fn rr3_start() {
     }
     SUP_ON.store(true, Ordering::Release);
     let wired = rr3_names(WIRED.iter().fold(0u8, |m, t| m | 1 << t.index()));
+    #[cfg(feature = "tts")]
+    let tail = "dialog 接线（W6）";
+    #[cfg(not(feature = "tts"))]
+    let tail = "dialog degraded（无 tts 档）";
     println!(
-        "[autonomy] 监督壳起：栅格 {}ms；已接线 {wired}；dialog degraded（W6 未落地，不判死）",
+        "[autonomy] 监督壳起：栅格 {}ms；已接线 {wired}；{tail}",
         SUP_CFG.tick_ms
     );
     let spawned = thread::Builder::new()
@@ -283,14 +289,20 @@ mod tests {
         assert!(!j.contains("tasks"), "无快照不得虚构任务状态");
     }
 
+    /// 位图口径 = WIRED 任务集（feature 档不同，期望值从同一常量导出，不抄字面）。
+    fn wired_mask() -> u8 {
+        WIRED.iter().fold(0u8, |m, t| m | 1 << t.index())
+    }
+
     #[test]
     fn dead_bits_only_cover_wired_tasks_with_real_beat() {
         let h = health_with(Rr3TaskState::Dead, 1);
         let all = rr3_dead_bits(&h, &[true; RR3_TASK_COUNT]);
-        assert_eq!(rr3_names(all), "net,audio-in,motion,ui");
+        assert_eq!(all, wired_mask());
         let mut ever = [true; RR3_TASK_COUNT];
         ever[Rr3Task::AudioIn.index()] = false; // 从未起过 → 不触发复位
-        assert_eq!(rr3_names(rr3_dead_bits(&h, &ever)), "net,motion,ui");
+        let want = wired_mask() & !(1 << Rr3Task::AudioIn.index());
+        assert_eq!(rr3_dead_bits(&h, &ever), want);
         let running = health_with(Rr3TaskState::Running, 0);
         assert_eq!(rr3_dead_bits(&running, &ever), 0);
     }

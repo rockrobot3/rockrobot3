@@ -1,0 +1,359 @@
+//! 对话轮 worker（W6-1/W6-2）：语音段 → 云 ASR → 意图 → 云 LLM → 云 TTS →
+//! 本板播放 → 表情回落。
+//!
+//! 分工（计划册 §3.2）：VAD/切段在 mic（audio-in），本模块只吃**已完成的一段**
+//! 16 kHz 单声道 PCM；三跳请求体/应答解析全部走 [`rr_cloud_proto`] 共享纯函数，
+//! 传输走 [`crate::cloud`] 的 `esp_http_client` 面（不引第二份 HTTP 栈）。
+//!
+//! 意图（W6-1）：[`rr_intent_mech`] 产出结构化动作；S3 单板只有 servo 执行面
+//! （relay 动作如实点名跳过），舵机作业走运行面 `Job::Move`，表情四态
+//! （listen/think/talk/idle）由 `rr3_expr_set` 切换。
+//!
+//! 心跳：worker 空转 1 s 一拍、轮内每步续 `dialog`（超时窗 10 s）；播放等待按
+//! `tts_played/tts_fail` 计数收敛，最长 = 估算时长 + 3 s 余量，不死等。
+//!
+//! 凭据零回显：配置只经 [`crate::cloud::rr3_dialog_cfg`] 读 NVS，日志不出 key。
+
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+
+use rr_audio_mech::rr3_pcm_ms;
+use rr_autonomy::Rr3Task;
+use rr_intent_mech::Rr3IntentAction;
+
+use crate::board::MIC_SR_HZ;
+use crate::state::{lock_bus, now_ms, push_job, rr3_expr_set, Bus, Job};
+
+/// 待处理语音段队列容量（满即拒——VAD 半双工下不应发生，发生即上游节拍失控）。
+const DIALOG_Q_CAP: usize = 1;
+/// worker 栈：mbedTLS 握手 + multipart/JSON 组包（同 TTS worker 口径）。
+const DIALOG_STACK: usize = 24_576;
+/// 空转心跳周期（监督壳 dialog 超时窗 10 s 的 1/10）。
+const DIALOG_IDLE_MS: u64 = 1_000;
+/// 单轮补全上限（契约 §2 默认 150）。
+const RR3_LLM_MAX_TOKENS: i64 = 150;
+/// 系统人设（策略量；回答短、口语化，避免 TTS 长文本）。
+const RR3_SYSTEM_PROMPT: &str = "你是桌面机器人小R，用简短口语化的中文回答，一般不超过50字。";
+/// 朗读文本上限（与 `/say` 的 512 B 门同源）。
+const MAX_REPLY: usize = 512;
+/// 播放等待轮询步长与余量。
+const PLAY_POLL_MS: u64 = 200;
+const PLAY_SLACK_MS: u64 = 3_000;
+/// 云端失败时的降级播报（契约 §4：不得静默弃轮；TTS 也失败则只留串口点名）。
+const RR3_DEGRADE_TEXT: &str = "网络不太通畅，请稍后再试。";
+
+/// 语音段发送端（未装配 = None；`try_send` 不阻塞 mic 线程）。
+static DIALOG_TX: Mutex<Option<SyncSender<Vec<i16>>>> = Mutex::new(None);
+
+/// 起对话轮 worker（tts 档；boot 在音频面之前调用，避免首段撞"未装配"窗）。
+pub(crate) fn spawn_dialog(bus: Arc<Mutex<Bus>>) {
+    let (tx, rx) = sync_channel(DIALOG_Q_CAP);
+    let _ = DIALOG_TX.lock().map(|mut slot| *slot = Some(tx));
+    let spawned = thread::Builder::new()
+        .name("dialog".into())
+        .stack_size(DIALOG_STACK)
+        .spawn(move || dialog_run(rx, bus));
+    if let Err(e) = spawned {
+        println!("[dialog] 起对话线程失败: {e:?}（dialog 任务将按 timeout 判死）");
+    }
+}
+
+/// 入队一段语音（mic 切段后调用）：满/未装配/线程退出如实回错，不阻塞采集。
+pub(crate) fn rr3_dialog_utterance(pcm: Vec<i16>) -> Result<(), &'static str> {
+    if pcm.is_empty() {
+        return Err("语音段为空");
+    }
+    let Ok(slot) = DIALOG_TX.lock() else {
+        return Err("对话面锁中毒");
+    };
+    let Some(tx) = slot.as_ref() else {
+        return Err("对话面未装配");
+    };
+    tx.try_send(pcm).map_err(|e| {
+        if matches!(e, TrySendError::Full(_)) {
+            "对话队列满"
+        } else {
+            "对话线程已退出"
+        }
+    })
+}
+
+/// `/api/board/dialog` body → 单声道 PCM：接受 16 kHz mono WAV 或裸 s16le；
+/// 立体声/异采样率显式拒（板侧不做重采样，避免把错误输入送云端）。
+pub(crate) fn rr3_dialog_body(body: &[u8]) -> Result<Vec<i16>, String> {
+    let (rate, channels, data) = match rr_audio_mech::rr3_wav_pcm(body) {
+        Ok(Some(wav)) => (wav.sample_rate, wav.channels, wav.data),
+        Ok(None) => (MIC_SR_HZ, 1u16, body),
+        Err(e) => return Err(format!("WAV 不合法: {e}")),
+    };
+    if rate != MIC_SR_HZ {
+        return Err(format!("采样率 {rate} ≠ {MIC_SR_HZ}"));
+    }
+    if channels != 1 {
+        return Err(format!("声道 {channels} ≠ 1（对话端点只收单声道）"));
+    }
+    if data.len() < 2 || data.len() % 2 != 0 {
+        return Err("PCM 空或非整样本".into());
+    }
+    Ok(data
+        .chunks_exact(2)
+        .map(|c| i16::from_le_bytes([c[0], c[1]]))
+        .collect())
+}
+
+/// worker 主体：空转续 `dialog` 心跳；收到一段即跑一整轮。
+fn dialog_run(rx: Receiver<Vec<i16>>, bus: Arc<Mutex<Bus>>) {
+    println!("[dialog] 对话轮 worker 起（ASR→LLM→意图→TTS→本板播放）");
+    loop {
+        match rx.recv_timeout(Duration::from_millis(DIALOG_IDLE_MS)) {
+            Ok(pcm) => rr3_turn(&bus, pcm),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                crate::autonomy::rr3_beat(Rr3Task::Dialog);
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                println!("[dialog] 语音队列断开，worker 退出");
+                return;
+            }
+        }
+    }
+}
+
+/// 一整轮：ASR → 意图执行 → LLM → TTS → 播放等待 → 表情回落。
+fn rr3_turn(bus: &Arc<Mutex<Bus>>, pcm: Vec<i16>) {
+    let t0 = now_ms();
+    rr3_beat_dialog();
+    rr3_face(bus, "think");
+    let text = match rr3_asr_stage(&pcm) {
+        Ok(t) if !t.trim().is_empty() => t,
+        Ok(_) => return rr3_turn_end(bus, "识别为空文本，弃轮"),
+        Err(e) => return rr3_turn_fail(bus, &format!("ASR 失败，弃轮: {e}")),
+    };
+    let actions = rr_intent_mech::rr3_extract_actions(&text);
+    let acted = rr3_apply_actions(bus, &actions);
+    let reply = match rr3_llm_stage(&text) {
+        Ok(r) => rr3_cap_text(&r, MAX_REPLY),
+        Err(e) => return rr3_turn_fail(bus, &format!("LLM 失败，弃轮: {e}")),
+    };
+    let speak = rr3_speak_stage(bus, &reply);
+    println!(
+        "[dialog] 轮完成 {}ms asr='{text}' reply='{reply}' actions={acted} {speak}",
+        now_ms().saturating_sub(t0)
+    );
+}
+
+/// 弃轮收尾：表情回落 idle 并打印点名（不 panic，板其余功能照常）。
+fn rr3_turn_end(bus: &Arc<Mutex<Bus>>, why: &str) {
+    rr3_face(bus, "idle");
+    println!("[dialog] {why}");
+}
+
+/// 云端失败收尾：先点名，再尝试一句降级播报（契约 §4 不静默弃轮）。
+fn rr3_turn_fail(bus: &Arc<Mutex<Bus>>, why: &str) {
+    rr3_turn_end(bus, why);
+    let speak = rr3_speak_stage(bus, RR3_DEGRADE_TEXT);
+    println!("[dialog] 降级播报 {speak}");
+}
+
+/// ASR 段：PCM → WAV/multipart → 识别文本。
+fn rr3_asr_stage(pcm: &[i16]) -> Result<String, String> {
+    let cfg = crate::cloud::rr3_dialog_cfg().map_err(|e| format!("云配置缺席: {e}"))?;
+    let bytes = rr3_i16_le(pcm);
+    let boundary = format!("rr3{:08x}", crate::state::esp_random_u32());
+    let body = rr_cloud_proto::rr3_multipart_body(
+        &cfg.asr_model,
+        &bytes,
+        MIC_SR_HZ,
+        &boundary,
+        Some("zh"),
+    );
+    let ctype = format!("multipart/form-data; boundary={boundary}");
+    let url = format!("{}/v1/audio/transcriptions", cfg.base.trim_end_matches('/'));
+    let resp = crate::cloud::rr3_post_retry(
+        "识别接口",
+        &url,
+        &cfg.key,
+        &body,
+        &ctype,
+        crate::cloud::MAX_JSON,
+    )?;
+    rr_cloud_proto::rr3_asr_text(&resp)
+}
+
+/// LLM 段：user_text → OpenAI 兼容补全 → 回复文本。
+fn rr3_llm_stage(text: &str) -> Result<String, String> {
+    let cfg = crate::cloud::rr3_dialog_cfg().map_err(|e| format!("云配置缺席: {e}"))?;
+    let messages = [
+        ("system".to_string(), RR3_SYSTEM_PROMPT.to_string()),
+        ("user".to_string(), text.to_string()),
+    ];
+    let body = rr_cloud_proto::rr3_chat_body(&cfg.llm_model, &messages, RR3_LLM_MAX_TOKENS);
+    let url = format!("{}/chat/completions", cfg.base.trim_end_matches('/'));
+    let resp = crate::cloud::rr3_post_retry(
+        "大模型接口",
+        &url,
+        &cfg.key,
+        &body,
+        "application/json",
+        crate::cloud::MAX_JSON,
+    )?;
+    rr_cloud_proto::rr3_reply_text(&resp).ok_or_else(|| "大模型应答形状不符".to_string())
+}
+
+/// TTS 段：回复文本 → 云 PCM → 播放队列 → 有界等待播完 → 表情 idle。
+fn rr3_speak_stage(bus: &Arc<Mutex<Bus>>, reply: &str) -> String {
+    if reply.trim().is_empty() {
+        rr3_face(bus, "idle");
+        return "tts=skip(空回复)".to_string();
+    }
+    let pcm = match crate::cloud::rr3_tts_fetch(reply) {
+        Ok(p) => p,
+        Err(e) => {
+            rr3_face(bus, "idle");
+            return format!("tts_fail={e}");
+        }
+    };
+    let want_ms = rr3_pcm_ms(pcm.len(), 1, MIC_SR_HZ);
+    let (played0, fail0) = {
+        let b = lock_bus(bus);
+        (b.st.tts_played, b.st.tts_fail)
+    };
+    rr3_face(bus, "talk");
+    let queued = crate::playout::rr3_play(pcm);
+    if queued.is_err() {
+        rr3_face(bus, "idle");
+        return format!("play_enqueue={queued:?}");
+    }
+    rr3_wait_played(bus, played0, fail0, want_ms + PLAY_SLACK_MS);
+    rr3_face(bus, "idle");
+    format!("tts_ms={want_ms} played=1")
+}
+
+/// 播放等待：按 `tts_played/tts_fail` 计数收敛，轮询期续 dialog 心跳。
+fn rr3_wait_played(bus: &Arc<Mutex<Bus>>, played0: u64, fail0: u32, max_ms: u64) {
+    let t0 = now_ms();
+    while now_ms().saturating_sub(t0) < max_ms {
+        rr3_beat_dialog();
+        let (played, fail) = {
+            let b = lock_bus(bus);
+            (b.st.tts_played, b.st.tts_fail)
+        };
+        if played > played0 || fail > fail0 {
+            return;
+        }
+        thread::sleep(Duration::from_millis(PLAY_POLL_MS));
+    }
+    println!("[dialog] 播放等待超窗 {max_ms}ms（tts_played 未推进）");
+}
+
+/// 意图动作执行：servo → 推 pan 移动作业；relay 在 S3 无执行面，如实点名跳过。
+fn rr3_apply_actions(bus: &Arc<Mutex<Bus>>, actions: &[Rr3IntentAction]) -> usize {
+    let mut acted = 0usize;
+    for action in actions {
+        let Some(deg) = action.rr3_angle_deg().and_then(|a| u32::try_from(a).ok()) else {
+            println!(
+                "[dialog] 意图动作跳过 topic={}（S3 无 relay 执行面或角非法）",
+                action.rr3_topic()
+            );
+            continue;
+        };
+        lock_bus(bus).st.wander_on = false; // 外部点名优先，自主扫摆让位
+        push_job(
+            bus,
+            Job::Move {
+                pan: Some(deg),
+                tilt: None,
+            },
+        );
+        acted += 1;
+    }
+    acted
+}
+
+/// 表情切换（listen/think/talk/idle 四态；未知名由机制件兜底 idle）。
+fn rr3_face(bus: &Arc<Mutex<Bus>>, expr: &str) {
+    rr3_expr_set(bus, expr);
+}
+
+/// 一轮内的进度心跳（ASR/LLM/TTS 各段之间与播放等待）。
+fn rr3_beat_dialog() {
+    crate::autonomy::rr3_beat(Rr3Task::Dialog);
+}
+
+/// i16 样本 → s16le 字节（ASR multipart 载荷）。
+fn rr3_i16_le(pcm: &[i16]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(pcm.len() * 2);
+    for s in pcm {
+        out.extend_from_slice(&s.to_le_bytes());
+    }
+    out
+}
+
+/// 文本上限（按 UTF-8 字符边界截断；TTS 输入与 `/say` 同门）。
+fn rr3_cap_text(text: &str, max: usize) -> String {
+    let mut out = String::new();
+    for ch in text.chars() {
+        if out.len() + ch.len_utf8() > max {
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 合成最小 WAV（16 kHz mono 16 bit）。
+    fn wav_mono(rate: u32, pcm: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(36 + pcm.len() as u32).to_le_bytes());
+        out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&rate.to_le_bytes());
+        out.extend_from_slice(&(rate * 2).to_le_bytes());
+        out.extend_from_slice(&2u16.to_le_bytes());
+        out.extend_from_slice(&16u16.to_le_bytes());
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
+        out.extend_from_slice(pcm);
+        out
+    }
+
+    #[test]
+    fn dialog_body_accepts_mono_wav_and_raw() {
+        let pcm = [0x01, 0x00, 0xFE, 0xFF];
+        assert_eq!(rr3_dialog_body(&wav_mono(16_000, &pcm)).unwrap(), [1, -2]);
+        assert_eq!(rr3_dialog_body(&pcm).unwrap(), [1, -2]);
+    }
+
+    #[test]
+    fn dialog_body_rejects_wrong_rate_channels_and_odd_bytes() {
+        assert!(rr3_dialog_body(&wav_mono(8_000, &[0, 0]))
+            .unwrap_err()
+            .contains("采样率"));
+        let mut stereo = wav_mono(16_000, &[0, 0, 0, 0]);
+        stereo[22] = 2; // channels
+        assert!(rr3_dialog_body(&stereo).unwrap_err().contains("声道"));
+        assert!(rr3_dialog_body(&[0, 1, 2]).unwrap_err().contains("整样本"));
+        assert!(rr3_dialog_body(&[]).unwrap_err().contains("整样本"));
+    }
+
+    #[test]
+    fn i16_bytes_are_little_endian_roundtrip() {
+        let bytes = rr3_i16_le(&[1, -2, 32767, -32768]);
+        assert_eq!(bytes, [0x01, 0x00, 0xFE, 0xFF, 0xFF, 0x7F, 0x00, 0x80]);
+    }
+
+    #[test]
+    fn cap_text_stops_on_char_boundary() {
+        assert_eq!(rr3_cap_text("你好世界", 6), "你好");
+        assert_eq!(rr3_cap_text("abc", 3), "abc");
+        assert_eq!(rr3_cap_text("你好", 1), "");
+    }
+}

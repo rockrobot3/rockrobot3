@@ -31,7 +31,7 @@ autonomy = []
 # W4-2 真实 PCM 播放 + 云 TTS：I2S1 常驻播放面、半双工门控、HTTPS 取数。
 # 与 spk-tone 互斥（同占 I2S1）；**隐含 autonomy**——TLS 证书校验依赖 SNTP 对时，
 # 单独开 tts 也必须带健康壳与对时，避免"能编译、连不上云"的隐性坏档。
-tts = ["autonomy", "dep:rr-audio-mech", "dep:rr-cloud-proto"]
+tts = ["autonomy", "dep:rr-audio-mech", "dep:rr-cloud-proto", "dep:rr-intent-mech"]
 
 # 批D③ 真板实锤（2026-10-13）：dev 缺省 opt-level=0 下 mic 线程的逐元素堆写
 # （extend_from_slice / String::push / serde_json 序列化）慢两个数量级——组帧
@@ -59,6 +59,8 @@ rr-autonomy = { path = "../../base/runtime/rr-autonomy" }
 rr-audio-mech = { path = "../../base/runtime/rr-audio-mech", optional = true }
 # 云请求体纯函数（W4-2b）：TTS body 与重试判据，与 Pi 侧逐字节同源。
 rr-cloud-proto = { path = "../../base/runtime/rr-cloud-proto", optional = true }
+# 意图规则机制核（W6-1）：user_text → 动作枚举，与 Pi brain 同一份词表。
+rr-intent-mech = { path = "../../base/runtime/rr-intent-mech", optional = true }
 # 外设帧面协议共享层（ADR-0024）：task 位形/主题/magic/请求解析/应答组帧的真值
 # 单点，与宿主 rr-hal 双向复用；本固件只消费协议件，平台面（UART/I2C/LEDC/I2S）
 # 仍在本 crate 的端口层。

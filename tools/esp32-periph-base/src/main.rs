@@ -90,6 +90,9 @@ mod periph;
 // 云 TTS 客户端（W4-2b）：仅 tts 档编译；与播放面共用 tts gate。
 #[cfg(feature = "tts")]
 mod cloud;
+// 对话轮 worker（W6-1/W6-2）：语音段 → ASR → 意图 → LLM → TTS → 本板播放。
+#[cfg(feature = "tts")]
+mod dialog;
 // I2S1 TX 真实 PCM 播放面（W4-2）：仅 --features tts 编译；与 spk-tone 互斥。
 #[cfg(feature = "tts")]
 mod playout;
