@@ -98,6 +98,42 @@ const RR3_MAX7219_INIT_SEQ: [(u8, u8); 5] = [
     (RR3_MAX7219_REG_SHUTDOWN, 0x01),
 ];
 
+/// spidev 三笔 ioctl（自 [`Rr3Max7219SpiDisplay::ensure`] 抽出）：模式 0 /
+/// 字宽 8 / 时钟 1 MHz；errno 当场取出，失败点名设备路径与项名。
+fn rr3_spi_config(dev: &std::fs::File, path: &std::path::Path) -> Result<(), Rr3HalError> {
+    for (req, value, what) in [
+        (SPI_IOC_WR_MODE, 0u8, "写 SPI 模式失败"),
+        (SPI_IOC_WR_BITS_PER_WORD, 8u8, "写字宽失败"),
+    ] {
+        // SAFETY：value 是合法可写指针，ioctl 号与 u8 载荷配对（单测钉死）
+        let ret = unsafe {
+            libc::ioctl(
+                std::os::fd::AsRawFd::as_raw_fd(dev),
+                req as _,
+                &value as *const u8,
+            )
+        };
+        if ret < 0 {
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            return Err(rr3_spidev_err(path, what, errno));
+        }
+    }
+    let speed: u32 = 1_000_000;
+    // SAFETY：speed 是合法可写指针，ioctl 号与 u32 载荷配对（单测钉死）
+    let ret = unsafe {
+        libc::ioctl(
+            std::os::fd::AsRawFd::as_raw_fd(dev),
+            SPI_IOC_WR_MAX_SPEED_HZ as _,
+            &speed as *const u32,
+        )
+    };
+    if ret < 0 {
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        return Err(rr3_spidev_err(path, "写时钟上限失败", errno));
+    }
+    Ok(())
+}
+
 /// linux spidev MAX7219 显示（[`crate::Rr3Display`] 的 linux 后端）。
 ///
 /// [`Rr3Display::frame`] 的"读回 == 上次 draw 的帧"语义由 `last` 快照承载
@@ -139,36 +175,7 @@ impl Rr3Max7219SpiDisplay {
                     self.dev_path.display()
                 )))
             })?;
-        for (req, value, what) in [
-            (SPI_IOC_WR_MODE, 0u8, "写 SPI 模式失败"),
-            (SPI_IOC_WR_BITS_PER_WORD, 8u8, "写字宽失败"),
-        ] {
-            // SAFETY：value 是合法可写指针，ioctl 号与 u8 载荷配对（单测钉死）
-            let ret = unsafe {
-                libc::ioctl(
-                    std::os::fd::AsRawFd::as_raw_fd(&dev),
-                    req as _,
-                    &value as *const u8,
-                )
-            };
-            if ret < 0 {
-                let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-                return Err(rr3_spidev_err(&self.dev_path, what, errno));
-            }
-        }
-        let speed: u32 = 1_000_000;
-        // SAFETY：speed 是合法可写指针，ioctl 号与 u32 载荷配对（单测钉死）
-        let ret = unsafe {
-            libc::ioctl(
-                std::os::fd::AsRawFd::as_raw_fd(&dev),
-                SPI_IOC_WR_MAX_SPEED_HZ as _,
-                &speed as *const u32,
-            )
-        };
-        if ret < 0 {
-            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-            return Err(rr3_spidev_err(&self.dev_path, "写时钟上限失败", errno));
-        }
+        rr3_spi_config(&dev, &self.dev_path)?;
         use std::io::Write;
         for (reg, data) in RR3_MAX7219_INIT_SEQ {
             (&dev).write_all(&rr3_max7219_cmd(reg, data)).map_err(|e| {
