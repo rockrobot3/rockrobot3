@@ -38,7 +38,7 @@
 #   panel/exec 641→85；rr3-act boot 938→293；rr3-sense dispatch 791→307；
 #   pi-periph-base main 732→109 → 11→0。
 # **hard_600 = 0 = 铁律落地**：此后任何 ≥600 行的源文件新增即红。
-# 2026-11-21 下一档：≥500 行存量 9（7 个 .rs + metrics.py 542 + workflow_rules.py 520），
-#   只降不升；先拆最接近 600 的 ESP httpd/serve.rs（593，板窗口空闲时做）。
+# 2026-11-21 下一档立项：≥500 行存量 9（7 个 .rs + metrics.py 542 + workflow_rules.py 520）。
+# 首拆 metrics.py 542→367+193（测量核/CLI），存量 9→8；只降不升。
 hard_600 = 0
-tier_500 = 9
+tier_500 = 8
