@@ -15,12 +15,16 @@ use std::thread;
 use std::time::Duration;
 
 use esp_idf_hal::gpio::{AnyInputPin, AnyOutputPin, InputPin, OutputPin};
+#[cfg(feature = "esp32s3")]
+use esp_idf_hal::gpio::{Gpio15, Gpio16, Gpio17, Gpio18, Gpio6, Gpio7};
+#[cfg(feature = "esp32")]
+use esp_idf_hal::gpio::{Gpio16, Gpio17, Gpio25, Gpio26, Gpio27, Gpio4};
 use esp_idf_hal::i2c::{I2cConfig, I2cDriver, I2C0};
 use esp_idf_hal::ledc::{
     config::TimerConfig, LedcDriver, LedcTimerDriver, CHANNEL0, CHANNEL1, TIMER0,
 };
 use esp_idf_hal::peripheral::Peripheral;
-use esp_idf_hal::peripherals::Peripherals;
+use esp_idf_hal::peripherals::{Peripherals, I2S0, I2S1};
 use esp_idf_hal::uart::{UartConfig, UartDriver, UART2};
 use esp_idf_hal::units::Hertz;
 use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size, EspError};
@@ -349,15 +353,61 @@ fn status_loop() {
     }
 }
 
+/// 音频面外部件（开箱一并取出）：`Peripherals` 字段部分移动后不能再整体传递，
+/// 而音频面按硬件契约最后起——脚位在开箱时定型，线程由 [`spawn_audio`] 末段拉起。
+#[cfg(feature = "esp32")]
+struct AudioFace {
+    i2s0: I2S0,
+    mic: (Gpio4, Gpio27, Gpio26),
+    i2s1: I2S1,
+    spk: (Gpio25, Gpio17, Gpio16),
+}
+
+#[cfg(feature = "esp32s3")]
+struct AudioFace {
+    i2s0: I2S0,
+    mic: (Gpio6, Gpio15, Gpio7),
+    i2s1: I2S1,
+    spk: (Gpio16, Gpio18, Gpio17),
+}
+
+/// 音频面起序（硬件契约末段）：先采集，后提示音/常驻播放；I2S1 两档互斥。
+/// 元组序 = (bclk, din/dout, ws)，与各 spawn 签名同序。
+fn spawn_audio(face: AudioFace, bus: &Arc<Mutex<Bus>>) {
+    let AudioFace {
+        i2s0,
+        mic,
+        i2s1,
+        spk,
+    } = face;
+    // 采集冒烟：接法与 BCLK 迁移史见 mic.rs 头注（2026-10-20 迁 GPIO4）。
+    mic::spawn_mic_smoke(bus.clone(), i2s0, mic.0, mic.1, mic.2);
+    ram_point("3-mic-smoke");
+    // W4-1 提示音验收档（spk-tone）。
+    #[cfg(feature = "spk-tone")]
+    {
+        speaker::spawn_tone(i2s1, spk.0, spk.1, spk.2);
+        ram_point("4-spk-tone");
+    }
+    // W4-2 常驻播放面（tts）：播放线程独占 I2S1 TX。
+    #[cfg(feature = "tts")]
+    {
+        playout::spawn_player(i2s1, spk.0, spk.1, spk.2, bus.clone());
+        ram_point("4-spk-play");
+    }
+    #[cfg(not(any(feature = "spk-tone", feature = "tts")))]
+    let _ = (i2s1, spk); // 默认固件不占 I2S1：外部件就地释放
+}
+
 /// 板级外设开箱（自 rr3_boot 抽出）：按芯片档选脚后逐件装配，返回 LEDC timer、
-/// 指令面、运行面与外设总线。timer 必须由调用方持有到进程终局（Drop 会复位硬件）。
+/// 指令面、运行面与音频面外部件。timer 由调用方持有到进程终局（Drop 会复位硬件）。
 fn open_parts(
     p: Peripherals,
 ) -> (
     LedcTimerDriver<'static, TIMER0>,
     CtlUart,
     RtPeriph,
-    Arc<Mutex<Bus>>,
+    AudioFace,
 ) {
     // UART2 指令面引脚：classic 18/19；S3 N16R8 41/42（真板订正，见 pins_s3.rs 头注）。
     #[cfg(feature = "esp32")]
@@ -391,8 +441,22 @@ fn open_parts(
         p.pins.gpio4,
         p.pins.gpio5,
     );
+    #[cfg(feature = "esp32")]
+    let audio = AudioFace {
+        i2s0: p.i2s0,
+        mic: (p.pins.gpio4, p.pins.gpio27, p.pins.gpio26),
+        i2s1: p.i2s1,
+        spk: (p.pins.gpio25, p.pins.gpio17, p.pins.gpio16),
+    };
+    #[cfg(feature = "esp32s3")]
+    let audio = AudioFace {
+        i2s0: p.i2s0,
+        mic: (p.pins.gpio6, p.pins.gpio15, p.pins.gpio7),
+        i2s1: p.i2s1,
+        spk: (p.pins.gpio16, p.pins.gpio18, p.pins.gpio17),
+    };
     let rt = init_rt(i2c, pan, tilt, rail);
-    (timer, CtlUart { uart }, rt, bus_seed())
+    (timer, CtlUart { uart }, rt, audio)
 }
 
 /// 板级启动总序：外设开箱 → 两平面 → 音频面 → 状态环（永不返回，复位靠 BOD/复位键）。
@@ -400,44 +464,11 @@ pub(crate) fn rr3_boot() {
     boot_banner();
     let p = Peripherals::take()
         .expect("Peripherals::take 失败：外设已被取走（启动期不应发生，查是否有二次取）");
-    let (_timer, ctl, rt, bus) = open_parts(p);
+    let (_timer, ctl, rt, audio) = open_parts(p);
+    let bus = bus_seed();
     ram_point("2-periph-ready");
     start_services(&bus);
     spawn_planes(ctl, rt, bus.clone());
-    // 采集冒烟：接法与 BCLK 迁移史见 mic.rs 头注（2026-10-20 迁 GPIO4）。
-    #[cfg(feature = "esp32")]
-    mic::spawn_mic_smoke(
-        bus.clone(),
-        p.i2s0,
-        p.pins.gpio4,
-        p.pins.gpio27,
-        p.pins.gpio26,
-    );
-    #[cfg(feature = "esp32s3")]
-    mic::spawn_mic_smoke(
-        bus.clone(),
-        p.i2s0,
-        p.pins.gpio6,
-        p.pins.gpio15,
-        p.pins.gpio7,
-    );
-    ram_point("3-mic-smoke");
-
-    // W4-1 提示音验收档（spk-tone）：classic 25/17/16，S3 16/18/17。
-    #[cfg(all(feature = "spk-tone", feature = "esp32"))]
-    speaker::spawn_tone(p.i2s1, p.pins.gpio25, p.pins.gpio17, p.pins.gpio16);
-    #[cfg(all(feature = "spk-tone", feature = "esp32s3"))]
-    speaker::spawn_tone(p.i2s1, p.pins.gpio16, p.pins.gpio18, p.pins.gpio17);
-    #[cfg(feature = "spk-tone")]
-    ram_point("4-spk-tone");
-
-    // W4-2 常驻播放面（tts）：与 W4-1 同脚，播放线程独占 I2S1 TX。
-    #[cfg(all(feature = "tts", feature = "esp32"))]
-    playout::spawn_player(p.i2s1, p.pins.gpio25, p.pins.gpio17, p.pins.gpio16, bus);
-    #[cfg(all(feature = "tts", feature = "esp32s3"))]
-    playout::spawn_player(p.i2s1, p.pins.gpio16, p.pins.gpio18, p.pins.gpio17, bus);
-    #[cfg(feature = "tts")]
-    ram_point("4-spk-play");
-
+    spawn_audio(audio, &bus);
     status_loop();
 }
