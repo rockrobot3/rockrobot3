@@ -270,49 +270,10 @@ fn rt_scan(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
     let tilt_pts = axis_scan_points(Axis::Tilt);
     let mut ok = true;
     for (i, (dp, dt)) in pan_pts.iter().zip(tilt_pts.iter()).enumerate() {
-        let p = match ph.servo_set(Axis::Pan, *dp) {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("[periph] SCAN pan 失败: {e}");
-                ok = false;
-                break;
-            }
-        };
-        thread::sleep(Duration::from_millis(SCAN_POINT_MS));
-        let t = match ph.servo_set(Axis::Tilt, *dt) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("[periph] SCAN tilt 失败: {e}");
-                ok = false;
-                break;
-            }
-        };
-        thread::sleep(Duration::from_millis(SCAN_POINT_MS));
-        // 整轮扫描 ≈12 s，高于 motion/ui 的 4 s 超时窗——每个点是一次真实进度，
-        // 在此续命（心跳语义 = 线程仍在推进，不是"结果已产出"）。
-        rr3_beat_rt();
-        // 回读闭环：LEDC 寄存器实际 duty 换算回角度（duty_to_deg），与设定角并打
-        // ——判据②"目视 + 串口回读一致"的硬件侧证据
-        let (pr, tr) = (
-            duty_to_deg(ph.pan.get_duty(), DUTY_MIN, DUTY_MAX),
-            duty_to_deg(ph.tilt.get_duty(), DUTY_MIN, DUTY_MAX),
-        );
-        {
-            let mut b = lock_bus(bus);
-            b.st.wander_on = false;
-            b.st.pan_deg = p;
-            b.st.tilt_deg = t;
+        if !rt_scan_point(ph, bus, i, *dp, *dt) {
+            ok = false;
+            break;
         }
-        println!(
-            "[periph] SCAN point={} pan={}(read {pr}) tilt={}(read {tr})",
-            i + 1,
-            p,
-            t
-        );
-        outbox_push(
-            bus,
-            format!("SCAN point={} pan={p} read={pr} tilt={t} read={tr}", i + 1),
-        );
     }
     outbox_push(
         bus,
@@ -322,6 +283,52 @@ fn rt_scan(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
             "ERR SCAN 中途失败（见 monitor 日志）".into()
         },
     );
+}
+
+/// 单点扫描：pan→驻留→tilt→驻留→回读→记账回包；任一步失败打点并中止整轮。
+fn rt_scan_point(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, i: usize, dp: u32, dt: u32) -> bool {
+    let p = match ph.servo_set(Axis::Pan, dp) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[periph] SCAN pan 失败: {e}");
+            return false;
+        }
+    };
+    thread::sleep(Duration::from_millis(SCAN_POINT_MS));
+    let t = match ph.servo_set(Axis::Tilt, dt) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("[periph] SCAN tilt 失败: {e}");
+            return false;
+        }
+    };
+    thread::sleep(Duration::from_millis(SCAN_POINT_MS));
+    // 整轮扫描 ≈12 s，高于 motion/ui 的 4 s 超时窗——每个点是一次真实进度，
+    // 在此续命（心跳语义 = 线程仍在推进，不是"结果已产出"）。
+    rr3_beat_rt();
+    // 回读闭环：LEDC 寄存器实际 duty 换算回角度（duty_to_deg），与设定角并打
+    // ——判据②"目视 + 串口回读一致"的硬件侧证据
+    let (pr, tr) = (
+        duty_to_deg(ph.pan.get_duty(), DUTY_MIN, DUTY_MAX),
+        duty_to_deg(ph.tilt.get_duty(), DUTY_MIN, DUTY_MAX),
+    );
+    {
+        let mut b = lock_bus(bus);
+        b.st.wander_on = false;
+        b.st.pan_deg = p;
+        b.st.tilt_deg = t;
+    }
+    println!(
+        "[periph] SCAN point={} pan={}(read {pr}) tilt={}(read {tr})",
+        i + 1,
+        p,
+        t
+    );
+    outbox_push(
+        bus,
+        format!("SCAN point={} pan={p} read={pr} tilt={t} read={tr}", i + 1),
+    );
+    true
 }
 
 /// 运行面自主节拍（无作业时 10ms 一拍）：**决策段持锁纯算，渲染/驱动段脱锁慢跑**
