@@ -259,24 +259,16 @@ fn rr3_model_commit(
     }))
 }
 
-/// 连通性测试（`rr3-brain/model/test`）：按名取行造临时客户端探测——业务失败
-/// （缺 key/HTTP 非 2xx/不可达）也回正常应答，用 `ok:false` 表达，不折 Err。
-pub(crate) fn rr3_model_test_arm(cfg: &Rr3BrainCfg, args: &Value) -> Result<Value, String> {
-    let name = args
-        .get("name")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .unwrap_or("");
-    if name.is_empty() {
-        return Err("模型行 name 不得为空".to_string());
-    }
-    let rows = rr3_model_rows(&cfg.doc)?;
-    let Some(row) = rows
-        .iter()
-        .find(|r| r.get("name").and_then(Value::as_str) == Some(name))
-    else {
-        return Err(format!("模型行不认: '{name}'"));
-    };
+/// 测试端点件（自 test_arm 抽出）：行内 base_url/model_id/mode/key_ref 的
+/// 缺省归一与空值拒绝。
+struct Rr3ProbePoint {
+    base_url: String,
+    model_id: String,
+    mode: Rr3LlmMode,
+    key_ref: Option<String>,
+}
+
+fn rr3_probe_point(row: &Value, name: &str) -> Result<Rr3ProbePoint, String> {
     let base_url = row
         .get("base_url")
         .and_then(Value::as_str)
@@ -301,8 +293,41 @@ pub(crate) fn rr3_model_test_arm(cfg: &Rr3BrainCfg, args: &Value) -> Result<Valu
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
+    Ok(Rr3ProbePoint {
+        base_url: base_url.to_string(),
+        model_id: model_id.to_string(),
+        mode,
+        key_ref,
+    })
+}
+
+/// 连通性测试（`rr3-brain/model/test`）：按名取行造临时客户端探测——业务失败
+/// （缺 key/HTTP 非 2xx/不可达）也回正常应答，用 `ok:false` 表达，不折 Err。
+pub(crate) fn rr3_model_test_arm(cfg: &Rr3BrainCfg, args: &Value) -> Result<Value, String> {
+    let name = args
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if name.is_empty() {
+        return Err("模型行 name 不得为空".to_string());
+    }
+    let rows = rr3_model_rows(&cfg.doc)?;
+    let Some(row) = rows
+        .iter()
+        .find(|r| r.get("name").and_then(Value::as_str) == Some(name))
+    else {
+        return Err(format!("模型行不认: '{name}'"));
+    };
+    let point = rr3_probe_point(row, name)?;
     let timeout_s = rr3_cloud_cfg_of(&cfg.doc)?.timeout_s;
-    let client = Rr3LlmClient::new(base_url, model_id, timeout_s, key_ref, Some(mode));
+    let client = Rr3LlmClient::new(
+        &point.base_url,
+        &point.model_id,
+        timeout_s,
+        point.key_ref,
+        Some(point.mode),
+    );
     Ok(client.rr3_probe().map_or_else(
         |e| {
             json!({
