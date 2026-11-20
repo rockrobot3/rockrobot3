@@ -305,7 +305,7 @@ pub(crate) unsafe fn handle_dialog(req: *mut httpd_req_t, _bus: &Arc<Mutex<Bus>>
         );
     };
     let reply = match crate::dialog::rr3_dialog_body(&body)
-        .and_then(|pcm| crate::dialog::rr3_dialog_utterance(pcm).map_err(|e| e.to_string()))
+        .and_then(|pcm| crate::cloud::rr3_turn(pcm).map_err(|e| e.to_string()))
     {
         Ok(()) => serde_json::json!({"ok": true}).to_string(),
         Err(e) => serde_json::json!({"ok": false, "err": e}).to_string(),

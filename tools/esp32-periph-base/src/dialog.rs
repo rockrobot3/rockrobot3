@@ -1,5 +1,7 @@
-//! 对话轮 worker（W6-1/W6-2）：语音段 → 云 ASR → 意图 → 云 LLM → 云 TTS →
-//! 本板播放 → 表情回落。
+//! 对话整轮执行（W6-1/W6-2）：语音段 → 云 ASR → 意图 → 云 LLM → 云 TTS →
+//! 本板播放 → 表情回落。**线程归 cloud worker**（与 TTS 朗读共用一条 24 KB TLS
+//! 栈；W6-3 真板内存门实锤：独立 dialog 线程把 free heap 压到 18 KB，httpd 起栈
+//! 失败）。
 //!
 //! 分工（计划册 §3.2）：VAD/切段在 mic（audio-in），本模块只吃**已完成的一段**
 //! 16 kHz 单声道 PCM；三跳请求体/应答解析全部走 [`rr_cloud_proto`] 共享纯函数，
@@ -9,12 +11,11 @@
 //! （relay 动作如实点名跳过），舵机作业走运行面 `Job::Move`，表情四态
 //! （listen/think/talk/idle）由 `rr3_expr_set` 切换。
 //!
-//! 心跳：worker 空转 1 s 一拍、轮内每步续 `dialog`（超时窗 10 s）；播放等待按
-//! `tts_played/tts_fail` 计数收敛，最长 = 估算时长 + 3 s 余量，不死等。
+//! 心跳：轮内每步续 `dialog`（超时窗 10 s）；空转心跳由 cloud worker 负责。
+//! 播放等待按 `tts_played/tts_fail` 计数收敛，最长 = 估算时长 + 3 s 余量。
 //!
 //! 凭据零回显：配置只经 [`crate::cloud::rr3_dialog_cfg`] 读 NVS，日志不出 key。
 
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -26,12 +27,6 @@ use rr_intent_mech::Rr3IntentAction;
 use crate::board::MIC_SR_HZ;
 use crate::state::{lock_bus, now_ms, push_job, rr3_expr_set, Bus, Job};
 
-/// 待处理语音段队列容量（满即拒——VAD 半双工下不应发生，发生即上游节拍失控）。
-const DIALOG_Q_CAP: usize = 1;
-/// worker 栈：mbedTLS 握手 + multipart/JSON 组包（同 TTS worker 口径）。
-const DIALOG_STACK: usize = 24_576;
-/// 空转心跳周期（监督壳 dialog 超时窗 10 s 的 1/10）。
-const DIALOG_IDLE_MS: u64 = 1_000;
 /// 单轮补全上限（契约 §2 默认 150）。
 const RR3_LLM_MAX_TOKENS: i64 = 150;
 /// 系统人设（策略量；回答短、口语化，避免 TTS 长文本）。
@@ -43,42 +38,6 @@ const PLAY_POLL_MS: u64 = 200;
 const PLAY_SLACK_MS: u64 = 3_000;
 /// 云端失败时的降级播报（契约 §4：不得静默弃轮；TTS 也失败则只留串口点名）。
 const RR3_DEGRADE_TEXT: &str = "网络不太通畅，请稍后再试。";
-
-/// 语音段发送端（未装配 = None；`try_send` 不阻塞 mic 线程）。
-static DIALOG_TX: Mutex<Option<SyncSender<Vec<i16>>>> = Mutex::new(None);
-
-/// 起对话轮 worker（tts 档；boot 在音频面之前调用，避免首段撞"未装配"窗）。
-pub(crate) fn spawn_dialog(bus: Arc<Mutex<Bus>>) {
-    let (tx, rx) = sync_channel(DIALOG_Q_CAP);
-    let _ = DIALOG_TX.lock().map(|mut slot| *slot = Some(tx));
-    let spawned = thread::Builder::new()
-        .name("dialog".into())
-        .stack_size(DIALOG_STACK)
-        .spawn(move || dialog_run(rx, bus));
-    if let Err(e) = spawned {
-        println!("[dialog] 起对话线程失败: {e:?}（dialog 任务将按 timeout 判死）");
-    }
-}
-
-/// 入队一段语音（mic 切段后调用）：满/未装配/线程退出如实回错，不阻塞采集。
-pub(crate) fn rr3_dialog_utterance(pcm: Vec<i16>) -> Result<(), &'static str> {
-    if pcm.is_empty() {
-        return Err("语音段为空");
-    }
-    let Ok(slot) = DIALOG_TX.lock() else {
-        return Err("对话面锁中毒");
-    };
-    let Some(tx) = slot.as_ref() else {
-        return Err("对话面未装配");
-    };
-    tx.try_send(pcm).map_err(|e| {
-        if matches!(e, TrySendError::Full(_)) {
-            "对话队列满"
-        } else {
-            "对话线程已退出"
-        }
-    })
-}
 
 /// `/api/board/dialog` body → 单声道 PCM：接受 16 kHz mono WAV 或裸 s16le；
 /// 立体声/异采样率显式拒（板侧不做重采样，避免把错误输入送云端）。
@@ -103,25 +62,9 @@ pub(crate) fn rr3_dialog_body(body: &[u8]) -> Result<Vec<i16>, String> {
         .collect())
 }
 
-/// worker 主体：空转续 `dialog` 心跳；收到一段即跑一整轮。
-fn dialog_run(rx: Receiver<Vec<i16>>, bus: Arc<Mutex<Bus>>) {
-    println!("[dialog] 对话轮 worker 起（ASR→LLM→意图→TTS→本板播放）");
-    loop {
-        match rx.recv_timeout(Duration::from_millis(DIALOG_IDLE_MS)) {
-            Ok(pcm) => rr3_turn(&bus, pcm),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                crate::autonomy::rr3_beat(Rr3Task::Dialog);
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                println!("[dialog] 语音队列断开，worker 退出");
-                return;
-            }
-        }
-    }
-}
-
 /// 一整轮：ASR → 意图执行 → LLM → TTS → 播放等待 → 表情回落。
-fn rr3_turn(bus: &Arc<Mutex<Bus>>, pcm: Vec<i16>) {
+/// 由 cloud worker 在收 `Rr3CloudJob::Turn` 时调用（线程与 TLS 栈同 TTS）。
+pub(crate) fn rr3_turn(bus: &Arc<Mutex<Bus>>, pcm: Vec<i16>) {
     let t0 = now_ms();
     rr3_beat_dialog();
     rr3_face(bus, "think");

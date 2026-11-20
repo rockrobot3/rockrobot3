@@ -343,7 +343,9 @@ impl MicRun {
             stats: MicStats::new(),
             dump_count: 0,
             last_dump: [0u8; 16],
-            chunk: Vec::with_capacity(AUDIO_CHUNK_FRAMES * 2),
+            // W6 内存门：上行分片缓冲**懒分配**（AUDIO ON 才长到 16 KB）——单板
+            // 全链档不跑 UART 音频，省出的内部 RAM 留给 httpd/TLS。
+            chunk: Vec::new(),
             dc: Rr3DcBlocker::new(),
             #[cfg(feature = "tts")]
             voice: voice::VoiceRun::new(),

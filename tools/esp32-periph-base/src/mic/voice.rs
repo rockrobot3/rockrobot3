@@ -60,27 +60,44 @@ pub(crate) struct VoiceRun {
     /// 当前语音段（立体声交错；起音时用预滚窗补头）。
     utter: Vec<i16>,
     recording: bool,
+    /// PSRAM 在位数（false = 本地分段停用，不拿内部 SRAM 硬撑 512 KB 段缓冲）。
+    enabled: bool,
     /// 入队失败计数（dialog 未装配/队列满；串口抽样点名）。
     dropped: u32,
 }
 
 impl VoiceRun {
     pub(crate) fn new() -> Self {
+        let enabled = crate::psram::rr3_psram_total() > 0;
+        if !enabled {
+            println!("[mic] PSRAM 未启用：本地 VAD/分段停用（W6 S3 档需 CONFIG_SPIRAM；查 sdkconfig.defaults 接线）");
+        }
+        let (raw, pending, pre, utter) = if enabled {
+            (
+                crate::psram::rr3_psram_vec(2048),
+                crate::psram::rr3_psram_vec(BLOCK_SAMPLES * 2),
+                crate::psram::rr3_psram_vec(PRE_ROLL_BLOCKS * BLOCK_SAMPLES + BLOCK_SAMPLES),
+                crate::psram::rr3_psram_vec(MAX_UTTER_SAMPLES + BLOCK_SAMPLES),
+            )
+        } else {
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new())
+        };
         Self {
             vad: Rr3VadState::rr3_vad_new(VAD_CFG, FRAME_MS),
             dc: Rr3DcBlocker::new(),
-            raw: Vec::with_capacity(2048),
-            pending: Vec::with_capacity(BLOCK_SAMPLES * 2),
-            pre: Vec::with_capacity(PRE_ROLL_BLOCKS * BLOCK_SAMPLES + BLOCK_SAMPLES),
-            utter: Vec::new(),
+            raw,
+            pending,
+            pre,
+            utter,
             recording: false,
+            enabled,
             dropped: 0,
         }
     }
 
     /// 一次 I2S read：原始帧 → DC/增益 → 20 ms 块 → VAD/DoA/分段。
     pub(crate) fn batch(&mut self, buf: &[u8], nbytes: usize, bus: &Arc<Mutex<Bus>>, gated: bool) {
-        if gated {
+        if gated || !self.enabled {
             self.reset();
             return;
         }
@@ -131,8 +148,14 @@ impl VoiceRun {
         );
     }
 
-    /// 录音累积 + 超长强制收段。
+    /// 录音累积 + 超长强制收段（定容缓冲：先截余量再 push，绝不触发 realloc）。
     fn append(&mut self, block: &[i16], bus: &Arc<Mutex<Bus>>) {
+        let room = MAX_UTTER_SAMPLES.saturating_sub(self.utter.len());
+        if block.len() > room {
+            self.utter.extend_from_slice(&block[..room]);
+            self.finish(bus, "max-utterance");
+            return;
+        }
         self.utter.extend_from_slice(block);
         if self.utter.len() >= MAX_UTTER_SAMPLES {
             self.finish(bus, "max-utterance");
@@ -149,7 +172,7 @@ impl VoiceRun {
         if mono.is_empty() {
             return;
         }
-        match crate::dialog::rr3_dialog_utterance(mono) {
+        match crate::cloud::rr3_turn(mono) {
             Ok(()) => println!("[mic] 语音段入队 {ms}ms（{why}）"),
             Err(e) => {
                 self.dropped = self.dropped.saturating_add(1);
