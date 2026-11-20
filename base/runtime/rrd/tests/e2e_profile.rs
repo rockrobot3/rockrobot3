@@ -26,7 +26,9 @@
 
 mod support;
 
+#[path = "e2e_profile/full.rs"]
 mod full;
+#[path = "e2e_profile/sink.rs"]
 mod sink;
 
 use std::path::PathBuf;
