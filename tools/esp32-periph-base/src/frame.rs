@@ -10,7 +10,6 @@ use rr_periph_proto::ports::{Rr3ClockPort, Rr3UartPort};
 use serde_json::{json, Value};
 
 use crate::board::{rr3_bindings_check, RR3_FACE_EXPRS, RR3_FACE_TOPIC, RR3_SERVO_TOPIC};
-use crate::face::expr_eye_base;
 use crate::servo::{axis_check, Axis};
 use crate::state::{lock_bus, push_job, rr3_board_binds_set, Bus, CtlState, Job};
 
@@ -174,18 +173,8 @@ fn rr3_face_expr(bus: &Arc<Mutex<Bus>>, ctl: &mut CtlState, v: &Value) -> Result
     if !RR3_FACE_EXPRS.contains(&expr) {
         return Err(format!("expression 不在白名单: \"{expr}\""));
     }
-    let base = expr_eye_base(expr);
     let previous = std::mem::replace(&mut ctl.prev_expr, expr.to_string());
-    {
-        let mut b = lock_bus(bus);
-        b.st.expr_mode = true;
-        b.st.frame_mode = false;
-        b.st.base = base;
-        b.st.last_text = format!("EXPR {expr}");
-        b.st.anim_reset();
-        b.st.drawn = base;
-    }
-    push_job(bus, Job::RenderCapsules);
+    crate::state::rr3_expr_set(bus, expr);
     Ok(json!({ "expression": expr, "previous": previous }))
 }
 

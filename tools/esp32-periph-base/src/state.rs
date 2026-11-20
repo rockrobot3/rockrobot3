@@ -11,7 +11,7 @@ use esp_idf_hal::uart::UartDriver;
 use esp_idf_sys::{esp_random, esp_timer_get_time};
 use rr_ipc::Rr3BoardBindings;
 
-use crate::face::{EyeStyle, EYE_IDLE};
+use crate::face::{expr_eye_base, EyeStyle, EYE_IDLE};
 use crate::link::{reply, UartIo};
 use crate::power::RailTier;
 use crate::servo::{wander_step, Axis};
@@ -372,6 +372,23 @@ pub(crate) struct CtlState {
 /// 取总线锁（中毒不失效：std 惰性 pthread 面，哨兵同款 `into_inner` 纪律）。
 pub(crate) fn lock_bus(bus: &Arc<Mutex<Bus>>) -> std::sync::MutexGuard<'_, Bus> {
     bus.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// 设表情基态（行面 FACE / 帧面 expression / dialog 三处共用）：切表情模式、
+/// 复位微动作时钟并推一次渲染作业。`expr` 不在白名单时由 [`expr_eye_base`]
+/// 兜底到 idle——调用方负责白名单门（行面/帧面各自点名拒收）。
+pub(crate) fn rr3_expr_set(bus: &Arc<Mutex<Bus>>, expr: &str) {
+    let base = expr_eye_base(expr);
+    {
+        let mut b = lock_bus(bus);
+        b.st.expr_mode = true;
+        b.st.frame_mode = false;
+        b.st.base = base;
+        b.st.last_text = format!("EXPR {expr}");
+        b.st.anim_reset();
+        b.st.drawn = base;
+    }
+    push_job(bus, Job::RenderCapsules);
 }
 
 /// 控制面推一件作业（唤醒运行面；运行面每轮取队列头执行）。
