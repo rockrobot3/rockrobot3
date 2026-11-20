@@ -12,8 +12,8 @@
 #   只降不升**（与仓内红账基线门同款纪律）。目标均值 2.5，当前 2.49 已达标；
 #   基线只能随重构下调，上调须在评审里说明理由。
 # - 生产函数体量：单函数 >80 行计红（测试面不计——表驱动用例允许更长）；
-#   基线 = 存量 0 件（已清零）；下一档 >60 行按 fn_over60_max 只降不升（存量 0，
-#   逐批拆到 0 后把门槛压到 60，最终再向 50 收。
+#   基线 = 存量 0 件（已清零）；>60 行按 fn_over60_max 只降不升（存量 0）；
+#   下一档 >50 行按 fn_over50_max 只降不升（存量 16），目标逐批拆到 0（即 <50 行）。
 # - 生产 panic 落点：生产面 `.unwrap()` / `.expect(` 计数（测试面按上面的同一口径
 #   截除；独立成文件的 `test_support.rs` / `test_fixtures.rs` 由 `#[cfg(test)]`
 #   挂载，同样不计），基线 60、**只钉不回涨**。它不是"越少越好"的绝对值判据——启动期
@@ -40,8 +40,10 @@ WINDOW = 10
 NAME_MAX = 20
 # 生产函数体量门槛：>80 行计红；测试面不参与（表驱动用例允许更长）。
 FN_LINES_MAX = 80
-# 下一档（只收紧不放松）：>60 行计数按基线只降不升，逐批拆到 0 后把门槛压到 60。
+# 下一档（只收紧不放松）：>60 行计数按基线只降不升，逐批拆到 0。
 FN_TIGHT_MAX = 60
+# 再下一档（目标 <50 行）：>50 行计数按基线只降不升，先清 >60 再逐批压低。
+FN_NEXT_MAX = 50
 FFI_PREFIXES = ("AudioQueue",)
 # 独立成文件的测试夹具：由 `#[cfg(test)]` / `#[cfg(all(test, …))]` 挂载，
 # `git ls-files` 会单独列出；不按文件名排除，panic/CC/重复率口径就会被测试面污染。
@@ -291,6 +293,7 @@ def measure(root):
     long_sleeps = []
     fn_over = []
     fn_over60 = []
+    fn_over50 = []
     for rel in rust_files(root):
         base_name = os.path.basename(rel)
         if ("/tests/" in rel or rel.startswith("tests/")
@@ -317,6 +320,8 @@ def measure(root):
                 fn_over.append((rel, name, n))
             if n > FN_TIGHT_MAX:
                 fn_over60.append((rel, name, n))
+            if n > FN_NEXT_MAX:
+                fn_over50.append((rel, name, n))
             if len(name.encode()) > NAME_MAX and not name.startswith(FFI_PREFIXES):
                 long_names.append(name)
         lines = significant(src.splitlines())
@@ -332,7 +337,7 @@ def measure(root):
                     dup.add((rel, i + k))
     return (
         total_lines, len(dup), ccs, long_names, unwrap_sites, long_sleeps,
-        fn_over, fn_over60,
+        fn_over, fn_over60, fn_over50,
     )
 
 
@@ -399,6 +404,11 @@ def _selftest_repo(td):
             + "".join(f"    let m{i} = {i};\n" for i in range(FN_TIGHT_MAX + 2))
             + "}\n"
         ),
+        "base/targetfn.rs": (
+            "fn target() {\n"
+            + "".join(f"    let t{i} = {i};\n" for i in range(FN_NEXT_MAX + 2))
+            + "}\n"
+        ),
     }
     dup = "".join(f"const D{i}: u8 = {i};\n" for i in range(WINDOW))
     files["base/src/dup_a.rs"] = dup
@@ -419,7 +429,7 @@ def self_test():
     with tempfile.TemporaryDirectory() as td:
         _selftest_repo(td)
         (total, dup_lines, ccs, long_names, unwrap_sites, long_sleeps,
-         fn_over, fn_over60) = measure(td)
+         fn_over, fn_over60, fn_over50) = measure(td)
 
     checks = [
         (f"生产面 unwrap=2（实得 {unwrap_sites}）", unwrap_sites == 2),
@@ -427,8 +437,9 @@ def self_test():
         (f"超长函数名=1（实得 {len(long_names)}）", len(long_names) == 1),
         (f"生产函数>{FN_LINES_MAX} 行=1（实得 {len(fn_over)}）", len(fn_over) == 1),
         (f"生产函数>{FN_TIGHT_MAX} 行=2（实得 {len(fn_over60)}）", len(fn_over60) == 2),
+        (f"生产函数>{FN_NEXT_MAX} 行=3（实得 {len(fn_over50)}）", len(fn_over50) == 3),
         (f"重复行=20（实得 {dup_lines}）", dup_lines == 2 * WINDOW),
-        (f"函数数=6（实得 {len(ccs)}）", len(ccs) == 6),
+        (f"函数数=7（实得 {len(ccs)}）", len(ccs) == 7),
         (f"有效行>0（实得 {total}）", total > 0),
     ]
     for name, ok in checks:
@@ -442,7 +453,7 @@ def main():
     root = repo_root()
     base = load_baseline(root)
     (total, dup_lines, ccs, long_names, unwrap_sites, long_sleeps,
-     fn_over, fn_over60) = measure(root)
+     fn_over, fn_over60, fn_over50) = measure(root)
     if total == 0 or not ccs:
         print("FAIL  ⑫ 度量面为空（git ls-files 无生产 Rust 行）", file=sys.stderr)
         return 1
@@ -485,6 +496,16 @@ def main():
     else:
         top = sorted(fn_over60, key=lambda x: -x[2])[:5]
         print(f"FAIL  ⑫ 生产函数 >{FN_TIGHT_MAX} 行回涨：{len(fn_over60)} > 基线 {tight_max}："
+              f"{top}", file=sys.stderr)
+        ok = False
+
+    next_max = base["fn_over50_max"]
+    if len(fn_over50) <= next_max:
+        print(f"PASS  ⑫ 生产函数 >{FN_NEXT_MAX} 行 {len(fn_over50)} ≤ 基线 {next_max}"
+              f"（目标档；只降不升，逐批拆到 0 = <{FN_NEXT_MAX} 行）")
+    else:
+        top = sorted(fn_over50, key=lambda x: -x[2])[:5]
+        print(f"FAIL  ⑫ 生产函数 >{FN_NEXT_MAX} 行回涨：{len(fn_over50)} > 基线 {next_max}："
               f"{top}", file=sys.stderr)
         ok = False
 
