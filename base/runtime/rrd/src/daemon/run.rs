@@ -84,6 +84,8 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     // E-7 启动序：先全部装载，再交 rr-registry 仲裁，最后按裁定投递
     rr3_daemon_queue(&boot, &shared, &sup)?;
 
+    // 启动段与稳态段的边界：卡在装配/投递与卡在等连接，排障看这一行即知走到哪。
+    rr3_log("boot 队列已投递，进入 accept（等模块连接注册）");
     rr3_daemon_accept(
         listener,
         Rr3AcceptCtx {

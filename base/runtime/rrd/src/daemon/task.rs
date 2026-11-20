@@ -43,6 +43,7 @@ pub(super) fn rr3_daemon_queue(
     // 层内 (start_priority, name) 确定性次键。
     let plan = rr3_queue_arb(&jobs);
     rr3_queue_fatal(&plan)?;
+    rr3_queue_note(&plan, boot);
     // 提供者表：boot 全集一次性写入，含被拒模块——provides 仍计入可满足性宇宙
     rr3_queue_providers(&jobs, shared);
     rr3_queue_rejects(&plan);
@@ -52,6 +53,26 @@ pub(super) fn rr3_daemon_queue(
         .collect();
     rr3_queue_dispatch(boot, &plan, by_name, sup);
     Ok(())
+}
+
+/// 裁定序一行定格（缺格跳过项已单独点名，不混入）：spawn 行给时刻，本行给顺序与
+/// 全集——boot 卡住时先看这行，按序对照下一条 spawn 即可定位停在哪一项。
+fn rr3_queue_note(plan: &rr_registry::Rr3BootPlan, boot: &Rr3DaemonBoot) {
+    let order: Vec<&str> = plan
+        .order
+        .iter()
+        .map(String::as_str)
+        .filter(|n| !boot.degraded.contains(*n))
+        .collect();
+    if order.is_empty() {
+        rr3_log("boot 序: 空（无可投递模块）");
+    } else {
+        rr3_log(&format!(
+            "boot 序（{} 项）: {}",
+            order.len(),
+            order.join(" → ")
+        ));
+    }
 }
 
 /// 被仲裁拒的模块逐个点名（不可满足，但不连坐下游）。
