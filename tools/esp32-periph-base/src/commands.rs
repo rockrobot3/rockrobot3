@@ -13,7 +13,6 @@ use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size};
 use crate::board::{
     FRAME_DRAIN_MAX, OLED_COLS, OLED_ROWS, RR3_FACE_EXPRS, RR3_MAGIC_FIRST, UART2_BAUD_HZ,
 };
-use crate::face::expr_eye_base;
 use crate::frame::{frame_dispatch, frame_recv, frame_send_response};
 use crate::link::{drain_uart_quiet, read_line, reply, UartIo};
 use crate::oled::glyph;
@@ -314,18 +313,8 @@ fn rr3_cmd_face(
     let r = match head {
         "FACE" => match parts.next() {
             Some(expr) if RR3_FACE_EXPRS.contains(&expr) => {
-                let base = expr_eye_base(expr);
                 ctl.prev_expr = expr.to_string();
-                {
-                    let mut b = lock_bus(bus);
-                    b.st.expr_mode = true;
-                    b.st.frame_mode = false;
-                    b.st.base = base;
-                    b.st.last_text = format!("EXPR {expr}");
-                    b.st.anim_reset();
-                    b.st.drawn = base;
-                }
-                push_job(bus, Job::RenderCapsules);
+                crate::state::rr3_expr_set(bus, expr);
                 Ok(format!("OK face={expr}"))
             }
             Some(other) => Err(format!(
