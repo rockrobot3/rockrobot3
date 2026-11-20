@@ -349,12 +349,16 @@ fn status_loop() {
     }
 }
 
-/// 板级启动总序：外设开箱 → 两平面 → 音频面 → 状态环（永不返回，复位靠 BOD/复位键）。
-pub(crate) fn rr3_boot() {
-    boot_banner();
-    let p = Peripherals::take()
-        .expect("Peripherals::take 失败：外设已被取走（启动期不应发生，查是否有二次取）");
-
+/// 板级外设开箱（自 rr3_boot 抽出）：按芯片档选脚后逐件装配，返回 LEDC timer、
+/// 指令面、运行面与外设总线。timer 必须由调用方持有到进程终局（Drop 会复位硬件）。
+fn open_parts(
+    p: Peripherals,
+) -> (
+    LedcTimerDriver<'static, TIMER0>,
+    CtlUart,
+    RtPeriph,
+    Arc<Mutex<Bus>>,
+) {
     // UART2 指令面引脚：classic 18/19；S3 N16R8 41/42（真板订正，见 pins_s3.rs 头注）。
     #[cfg(feature = "esp32")]
     let uart = open_uart2(p.uart2, p.pins.gpio18, p.pins.gpio19);
@@ -370,9 +374,9 @@ pub(crate) fn rr3_boot() {
     let rail = rail_open(RailMonitor::new(p.adc1, p.pins.gpio34));
     #[cfg(feature = "esp32s3")]
     let rail = rail_open(RailMonitor::new(p.adc1, p.pins.gpio1));
-    // 云台两轴：classic 32/33，S3 4/5；`_timer` 持有到进程终局（Drop 会复位硬件）。
+    // 云台两轴：classic 32/33，S3 4/5。
     #[cfg(feature = "esp32")]
-    let (_timer, pan, tilt) = open_servos(
+    let (timer, pan, tilt) = open_servos(
         p.ledc.timer0,
         p.ledc.channel0,
         p.ledc.channel1,
@@ -380,7 +384,7 @@ pub(crate) fn rr3_boot() {
         p.pins.gpio33,
     );
     #[cfg(feature = "esp32s3")]
-    let (_timer, pan, tilt) = open_servos(
+    let (timer, pan, tilt) = open_servos(
         p.ledc.timer0,
         p.ledc.channel0,
         p.ledc.channel1,
@@ -388,10 +392,18 @@ pub(crate) fn rr3_boot() {
         p.pins.gpio5,
     );
     let rt = init_rt(i2c, pan, tilt, rail);
-    let bus = bus_seed();
+    (timer, CtlUart { uart }, rt, bus_seed())
+}
+
+/// 板级启动总序：外设开箱 → 两平面 → 音频面 → 状态环（永不返回，复位靠 BOD/复位键）。
+pub(crate) fn rr3_boot() {
+    boot_banner();
+    let p = Peripherals::take()
+        .expect("Peripherals::take 失败：外设已被取走（启动期不应发生，查是否有二次取）");
+    let (_timer, ctl, rt, bus) = open_parts(p);
     ram_point("2-periph-ready");
     start_services(&bus);
-    spawn_planes(CtlUart { uart }, rt, bus.clone());
+    spawn_planes(ctl, rt, bus.clone());
     // 采集冒烟：接法与 BCLK 迁移史见 mic.rs 头注（2026-10-20 迁 GPIO4）。
     #[cfg(feature = "esp32")]
     mic::spawn_mic_smoke(
