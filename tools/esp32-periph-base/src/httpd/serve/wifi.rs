@@ -174,6 +174,11 @@ pub(super) unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWrit
 
 /// 回退旧凭据（Some→写回；None→erase 回原空态）并重连；回退写败点名 stage=revert，
 /// 写成功后 apply 旧值（原空态停在断态，不 connect）并如实回 connected。
+///
+/// # Safety
+///
+/// 只能由 [`rr3_wifi_write_apply`] 在 httpd 任务串行调用链内调用（两写口天然互斥），
+/// 不得与 `wifi_bringup` 并发；事务期间不持 bus 锁，不跨线程共享 Rust 引用。
 unsafe fn wifi_revert(old: Option<crate::cred::Rr3Cred>) -> Rr3WifiWriteResult {
     let revert_ok = old.as_ref().map_or_else(
         || crate::cred::rr3_cred_erase().is_ok(),
