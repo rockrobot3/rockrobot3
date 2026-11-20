@@ -19,7 +19,6 @@ use crate::profile_pins::{rr3_pin_capabilities, rr3_pin_occupancy};
 /// 返回 (错误清单, 引脚派生, 装配段坏件点名)——坏件点名不是 fatal（G4 该格 Degraded）。
 pub(super) type Rr3BootChecks = (Vec<String>, BTreeMap<String, String>, Vec<(String, String)>);
 
-#[allow(clippy::too_many_arguments)]
 /// 轨/域/接线闭合段（自 [`rr3_boot_checks`] 抽出）：⑥ 轨与域、⑦ 接线闭合。
 fn rr3_chain_checks(
     profile: &Rr3Profile,
@@ -52,6 +51,7 @@ fn rr3_chain_checks(
     errs
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn rr3_boot_checks(
     profile: &Rr3Profile,
     table: &Rr3SlotTable,
