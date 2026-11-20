@@ -15,7 +15,7 @@
 
 use std::ffi::CString;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -26,6 +26,7 @@ use esp_idf_sys::{
 use serde_json::Value;
 
 use crate::cred::RR3_CRED_NAMESPACE;
+use crate::state::Bus;
 
 mod http;
 pub(crate) use http::{rr3_post_retry, rr3_tts_fetch, MAX_JSON};
@@ -54,8 +55,14 @@ const TTS_STACK: usize = 24_576;
 /// worker 空转周期（只为及时退出，不承担心跳——dialog 归 W6）。
 const IDLE_MS: u64 = 2_000;
 
-/// 播放队列发送端（未装配 = None）。
-static TTS_TX: Mutex<Option<SyncSender<String>>> = Mutex::new(None);
+/// 云端 worker 作业（TTS 朗读 / 对话整轮；同一条 TLS 线程，省一份 24 KB 栈）。
+pub(crate) enum Rr3CloudJob {
+    Say(String),
+    Turn(Vec<i16>),
+}
+
+/// 云端 worker 发送端（未装配 = None）。
+static TTS_TX: Mutex<Option<SyncSender<Rr3CloudJob>>> = Mutex::new(None);
 
 /// 云 TTS 配置（key 私有——零回显：不派生 `Debug`）。
 struct Rr3CloudCfg {
@@ -304,52 +311,78 @@ pub(crate) fn rr3_say_body(body: &[u8]) -> Result<String, &'static str> {
 }
 
 // ---------------------------------------------------------------------------
-// worker（有界文本队列 → TTS → 播放队列）
+// worker（有界作业队列：TTS 朗读 / 对话整轮；单条 TLS 线程）
 // ---------------------------------------------------------------------------
 
-/// 起 TTS worker（main 在 httpd 之前调用，避免 `/say` 撞"未装配"窗）。
-pub(crate) fn spawn_tts() {
+/// 起云端 worker（httpd 之前调用，避免 `/say` 与 `/dialog` 撞"未装配"窗）。
+pub(crate) fn spawn_tts(bus: Arc<Mutex<Bus>>) {
     let (tx, rx) = sync_channel(TTS_Q_CAP);
     let _ = TTS_TX.lock().map(|mut slot| *slot = Some(tx));
+    println!("[cloud] 云端 worker 起（TTS 朗读 + 对话整轮；单条 TLS 栈）");
     let _ = thread::Builder::new()
-        .name("tts-cloud".into())
+        .name("cloud-dialog".into())
         .stack_size(TTS_STACK)
-        .spawn(move || tts_run(rx))
-        .map_err(|e| println!("[cloud] 起 TTS 线程失败: {e:?}"));
+        .spawn(move || cloud_run(rx, bus))
+        .map_err(|e| println!("[cloud] 起云端线程失败: {e:?}"));
 }
 
 /// 入队一条朗读请求（满/未装配/线程退出都如实回错，绝不阻塞 HTTP 任务）。
 pub(crate) fn rr3_say(text: String) -> Result<(), &'static str> {
+    rr3_enqueue(Rr3CloudJob::Say(text))
+}
+
+/// 入队一整轮对话（mic 切段 / `/api/board/dialog` 共用；不阻塞调用方）。
+pub(crate) fn rr3_turn(pcm: Vec<i16>) -> Result<(), &'static str> {
+    rr3_enqueue(Rr3CloudJob::Turn(pcm))
+}
+
+/// 公共入队（错误文案按 job 面口径统一）。
+fn rr3_enqueue(job: Rr3CloudJob) -> Result<(), &'static str> {
     let Ok(slot) = TTS_TX.lock() else {
-        return Err("TTS 面锁中毒");
+        return Err("云线程锁中毒");
     };
     let Some(tx) = slot.as_ref() else {
-        return Err("TTS 面未装配");
+        return Err("云线程未装配");
     };
-    tx.try_send(text).map_err(|e| {
+    tx.try_send(job).map_err(|e| {
         if matches!(e, TrySendError::Full(_)) {
-            "TTS 队列满"
+            "云队列满"
         } else {
-            "TTS 线程已退出"
+            "云线程已退出"
         }
     })
 }
 
-/// worker 主体：取文本 → 云端 TTS → 交播放面（半双工门由播放面收尾）。
-fn tts_run(rx: Receiver<String>) {
+/// worker 主体：Say → 云端 TTS → 播放；Turn → dialog 整轮；空转续 dialog 心跳。
+fn cloud_run(rx: Receiver<Rr3CloudJob>, bus: Arc<Mutex<Bus>>) {
     loop {
-        let Ok(text) = rx.recv_timeout(Duration::from_millis(IDLE_MS)) else {
-            continue;
-        };
-        let chars = text.chars().count();
-        match rr3_tts_fetch(&text) {
-            Ok(pcm) => {
-                let bytes = pcm.len();
-                let queued = crate::playout::rr3_play(pcm);
-                println!("[cloud] TTS ok chars={chars} pcm={bytes}B 入队={queued:?}");
+        match rx.recv_timeout(Duration::from_millis(IDLE_MS)) {
+            Ok(Rr3CloudJob::Say(text)) => tts_say(&text),
+            Ok(Rr3CloudJob::Turn(pcm)) => {
+                crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
+                crate::dialog::rr3_turn(&bus, pcm);
             }
-            Err(e) => println!("[cloud] TTS 失败 chars={chars}: {e}"),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                println!("[cloud] 作业队列断开，worker 退出");
+                return;
+            }
         }
+    }
+}
+
+/// 朗读一条：云端 TTS → 交播放面（半双工门由播放面收尾）。
+fn tts_say(text: &str) {
+    let chars = text.chars().count();
+    match rr3_tts_fetch(text) {
+        Ok(pcm) => {
+            let bytes = pcm.len();
+            let queued = crate::playout::rr3_play(pcm);
+            println!("[cloud] TTS ok chars={chars} pcm={bytes}B 入队={queued:?}");
+        }
+        Err(e) => println!("[cloud] TTS 失败 chars={chars}: {e}"),
     }
 }
 

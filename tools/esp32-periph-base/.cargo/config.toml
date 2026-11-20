@@ -42,6 +42,12 @@ build-std-features = []
 # MCU 必须显式（esp-idf-sys 据此选 IDF 工具链与目标）。
 [env]
 MCU = "esp32"
+# **P0（W6-3 真板实锤）**：esp-idf-sys 的 sdkconfig.defaults 缺省基准是 IDF 工程目录
+# （构建 out/），不是本 crate 根——不显式给本键时项目 defaults 从未被读取（真板
+# heap_init 无 SPIRAM 行，PSRAM 分配必失败；cert bundle 等也落 IDF 缺省）。
+# relative=true 把值钉到本文件目录；esp-idf-sys 会再按 MCU 自动叠加
+# sdkconfig.defaults.esp32s3 / .esp32（存在才吃）。
+ESP_IDF_SDKCONFIG_DEFAULTS = { value = "sdkconfig.defaults", relative = true }
 # IDF_PATH 由环境变量提供：tools/ci 的 esp32*/esp32s3* 门用 $HOME 下版本钉克隆
 # 自行 export；本地直接 `cargo +esp build` 前也自行 export。仓库不写本机绝对路径，
 # 换机/CI 不靠改源码（Custom 路径仍跳过 esp-idf-sys 的 managed 网络探测）。
