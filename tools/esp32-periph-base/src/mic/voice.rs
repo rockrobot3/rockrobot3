@@ -22,9 +22,11 @@ use crate::board::MIC_SR_HZ;
 use crate::capture::{chunk_to_pcm, frame32_to_pair, Rr3DcBlocker};
 use crate::state::{lock_bus, push_job, rr3_expr_set, Bus, Job};
 
-/// VAD 判据（config-esp32.toml 2026-11-01 四订；板侧同门）。
+/// VAD 判据（2026-11-20 S3 单板近讲实测订正：底噪 370–400，用户正常音量
+/// 2 s 窗均值 499，650 阈值全程不起音；下调到 500。若环境噪声触发误起音，
+/// 再按 `voice mono_rms` 回填 550）。
 const VAD_CFG: Rr3VadConfig = Rr3VadConfig {
-    rms_start: 650,
+    rms_start: 500,
     silence_tail_ms: 400,
     min_speech_ms: 200,
 };
@@ -33,7 +35,7 @@ const DOA_CFG: Rr3DoaCfg = Rr3DoaCfg {
     sample_rate_hz: MIC_SR_HZ,
     frame_ms: 20,
     mic_baseline_mm: 150,
-    window_rms_min: 650,
+    window_rms_min: 500,
     bin_threshold_deg: 30,
 };
 /// 采集块节拍（20 ms）与每块采样数（320 帧 × 2 声道）。
