@@ -13,29 +13,31 @@
 //! 凭据写口（`POST /api/board/cloud`）与取数共用 [`nvs_get`]/[`nvs_set`]；
 //! NVS 键名 ≤15 B（IDF 硬限），值上限见 `MAX_*`。
 
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
-use esp_idf_sys::esp_http_client_method_t_HTTP_METHOD_POST;
 use esp_idf_sys::{
-    esp_crt_bundle_attach, esp_http_client_cleanup, esp_http_client_config_t,
-    esp_http_client_fetch_headers, esp_http_client_get_status_code, esp_http_client_handle_t,
-    esp_http_client_init, esp_http_client_open, esp_http_client_read, esp_http_client_set_header,
-    esp_http_client_write, nvs_close, nvs_commit, nvs_get_str, nvs_handle_t, nvs_open,
-    nvs_open_mode_t_NVS_READONLY, nvs_open_mode_t_NVS_READWRITE, nvs_set_str, ESP_OK,
+    nvs_close, nvs_commit, nvs_get_str, nvs_handle_t, nvs_open, nvs_open_mode_t_NVS_READONLY,
+    nvs_open_mode_t_NVS_READWRITE, nvs_set_str, ESP_OK,
 };
 use serde_json::Value;
 
 use crate::cred::RR3_CRED_NAMESPACE;
 
-/// NVS 键（≤15 B）：base URL / key / TTS 模型行 / 音色。
+mod http;
+pub(crate) use http::{rr3_post_retry, rr3_tts_fetch, MAX_JSON};
+
+/// NVS 键（≤15 B）：base URL / key / TTS 模型行 / 音色 / ASR 与 LLM 模型行。
 const K_BASE: &str = "cloud.base";
 const K_KEY: &str = "cloud.key";
 const K_MODEL: &str = "tts.model";
 const K_VOICE: &str = "tts.voice";
+/// W6-2：对话链两跳的模型行（供应商模型名归配置，不编译进固件）。
+const K_ASR_MODEL: &str = "asr.model";
+const K_LLM_MODEL: &str = "llm.model";
 /// 值上限（写口与读口同门；超形即拒，防 NVS 被大值撑爆）。
 const MAX_BASE: usize = 128;
 const MAX_KEY: usize = 160;
@@ -49,10 +51,6 @@ const MAX_PCM: usize = 262_144;
 const TTS_Q_CAP: usize = 2;
 /// worker 栈：mbedTLS 握手 + esp_http_client 缓冲。
 const TTS_STACK: usize = 24_576;
-/// 单次 HTTP 超时（契约 §4）。
-const HTTP_TIMEOUT_MS: i32 = 8_000;
-/// 重试间隔（契约 §4）。
-const RETRY_DELAY_MS: u64 = 500;
 /// worker 空转周期（只为及时退出，不承担心跳——dialog 归 W6）。
 const IDLE_MS: u64 = 2_000;
 
@@ -74,12 +72,22 @@ impl Rr3CloudCfg {
     }
 }
 
-/// 写口 body：base/model/voice 必填，key 可选（缺席＝保留旧值）。
+/// 写口 body：base/model/voice 必填，key/asr_model/llm_model 可选（缺席＝保留旧值）。
 struct Rr3CloudWrite {
     base: String,
     model: String,
     voice: String,
     key: Option<String>,
+    asr_model: Option<String>,
+    llm_model: Option<String>,
+}
+
+/// 对话链配置（W6：ASR/LLM 两跳；key 零回显，不派生 Debug）。
+pub(crate) struct Rr3DialogCfg {
+    pub(crate) base: String,
+    pub(crate) key: String,
+    pub(crate) asr_model: String,
+    pub(crate) llm_model: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +178,29 @@ fn rr3_cloud_cfg() -> Result<Rr3CloudCfg, &'static str> {
     })
 }
 
+/// 读对话链配置（ASR/LLM；与 TTS 同库同 base，key 可空＝local 免鉴权）。
+pub(crate) fn rr3_dialog_cfg() -> Result<Rr3DialogCfg, &'static str> {
+    let Some(base) = nvs_get(K_BASE, MAX_BASE) else {
+        return Err("缺 cloud.base");
+    };
+    let Some(asr_model) = nvs_get(K_ASR_MODEL, MAX_MODEL) else {
+        return Err("缺 asr.model");
+    };
+    let Some(llm_model) = nvs_get(K_LLM_MODEL, MAX_MODEL) else {
+        return Err("缺 llm.model");
+    };
+    let ok = base.starts_with("https://") && !asr_model.is_empty() && !llm_model.is_empty();
+    let true = ok else {
+        return Err("对话配置不完整或 base 非 https");
+    };
+    Ok(Rr3DialogCfg {
+        base,
+        key: nvs_get(K_KEY, MAX_KEY).unwrap_or_default(),
+        asr_model,
+        llm_model,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // 写口：body 解析 / 形制 / 落 NVS
 // ---------------------------------------------------------------------------
@@ -179,6 +210,15 @@ fn rr3_field<'a>(v: &'a Value, k: &str) -> Result<&'a str, &'static str> {
     v.get(k).and_then(Value::as_str).ok_or("字段缺席或非串")
 }
 
+/// JSON 可选串字段：缺席＝None，非串＝Err。
+fn rr3_opt_field<'a>(v: &'a Value, k: &str) -> Result<Option<&'a str>, &'static str> {
+    match v.get(k) {
+        None => Ok(None),
+        Some(Value::String(s)) => Ok(Some(s)),
+        Some(_) => Err("字段非串"),
+    }
+}
+
 /// 写口 body 解析（纯函数，单测钉域）。
 fn rr3_cloud_body(body: &[u8]) -> Result<Rr3CloudWrite, &'static str> {
     let v: Value = serde_json::from_slice(body).map_err(|_| "body 非 JSON")?;
@@ -186,7 +226,9 @@ fn rr3_cloud_body(body: &[u8]) -> Result<Rr3CloudWrite, &'static str> {
         base: rr3_field(&v, "base")?.to_string(),
         model: rr3_field(&v, "model")?.to_string(),
         voice: rr3_field(&v, "voice")?.to_string(),
-        key: v.get("key").and_then(Value::as_str).map(str::to_string),
+        key: rr3_opt_field(&v, "key")?.map(str::to_string),
+        asr_model: rr3_opt_field(&v, "asr_model")?.map(str::to_string),
+        llm_model: rr3_opt_field(&v, "llm_model")?.map(str::to_string),
     })
 }
 
@@ -200,6 +242,8 @@ fn rr3_cloud_check(c: &Rr3CloudWrite) -> Result<(), &'static str> {
         !c.voice.is_empty(),
         c.voice.len() <= MAX_VOICE,
         c.key.as_ref().map_or(true, |k| k.len() <= MAX_KEY),
+        rr3_opt_len_ok(&c.asr_model),
+        rr3_opt_len_ok(&c.llm_model),
     ];
     let true = checks.iter().all(|b| *b) else {
         return Err("云配置形制不合（https/长度门）");
@@ -207,18 +251,29 @@ fn rr3_cloud_check(c: &Rr3CloudWrite) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// 落 NVS：三必填键 + 可选 key（缺席保留旧值）。
+/// 可选模型行形制：缺席合法；在场须非空且 ≤ [`MAX_MODEL`]。
+fn rr3_opt_len_ok(v: &Option<String>) -> bool {
+    v.as_ref()
+        .map_or(true, |s| !s.is_empty() && s.len() <= MAX_MODEL)
+}
+
+/// 落 NVS：三必填键 + 可选 key/asr_model/llm_model（缺席保留旧值）。
 fn rr3_cloud_store(c: &Rr3CloudWrite) -> Result<(), i32> {
-    let Ok(()) = nvs_set(K_BASE, &c.base) else {
-        return Err(-2);
-    };
-    let Ok(()) = nvs_set(K_MODEL, &c.model) else {
-        return Err(-2);
-    };
-    let Ok(()) = nvs_set(K_VOICE, &c.voice) else {
-        return Err(-2);
-    };
-    c.key.as_ref().map_or(Ok(()), |k| nvs_set(K_KEY, k))
+    for (key, val) in [
+        (K_BASE, Some(c.base.as_str())),
+        (K_MODEL, Some(c.model.as_str())),
+        (K_VOICE, Some(c.voice.as_str())),
+        (K_KEY, c.key.as_deref()),
+        (K_ASR_MODEL, c.asr_model.as_deref()),
+        (K_LLM_MODEL, c.llm_model.as_deref()),
+    ] {
+        if let Some(val) = val {
+            let Ok(()) = nvs_set(key, val) else {
+                return Err(-2);
+            };
+        }
+    }
+    Ok(())
 }
 
 /// 写口总入口（handler 只做 token/应答）：解析 → 形制 → NVS。
@@ -229,8 +284,10 @@ pub(crate) fn rr3_cloud_write(body: &[u8]) -> Result<(), &'static str> {
         return Err("NVS 写入失败（串口有 err 码）");
     };
     println!(
-        "[cloud] 配置已写入 NVS（key={}，base/model/voice 已更新）",
-        req.key.as_ref().map_or("保留", |_| "更新")
+        "[cloud] 配置已写入 NVS（key={}，asr_model={}，llm_model={}）",
+        req.key.as_ref().map_or("保留", |_| "更新"),
+        req.asr_model.as_ref().map_or("保留", |_| "更新"),
+        req.llm_model.as_ref().map_or("保留", |_| "更新")
     );
     Ok(())
 }
@@ -244,133 +301,6 @@ pub(crate) fn rr3_say_body(body: &[u8]) -> Result<String, &'static str> {
         return Err("text 空或超 512B");
     };
     Ok(text.to_string())
-}
-
-// ---------------------------------------------------------------------------
-// HTTPS 传输（esp_http_client + mbedTLS 证书束；单轮串行）
-// ---------------------------------------------------------------------------
-
-/// 一次 HTTPS POST（JSON 请求、原始字节响应）。错误串按契约分两类：
-/// 传输层 `云端不可达 ...`、HTTP 状态 `TTS接口 HTTP {code}`（重试判据同源）。
-fn rr3_http_post(url: &str, key: &str, body: &[u8]) -> Result<Vec<u8>, String> {
-    let Ok(url_c) = CString::new(url) else {
-        return Err("url 含 NUL".into());
-    };
-    let cfg = esp_http_client_config_t {
-        url: url_c.as_ptr(),
-        method: esp_http_client_method_t_HTTP_METHOD_POST,
-        timeout_ms: HTTP_TIMEOUT_MS,
-        crt_bundle_attach: Some(esp_crt_bundle_attach),
-        ..Default::default()
-    };
-    // SAFETY：cfg/url_c 活到 cleanup；handle 在本函数内成对 init/cleanup。
-    let client = unsafe { esp_http_client_init(&cfg) };
-    let Some(client) = (!client.is_null()).then_some(client) else {
-        return Err("云端不可达: HTTP 客户端初始化失败（堆不足？）".into());
-    };
-    let Ok(auth) = CString::new(format!("Bearer {key}")) else {
-        // SAFETY: client 由本函数 init，此路径不再使用。
-        unsafe { esp_http_client_cleanup(client) };
-        return Err("key 含 NUL".into());
-    };
-    let rc = rr3_http_do(client, &auth, body);
-    // SAFETY：client 由本函数 init 且只在此处 cleanup。
-    unsafe { esp_http_client_cleanup(client) };
-    rc
-}
-
-/// 建连接 → 写请求体 → 取状态码 → 读响应体（header/auth 由调用方备好）。
-fn rr3_http_do(
-    client: esp_http_client_handle_t,
-    auth: &CStr,
-    body: &[u8],
-) -> Result<Vec<u8>, String> {
-    // SAFETY：client 有效；两个头名/值为静态 C 串，auth 活到调用结束。
-    let h1 = unsafe {
-        esp_http_client_set_header(
-            client,
-            c"Content-Type".as_ptr(),
-            c"application/json".as_ptr(),
-        )
-    };
-    let h2 =
-        unsafe { esp_http_client_set_header(client, c"Authorization".as_ptr(), auth.as_ptr()) };
-    let true = (h1 == ESP_OK && h2 == ESP_OK) else {
-        return Err("云端不可达: 请求头设置失败".into());
-    };
-    // SAFETY：client 有效；写长由 body 长度给定。
-    let opened = unsafe { esp_http_client_open(client, body.len() as i32) };
-    let true = opened == ESP_OK else {
-        return Err(format!("云端不可达: open err={opened}"));
-    };
-    let mut off = 0usize;
-    while off < body.len() {
-        // SAFETY：client 已 open；切片剩余长度由 off 保证不超过 body。
-        let n = unsafe {
-            esp_http_client_write(
-                client,
-                body[off..].as_ptr() as *const _,
-                (body.len() - off) as i32,
-            )
-        };
-        let true = n > 0 else {
-            return Err("云端不可达: 请求体写失败".into());
-        };
-        off += n as usize;
-    }
-    // SAFETY：client 有效；返回长度不参与判定（状态码另取）。
-    unsafe { esp_http_client_fetch_headers(client) };
-    // SAFETY：头已取回，状态码只读。
-    let status = unsafe { esp_http_client_get_status_code(client) };
-    let true = status == 200 else {
-        return Err(format!("TTS接口 HTTP {status}"));
-    };
-    rr3_http_read(client)
-}
-
-/// 读响应体（≤[`MAX_PCM`]；n<0 传输错、n==0 EOF）。
-fn rr3_http_read(client: esp_http_client_handle_t) -> Result<Vec<u8>, String> {
-    let mut out = Vec::new();
-    let mut buf = [0u8; 4096];
-    loop {
-        // SAFETY：client 有效；缓冲 4 KB 可写；长度按缓冲大小给。
-        let n =
-            unsafe { esp_http_client_read(client, buf.as_mut_ptr() as *mut _, buf.len() as i32) };
-        let true = n >= 0 else {
-            return Err("云端不可达: 读响应失败".into());
-        };
-        let true = n > 0 else { break };
-        let n = n as usize;
-        let true = out.len() + n <= MAX_PCM else {
-            return Err("TTS 响应超上限".into());
-        };
-        out.extend_from_slice(&buf[..n]);
-    }
-    let true = !out.is_empty() else {
-        return Err("TTS 响应为空".into());
-    };
-    Ok(out)
-}
-
-/// 取一条 TTS PCM：读配置 → 组请求体（共享纯函数）→ 至多两次尝试。
-fn rr3_tts_fetch(text: &str) -> Result<Vec<u8>, String> {
-    let cfg = rr3_cloud_cfg().map_err(|e| format!("云配置缺席: {e}"))?;
-    let body = rr_cloud_proto::rr3_tts_body(&cfg.model, text, &cfg.voice, 16_000);
-    let url = cfg.url();
-    let mut last = String::new();
-    for _ in 0..2 {
-        match rr3_http_post(&url, &cfg.key, &body) {
-            Ok(pcm) => return Ok(pcm),
-            Err(e) => {
-                let true = rr_cloud_proto::rr3_cloud_retryable("TTS接口", &e) else {
-                    return Err(e);
-                };
-                last = e;
-            }
-        }
-        thread::sleep(Duration::from_millis(RETRY_DELAY_MS));
-    }
-    Err(last)
 }
 
 // ---------------------------------------------------------------------------
@@ -437,13 +367,21 @@ mod tests {
             "base": "https://api.example.com",
             "model": "tts-1",
             "voice": "alloy",
+            "asr_model": "sensevoice",
+            "llm_model": "chat-1",
         }));
         let c = rr3_cloud_body(&b).unwrap();
         assert_eq!(c.base, "https://api.example.com");
         assert!(c.key.is_none(), "key 缺席＝保留旧值");
+        assert_eq!(c.asr_model.as_deref(), Some("sensevoice"));
+        assert_eq!(c.llm_model.as_deref(), Some("chat-1"));
         // 不用 unwrap_err：Rr3CloudWrite 故意不派生 Debug（key 零回显墙）。
         assert!(matches!(rr3_cloud_body(b"{}"), Err(e) if e.contains("base")));
         assert!(matches!(rr3_cloud_body(b"not json"), Err(e) if e.contains("JSON")));
+        let bad = body(serde_json::json!({
+            "base": "https://a", "model": "m", "voice": "v", "asr_model": 1,
+        }));
+        assert!(matches!(rr3_cloud_body(&bad), Err(e) if e.contains("非串")));
     }
 
     #[test]
@@ -453,11 +391,18 @@ mod tests {
             model: "m".into(),
             voice: "v".into(),
             key: None,
+            asr_model: None,
+            llm_model: None,
         };
         assert_eq!(rr3_cloud_check(&ok), Ok(()));
+        let empty_asr = Rr3CloudWrite {
+            asr_model: Some(String::new()),
+            ..ok
+        };
+        assert!(rr3_cloud_check(&empty_asr).unwrap_err().contains("形制"));
         let http = Rr3CloudWrite {
             base: "http://a".into(),
-            ..ok
+            ..empty_asr
         };
         assert!(rr3_cloud_check(&http).unwrap_err().contains("形制"));
     }

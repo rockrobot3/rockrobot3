@@ -277,6 +277,42 @@ pub(crate) unsafe fn handle_say(req: *mut httpd_req_t, _bus: &Arc<Mutex<Bus>>) -
     resp_json(req, &reply)
 }
 
+/// 对话 body 上界（W6）：128 KB ≈ 4 s @16k mono s16（手动验收入口；麦克风路径
+/// 走 PSRAM 缓冲，不占 HTTP body）。
+#[cfg(feature = "tts")]
+const RR3_DIALOG_BODY_MAX: usize = 131_072;
+
+/// POST /api/board/dialog——手动触发一整轮（W6）：raw 16 kHz mono WAV/PCM，
+/// 令牌走 `X-RR3-Token` 头；入队即应答（识别/补全/播放异步，进度见串口 `[dialog]`）。
+///
+/// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
+#[cfg(feature = "tts")]
+pub(crate) unsafe fn handle_dialog(req: *mut httpd_req_t, _bus: &Arc<Mutex<Bus>>) -> i32 {
+    let true = req_hdr_token_ok(req) else {
+        println!("[periph] 写口 dialog 拒收：admin token 缺失或错误");
+        return resp_err(
+            req,
+            httpd_err_code_t_HTTPD_401_UNAUTHORIZED,
+            b"admin token missing or invalid\0",
+        );
+    };
+    let Ok(body) = req_body_read_max(req, RR3_DIALOG_BODY_MAX) else {
+        println!("[periph] 写口 dialog 拒收：body 空/超 {RR3_DIALOG_BODY_MAX}B 或收包不完整");
+        return resp_err(
+            req,
+            httpd_err_code_t_HTTPD_400_BAD_REQUEST,
+            b"dialog body out of bounds or recv failed\0",
+        );
+    };
+    let reply = match crate::dialog::rr3_dialog_body(&body)
+        .and_then(|pcm| crate::dialog::rr3_dialog_utterance(pcm).map_err(|e| e.to_string()))
+    {
+        Ok(()) => serde_json::json!({"ok": true}).to_string(),
+        Err(e) => serde_json::json!({"ok": false, "err": e}).to_string(),
+    };
+    resp_json(req, &reply)
+}
+
 /// `X-RR3-Token` 头校验（raw body 端点用；令牌上限 128 B，超长即拒）。
 ///
 /// # Safety: req 为有效请求指针；`httpd_req_get_hdr_value_str` 只读请求头。
