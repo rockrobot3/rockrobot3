@@ -157,16 +157,24 @@ fn parity_result_json() -> Value {
 /// 点名 Request 的 round-trip 应答（层③ 判据第三腿）：Response + id 回显 +
 /// result 原样回带 params；method == `rr3-sentinel/diag/parity` 时回安全核
 /// 逐拍向量（批G ⑤）。首次应答触发堆采样③。
-fn handle_request(frame: &Rr3Frame, body: &[u8], sh: &Shared) {
+/// 请求解析（自 [`handle_request`] 抽出）：非 JSON / 缺 id 当场点名，None = 不应答。
+fn rr3_req_of(body: &[u8]) -> Option<(Value, u64)> {
     let v: Value = match serde_json::from_slice(body) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("[sentinel] 请求体非 JSON: {e}");
-            return;
+            return None;
         }
     };
     let Some(id) = v.get("id").and_then(Value::as_u64) else {
         eprintln!("[sentinel] 请求缺 id，不应答（不猜）");
+        return None;
+    };
+    Some((v, id))
+}
+
+fn handle_request(frame: &Rr3Frame, body: &[u8], sh: &Shared) {
+    let Some((v, id)) = rr3_req_of(body) else {
         return;
     };
     // 分发判定（形状实锤 conn.rs rr3_route_call L779/L816：rrd 转发是"原始 body
