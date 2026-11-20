@@ -192,7 +192,11 @@ impl Rr3LinuxGpioOut {
             .handle_fd
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .expect("ensure 已过，句柄必在位");
+            .ok_or_else(|| {
+                Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+                    "gpio 句柄未 open（ensure 未执行）",
+                ))
+            })?;
         // SAFETY：data 是合法可写指针，尺寸与 ioctl 号配对（单测钉死）
         let ret = unsafe { libc::ioctl(fd, ioctl as _, data as *mut Rr3GpioHandleData) };
         if ret < 0 {

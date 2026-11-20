@@ -220,7 +220,10 @@ impl Rr3LinuxIna219 {
     /// 持锁调用（fd 面串行），两步不完整即回错（I2C NACK / EIO）。
     fn read_register(&self, reg: u8) -> Result<u16, Rr3HalError> {
         let guard = self.bus_fd.lock().unwrap_or_else(|p| p.into_inner());
-        let fd = guard.as_ref().expect("ensure 已过，总线 fd 必在位").fd;
+        let fd = guard
+            .as_ref()
+            .ok_or_else(|| rr3_bad_text("i2c 总线 fd 未 open（ensure 未执行）"))?
+            .fd;
         Ok(u16::from_be_bytes(rr3_reg_read(fd, reg)?))
     }
 }
