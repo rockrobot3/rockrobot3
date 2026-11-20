@@ -317,6 +317,10 @@ name = "rr-hal-api"
 version = "0.0.1"
 
 [[package]]
+name = "rr-intent-mech"
+version = "0.0.1"
+
+[[package]]
 name = "rr-ipc"
 version = "0.0.1"
 dependencies = [

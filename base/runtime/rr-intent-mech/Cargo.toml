@@ -1,0 +1,12 @@
+[package]
+name = "rr-intent-mech"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "意图规则机制核：user_text → 结构化动作（no_std、零依赖，Pi/MCU 共用）"
+
+[lib]
+name = "rr_intent_mech"
+path = "src/lib.rs"
