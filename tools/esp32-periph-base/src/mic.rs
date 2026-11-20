@@ -50,6 +50,10 @@ use crate::capture::{chunk_to_pcm, frame32_to_pair, push_bounded, Rr3DcBlocker};
 use crate::link::rr3_frame_now_ns;
 use crate::state::{lock_bus, now_ms, Bus};
 
+// W6-3 本地语音分段（VAD/DoA→dialog）：仅 tts 全链档编译。
+#[cfg(feature = "tts")]
+mod voice;
+
 /// 采集线程栈（8KB→16KB 运行下限钉死的教训在案，勿再调低；buf 4KB 在栈上）。
 const MIC_THREAD_STACK: usize = 16384;
 /// I2S 事务阻塞读超时（u32::MAX = portMAX_DELAY 同义，批B I2C_TIMEOUT 同款）。
@@ -328,6 +332,9 @@ struct MicRun {
     /// 跨分片连续的 DC 阻断器（2026-10-31 S3 订正：逐片减均值会在 128ms 边界造
     /// 台阶，频谱 31/47/62/78Hz 拉链噪声压过语音——见 capture/mech.rs）。
     dc: Rr3DcBlocker,
+    /// W6-3 本地 VAD/DoA 分段（独立 DC 状态，不与上行分片共用）。
+    #[cfg(feature = "tts")]
+    voice: voice::VoiceRun,
 }
 
 impl MicRun {
@@ -338,6 +345,8 @@ impl MicRun {
             last_dump: [0u8; 16],
             chunk: Vec::with_capacity(AUDIO_CHUNK_FRAMES * 2),
             dc: Rr3DcBlocker::new(),
+            #[cfg(feature = "tts")]
+            voice: voice::VoiceRun::new(),
         }
     }
 
@@ -350,6 +359,10 @@ impl MicRun {
             let b = lock_bus(bus);
             (b.st.audio_on, b.st.audio_host_ms, b.st.tts_gate)
         };
+        // W6-3：本地 VAD/DoA 分段与 UART 上行开关解耦（audio_on 只关上行流）；
+        // 半双工只听播放门（tts_gate），播放期整段重置。
+        #[cfg(feature = "tts")]
+        self.voice.batch(buf, n, bus, gated);
         // 半双工（W4-2）：TTS 播放期停攒上行，但**不改**用户的 audio_on 偏好；
         // 播放结束自动恢复，故与看门狗的两条停流路分开判。
         let live = host_watchdog(bus, audio_on, host_ms) && !gated;
