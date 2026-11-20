@@ -62,8 +62,10 @@ with 入参），不依赖 runner 镜像预装版本；交叉 job 同时显式�
 
 本文件的**结构判据**由 [`tools/ci/workflows_audit.py`](../../tools/ci/workflows_audit.py)
 在 gate `scripts` job 执法（工具链钉版 / 缓存参数 / 触发过滤 / 作业上限 / needs 图 /
-并发语义 / 权限面 / 失败显形 / 五芯片矩阵腿 / 发布面与正式制品托管），政策变更须
-同批改脚本与自检夹具。
+并发语义 / 权限面 / 失败显形 / 五芯片矩阵腿 / 作业覆盖契约 / 发布面与正式制品托管），
+政策变更须同批改脚本与自检夹具。**作业覆盖契约（2026-11-20 补）**：gate /
+integration / platforms / publish / buildroot 的 job 名按 `REQUIRED_JOBS` 钉住——
+删一个 job 就是某类验证静默停跑，必须同批评审改表，不得只靠记忆。
 
 **五芯片覆盖（2026-11-20）**：`platforms.yml` 的 `cross-artifacts` 必须含
 英特尔/AMD `x86_64-unknown-linux-gnu`、瑞芯微 `aarch64-unknown-linux-musl`、
