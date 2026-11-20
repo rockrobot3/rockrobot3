@@ -202,15 +202,7 @@ fn rr3_steady_scan(status: &str) -> Result<(u64, u64, u64, Option<u64>), String>
     let mut slow = None;
     let mut max_us = None;
     for line in status.lines() {
-        let line = line.trim();
-        if let Some(v) = line.strip_prefix("fan_dropped = ") {
-            fd = Some(rr3_steady_num(v, line, "fan_dropped")?);
-        } else if let Some(v) = line.strip_prefix("fan_write_timeout = ") {
-            wr = Some(rr3_steady_num(v, line, "fan_write_timeout")?);
-        } else if let Some((max, s)) = rr3_steady_log_line(line)? {
-            max_us = Some(max);
-            slow = Some(s);
-        }
+        rr3_steady_line(line.trim(), &mut fd, &mut wr, &mut slow, &mut max_us)?;
     }
     Ok((
         fd.ok_or("status 缺 fan_dropped 行")?,
@@ -218,6 +210,25 @@ fn rr3_steady_scan(status: &str) -> Result<(u64, u64, u64, Option<u64>), String>
         slow.ok_or("status 缺 log_write 行")?,
         max_us,
     ))
+}
+
+/// 扫一行 status：命中三读数行则写入对应槽位，其余行忽略。
+fn rr3_steady_line(
+    line: &str,
+    fd: &mut Option<u64>,
+    wr: &mut Option<u64>,
+    slow: &mut Option<u64>,
+    max_us: &mut Option<u64>,
+) -> Result<(), String> {
+    if let Some(v) = line.strip_prefix("fan_dropped = ") {
+        *fd = Some(rr3_steady_num(v, line, "fan_dropped")?);
+    } else if let Some(v) = line.strip_prefix("fan_write_timeout = ") {
+        *wr = Some(rr3_steady_num(v, line, "fan_write_timeout")?);
+    } else if let Some((max, s)) = rr3_steady_log_line(line)? {
+        *max_us = Some(max);
+        *slow = Some(s);
+    }
+    Ok(())
 }
 
 /// `log_write = max_us=N slow=M` 一行；不是该行回 None。
