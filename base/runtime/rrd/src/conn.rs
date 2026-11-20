@@ -42,7 +42,9 @@ use serde_json::{json, Value};
 
 use crate::daemon::{rr3_now_ms, rr3_now_ns, rr3_state_frame};
 use crate::manifest::{rr3_manifest_abs, rr3_manifest_parse, Rr3ManifestFacts};
-use crate::registry::{rr3_phase_for_exit, Rr3Beat, Rr3Death, Rr3Phase, RrdRegistry, RR3_FAN_CAP};
+use crate::registry::{
+    rr3_phase_for_exit, Rr3Beat, Rr3Death, Rr3Phase, Rr3RestartPlan, RrdRegistry, RR3_FAN_CAP,
+};
 use crate::rpc::{
     rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_call_params, rr3_rpc_counters,
     rr3_rpc_deny_status, rr3_rpc_manifest, rr3_rpc_parse, rr3_rpc_reg_status, rr3_rpc_topic_ref,
@@ -259,49 +261,60 @@ fn rr3_conn_finish(ctx: &Rr3ConnCtx, me: &Rr3Peer, clean_exit: bool, reason: &st
         }
         // 刚由 live 转终态，或 unregister 后条目已摘（plan=None）：调用方广播恰好一条 state。
         Rr3Death::Broadcast { plan } => {
-            // D-7：死因→phase 的字面量只在 registry 一处，conn 不再各写各的。
-            let phase = rr3_phase_for_exit(clean_exit);
-            // E-9：这里排 `RR3_TASK_RRD` 等于不排除（发起者自己也收到关于自己的终态）；
-            // supervisor 收尸那一路排的是 `crashed.src_task`。两种口径是**已知**的第三/第四种
-            // 口径，归 Task 13 的 A-3 文档化，本任务不"统一"——统一成哪一种都没有判据支持。
-            let n = crate::registry::rr3_reg_with(&ctx.shared, |g| {
-                g.rr3_reg_fanout(&rr3_state_frame(&me.name, phase, me.task), RR3_TASK_RRD)
-            });
-            match plan {
-                Some(p) => {
-                    rr3_log(&format!(
-                        "{} 退出（{reason}）→ 重启计划 attempt={} delay_ms={} entry={}（非本守护起的模块不 spawn）",
-                        p.name, p.attempt, p.delay_ms, p.entry
-                    ));
-                    // 投出去就完事：起不起由 supervisor 按 `jobs`（"我能起谁"的全集）裁定（E-1）。
-                    // 顺序要紧：日志在投之前——`rr3_restart` 只做一次 send，但把"计划是什么"
-                    // 钉在"谁拿到了它"前面，读日志时才不会先看到结果再找原因。
-                    ctx.sup.rr3_restart(p);
-                }
-                None => rr3_log(&format!(
-                    "{} 退出（{reason}），无重启，广播 {phase} 到 {n} 个连接",
-                    me.name
-                )),
-            }
-            // ADR-0009 裁定 3：本路刚记完一条死亡/注销（EOF 或 unregister），若死者
-            // 是某能力在 boot 全集里的提供者且再无人在位 → 下游逐个置 Degraded 并广播。
-            // 只置位与广播，不记账不出计划（裁定 4）。Deferred/Silent 两路不在这里传播：
-            // 死亡分别由退出码那一路（supervisor）与到期那一路（watchdog）记，各自的
-            // 落点负责各自的传播，一次死亡恰好传播一次。
-            let degraded = rr3_lock(&ctx.shared).rr3_reg_degrade(&me.name);
-            for (dep, task) in degraded {
-                let n = crate::registry::rr3_reg_with(&ctx.shared, |g| {
-                    g.rr3_reg_fanout(
-                        &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
-                        task,
-                    )
-                });
-                rr3_log(&format!(
-                    "{dep} 依赖断供 → degraded（提供者 {} 离开 Running）广播到 {n} 个连接",
-                    me.name
-                ));
-            }
+            rr3_finish_broadcast(ctx, me, clean_exit, reason, plan);
         }
+    }
+}
+
+/// 终态广播 + 重启计划 + 依赖降级传播（`Broadcast` 分支；一次死亡恰好传播一次）。
+fn rr3_finish_broadcast(
+    ctx: &Rr3ConnCtx,
+    me: &Rr3Peer,
+    clean_exit: bool,
+    reason: &str,
+    plan: Option<Rr3RestartPlan>,
+) {
+    // D-7：死因→phase 的字面量只在 registry 一处，conn 不再各写各的。
+    let phase = rr3_phase_for_exit(clean_exit);
+    // E-9：这里排 `RR3_TASK_RRD` 等于不排除（发起者自己也收到关于自己的终态）；
+    // supervisor 收尸那一路排的是 `crashed.src_task`。两种口径是**已知**的第三/第四种
+    // 口径，归 Task 13 的 A-3 文档化，本任务不"统一"——统一成哪一种都没有判据支持。
+    let n = crate::registry::rr3_reg_with(&ctx.shared, |g| {
+        g.rr3_reg_fanout(&rr3_state_frame(&me.name, phase, me.task), RR3_TASK_RRD)
+    });
+    match plan {
+        Some(p) => {
+            rr3_log(&format!(
+                "{} 退出（{reason}）→ 重启计划 attempt={} delay_ms={} entry={}（非本守护起的模块不 spawn）",
+                p.name, p.attempt, p.delay_ms, p.entry
+            ));
+            // 投出去就完事：起不起由 supervisor 按 `jobs`（"我能起谁"的全集）裁定（E-1）。
+            // 顺序要紧：日志在投之前——`rr3_restart` 只做一次 send，但把"计划是什么"
+            // 钉在"谁拿到了它"前面，读日志时才不会先看到结果再找原因。
+            ctx.sup.rr3_restart(p);
+        }
+        None => rr3_log(&format!(
+            "{} 退出（{reason}），无重启，广播 {phase} 到 {n} 个连接",
+            me.name
+        )),
+    }
+    // ADR-0009 裁定 3：本路刚记完一条死亡/注销（EOF 或 unregister），若死者
+    // 是某能力在 boot 全集里的提供者且再无人在位 → 下游逐个置 Degraded 并广播。
+    // 只置位与广播，不记账不出计划（裁定 4）。Deferred/Silent 两路不在这里传播：
+    // 死亡分别由退出码那一路（supervisor）与到期那一路（watchdog）记，各自的
+    // 落点负责各自的传播，一次死亡恰好传播一次。
+    let degraded = rr3_lock(&ctx.shared).rr3_reg_degrade(&me.name);
+    for (dep, task) in degraded {
+        let n = crate::registry::rr3_reg_with(&ctx.shared, |g| {
+            g.rr3_reg_fanout(
+                &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
+                task,
+            )
+        });
+        rr3_log(&format!(
+            "{dep} 依赖断供 → degraded（提供者 {} 离开 Running）广播到 {n} 个连接",
+            me.name
+        ));
     }
 }
 
