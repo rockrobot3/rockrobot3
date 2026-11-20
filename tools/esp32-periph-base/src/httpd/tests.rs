@@ -75,6 +75,22 @@ fn index_form_posts_pass_field() {
     );
 }
 
+/// OLED 提示写口：ASCII 非空 ≤63B；空/缺字段/超长拒。
+#[test]
+fn oled_body_bounds_text_and_hold() {
+    let w = rr3_oled_body(br#"{"text":"LEFT 1/10","hold":true}"#).unwrap();
+    assert_eq!(w.text, "LEFT 1/10");
+    assert!(w.hold, "hold=true 应保持提示不被表情覆盖");
+    let w = rr3_oled_body(br#"{"text":"LEFT 1/10"}"#).unwrap();
+    assert!(!w.hold, "hold 缺席＝不保持");
+    assert!(rr3_oled_body(br#"{"text":""}"#).is_err());
+    assert!(rr3_oled_body(b"{}").is_err());
+    assert!(rr3_oled_body(b"not json").is_err());
+    assert!(rr3_oled_body(br#"{"text":"x","hold":1}"#).is_err());
+    let long = format!("{{\"text\":\"{}\"}}", "A".repeat(64));
+    assert!(rr3_oled_body(long.as_bytes()).is_err());
+}
+
 /// 写口 body 解析域（纯函数）：合法/空密码合法（开放网络）/坏 JSON/缺字段/
 /// 非串字段全点名。
 #[test]

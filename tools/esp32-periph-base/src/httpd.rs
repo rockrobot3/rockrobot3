@@ -76,7 +76,7 @@ use esp_idf_sys::{
 
 use rr_ipc::Rr3BoardBindings;
 
-use crate::state::{lock_bus, Bus};
+use crate::state::{lock_bus, push_job, Bus, Job};
 
 /// 板侧 HTTP 写口管理令牌（P1-3）：POST /api/board/wifi 与 /api/board/reboot
 /// 须在 JSON body 带 `token` 字段且与本值相等，否则 401。生产构建必须经
@@ -133,6 +133,9 @@ pub(crate) const RR3_BOARD_ROUTES: &[(&str, &str, &[&str], &str, Rr3Handler)] = 
     ("GET", "/api/board/bindings", &[], "", serve::handle_bindings),
     ("POST", "/api/board/wifi", &[], "live", serve::handle_wifi_write),
     ("POST", "/api/board/reboot", &[], "", serve::handle_reboot),
+    // 调试/标定提示面：把一行 ASCII 写进 OLED 三行文本区（DoA 3×10 等现场测试
+    // 的提示屏；不依赖 UART2，WiFi 可达即可）。
+    ("POST", "/api/board/oled", &[], "", serve::handle_oled),
     // W4-2 播放写口：raw PCM/WAV body，令牌走 `X-RR3-Token` 头（非 JSON）。
     #[cfg(feature = "tts")]
     ("POST", "/api/board/play", &[], "", serve::handle_play),
@@ -288,6 +291,35 @@ pub(crate) fn rr3_bindings_json(b: Option<&Rr3BoardBindings>) -> String {
 /// 写口 body 上界（fail-closed：形制上限 32+64B 的 JSON 富余 8 倍——超长 body
 /// 一律不读全，400 拒收）。
 const RR3_WIFI_BODY_MAX: usize = 512;
+
+/// OLED 提示写口解析结果：文本 + 是否保持（hold=true 时 dialog/DoA 的表情
+/// 切换不覆盖提示，用于 3×10 等现场标定）。
+pub(crate) struct Rr3OledWrite {
+    pub(crate) text: String,
+    pub(crate) hold: bool,
+}
+
+/// OLED 提示文本（3 行 ×21 列 ASCII 字体；中文不在字模内，现场提示用英文）。
+pub(crate) fn rr3_oled_body(body: &[u8]) -> Result<Rr3OledWrite, &'static str> {
+    let v: serde_json::Value = serde_json::from_slice(body).map_err(|_| "body 非 JSON")?;
+    let text = v
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("text 字段缺席或非串")?;
+    let ok = !text.is_empty() && text.len() <= 63;
+    let true = ok else {
+        return Err("text 空或超 63B");
+    };
+    let hold = match v.get("hold") {
+        None => false,
+        Some(serde_json::Value::Bool(b)) => *b,
+        Some(_) => return Err("hold 非布尔"),
+    };
+    Ok(Rr3OledWrite {
+        text: text.to_string(),
+        hold,
+    })
+}
 
 /// 板端配网页（GET /，2026-10-31）：手机连上 SoftAP 后直接填 SSID/口令即可配网，
 /// 不必依赖 curl；同时轮询 `/api/board/state` 显示实时状态。页面本体零外部依赖
