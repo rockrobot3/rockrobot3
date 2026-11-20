@@ -17,6 +17,9 @@
 - publish.yml 的发布面完整性：build / build-riscv64 / merge / firmware 四腿
   必须在；merge.needs 必须等两条构建腿、合并命令必须含三架构；firmware 必须
   带 packages: write 且推 rockrobot3-firmware——发布面缺腿只在 tag 暴露太晚。
+- buildroot.yml 的正式制品面：release 腿必须 tag 门、登录 ghcr、带
+  packages: write，并以 oras 推 rockrobot3-ota / rockrobot3-buildroot——
+  正式制品只发 release asset 不进 ghcr 等于托管面残缺。
 
 用法：
     workflows_audit.py [--root <仓根>]
@@ -369,6 +372,38 @@ def release_problems(text, rel):
     return bad
 
 
+# 正式制品面（buildroot.yml）：job 名 → 必须进 ghcr 的制品名。
+# 与 publish.yml 的镜像/固件同一条纪律：正式发布物只进 release asset 不算托管完成。
+GHCR_ARTIFACTS = {
+    "buildroot.yml": ("release", ("rockrobot3-ota", "rockrobot3-buildroot")),
+}
+
+
+def release_artifacts_problems(text, rel):
+    """正式制品托管面：OTA 与 buildroot 镜像必须由 tag 门作业推 ghcr。"""
+    spec = GHCR_ARTIFACTS.get(rel.name)
+    if spec is None:
+        return []
+    job, names = spec
+    block = dict(jobs_of(text)).get(job)
+    if block is None:
+        return [f"{rel} 缺发布 job {job}（正式制品面被删）"]
+    joined = "\n".join(block)
+    bad = []
+    for name in names:
+        if name not in joined:
+            bad.append(f"{rel} job {job} 未推 {name}（正式制品必须进 ghcr）")
+    if "oras push" not in joined:
+        bad.append(f"{rel} job {job} 缺 oras push（ghcr 制品未发布）")
+    if not re.search(r"^\s+packages:\s*write\s*$", joined, re.M):
+        bad.append(f"{rel} job {job} 缺 packages: write（无法推 ghcr）")
+    if "startsWith(github.ref, 'refs/tags/v')" not in joined:
+        bad.append(f"{rel} job {job} 必须 tag 门（v* 才发布）")
+    if "docker/login-action" not in joined:
+        bad.append(f"{rel} job {job} 缺 ghcr 登录步骤")
+    return bad
+
+
 def workflow_problems(path, root):
     text = path.read_text(encoding="utf-8")
     rel = path.relative_to(root)
@@ -377,6 +412,7 @@ def workflow_problems(path, root):
     bad.extend(paths_ignore_problems(text, rel))
     bad.extend(chip_problems(text, rel))
     bad.extend(release_problems(text, rel))
+    bad.extend(release_artifacts_problems(text, rel))
     if not re.search(r"^concurrency:\s*$", text, re.M):
         bad.append(f"{rel} 缺顶层 concurrency（同 ref 并发组）")
     if rel.name == "publish.yml" and not re.search(r"cancel-in-progress:\s*false", text):
@@ -481,6 +517,16 @@ def self_test():
             "    steps:\n      - run: echo x86_64-unknown-linux-gnu\n",
             encoding="utf-8",
         )
+        (wf / "buildroot.yml").write_text(
+            "name: br\non:\n  push:\n    tags: [\"v*\"]\n"
+            "permissions:\n  contents: read\n"
+            "concurrency:\n  group: br\njobs:\n"
+            "  release:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    if: startsWith(github.ref, 'refs/tags/v')\n"
+            "    permissions:\n      contents: read\n      packages: write\n"
+            "    steps:\n      - run: oras push ghcr.io/o/rockrobot3-ota:1\n",
+            encoding="utf-8",
+        )
         bad = audit(root)
 
     cases = [
@@ -502,6 +548,7 @@ def self_test():
         ("芯片验证步骤缺失被抓", any("验证步骤" in b for b in bad)),
         ("riscv 镜像腿缺失被抓", any("缺 job riscv-image" in b for b in bad)),
         ("发布面缺腿被抓", any("缺发布 job" in b for b in bad)),
+        ("制品面缺名被抓", any("未推 rockrobot3-buildroot" in b for b in bad)),
         ("好例零误报", not any("good.yml" in b for b in bad)),
     ]
     for name, ok in cases:
@@ -522,7 +569,10 @@ def main():
     if bad:
         print(f"FAIL  流水线结构缺口 {len(bad)} 处（修法见 tools/ci/README.md）")
         return 1
-    print("PASS  流水线结构审计通过（并发组 / job 超时 / action 版本矩阵 / 权限与失败显形 / 五芯片覆盖 / 发布面完整性）")
+    print(
+        "PASS  流水线结构审计通过（并发组 / job 超时 / action 版本矩阵 / 权限与失败显形 / "
+        "五芯片覆盖 / 发布面完整性 / 制品托管）"
+    )
     return 0
 
 
