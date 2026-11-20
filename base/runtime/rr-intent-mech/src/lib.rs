@@ -1,6 +1,7 @@
-//! 意图→动作规则机制核（自 `rr3-brain/src/intent.rs` 抽出，W6-1）：
-//! user_text → 结构化动作清单。Pi 与 MCU 共用同一份词表与否定护栏，板侧不再
-//! 另写第二份规则。
+//! 文本规则机制核（自 `rr3-brain` 抽出，W6-1）：
+//! - 意图：user_text → 结构化动作清单；
+//! - 唤醒：ASR 文本 → 唤醒判决（Ack / Command / FollowUp / Ignore）。
+//! Pi 与 MCU 共用同一份词表、否定护栏与唤醒归一/编辑距，板侧不再另写第二份规则。
 //!
 //! 策略层唯一归属仍在 brain（architecture §2 原则 3"brain 是唯一编排者"）：本
 //! crate 只做**确定性词表匹配**，产出与契约主题一一对应的动作枚举；"动作怎么
@@ -13,6 +14,8 @@
 #![no_std]
 
 extern crate alloc;
+
+pub mod wake;
 
 use alloc::vec::Vec;
 
