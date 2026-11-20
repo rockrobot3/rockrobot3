@@ -343,6 +343,32 @@ def chip_problems(text, rel):
     return bad
 
 
+# 发布运行面十件（rrd + 六模块 + 三工具）：镜像根按名装这十件，少编任何一件
+# 只在装机后才暴露——build 腿的清单按名钉住，增删须同批评审。
+PUBLISH_MODULES = ("act", "brain", "connect", "interact", "sense", "power")
+PUBLISH_TOOLS = (
+    "tools/rrctl/Cargo.toml",
+    "base/ota/rr3-ota-ctl/Cargo.toml",
+    "tools/rr3-pack/Cargo.toml",
+)
+
+
+def runtime_problems(joined, rel):
+    """发布构建清单：rrd + 六模块 + 三工具逐名在场。"""
+    bad = []
+    if "-p rrd" not in joined:
+        bad.append(f"{rel} build 缺 -p rrd（运行面十件之一）")
+    m = re.search(r"for m in ([\w ]+); do", joined)
+    seen = set(m.group(1).split()) if m else set()
+    for mod in PUBLISH_MODULES:
+        if mod not in seen:
+            bad.append(f"{rel} build 运行面缺模块 {mod}（六模块清单被削）")
+    for path in PUBLISH_TOOLS:
+        if path not in joined:
+            bad.append(f"{rel} build 缺 {path}（运行面工具件被削）")
+    return bad
+
+
 def release_problems(text, rel):
     """发布面完整性：四腿齐、merge 等两条构建腿并覆盖三架构、固件进 ghcr。"""
     if rel.name != "publish.yml":
@@ -367,6 +393,7 @@ def release_problems(text, rel):
         for needle in ("stage-image.sh", "image-smoke.sh file", "image-smoke.sh run"):
             if needle not in joined:
                 bad.append(f"{rel} build 缺 {needle}（发布镜像未按装机面验证）")
+        bad.extend(runtime_problems(joined, rel))
     riscv = jobs.get("build-riscv64")
     if riscv is not None:
         joined = "\n".join(riscv)
@@ -549,6 +576,14 @@ def self_test():
             "    strategy:\n      matrix:\n        include:\n"
             "          - arch: amd64\n            platform: linux/amd64\n"
             "    steps:\n      - uses: actions/checkout@v7\n"
+            "      - run: |\n"
+            "          cargo build -q --locked --release -p rrd\n"
+            "          for m in act brain connect interact power; do\n"
+            '            cargo build -q --locked --release --manifest-path "modules/rr3-$m/Cargo.toml"\n'
+            "          done\n"
+            "          cargo build -q --locked --release --manifest-path tools/rrctl/Cargo.toml\n"
+            "          cargo build -q --locked --release --manifest-path base/ota/rr3-ota-ctl/Cargo.toml\n"
+            "          cargo build -q --locked --release --manifest-path tools/rr3-pack/Cargo.toml\n"
             "  firmware:\n    if: startsWith(github.ref, 'refs/tags/v')\n"
             "    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
             "    steps:\n      - run: echo classic\n",
@@ -619,6 +654,7 @@ def self_test():
         ("发布面缺腿被抓", any("缺发布 job" in b for b in bad)),
         ("发布矩阵缺 arm64 被抓", any("build 矩阵缺" in b for b in bad)),
         ("发布镜像冒烟缺失被抓", any("stage-image.sh" in b for b in bad)),
+        ("发布运行面缺模块被抓", any("运行面缺模块 sense" in b for b in bad)),
         ("门禁 job 缩水被抓", any("缺 job conventions" in b for b in bad)),
         ("固件缺 S3 被抓", any("未构建 S3 目标" in b for b in bad)),
         ("制品面缺名被抓", any("未推 rockrobot3-buildroot" in b for b in bad)),
