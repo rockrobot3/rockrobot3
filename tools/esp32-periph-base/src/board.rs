@@ -102,6 +102,11 @@ pub(crate) const SERVO_SLEW_STEP_MS: u64 = 20;
 pub(crate) const SCAN_POINT_MS: u64 = 1200;
 /// 运行面自主节拍（表情微动作 + 云台扫摆；无作业时空转一拍）。
 pub(crate) const RUNTIME_TICK_MS: u64 = 10;
+/// 播放线程空转心跳周期（tts 档；自治壳 audio-out 看门狗窗按它留余量）。
+/// 置策略量集中处：playout 消费它、autonomy 的编译期断言校验它——两条单向边，
+/// 不再形成 autonomy ↔ playout 双向引用。
+#[cfg(feature = "tts")]
+pub(crate) const PLAY_IDLE_MS: u64 = 1_000;
 
 // 帧面协议真值（ADR-0024）：task 位形/magic 单点在 rr-periph-proto（与宿主
 // rr-hal 双向复用），本固件只 re-export 保既有 board::* 路径。

@@ -34,7 +34,7 @@ pub(crate) const SNTP_UNKNOWN: i8 = 0;
 pub(crate) const SNTP_SYNCED: i8 = 1;
 pub(crate) const SNTP_FAILED: i8 = -1;
 
-/// audio-out 看门狗窗：播放线程空转心跳周期 [`crate::playout::PLAY_IDLE_MS`] 的
+/// audio-out 看门狗窗：播放线程空转心跳周期 [`crate::board::PLAY_IDLE_MS`] 的
 /// 3 倍余量. 旧值 1000 ms 与空转周期相等，调度抖动即被误判 dead（W4-2 真板
 /// 2026-11-20 实录：boot 后连续两次 `心跳超时 task=audio-out` 又立即恢复）。
 #[cfg(feature = "tts")]
@@ -45,7 +45,7 @@ const AUDIO_OUT_TIMEOUT_MS: u64 = 1_000;
 /// 判据在编译期成立：看门狗窗必须 ≥ 空转心跳的两倍，否则空闲即误判。
 #[cfg(feature = "tts")]
 const _: () = assert!(
-    AUDIO_OUT_TIMEOUT_MS >= crate::playout::PLAY_IDLE_MS * 2,
+    AUDIO_OUT_TIMEOUT_MS >= crate::board::PLAY_IDLE_MS * 2,
     "audio-out 看门狗窗必须 ≥ 空转心跳周期的 2 倍"
 );
 
