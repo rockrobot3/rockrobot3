@@ -213,7 +213,7 @@ fn rr3_serve_request(
         return Ok(Rr3Flow::Keep);
     };
     match req.method {
-        Rr3RpcMethod::Register => rr3_reply_misroute(out, me, req.id, req.method),
+        Rr3RpcMethod::Register => Ok(rr3_reply_misroute(out, me, req.id, req.method)),
         // ADR-0010：rr3.ctl.* 只对未注册的控制连接开放（握手分流）；已注册模块连接
         // 上行一律拒——回错误帧不断连，与 src_task 伪造同一口径（一次笔误不掉线）。
         // 显式 OR 臂而非 is_ctl 守卫：带守卫的臂不计入穷尽性，新增方法时这里必须表态。
@@ -225,7 +225,7 @@ fn rr3_serve_request(
         | Rr3RpcMethod::CtlReboot
         | Rr3RpcMethod::CtlWiring
         | Rr3RpcMethod::CtlContracts
-        | Rr3RpcMethod::CtlDomainSet => rr3_reply_misroute(out, me, req.id, req.method),
+        | Rr3RpcMethod::CtlDomainSet => Ok(rr3_reply_misroute(out, me, req.id, req.method)),
         Rr3RpcMethod::Heartbeat => beat::rr3_beat_handle(out, ctx, me, req.id, &req.params),
         Rr3RpcMethod::Unregister => {
             // 主动退场 ≠ 崩溃：直接移出在册表，不走 restart_policy。
