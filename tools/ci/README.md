@@ -32,7 +32,7 @@
 | ⑨-n | 判据静态扫描（详见脚本 ⑨-n 段注释） | 注入路径唯一门 n 静态面执法位（n1-11，全案 §8 门 n / 施工图 Task 8 Step 2）：键名单自代码常量 `RR3_PIN_DERIVED_KEYS`（`rrd/src/profile.rs`）awk 导出——单真值点不抄第二份，键集扩缩自动跟随；扫面前件 fail-closed 四查（声明数非空 / 实解析数非零 / 两数判等 / profiles 份数非零，任一不成立即"门禁失效，不放行"）；逐 `profiles/*.toml` 扫 `[hardware]` 段（行注释先剥）出现物理键任一即逐行点名（file:line）后 FAIL——稳态＝物理键一律 `[pins]` 派生，`[hardware]` 只留非引脚键 `alsa_device`/`link_ifname`（批N3 件六 SPI 词形收口：`spi_device` 已进派生键集、扫面 8 键，敞口 18 行已结）；装载期判据实体与反例用例在 `rrd/src/profile.rs` 门 n 段（经步 ①b 进 CI） |
 
 | ⑩ | `steps/10.sh`（读 contracts 快照与分母基线） | 面板覆盖率对账（门 d）：分子 = covers 申报 + applies 生效路径，分母 = 字段级五路并集；红账 0、分母下限 83，缩分母即红 |
-| ⑫ | `python3 tools/ci/metrics.py`（真值 `metrics-baseline.json`） | 质量度量门：重复率 ≤3%、CC 均值 ≤2.50 / 最大 ≤11、生产函数 >80 行 =0、>60 行 ≤9（下一档棘轮，只降不升）、生产 panic ≤60、>20B 生产函数名 0、≥1000ms 长睡 0；基线只降不升 |
+| ⑫ | `python3 tools/ci/metrics.py`（真值 `metrics-baseline.json`） | 质量度量门：重复率 ≤3%、CC 均值 ≤2.50 / 最大 ≤11、生产函数 >80 行 =0、>60 行 ≤8（下一档棘轮，只降不升）、生产 panic ≤60、>20B 生产函数名 0、≥1000ms 长睡 0；基线只降不升 |
 | ⑬ | `steps/13.sh`（git grep + git status） | 仓面卫生门：追踪文件无本机绝对路径、无构建目录、源码类新件必须入册、shell `$name` 后接非 ASCII 即红 |
 | ⑭ | `steps/14.sh` | 装载门体量基线门（裁-13/基-38）：装配单锚函数的块行数、`read_to_string` 样板数、rr-registry 同形函数数按 `gate-size-baseline.txt` 只降不升；锚函数缺失或基线形状坏即红 |
 | ⑮ | `python3 tools/ci/lockio_audit.py`（先 `--self-test`） | 锁内 I/O 门：`lock·log` 同行 / 条件位临时 guard 延寿到块体 / 直调会写待落盘日志的 registry 方法；扫面打空即门禁失效；gate `scripts` 同源执法 |

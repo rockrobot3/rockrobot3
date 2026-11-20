@@ -80,42 +80,8 @@ fn rr3_boot_profile(cfg: &RrdConfig, profile: &std::path::Path) -> Result<Rr3Dae
         ));
     }
     rr3_boot_notes(&boot);
-    // 降级原因单源（模块, 类别, 点名文案）：缺格与装配缺项在此合流，
-    // degraded/predegraded 两集合由它投影，`ctl.health` 读回同一份。
-    let degrade: Vec<(String, String, String)> = boot
-        .missing
-        .iter()
-        .map(|(m, slot)| (m.clone(), "missing_slot".to_string(), slot.clone()))
-        .chain(
-            boot.assemble_broken
-                .iter()
-                .map(|(m, msg)| (m.clone(), "assemble_broken".to_string(), msg.clone())),
-        )
-        .collect();
-    let degraded: BTreeSet<String> = degrade
-        .iter()
-        .filter(|(_, kind, _)| kind == "missing_slot")
-        .map(|(m, _, _)| m.clone())
-        .collect();
-    let predegraded: BTreeSet<String> = degrade
-        .iter()
-        .filter(|(_, kind, _)| kind == "assemble_broken")
-        .map(|(m, _, _)| m.clone())
-        .collect();
-    // 装配快照定格（批N4 件九笔4）：boot 链验收通过的底账一次 set 进 OnceLock，
-    // `rr3.ctl.wiring` 的渲染源；首份胜出，重复 boot 不覆盖。
-    if let Some(s) = boot.snapshot.clone() {
-        crate::assembly::rr3_assembly_set(s);
-    }
-    // 契约记账快照定格（Z-4/基-40）：契约四册 sha256 + 真值集七成员，`rr3.ctl.contracts`
-    // 的渲染源与自检判据锚；记账重读失败 = 文件系统级异常，fail-closed 带因拒 boot。
-    let cs =
-        crate::contracts::rr3_contracts_scan(profile, &contracts, &wiring, &boot.platform_chip)?;
-    if crate::contracts::rr3_contracts_set(cs) {
-        rr3_log(
-            "真值集记账定格：契约四册 Z-4 账＋真值集七成员基-40 账（rr3.ctl.contracts 自检判据锚）",
-        );
-    }
+    let (degrade, degraded, predegraded) = rr3_boot_degrade(&boot);
+    rr3_boot_freeze(profile, &contracts, &wiring, &boot)?;
     Ok(Rr3DaemonBoot {
         manifests: boot.manifests,
         degraded,
@@ -130,6 +96,59 @@ fn rr3_boot_profile(cfg: &RrdConfig, profile: &std::path::Path) -> Result<Rr3Dae
         tier: boot.platform_tier,
         chip: boot.platform_chip,
     })
+}
+
+/// 降级原因单源（模块, 类别, 点名文案）：缺格与装配缺项在此合流，
+/// degraded/predegraded 两集合由它投影，`ctl.health` 读回同一份。
+fn rr3_boot_degrade(
+    boot: &crate::profile::Rr3ProfileBoot,
+) -> (
+    Vec<(String, String, String)>,
+    BTreeSet<String>,
+    BTreeSet<String>,
+) {
+    let degrade: Vec<(String, String, String)> = boot
+        .missing
+        .iter()
+        .map(|(m, slot)| (m.clone(), "missing_slot".to_string(), slot.clone()))
+        .chain(
+            boot.assemble_broken
+                .iter()
+                .map(|(m, msg)| (m.clone(), "assemble_broken".to_string(), msg.clone())),
+        )
+        .collect();
+    let degraded = degrade
+        .iter()
+        .filter(|(_, kind, _)| kind == "missing_slot")
+        .map(|(m, _, _)| m.clone())
+        .collect();
+    let predegraded = degrade
+        .iter()
+        .filter(|(_, kind, _)| kind == "assemble_broken")
+        .map(|(m, _, _)| m.clone())
+        .collect();
+    (degrade, degraded, predegraded)
+}
+
+/// 装配快照与契约记账定格（`ctl.wiring`/`ctl.contracts` 读面源；首份胜出）：
+/// boot 链验收通过的底账一次 set 进 OnceLock；契约记账重读失败是文件系统级异常，
+/// fail-closed 带因拒 boot。
+fn rr3_boot_freeze(
+    profile: &std::path::Path,
+    contracts: &std::path::Path,
+    wiring: &std::path::Path,
+    boot: &crate::profile::Rr3ProfileBoot,
+) -> Result<(), String> {
+    if let Some(s) = boot.snapshot.clone() {
+        crate::assembly::rr3_assembly_set(s);
+    }
+    let cs = crate::contracts::rr3_contracts_scan(profile, contracts, wiring, &boot.platform_chip)?;
+    if crate::contracts::rr3_contracts_set(cs) {
+        rr3_log(
+            "真值集记账定格：契约四册 Z-4 账＋真值集七成员基-40 账（rr3.ctl.contracts 自检判据锚）",
+        );
+    }
+    Ok(())
 }
 
 /// 启动摘要（一行钉住本次装配的输入面与规模，排障先看这一行）。
