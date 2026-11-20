@@ -335,15 +335,19 @@ pub(crate) fn rr3_say_body(body: &[u8]) -> Result<String, &'static str> {
 // worker（有界作业队列：TTS 朗读 / 对话整轮；单条 TLS 线程）
 // ---------------------------------------------------------------------------
 
+/// 对话整轮策略入口（由装配面注入，cloud 只持机制：队列/传输/线程）。
+pub(crate) type Rr3TurnFn = fn(&Arc<Mutex<Bus>>, Vec<i16>);
+
 /// 起云端 worker（httpd 之前调用，避免 `/say` 与 `/dialog` 撞"未装配"窗）。
-pub(crate) fn spawn_tts(bus: Arc<Mutex<Bus>>) {
+/// `turn` 由调用方注入（`dialog::rr3_turn`）——cloud 不反向依赖策略层。
+pub(crate) fn spawn_tts(bus: Arc<Mutex<Bus>>, turn: Rr3TurnFn) {
     let (tx, rx) = sync_channel(TTS_Q_CAP);
     let _ = TTS_TX.lock().map(|mut slot| *slot = Some(tx));
     println!("[cloud] 云端 worker 起（TTS 朗读 + 对话整轮；单条 TLS 栈）");
     let _ = thread::Builder::new()
         .name("cloud-dialog".into())
         .stack_size(TTS_STACK)
-        .spawn(move || cloud_run(rx, bus))
+        .spawn(move || cloud_run(rx, bus, turn))
         .map_err(|e| println!("[cloud] 起云端线程失败: {e:?}"));
 }
 
@@ -374,14 +378,14 @@ fn rr3_enqueue(job: Rr3CloudJob) -> Result<(), &'static str> {
     })
 }
 
-/// worker 主体：Say → 云端 TTS → 播放；Turn → dialog 整轮；空转续 dialog 心跳。
-fn cloud_run(rx: Receiver<Rr3CloudJob>, bus: Arc<Mutex<Bus>>) {
+/// worker 主体：Say → 云端 TTS → 播放；Turn → 注入的整轮策略；空转续 dialog 心跳。
+fn cloud_run(rx: Receiver<Rr3CloudJob>, bus: Arc<Mutex<Bus>>, turn: Rr3TurnFn) {
     loop {
         match rx.recv_timeout(Duration::from_millis(IDLE_MS)) {
             Ok(Rr3CloudJob::Say(text)) => tts_say(&text),
             Ok(Rr3CloudJob::Turn(pcm)) => {
                 crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
-                crate::dialog::rr3_turn(&bus, pcm);
+                turn(&bus, pcm);
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
