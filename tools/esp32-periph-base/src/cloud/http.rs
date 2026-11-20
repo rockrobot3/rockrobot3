@@ -154,7 +154,12 @@ pub(crate) fn rr3_post_retry(
 ) -> Result<Vec<u8>, String> {
     let mut last = String::new();
     for _ in 0..2 {
-        match rr3_http_post(interface, url, key, body, content_type, max_body) {
+        // 单次 HTTP 上限 8 s < dialog 心跳窗 10 s；每次尝试前后各续一拍，
+        // 长云调用（ASR/LLM/TTS）不会把 dialog 任务误判 dead。
+        crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
+        let attempt = rr3_http_post(interface, url, key, body, content_type, max_body);
+        crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
+        match attempt {
             Ok(v) => return Ok(v),
             Err(e) => {
                 let true = rr_cloud_proto::rr3_cloud_retryable(interface, &e) else {
