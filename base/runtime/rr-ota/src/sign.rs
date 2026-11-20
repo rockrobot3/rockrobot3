@@ -106,8 +106,9 @@ fn rr3_manifest_ids(
     ))
 }
 
-/// 字节层形制：上限、UTF-8/ASCII、LF 结尾、无空行、九行、首行。
-fn rr3_manifest_lines(bytes: &[u8]) -> Result<Vec<&str>, String> {
+/// 字节层形制（自 [`rr3_manifest_lines`] 抽出）：上限、UTF-8/ASCII、LF 结尾、
+/// 无空行；返回去尾 LF 的正文。
+fn rr3_manifest_body(bytes: &[u8]) -> Result<&str, String> {
     if bytes.len() > RR3_OTA_MANIFEST_MAX {
         return Err(format!(
             "manifest 过长（{} 字节 > 上限 {RR3_OTA_MANIFEST_MAX}）",
@@ -127,6 +128,12 @@ fn rr3_manifest_lines(bytes: &[u8]) -> Result<Vec<&str>, String> {
     if body.ends_with('\n') {
         return Err("manifest 末尾不得有空行".into());
     }
+    Ok(body)
+}
+
+/// 形制面：九行与首行（正文由 [`rr3_manifest_body`] 定型）。
+fn rr3_manifest_lines(bytes: &[u8]) -> Result<Vec<&str>, String> {
+    let body = rr3_manifest_body(bytes)?;
     let lines: Vec<&str> = body.split('\n').collect();
     if lines.len() != 9 {
         return Err(format!(
