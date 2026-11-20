@@ -8,7 +8,7 @@
 //! 半双工（W4-2 语义）：`gated`（播放面 `tts_gate`）期间整段重置——扬声器回授
 //! 不进 VAD，也不进云端 ASR。
 //!
-//! 判据参数取 Pi 侧 esp32 档标定值（config-esp32.toml）：rms_start=650、
+//! 判据参数取 Pi 侧 esp32 档标定值（config-esp32.toml）：rms_start=500、
 //! silence_tail=400 ms、min_speech=200 ms、DoA 阈值 30°、麦间距 150 mm。
 
 use std::sync::{Arc, Mutex};
@@ -41,8 +41,10 @@ const DOA_CFG: Rr3DoaCfg = Rr3DoaCfg {
 /// 采集块节拍（20 ms）与每块采样数（320 帧 × 2 声道）。
 const FRAME_MS: u64 = 20;
 const BLOCK_SAMPLES: usize = (MIC_SR_HZ as usize / 1000) * 20 * 2;
-/// 预滚窗：VAD 起音至少 200 ms 才发 Onset，预滚 10 块刚好补齐（同时供 DoA 判向）。
-const PRE_ROLL_BLOCKS: usize = 10;
+/// 预滚窗：VAD 起音至少 200 ms 才发 Onset；预滚 **600 ms**（30 块）确保
+/// "你好洛克"这类唤醒前缀在起音偏晚时仍能进段（2026-11-21 真板：10 块预滚下
+/// ASR 曾把"你好洛克，今天天气怎么样"的唤醒前缀整段丢掉）。
+const PRE_ROLL_BLOCKS: usize = 30;
 /// 单段上限：8 s（与云 TTS 上限同量级；超长强制收段，不无限攒）。
 const MAX_UTTER_MS: usize = 8_000;
 const MAX_UTTER_SAMPLES: usize = (MIC_SR_HZ as usize / 1000) * MAX_UTTER_MS * 2;
