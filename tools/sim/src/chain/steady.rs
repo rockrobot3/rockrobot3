@@ -106,23 +106,9 @@ impl Rr3SteadyAgg {
             let Some(e) = self.mods.get(m) else {
                 return Err(format!("稳态段缺模块 {m}（保持期间未注册或已退场）"));
             };
-            if e.phase != "running" {
-                return Err(format!("稳态段末拍 {m} 不在 running: {}", e.phase));
-            }
-            if e.max_since_ms > e.watchdog_ms {
-                return Err(format!(
-                    "{m} 心跳间隔峰值 {}ms 触看门狗 {}ms（保持期间掉拍）",
-                    e.max_since_ms, e.watchdog_ms
-                ));
-            }
-            if e.max_peak_ms > e.watchdog_ms {
-                return Err(format!(
-                    "{m} 续命拍间隔峰值 {}ms 触看门狗 {}ms（稳态长尾越界）",
-                    e.max_peak_ms, e.watchdog_ms
-                ));
-            }
-            if e.fan_dropped > 0 {
-                drops.push(format!("{m}={}", e.fan_dropped));
+            let dropped = rr3_steady_mod_check(m, e)?;
+            if dropped > 0 {
+                drops.push(format!("{m}={dropped}"));
             }
         }
         if !drops.is_empty() {
@@ -188,6 +174,26 @@ impl Rr3SteadyAgg {
             rr3_steady_opt(self.max_boot_ms),
         )
     }
+}
+
+/// 单模块稳态判据：末拍 running、两路间隔峰值不触看门狗；回包该模块丢帧数。
+fn rr3_steady_mod_check(m: &str, e: &Rr3SteadyMod) -> Result<u64, String> {
+    if e.phase != "running" {
+        return Err(format!("稳态段末拍 {m} 不在 running: {}", e.phase));
+    }
+    if e.max_since_ms > e.watchdog_ms {
+        return Err(format!(
+            "{m} 心跳间隔峰值 {}ms 触看门狗 {}ms（保持期间掉拍）",
+            e.max_since_ms, e.watchdog_ms
+        ));
+    }
+    if e.max_peak_ms > e.watchdog_ms {
+        return Err(format!(
+            "{m} 续命拍间隔峰值 {}ms 触看门狗 {}ms（稳态长尾越界）",
+            e.max_peak_ms, e.watchdog_ms
+        ));
+    }
+    Ok(e.fan_dropped)
 }
 
 /// 未采到的读数渲染为 `?`（不拿 0 冒充）。
