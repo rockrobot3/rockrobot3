@@ -416,7 +416,7 @@ fn cmd_audio(
 
 /// INFO 的 5V 轨两栏（自 cmd_info 抽出）：有效报毫伏与档名，无效点名
 /// absent/unknown（原始码照回显）。
-fn rail_fields(valid: bool, mv: u32, raw: u32, tier: RailTier) -> (String, &'static str) {
+fn rail_fields(valid: bool, mv: u16, raw: u16, tier: RailTier) -> (String, &'static str) {
     if valid {
         (format!("{mv}mV raw={raw}"), tier.name())
     } else {
