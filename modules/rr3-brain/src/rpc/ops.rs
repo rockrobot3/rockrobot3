@@ -327,7 +327,7 @@ fn rr3_ops_store(
     if section_key == "dialog" {
         brain
             .as_object_mut()
-            .expect("brain 段是对象（TOML 表同构）")
+            .ok_or_else(|| "config [rr3-brain] 段须为表".to_string())?
             .entry("dialog")
             .or_insert(json!({}));
     }
@@ -348,13 +348,13 @@ fn rr3_row_store(brain: &mut Value, key: &str, new: &Value) -> Result<Value, Str
     let row = brain
         .get_mut("model")
         .and_then(Value::as_array_mut)
-        .expect("model 是行表（上方结构校验已拦截）")
+        .ok_or_else(|| "config model 段须为行表".to_string())?
         .iter_mut()
         .find(|r| r.get("active").and_then(Value::as_bool) == Some(true))
-        .expect("active 行在（上方结构校验已拦截）");
+        .ok_or_else(|| "模型行表无 active 行".to_string())?;
     let old = row.get(key).cloned().unwrap_or(Value::Null);
     row.as_object_mut()
-        .expect("模型行是表（TOML 行表同构）")
+        .ok_or_else(|| "模型行须为表".to_string())?
         .insert(key.to_string(), new.clone());
     Ok(old)
 }

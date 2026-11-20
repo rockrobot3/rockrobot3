@@ -205,7 +205,12 @@ impl Rr3Max7219SpiDisplay {
     fn write_all(&self, payload: &[u8], what: &str) -> Result<(), Rr3HalError> {
         use std::io::Write;
         let guard = self.spi.lock().unwrap_or_else(|p| p.into_inner());
-        let dev = guard.as_ref().expect("ensure 已过，设备必在位");
+        let dev = guard.as_ref().ok_or_else(|| {
+            Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+                "display {:?} {what}: 未 open（ensure 未执行）",
+                self.dev_path.display()
+            )))
+        })?;
         (&*dev).write_all(payload).map_err(|e| {
             Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
                 "display {:?} {what}: {e}",

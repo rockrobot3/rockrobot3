@@ -75,33 +75,45 @@ pub(super) fn rr3_rebuild_clients(
     clients: &mut Rr3CloudClients,
 ) -> Result<(), String> {
     match group {
-        "asr" => {
-            let cloud = rr3_cloud_cfg_of(&cfg.doc)?;
-            clients.asr = Rr3AsrClient::new(&cloud.base_url, &cloud.asr_model, cloud.timeout_s);
-        }
-        "tts" => {
-            let cloud = rr3_cloud_cfg_of(&cfg.doc)?;
-            clients.tts = Rr3TtsClient::new(&cloud.base_url, &cloud.tts_model, cloud.timeout_s);
-        }
-        "llm" => {
-            let row = rr3_model_row_of(cfg)?;
-            let timeout_s = rr3_cloud_cfg_of(&cfg.doc)?.timeout_s;
-            clients.llm = Rr3LlmClient::new(
-                &row.base_url,
-                &row.model_id,
-                timeout_s,
-                row.key_ref,
-                row.mode,
-            );
-        }
+        "asr" => rr3_rebuild_asr(cfg, clients),
+        "tts" => rr3_rebuild_tts(cfg, clients),
+        "llm" => rr3_rebuild_llm(cfg, clients),
         // dialog（rr3_ops_write 白名单保证四组，其余即 dialog）：Python
         // dialog.max_utterance_ms = int(new) 同位——new 是写臂类型域校验的整数
         _ => {
             dialog.max_utterance_ms = new
                 .as_i64()
-                .expect("ops/set 写臂类型域校验保证 dialog 组 new 是整数");
+                .ok_or_else(|| "ops/set dialog 组 new 须为整数".to_string())?;
+            Ok(())
         }
     }
+}
+
+/// asr 组：读 cloud 段现值重建 ASR 客户端。
+fn rr3_rebuild_asr(cfg: &Rr3BrainCfg, clients: &mut Rr3CloudClients) -> Result<(), String> {
+    let cloud = rr3_cloud_cfg_of(&cfg.doc)?;
+    clients.asr = Rr3AsrClient::new(&cloud.base_url, &cloud.asr_model, cloud.timeout_s);
+    Ok(())
+}
+
+/// tts 组：读 cloud 段现值重建 TTS 客户端。
+fn rr3_rebuild_tts(cfg: &Rr3BrainCfg, clients: &mut Rr3CloudClients) -> Result<(), String> {
+    let cloud = rr3_cloud_cfg_of(&cfg.doc)?;
+    clients.tts = Rr3TtsClient::new(&cloud.base_url, &cloud.tts_model, cloud.timeout_s);
+    Ok(())
+}
+
+/// llm 组：重解析模型行实效 + cloud 段超时，重建 LLM 客户端。
+fn rr3_rebuild_llm(cfg: &Rr3BrainCfg, clients: &mut Rr3CloudClients) -> Result<(), String> {
+    let row = rr3_model_row_of(cfg)?;
+    let timeout_s = rr3_cloud_cfg_of(&cfg.doc)?.timeout_s;
+    clients.llm = Rr3LlmClient::new(
+        &row.base_url,
+        &row.model_id,
+        timeout_s,
+        row.key_ref,
+        row.mode,
+    );
     Ok(())
 }
 
