@@ -11,12 +11,21 @@ use crate::supervisor::{rr3_spawn_supervisor, Rr3SuperMsg, Rr3Supervisor};
 use crate::{rr3_lock, rr3_log};
 
 use super::boot::{
-    rr3_backend_summary, rr3_boot_summary, rr3_daemon_bind, rr3_daemon_boot, rr3_daemon_counters,
-    rr3_daemon_logs, rr3_degrade_json,
+    rr3_boot_announce, rr3_ctr_wire, rr3_daemon_bind, rr3_daemon_boot, rr3_daemon_logs,
 };
-use super::ctl::rr3_flush_on_term;
 use super::task::{rr3_daemon_accept, rr3_daemon_queue, Rr3AcceptCtx};
 use super::tick::rr3_spawn_watchdog;
+
+/// panic 留痕（可观测性）：线程 panic 默认只到 stderr，不进 rrd 日志环/落盘；
+/// 先落一行再交默认钩子，ctl.logs 与 rrd.log 都能看到"哪个线程/哪一行"出事，
+/// 不改变 panic 语义。rr3_log 已不 panic（写失败降级），钩子内无重入风险。
+fn rr3_panic_log() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        rr3_log(&format!("线程 panic: {info}"));
+        default_hook(info);
+    }));
+}
 
 /// 守护主循环：永不返回（除非 bind 失败）。集成测试靠父进程 kill 收尾。
 ///
@@ -26,63 +35,15 @@ use super::tick::rr3_spawn_watchdog;
 ///    可能在同一毫秒内注册完，所以**监视线程必须已在跑**才有东西扫它（brief Step 2 的
 ///    "先起 watchdog、再起 boot 队列"）；
 /// 3. 投 boot 队列 —— 放在 accept 循环之前，否则第一条消息永远没人取。
+///
+/// 装配链（boot 产物、启动摘要、日志落盘、计数持久化）按依赖序在此串起；
+/// 各段的内部次序见 [`super::boot`]。
 pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String> {
-    // panic 留痕（可观测性）：线程 panic 默认只到 stderr，不进 rrd 日志环/落盘；
-    // 先落一行再交默认钩子，ctl.logs 与 rrd.log 都能看到"哪个线程/哪一行"出事，
-    // 不改变 panic 语义。rr3_log 已不 panic（写失败降级），钩子内无重入风险。
-    let default_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        rr3_log(&format!("线程 panic: {info}"));
-        default_hook(info);
-    }));
+    rr3_panic_log();
     let t0 = Instant::now();
     let boot = rr3_daemon_boot(cfg)?;
-    // rrd 自身日志落盘（批N5 件二笔2，§17 运维留痕同轨判据）：`<socket>.log/rrd.log`
-    // append——与 per-unit 文件同目录同派生单点。续轮十四起常持句柄：每行一次写、
-    // 累计超 2MiB 单代轮转（`log/sink.rs`）；启动回填把崩溃前的文件尾置回环头，
-    // `rr3.ctl.logs` 重启后仍取得到崩溃前的最后若干行。打不开 = 点名退纯内存，
-    // 观测通道故障降级、不放大成可用性故障（supervisor stderr 回退 inherit 同一条
-    // 纪律）。位置钉死在装配链 match **之后**：--profile 路径此刻环容量已定格
-    // （回填行数按真容量收）；--manifest 调试路径按 512 兜底收。
     rr3_daemon_logs(cfg);
-    // 启动摘要（可观测性）：一行钉住本次装配的输入面与规模，排障先看这一行。
-    // 后门（--manifest）无装配单：tier/chip 显示 `-`，不造假值。
-    let profile = cfg
-        .profile
-        .as_ref()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "--manifest".to_string());
-    let backends = rr3_backend_summary(
-        &boot.hal_backend,
-        boot.audio_backend.as_deref(),
-        boot.servo_backend.as_deref(),
-        boot.display_backend.as_deref(),
-    );
-    // 缺格数按 (模块, 格位) 条目计——一格一条，不是"缺格模块数"：同一模块缺两格
-    // 是两个缺格，报文只数模块会把严重度报小。
-    let missing_slots = boot
-        .degrade
-        .iter()
-        .filter(|(_, kind, _)| kind == "missing_slot")
-        .count();
-    let summary = rr3_boot_summary(
-        &boot.tier,
-        &boot.chip,
-        &profile,
-        boot.manifests.len(),
-        boot.predegraded.len(),
-        missing_slots,
-        &backends,
-    );
-    rr3_log(&summary);
-    // 同一行定格给 ctl.status：远程诊断读一次应答即可看到装配面，不必翻日志。
-    let _ = crate::rr3_boot_summary_set(summary);
-    // 降级原因同刻定格给 ctl.health：卡在哪一格、为何不 spawn，一条应答看全。
-    // 只在装配单正门定格——`--manifest` 后门未跑装配链，"无降级"是未知而非事实，
-    // 读面须为 null（[] 会被误读成"确认无降级"）。
-    if cfg.profile.is_some() {
-        let _ = crate::rr3_degrade_set(rr3_degrade_json(&boot.degrade));
-    }
+    rr3_boot_announce(cfg, &boot);
     // bind/cleanup/accept 走 trait 工厂（ADR-0008）：端点与监听语义上提到 rr-ipc，
     // Conn 类型仍是 UnixStream——conn.rs 的读写循环与 socket 专有门（读超时/shutdown）不动。
     // bind 独占探测（0.0.8d 审计 B-9）：存活实例占用 = 拒绝启动（裂脑禁绝）；
@@ -98,26 +59,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
         rr3_lock(&shared).rr3_reg_predegrade(boot.predegraded.clone());
     }
     let topics = Arc::new(topics);
-
-    // 运维计数持久化（0.0.4 批B，Q1/Q2 裁定）：启动加载全表 → `boots` 自增（rrd 自有键，
-    // 不走心跳）→ 立即回写一次。路径判定一处（counters.rs）：env RR3_DATA_DIR 优先，
-    // cfg(linux) 缺省 /data/rr3，皆无 = 不持久化（日志一行点名，不报错——sim 直跑就是
-    // 没有数据分区的，运维账只在内存里也照常用）。
-    let counters_path = rr3_daemon_counters(&shared);
-
-    // R26 心跳合并写闸门（0.0.5 增补轮四 批W3）：env 解析一次，全连接共享一份；
-    // SIGTERM/SIGINT 强制 flush 在此一并装上——合并写窗口内未落盘的尾部计数
-    // 靠关停路径兜底，缺了它 R26 的"最多丢 M 秒"只在断电时成立、正常关停会白丢。
-    let counters_gate = Arc::new(Mutex::new(crate::counters::Rr3CountersGate::rr3_new(
-        crate::counters::rr3_flush_ms(),
-        crate::counters::rr3_flush_max(),
-    )));
-    // 续轮十三：落盘执行面单线程（快照 + fsync + 回执 gate），心跳 reader 只投
-    // 非阻塞信号。未启用持久化 = None；线程起不来也回 None 并点名（不回落同步写）。
-    let ctr_store = counters_path.clone().and_then(|p| {
-        crate::counters::rr3_ctr_store_spawn(shared.clone(), counters_gate.clone(), p, t0)
-    });
-    rr3_flush_on_term(shared.clone(), counters_path.clone());
+    let (ctr_store, counters_gate) = rr3_ctr_wire(&shared, t0);
 
     // `Rr3Supervisor` 是 `Sender` 的一层薄壳（可 clone）：一份进 conn 收尾、一份进 watchdog，
     // 两条路交出的重启计划在这里汇成一条队列。
