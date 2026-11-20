@@ -26,7 +26,7 @@ rr3_step_16() {
   tier_list=()
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    if ! n="$(wc -l < "$f" 2>/dev/null)"; then
+    if ! n="$(awk 'END { print NR }' "$f" 2>/dev/null)"; then
       printf 'FAIL  ⑯ 读取失败 %s（fail-closed）\n' "$f"
       fail=1
       continue
