@@ -49,77 +49,90 @@ pub fn rr3_chain_manifests(
     brain_entry: &Path,
 ) -> Vec<(String, String)> {
     vec![
-        (
-            RR3_SIM_MODULE_A.to_string(),
-            rr3_manifest_ext(
-                RR3_SIM_MODULE_A,
-                sense_entry,
-                "module",
-                "rust",
-                RR3_CHAIN_HB_MS,
-                RR3_CHAIN_WD_MS,
-                "always",
-                &["rr3-sense/audio/pcm", RR3_SENSE_TOPIC_VAD],
-                &["rr3-runtime/module/state"],
-                &[],
-            ),
-        ),
+        (RR3_SIM_MODULE_A.to_string(), rr3_chain_sense(sense_entry)),
         (
             RR3_SIM_MODULE_B.to_string(),
-            rr3_manifest_ext(
-                RR3_SIM_MODULE_B,
-                interact_entry,
-                "module",
-                "rust",
-                RR3_CHAIN_HB_MS,
-                RR3_CHAIN_WD_MS,
-                "never",
-                &[],
-                &["rr3-runtime/module/state", RR3_BRAIN_TOPIC_TTS_PCM],
-                &["rr3-interact/tts/text", "rr3-interact/face/expression"],
-            ),
+            rr3_chain_interact(interact_entry),
         ),
         (
             RR3_SIM_MODULE_BRAIN.to_string(),
-            rr3_manifest_ext(
-                RR3_SIM_MODULE_BRAIN,
-                brain_entry,
-                "brain",
-                "rust",
-                RR3_CHAIN_HB_MS,
-                RR3_CHAIN_WD_MS,
-                "never",
-                &["rr3-brain/intent/result", RR3_BRAIN_TOPIC_TTS_PCM],
-                // C14（ADR-0019 修订 2 ②）：asr/text retired 撤申报、net/link 撤申报
-                //（不补实现）；订阅面对齐实然面 = pcm + vad_start（B-1 补齐）
-                &["rr3-sense/audio/pcm", RR3_SENSE_TOPIC_VAD],
-                &["rr3-brain/llm/completion"],
-            ),
+            rr3_chain_brain(brain_entry),
         ),
-        (
-            RR3_SIM_MODULE_ACT.to_string(),
-            rr3_manifest_ext(
-                RR3_SIM_MODULE_ACT,
-                act_entry,
-                "module",
-                "rust",
-                RR3_CHAIN_HB_MS,
-                RR3_CHAIN_WD_MS,
-                "never",
-                &[
-                    RR3_ACT_TOPIC_SERVO_STATE,
-                    "rr3-act/relay/state",
-                    "rr3-act/motor/reflex",
-                ],
-                &["rr3-brain/intent/result", "rr3-runtime/module/state"],
-                &[
-                    "rr3-act/servo/command",
-                    "rr3-act/led/effect",
-                    "rr3-act/relay/set",
-                ],
-            ),
-        ),
+        (RR3_SIM_MODULE_ACT.to_string(), rr3_chain_act(act_entry)),
     ]
+}
+
+/// sense manifest（boot resident；订阅/发布面对齐 module.toml 契约面）。
+fn rr3_chain_sense(entry: &Path) -> String {
+    rr3_manifest_ext(
+        RR3_SIM_MODULE_A,
+        entry,
+        "module",
+        "rust",
+        RR3_CHAIN_HB_MS,
+        RR3_CHAIN_WD_MS,
+        "always",
+        &["rr3-sense/audio/pcm", RR3_SENSE_TOPIC_VAD],
+        &["rr3-runtime/module/state"],
+        &[],
+    )
+}
+
+/// interact manifest（TTS PCM 订阅 + tts/face 点名面）。
+fn rr3_chain_interact(entry: &Path) -> String {
+    rr3_manifest_ext(
+        RR3_SIM_MODULE_B,
+        entry,
+        "module",
+        "rust",
+        RR3_CHAIN_HB_MS,
+        RR3_CHAIN_WD_MS,
+        "never",
+        &[],
+        &["rr3-runtime/module/state", RR3_BRAIN_TOPIC_TTS_PCM],
+        &["rr3-interact/tts/text", "rr3-interact/face/expression"],
+    )
+}
+
+/// brain manifest：C14（ADR-0019 修订 2 ②）asr/text retired、net/link 撤申报
+///（不补实现）；订阅面对齐实然面 = pcm + vad_start（B-1 补齐）。
+fn rr3_chain_brain(entry: &Path) -> String {
+    rr3_manifest_ext(
+        RR3_SIM_MODULE_BRAIN,
+        entry,
+        "brain",
+        "rust",
+        RR3_CHAIN_HB_MS,
+        RR3_CHAIN_WD_MS,
+        "never",
+        &["rr3-brain/intent/result", RR3_BRAIN_TOPIC_TTS_PCM],
+        &["rr3-sense/audio/pcm", RR3_SENSE_TOPIC_VAD],
+        &["rr3-brain/llm/completion"],
+    )
+}
+
+/// act manifest（转向/继电器/反射状态流 + 三条点名面）。
+fn rr3_chain_act(entry: &Path) -> String {
+    rr3_manifest_ext(
+        RR3_SIM_MODULE_ACT,
+        entry,
+        "module",
+        "rust",
+        RR3_CHAIN_HB_MS,
+        RR3_CHAIN_WD_MS,
+        "never",
+        &[
+            RR3_ACT_TOPIC_SERVO_STATE,
+            "rr3-act/relay/state",
+            "rr3-act/motor/reflex",
+        ],
+        &["rr3-brain/intent/result", "rr3-runtime/module/state"],
+        &[
+            "rr3-act/servo/command",
+            "rr3-act/led/effect",
+            "rr3-act/relay/set",
+        ],
+    )
 }
 
 /// 观察者 manifest：最小身份 + 两个取证主题订阅（不发布，无 exposes）。
