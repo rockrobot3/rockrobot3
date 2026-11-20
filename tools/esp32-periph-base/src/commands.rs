@@ -8,8 +8,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size};
-
 use crate::board::{
     FRAME_DRAIN_MAX, OLED_COLS, OLED_ROWS, RR3_FACE_EXPRS, RR3_MAGIC_FIRST, UART2_BAUD_HZ,
 };
@@ -18,11 +16,14 @@ use crate::link::{drain_uart_quiet, read_line, reply, UartIo};
 use crate::oled::glyph;
 use crate::periph::CtlUart;
 use crate::ports_impl::Rr3BoardClock;
-use crate::power::RailTier;
 use crate::servo::{axis_check, Axis};
 use crate::state::{
     drain_audio, drain_outbox, esp_random_u32, lock_bus, now_ms, push_job, Bus, CtlState, Job,
 };
+
+mod info;
+
+use info::cmd_info;
 
 // ---------------------------------------------------------------------------
 // 指令循环（批B 行面 + 批C 帧面双面并存：行面保留调试与舵机五点 SCAN 判据）
@@ -401,72 +402,6 @@ fn cmd_audio(
         b.st.audio_host_ms = 0;
     }
     Ok(if on { "OK audio on" } else { "OK audio off" }.into())
-}
-
-/// INFO 的 5V 轨两栏（自 cmd_info 抽出）：有效报毫伏与档名，无效点名
-/// absent/unknown（原始码照回显）。
-fn rail_fields(valid: bool, mv: u16, raw: u16, tier: RailTier) -> (String, &'static str) {
-    if valid {
-        (format!("{mv}mV raw={raw}"), tier.name())
-    } else {
-        (format!("absent raw={raw}"), "unknown")
-    }
-}
-
-/// `INFO` 观测面：一拍取齐状态快照后拼行（取锁只此一次，避免中途跳变）。
-fn cmd_info(bus: &Arc<Mutex<Bus>>) -> Result<String, String> {
-    let (plo, phi) = Axis::Pan.range();
-    let (tlo, thi) = Axis::Tilt.range();
-    let (
-        pan,
-        tilt,
-        wander,
-        phase,
-        last_text,
-        rail_mv,
-        rail_raw,
-        rail_valid,
-        rail_tier,
-        rail_low,
-        selfheal_skip,
-        audio_on,
-        audio_seq,
-        audio_sent,
-        audio_dropped,
-        audio_q,
-        job_drop,
-        reply_drop,
-    ) = {
-        let b = lock_bus(bus);
-        (
-            b.st.pan_deg,
-            b.st.tilt_deg,
-            b.st.wander_on,
-            b.st.wander_phase,
-            b.st.last_text.clone(),
-            b.st.rail_mv,
-            b.st.rail_raw,
-            b.st.rail_valid,
-            b.st.rail_tier,
-            b.st.rail_low_events,
-            b.st.selfheal_skipped,
-            b.st.audio_on,
-            b.st.audio_seq,
-            b.st.audio_sent,
-            b.st.audio_dropped,
-            b.audio_q.len(),
-            b.st.job_dropped,
-            b.st.reply_drop,
-        )
-    };
-    let (rail, rail_tier_name) = rail_fields(rail_valid, rail_mv, rail_raw, rail_tier);
-    // SAFETY：两个堆查询都是无参只读的 IDF 系统调用，不触碰 Rust 内存状态。
-    let (free, min_free) = unsafe { (esp_get_free_heap_size(), esp_get_minimum_free_heap_size()) };
-    Ok(format!(
-        "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} rail={rail} rail_tier={rail_tier_name} low_events={rail_low} selfheal_skip={selfheal_skip} audio={} seq={audio_seq} sent={audio_sent} drop={audio_dropped} q={audio_q} job_drop={job_drop} reply_drop={reply_drop} oled_last=\"{last_text}\" free={free}B min_free={min_free}B",
-        if wander { "on" } else { "off" },
-        if audio_on { "on" } else { "off" },
-    ))
 }
 
 /// `FONT` 字模自检护栏：打印 "ABC123" 的 5x7 字模 hex，供人工比对。
