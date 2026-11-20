@@ -391,12 +391,7 @@ fn rr3_spawn_hb(inner: &Arc<Rr3Inner>, tb: Rr3TimeBase) -> std::io::Result<JoinH
 fn rr3_hb_loop(hb_inner: Arc<Rr3Inner>, tb: Rr3TimeBase) {
     let mut misses: u32 = 0;
     loop {
-        let Some(wait_ms) = hb_inner
-            .rt
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .rr3_beat_wait_ms(tb.rr3_now_ms())
-        else {
+        let Some(wait_ms) = rr3_hb_wait(&hb_inner, &tb) else {
             return; // 断开（Down）即停拍——"不装活着"同一裁定
         };
         std::thread::sleep(Duration::from_millis(wait_ms));
@@ -412,55 +407,82 @@ fn rr3_hb_loop(hb_inner: Arc<Rr3Inner>, tb: Rr3TimeBase) {
         if !due {
             continue; // 提前醒（信号打断等），回睡
         }
-        let delta = hb_inner.rr3_counters_delta();
-        let params = if delta.is_empty() {
-            json!({})
-        } else {
-            json!({ "counters": delta })
-        };
-        if hb_inner
-            .rr3_call_inner(
-                hb_inner.rr3_task(),
-                "rr3.heartbeat",
-                params,
-                Duration::from_secs(5),
-            )
-            .is_err()
-            && !hb_inner.stop.load(Ordering::Relaxed)
-        {
-            // 宽限：连续失败到上界才退出（见 RR3_HEARTBEAT_MAX_MISSES）。
-            // 不记 `rr3_heartbeat_sent` → 下一拍立即到期重试，间隔由 RPC
-            // 超时（5s）兜住，不空转。
-            misses += 1;
-            if misses >= RR3_HEARTBEAT_MAX_MISSES {
-                eprintln!(
-                    "rr3-bus: 心跳连续 {misses} 拍失败，标记总线死亡（supervisor 按 restart_policy 裁定）"
-                );
-                // 库内不 process::exit：设 stop 让宿主 serve 循环的
-                // rr3_connected 死亡探针翻假，由宿主自行以 exit code 1
-                // 退出（库不得杀宿主进程）。关 socket 解阻塞 reader
-                // 与 pending 等待者，与 Drop 同形。
-                hb_inner.stop.store(true, Ordering::Relaxed);
-                let _ = hb_inner
-                    .sock
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .shutdown(std::net::Shutdown::Both);
-                break;
+        if !rr3_hb_send(&hb_inner) {
+            // 失败宽限：stop 已置（reader/宿主收场）时按拆分前口径落到"记已发"。
+            if !hb_inner.stop.load(Ordering::Relaxed) {
+                if rr3_hb_miss(&hb_inner, &mut misses) {
+                    return;
+                }
+                continue;
             }
-            eprintln!(
-                "rr3-bus: 心跳失败 第 {misses}/{RR3_HEARTBEAT_MAX_MISSES} 拍（不退出，下拍重试）"
-            );
-            continue;
         }
-        // 成功即清零宽限计数
+        // 成功即清零宽限计数（失败且 stop 已置的同拍也走到这里，与拆分前一致）
         misses = 0;
-        hb_inner
-            .rt
+        rr3_hb_mark_sent(&hb_inner, now_ms);
+    }
+}
+
+/// 等到下一拍；None = 已断开（Down），心跳线程应退出。
+fn rr3_hb_wait(hb_inner: &Rr3Inner, tb: &Rr3TimeBase) -> Option<u64> {
+    hb_inner
+        .rt
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .rr3_beat_wait_ms(tb.rr3_now_ms())
+}
+
+/// 发一拍心跳（有 counters 增量则随体上行）；真 = 调用成功。
+fn rr3_hb_send(hb_inner: &Rr3Inner) -> bool {
+    let delta = hb_inner.rr3_counters_delta();
+    let params = if delta.is_empty() {
+        json!({})
+    } else {
+        json!({ "counters": delta })
+    };
+    hb_inner
+        .rr3_call_inner(
+            hb_inner.rr3_task(),
+            "rr3.heartbeat",
+            params,
+            Duration::from_secs(5),
+        )
+        .is_ok()
+}
+
+/// 失败宽限：真 = 已达上界（标记总线死亡、解阻塞 reader 与 pending 等待者）。
+/// 未记 `rr3_heartbeat_sent` → 下一拍立即到期重试，间隔由 RPC 超时（5s）兜住。
+fn rr3_hb_miss(hb_inner: &Rr3Inner, misses: &mut u32) -> bool {
+    *misses += 1;
+    if *misses >= RR3_HEARTBEAT_MAX_MISSES {
+        eprintln!(
+            "rr3-bus: 心跳连续 {} 拍失败，标记总线死亡（supervisor 按 restart_policy 裁定）",
+            *misses
+        );
+        // 库内不 process::exit：设 stop 让宿主 serve 循环的 rr3_connected 死亡探针翻假，
+        // 由宿主自行以 exit code 1 退出（库不得杀宿主进程）。关 socket 解阻塞 reader
+        // 与 pending 等待者，与 Drop 同形。
+        hb_inner.stop.store(true, Ordering::Relaxed);
+        let _ = hb_inner
+            .sock
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .rr3_heartbeat_sent(now_ms);
+            .shutdown(std::net::Shutdown::Both);
+        return true;
     }
+    eprintln!(
+        "rr3-bus: 心跳失败 第 {}/{RR3_HEARTBEAT_MAX_MISSES} 拍（不退出，下拍重试）",
+        *misses
+    );
+    false
+}
+
+/// 记已发：推进拍点（成功后立即生效；失败且 stop 已置的同拍也记）。
+fn rr3_hb_mark_sent(hb_inner: &Rr3Inner, now_ms: u64) {
+    hb_inner
+        .rt
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .rr3_heartbeat_sent(now_ms);
 }
 
 fn rr3_abort_reader(inner: &Rr3Inner, reader: JoinHandle<()>) {
