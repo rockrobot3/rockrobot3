@@ -20,11 +20,12 @@ use esp_idf_hal::gpio::{Gpio15, Gpio16, Gpio17, Gpio18, Gpio6, Gpio7};
 #[cfg(feature = "esp32")]
 use esp_idf_hal::gpio::{Gpio16, Gpio17, Gpio25, Gpio26, Gpio27, Gpio4};
 use esp_idf_hal::i2c::{I2cConfig, I2cDriver, I2C0};
+use esp_idf_hal::i2s::{I2S0, I2S1};
 use esp_idf_hal::ledc::{
     config::TimerConfig, LedcDriver, LedcTimerDriver, CHANNEL0, CHANNEL1, TIMER0,
 };
 use esp_idf_hal::peripheral::Peripheral;
-use esp_idf_hal::peripherals::{Peripherals, I2S0, I2S1};
+use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::uart::{UartConfig, UartDriver, UART2};
 use esp_idf_hal::units::Hertz;
 use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size, EspError};
