@@ -1,6 +1,8 @@
 //! 装配快照渲染面（自 assembly.rs 抽出）：pin/domain/wire/axis/role/checks 行投影
 //! 与 `rr3.ctl.wiring` 应答壳；纯函数，不碰全局态。
 
+use serde_json::{json, Value};
+
 use super::*;
 
 /// `rr3.ctl.wiring` 应答渲染（纯函数）。字段面 = 门 d 分母四路的字段级全集
