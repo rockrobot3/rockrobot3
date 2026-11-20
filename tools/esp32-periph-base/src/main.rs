@@ -39,29 +39,29 @@
 //!   peripherals.ledc 的 timer0–3/channel0–7 为低速组（L625），Bits14 上限
 //!   同样适用。
 //! - I2cDriver/LedcDriver/UartDriver 上游 0.44.1 **均已标 `Send`**（vendored 实证：
-//!   i2c.rs L393 / ledc.rs L334 / uart.rs L653），故两平面 wrapper（[`CtlUart`]/
-//!   [`RtPeriph`]）自动 Send、**无需手补 unsafe impl**（旧单 wrapper 的手补系误判，
-//!   同批删除并订正）。
+//!   i2c.rs L393 / ledc.rs L334 / uart.rs L653），故两平面 wrapper
+//!   （[`crate::periph::CtlUart`]/[`crate::periph::RtPeriph`]）自动 Send、**无需手补
+//!   unsafe impl**（旧单 wrapper 的手补系误判，同批删除并订正）。
 //! - UART2 整装 `UartDriver::new(uart, tx, rx, cts, rts, config)`（cts/rts 传
 //!   None；同口二次 install 必败的教训，哨兵 API 对表实录在案，照抄不赘）。
 //!   不 split：控制面单线程读写同驱动，owned move 即可。
-//! - xtensa LX6 无 64 位原子；状态面（[`PeriphState`]）以 `Arc<Mutex<..>>` 护，
+//! - xtensa LX6 无 64 位原子；状态面（[`crate::state::PeriphState`]）以 `Arc<Mutex<..>>` 护，
 //!   角度用 u32 直传，无需原子。
 //!
 //! 线程模型（0.0.5 现场处置续批 2026-10-12：**控制面/运行面分离**）：入口只做
 //! IDF 补丁与转交 `boot.rs`（外设开箱/两平面起序/音频面/状态环全在 boot.rs），
 //! 随后起**两个** 16KB 线程（8KB→16KB 运行下限钉死的教训在案，勿再调低）：
-//! - **控制面** [`cmd_loop`]（独占 UART2）：逐字节收、双面分流、解析、校验、**改状态**、
-//!   回包——**不碰 I2C/LEDC**，慢外设一律不阻塞命令吞吐（消"卡顿"）；
-//! - **运行面** [`runtime_loop`]（独占 I2C0 + LEDC）：取控制面推送的硬件作业 [`Job`]
-//!   执行（OLED 出字 / 舵机移动 / 五点扫描），并跑自主节拍（表情微动作 / 云台扫摆）。
+//! - **控制面** [`crate::commands::cmd_loop`]（独占 UART2）：逐字节收、双面分流、解析、
+//!   校验、**改状态**、回包——**不碰 I2C/LEDC**，慢外设一律不阻塞命令吞吐（消"卡顿"）；
+//! - **运行面** [`crate::runtime::runtime_loop`]（独占 I2C0 + LEDC）：取控制面推送的
+//!   硬件作业 [`crate::state::Job`] 执行（OLED 出字 / 舵机移动 / 五点扫描），并跑自主节拍。
 //! 两面经 `Arc<Mutex<Bus>>` 通信（哨兵 Arc<Mutex> 纪律同款，xtensa 面已被其背书）：
 //! `Bus { jobs, outbox, st }`——控制面推作业 + 改 `st`，运行面取作业执行 + 回推 outbox
 //! 行。**锁只护状态读写，绝不跨 I2C 持有**（运行面"决策段持锁纯算，渲染段脱锁慢跑"）。
 //!
 //! 舵机**串行降级**（同批，用户明文裁定）：板载 5V 直供、无 UBEC 时两轴并行驱动的峰值
 //! 电流叠加会拉塌轨压（真板 BOD / 舵机发烫实录），故复合动作一律**先 pan 到位 → 整定
-//! [`AXIS_SETTLE_MS`] → 再 tilt**（任一时刻只驱动一轴，削峰值）；单轴命令直动。
+//! [`crate::board::AXIS_SETTLE_MS`] → 再 tilt**（任一时刻只驱动一轴，削峰值）；单轴命令直动。
 //! SCAN 同守此律（每点 pan/tilt 两段），WANDER 扫摆**同拍只动一轴**（pan/tilt 错拍）。
 
 // 自治壳（W3-2b）：健康快照与监督核接线；/api/board/health 常驻。
