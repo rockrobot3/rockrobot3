@@ -1,0 +1,21 @@
+# pi4b-solo 形态 pan（水平）轴行程档案（W5-3 首装，2026-11-20）。
+# 十四键 = rr-hal-api RR3_ACT_PROFILE_FIELDS 词表序；外键 pin 对账装配单
+# profiles/pi4b-solo.toml [[pin]]（act.axis.pwm / instance=pan，pwmchip0 ch0 →
+# GPIO12 / pin 32）。器件与 esp32-mini 同款 SG90，行程按同款实测档取 ±30°
+# （lo=60 / center=90 / hi=120）；Pi 端舵机由独立 5V/3A UBEC 供电、单点共地。
+# 若实机限位不同，只改本档三键——rrd 装配注入与模块行程都从这一份真值读，
+# 不在任何一侧手写副本。
+schema = 1
+pin = "act.axis.pwm.pan"
+center_deg = 90
+lo_deg = 60
+hi_deg = 120
+dir_sign = 1
+slew_deg_s = 100
+settle_ms = 200
+hold = "release"
+current_ceil_ma = 750
+warmup_ms = 0
+hard_stop = "yes"
+calibrated = true
+source = "manual"
