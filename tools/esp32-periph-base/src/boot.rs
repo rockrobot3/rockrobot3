@@ -359,7 +359,7 @@ fn start_services(bus: &Arc<Mutex<Bus>>) {
     #[cfg(feature = "autonomy")]
     crate::autonomy::rr3_start();
     #[cfg(feature = "tts")]
-    crate::cloud::spawn_tts(bus.clone());
+    crate::cloud::spawn_tts(bus.clone(), crate::dialog::rr3_turn);
     crate::httpd::rr3_httpd_spawn(bus);
     #[cfg(feature = "autonomy")]
     crate::sntp::spawn_sntp();
