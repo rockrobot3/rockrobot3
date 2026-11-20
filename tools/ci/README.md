@@ -36,7 +36,7 @@
 | ⑬ | `steps/13.sh`（git grep + git status） | 仓面卫生门：追踪文件无本机绝对路径、无构建目录、源码类新件必须入册、shell `$name` 后接非 ASCII 即红 |
 | ⑭ | `steps/14.sh` | 装载门体量基线门（裁-13/基-38）：装配单锚函数的块行数、`read_to_string` 样板数、rr-registry 同形函数数按 `gate-size-baseline.txt` 只降不升；锚函数缺失或基线形状坏即红 |
 | ⑮ | `python3 tools/ci/lockio_audit.py`（先 `--self-test`） | 锁内 I/O 门：`lock·log` 同行 / 条件位临时 guard 延寿到块体 / 直调会写待落盘日志的 registry 方法；扫面打空即门禁失效；gate `scripts` 同源执法 |
-| ⑯ | `steps/16.sh` | 源文件行数门：每个 `.rs` <600 行；超标文件数按 `gate-lines-baseline.txt` 只降不升 |
+| ⑯ | `steps/16.sh` | 源文件行数门：每个 `.rs/.py/.sh` <600 行（铁律）；≥500 下一档按 `gate-lines-baseline.txt` 只降不升 |
 
 **基线只降不升审计（`baselines_audit.py`，gate `scripts` job）**：把 `tools/ci/*-baseline.*`
 与 base ref 的同名文件逐键比对——已存在的键上调即红；新键/缺键告警；未登记基线文件即红。

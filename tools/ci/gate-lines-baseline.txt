@@ -1,7 +1,9 @@
-# ⑯ 源文件行数门低水位基线（2026-11-13 立规：每个 .rs <600 行）。
-# 语义：git ls-files 追踪的 .rs 中，行数 ≥600 的文件数不得超过本值——
-#   count > 本值即 FAIL（新增长文件）；count 下降须同批下调本值（只降不升）；
-#   文件缺/无整数计数即 FAIL（fail-closed）。
+# ⑯ 源文件行数门低水位基线（2026-11-13 立规：每个 .rs <600 行；2026-11-21 扩到
+# .rs/.py/.sh——workflows_audit.py 689 行曾整段藏出，证明只扫 .rs 是盲区）。
+# 语义：git ls-files 追踪的 .rs/.py/.sh 中——
+#   hard_600 = 行数 ≥600 的文件数上限（铁律，只降不升；0 = 落地）；
+#   tier_500 = 行数 ≥500 的文件数上限（下一档，只降不升，目标逐批拆到 0 = <500 行）。
+#   键缺失/无整数/形状坏即 FAIL（fail-closed）；count 下降须同批下调本值。
 # 处置纪律：不是"把长文件塞进白名单"，而是按职责结构化拆分后同批减一。
 # 初值 58 = 立规时的存量盘点（2026-11-13，含测试文件；最大三件：
 #   rr-registry/tests/contract.rs 2632、rr3-interact/src/panel/server.rs 2079、
@@ -35,5 +37,8 @@
 #   profile/tests/boot 634→11；rr3-interact mech 1199→384（测试与 parity 两腿留本件）、
 #   panel/exec 641→85；rr3-act boot 938→293；rr3-sense dispatch 791→307；
 #   pi-periph-base main 732→109 → 11→0。
-# **0 = 铁律落地**：此后任何 ≥600 行的 .rs 新增即红，无需再降基线。
-0
+# **hard_600 = 0 = 铁律落地**：此后任何 ≥600 行的源文件新增即红。
+# 2026-11-21 下一档：≥500 行存量 9（7 个 .rs + metrics.py 542 + workflow_rules.py 520），
+#   只降不升；先拆最接近 600 的 ESP httpd/serve.rs（593，板窗口空闲时做）。
+hard_600 = 0
+tier_500 = 9
