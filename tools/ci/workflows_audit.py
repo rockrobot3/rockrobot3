@@ -376,6 +376,24 @@ def release_problems(text, rel):
     return bad
 
 
+# 作业覆盖面（按名钉住）：门禁/集成/平台/发布/固件的 job 是覆盖契约的一部分，
+# 删除或改名即"某类验证不再跑"——必须同批改本表，不许静默缩水。
+REQUIRED_JOBS = {
+    "gate.yml": (
+        "conventions", "release", "lint", "supply", "alsa", "ota-bundle", "scripts",
+    ),
+    "integration.yml": (
+        "distro-smoke", "ota-sign", "rk3566-onboard", "buildroot-assembly",
+        "sim-assemble", "sim-chain", "matrix",
+    ),
+    "platforms.yml": (
+        "cross-artifacts", "riscv-image", "esp32-gates", "autonomy-face",
+        "ipct003", "host-windows", "host-macos",
+    ),
+    "publish.yml": ("build", "build-riscv64", "merge", "firmware"),
+    "buildroot.yml": ("dtb-backport", "image", "release"),
+}
+
 # 正式制品面（buildroot.yml）：job 名 → 必须进 ghcr 的制品名。
 # 与 publish.yml 的镜像/固件同一条纪律：正式发布物只进 release asset 不算托管完成。
 GHCR_ARTIFACTS = {
@@ -424,6 +442,10 @@ def workflow_problems(path, root):
     jobs = jobs_of(text)
     if not jobs:
         bad.append(f"{rel} 没有可识别的 job")
+    names = {n for n, _ in jobs}
+    for job in REQUIRED_JOBS.get(rel.name, ()):
+        if job not in names:
+            bad.append(f"{rel} 缺 job {job}（覆盖契约被削，改表须同批评审）")
     if len(jobs) > MAX_JOBS:
         bad.append(f"{rel} job 定义 {len(jobs)} > 上限 {MAX_JOBS}（塞不下就拆流水线）")
     for name, block in jobs:
@@ -524,6 +546,14 @@ def self_test():
             "    steps:\n      - run: echo x86_64-unknown-linux-gnu\n",
             encoding="utf-8",
         )
+        (wf / "gate.yml").write_text(
+            "name: g\non:\n  push:\n    branches: [main]\n"
+            "permissions:\n  contents: read\n"
+            "concurrency:\n  group: g\njobs:\n"
+            "  lint:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    steps:\n      - uses: actions/checkout@v7\n",
+            encoding="utf-8",
+        )
         (wf / "buildroot.yml").write_text(
             "name: br\non:\n  push:\n    tags: [\"v*\"]\n"
             "permissions:\n  contents: read\n"
@@ -555,6 +585,7 @@ def self_test():
         ("芯片验证步骤缺失被抓", any("验证步骤" in b for b in bad)),
         ("riscv 镜像腿缺失被抓", any("缺 job riscv-image" in b for b in bad)),
         ("发布面缺腿被抓", any("缺发布 job" in b for b in bad)),
+        ("门禁 job 缩水被抓", any("缺 job conventions" in b for b in bad)),
         ("固件缺 S3 被抓", any("未构建 S3 目标" in b for b in bad)),
         ("制品面缺名被抓", any("未推 rockrobot3-buildroot" in b for b in bad)),
         ("好例零误报", not any("good.yml" in b for b in bad)),
