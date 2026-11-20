@@ -146,11 +146,12 @@ job 定义 ≤10；integration/platforms 的 push/PR 必须 `paths-ignore` 含 `
 `continue-on-error` 非 `false` 即红（掩码会把漂红巡检变成假绿）。`--self-test` 给
 好例 + 缺并发/缺超时/版本漂移/needs 悬空/needs 成环/push 无范围/工具链未钉版/
 缓存缺参/paths-ignore 缺失/publish 可取消/job 超限/continue-on-error/缺 permissions/
-芯片矩阵缩水/芯片 job 缺失/芯片验证步骤缺失/riscv 镜像腿缺失/发布面缺腿/制品面缺名
-十九条负例，gate 的 `scripts` job 先自检后执法。**发布面完整性**：`publish.yml`
-必须有 build / build-riscv64 / merge / firmware 四腿；merge 必须等两条构建腿、
-合并命令含三架构单镜像；firmware 必须带 `packages: write` 且推
-`rockrobot3-firmware`。**制品托管**：`buildroot.yml` 的 `release` 腿必须 tag 门、
+芯片矩阵缩水/芯片 job 缺失/芯片验证步骤缺失/riscv 镜像腿缺失/发布面缺腿/固件缺 S3/
+制品面缺名二十条负例，gate 的 `scripts` job 先自检后执法。**发布面完整性**：
+`publish.yml` 必须有 build / build-riscv64 / merge / firmware 四腿；merge 必须等
+两条构建腿、合并命令含三架构单镜像；firmware 必须带 `packages: write`、推
+`rockrobot3-firmware`，且 S3 目标（`xtensa-esp32s3-espidf`）与 S3 ELF 资产按名
+钉住——双芯片发布面不得缩成单芯片。**制品托管**：`buildroot.yml` 的 `release` 腿必须 tag 门、
 登录 ghcr、带 `packages: write`，并以 oras 推 `rockrobot3-ota` 与
 `rockrobot3-buildroot`——正式制品只发 release asset 不算托管完成。
 

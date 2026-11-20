@@ -369,6 +369,10 @@ def release_problems(text, rel):
             bad.append(f"{rel} firmware 未推 rockrobot3-firmware（正式制品必须进 ghcr）")
         if not re.search(r"^\s+packages:\s*write\s*$", joined, re.M):
             bad.append(f"{rel} firmware 缺 packages: write（无法推 ghcr）")
+        if "xtensa-esp32s3-espidf" not in joined:
+            bad.append(f"{rel} firmware 未构建 S3 目标（双芯片覆盖缺失）")
+        if "rr3-periph-base-esp32s3-dev.elf" not in joined:
+            bad.append(f"{rel} firmware 缺 S3 ELF 资产/推送（双芯片覆盖缺失）")
     return bad
 
 
@@ -490,7 +494,10 @@ def self_test():
             "name: pub\non:\n  push:\n    tags: [\"v*\"]\n"
             "concurrency:\n  group: p\n  cancel-in-progress: true\njobs:\n"
             "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
-            "    steps:\n      - uses: actions/checkout@v7\n",
+            "    steps:\n      - uses: actions/checkout@v7\n"
+            "  firmware:\n    if: startsWith(github.ref, 'refs/tags/v')\n"
+            "    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    steps:\n      - run: echo classic\n",
             encoding="utf-8",
         )
         many = "".join(
@@ -548,6 +555,7 @@ def self_test():
         ("芯片验证步骤缺失被抓", any("验证步骤" in b for b in bad)),
         ("riscv 镜像腿缺失被抓", any("缺 job riscv-image" in b for b in bad)),
         ("发布面缺腿被抓", any("缺发布 job" in b for b in bad)),
+        ("固件缺 S3 被抓", any("未构建 S3 目标" in b for b in bad)),
         ("制品面缺名被抓", any("未推 rockrobot3-buildroot" in b for b in bad)),
         ("好例零误报", not any("good.yml" in b for b in bad)),
     ]
