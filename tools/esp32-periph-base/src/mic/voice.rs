@@ -46,9 +46,11 @@ const PRE_ROLL_BLOCKS: usize = 10;
 /// 单段上限：8 s（与云 TTS 上限同量级；超长强制收段，不无限攒）。
 const MAX_UTTER_MS: usize = 8_000;
 const MAX_UTTER_SAMPLES: usize = (MIC_SR_HZ as usize / 1000) * MAX_UTTER_MS * 2;
-/// DoA 左右落 pan（pan 行程 [60,120]，与意图三档同区间）。
-const PAN_LEFT_DEG: u32 = 60;
-const PAN_RIGHT_DEG: u32 = 120;
+/// DoA 左右落 pan：**收进 70/110**（与意图三档同值）。2026-11-20 真板实锤：
+/// 右转落 120（机械行程上限）时舵机顶死堵转，300 s 内 13 次 BOD；左 60 偶发但
+/// 同样贴边。留 10° 机械余量，方向判据不变（left/center/right 分档独立）。
+const PAN_LEFT_DEG: u32 = 70;
+const PAN_RIGHT_DEG: u32 = 110;
 
 /// 语音分段运行态（单线程：mic 采集线程独占）。
 pub(crate) struct VoiceRun {
@@ -200,6 +202,12 @@ impl VoiceRun {
         if mono.is_empty() {
             return;
         }
+        // 标定保持模式（oled_hold）：只做 VAD/DoA 提示，不进 dialog——避免云端
+        // 往返/播放打断 3×10 的节奏，也避免回复声反馈污染下一轮判向。
+        if lock_bus(bus).st.oled_hold {
+            println!("[mic] 语音段 {ms}ms（{why}；hold 模式跳过 dialog）");
+            return;
+        }
         match crate::cloud::rr3_turn(mono) {
             Ok(()) => println!("[mic] 语音段入队 {ms}ms（{why}）"),
             Err(e) => {
@@ -223,7 +231,11 @@ impl VoiceRun {
         let pan = match fix.bin {
             Rr3DoaBin::Left => PAN_LEFT_DEG,
             Rr3DoaBin::Right => PAN_RIGHT_DEG,
-            Rr3DoaBin::Center => return false,
+            Rr3DoaBin::Center => {
+                // 中档也点名角度，供现场判断"站得不够偏"还是算法判错。
+                println!("[mic] DoA bin=center deg={}", fix.deg);
+                return false;
+            }
         };
         lock_bus(bus).st.wander_on = false; // 外部点名优先，自主扫摆让位
         push_job(

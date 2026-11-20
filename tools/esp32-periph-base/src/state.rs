@@ -99,6 +99,9 @@ pub(crate) struct PeriphState {
     /// 表情模式：true=胶囊眼 + 生命感微动作（帧面 expression 专有）；位图占屏
     /// 与行面文本模式复位 false（动画只在此模式跑）。
     pub(crate) expr_mode: bool,
+    /// 提示保持（标定/测试面）：true 时 [`rr3_expr_set`] 不切表情模式、不覆盖
+    /// 文本，OLED 停在 `/api/board/oled` 写入的提示上（DoA 3×10 等现场用）。
+    pub(crate) oled_hold: bool,
     /// 表情基态（expr_eye_base 预设）：开合% + 水平/垂直扫视偏移 + 眼高% + 眉形
     pub(crate) base: EyeStyle,
     /// 微动作时钟（esp_timer ms）：眨眼/扫视的下一触发点与进行中截止点 +
@@ -186,6 +189,7 @@ impl PeriphState {
             tilt_deg: Axis::Tilt.center_deg(),
             frame_mode: false,
             expr_mode: false,
+            oled_hold: false,
             base: EYE_IDLE,
             next_blink_ms: 0,
             blink_until_ms: 0,
@@ -381,6 +385,10 @@ pub(crate) fn rr3_expr_set(bus: &Arc<Mutex<Bus>>, expr: &str) {
     let base = expr_eye_base(expr);
     {
         let mut b = lock_bus(bus);
+        // 标定提示保持：dialog/DoA 的表情切换不得覆盖测试提示屏。
+        if b.st.oled_hold {
+            return;
+        }
         b.st.expr_mode = true;
         b.st.frame_mode = false;
         b.st.base = base;

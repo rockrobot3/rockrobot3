@@ -313,6 +313,43 @@ pub(crate) unsafe fn handle_dialog(req: *mut httpd_req_t, _bus: &Arc<Mutex<Bus>>
     resp_json(req, &reply)
 }
 
+/// POST /api/board/oled——OLED 提示文本（DoA 3×10 现场提示；ASCII ≤63 B）。
+/// 写 `st.last_text` 并切回文本模式，运行面下一次 `RedrawOled` 上屏。
+///
+/// # Safety: req 为 esp_http_server 传入的非空有效指针，仅本次回调内使用。
+pub(crate) unsafe fn handle_oled(req: *mut httpd_req_t, bus: &Arc<Mutex<Bus>>) -> i32 {
+    let Ok(body) = req_body_read(req) else {
+        return resp_err(
+            req,
+            httpd_err_code_t_HTTPD_400_BAD_REQUEST,
+            b"oled body out of bounds\0",
+        );
+    };
+    let true = rr3_token_check(&body) else {
+        println!("[periph] 写口 oled 拒收：admin token 缺失或错误");
+        return resp_err(
+            req,
+            httpd_err_code_t_HTTPD_401_UNAUTHORIZED,
+            b"admin token missing or invalid\0",
+        );
+    };
+    let reply = match rr3_oled_body(&body) {
+        Ok(w) => {
+            {
+                let mut b = lock_bus(bus);
+                b.st.last_text = w.text;
+                b.st.expr_mode = false;
+                b.st.frame_mode = false;
+                b.st.oled_hold = w.hold;
+            }
+            push_job(bus, Job::RedrawOled);
+            "{\"ok\":true}".to_string()
+        }
+        Err(e) => serde_json::json!({"ok": false, "err": e}).to_string(),
+    };
+    resp_json(req, &reply)
+}
+
 /// `X-RR3-Token` 头校验（raw body 端点用；令牌上限 128 B，超长即拒）。
 ///
 /// # Safety: req 为有效请求指针；`httpd_req_get_hdr_value_str` 只读请求头。
