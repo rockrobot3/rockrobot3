@@ -136,7 +136,7 @@ pub(super) fn rr3_accept_loop(
     // 服务面——面板是运维的最后一扇门，EMFILE/ENFILE 等瞬态错误后必须还能接客。
     const RR3_ACCEPT_BACKOFF: Duration = Duration::from_millis(200);
     loop {
-        let (mut stream, _) = match listener.accept() {
+        let (stream, _) = match listener.accept() {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("面板 accept 失败（继续服务）: {e}");
@@ -144,48 +144,59 @@ pub(super) fn rr3_accept_loop(
                 continue;
             }
         };
-        // 连接 IO 耐心（读侧已在 rr3_http_read_req 设，写侧在此按同一预算补）：
-        // 对端只连不读时 write_all 会一直堵在“发送缓冲已满”，8 个槽位被钉死＝
-        // 面板整体失联（运维最后一扇门自锁，静态审计 B16）。
-        if let Err(e) = rr3_http_patience(&stream, shared.limits.read_timeout) {
-            eprintln!("面板连接写耐心未设上（连接仍按既有语义处理）: {e}");
-        }
-        if live.load(Ordering::Relaxed) >= shared.limits.max_conns {
-            // 拒连必须留痕（信息面）：面板"打得开但一直 503"时，只有这行能指出
-            // 是对端洪水还是自家槽位泄漏——对端地址是最小充分证据。
-            let peer = stream
-                .peer_addr()
-                .map(|a| a.to_string())
-                .unwrap_or_else(|_| "?".to_string());
-            eprintln!(
-                "面板并发已达上限 {}（在服 {}），拒连对端 {peer}",
-                shared.limits.max_conns,
-                live.load(Ordering::Relaxed)
-            );
-            let body = br#"{"error":"conn limit"}"#;
-            let _ = rr3_http_respond(
-                &mut stream,
-                503,
-                "Service Unavailable",
-                "application/json",
-                body,
-            );
-            continue;
-        }
-        let slot = Rr3ConnSlot::rr3_acquire(&live);
-        let shared = shared.clone();
-        let shared_bump = shared.clone(); // Err 分支记账用（闭包 move 走主句柄）
-                                          // spawn 失败（批M M-β I-4）：闭包（连同 stream 与守卫）被丢弃——守卫
-                                          // Drop 归还槽位、连接自然关闭。**不退循环**：面板是运维的最后一扇门，
-                                          // 一条连接起不来不能把整个面板带走（工单判据"起不来一个连接后面板仍
-                                          // 可访问"）；点账 counters + stderr 点名，服务继续。
-        if let Err(e) = make_builder().spawn(move || {
-            rr3_panel_handle(&mut stream, &shared);
-            drop(slot); // RAII 守卫：正常返回或 panic 展开都在此归还槽位
-        }) {
-            shared_bump.bus.counter_bump(RR3_PANEL_SPAWN_FAIL_KEY, 1);
-            eprintln!("面板连接线程起失败（连接弃置，服务继续）: {e}");
-        }
+        rr3_conn_admit(stream, &shared, &live, &mut make_builder);
+    }
+}
+
+/// 单连接准入（自 [`rr3_accept_loop`] 抽出）：写耐心 → 并发上限 → 槽位守卫 → 起线程。
+/// 拒绝与弃置都在本函数内收账，主循环不因单连接失败退出。
+fn rr3_conn_admit(
+    mut stream: TcpStream,
+    shared: &Arc<Rr3PanelShared>,
+    live: &Arc<AtomicUsize>,
+    make_builder: &mut impl FnMut() -> std::thread::Builder,
+) {
+    // 连接 IO 耐心（读侧已在 rr3_http_read_req 设，写侧在此按同一预算补）：
+    // 对端只连不读时 write_all 会一直堵在“发送缓冲已满”，8 个槽位被钉死＝
+    // 面板整体失联（运维最后一扇门自锁，静态审计 B16）。
+    if let Err(e) = rr3_http_patience(&stream, shared.limits.read_timeout) {
+        eprintln!("面板连接写耐心未设上（连接仍按既有语义处理）: {e}");
+    }
+    if live.load(Ordering::Relaxed) >= shared.limits.max_conns {
+        // 拒连必须留痕（信息面）：面板"打得开但一直 503"时，只有这行能指出
+        // 是对端洪水还是自家槽位泄漏——对端地址是最小充分证据。
+        let peer = stream
+            .peer_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_else(|_| "?".to_string());
+        eprintln!(
+            "面板并发已达上限 {}（在服 {}），拒连对端 {peer}",
+            shared.limits.max_conns,
+            live.load(Ordering::Relaxed)
+        );
+        let body = br#"{"error":"conn limit"}"#;
+        let _ = rr3_http_respond(
+            &mut stream,
+            503,
+            "Service Unavailable",
+            "application/json",
+            body,
+        );
+        return;
+    }
+    let slot = Rr3ConnSlot::rr3_acquire(live);
+    let shared = shared.clone();
+    let shared_bump = shared.clone(); // Err 分支记账用（闭包 move 走主句柄）
+                                      // spawn 失败（批M M-β I-4）：闭包（连同 stream 与守卫）被丢弃——守卫
+                                      // Drop 归还槽位、连接自然关闭。**不退循环**：面板是运维的最后一扇门，
+                                      // 一条连接起不来不能把整个面板带走（工单判据"起不来一个连接后面板仍
+                                      // 可访问"）；点账 counters + stderr 点名，服务继续。
+    if let Err(e) = make_builder().spawn(move || {
+        rr3_panel_handle(&mut stream, &shared);
+        drop(slot); // RAII 守卫：正常返回或 panic 展开都在此归还槽位
+    }) {
+        shared_bump.bus.counter_bump(RR3_PANEL_SPAWN_FAIL_KEY, 1);
+        eprintln!("面板连接线程起失败（连接弃置，服务继续）: {e}");
     }
 }
 
