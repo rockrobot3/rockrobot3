@@ -1,5 +1,7 @@
 //! assembly 的单测（自同名单测模块原样抽出，判据不变）。
 
+use serde_json::json;
+
 use super::*;
 use rr_hal_api::{Rr3ActHardStop, Rr3ActHold, Rr3ActProfile, Rr3ActSource};
 use rr_registry::rr3_role_parse;
