@@ -132,7 +132,7 @@ fn rr3_llm_stage(text: &str) -> Result<String, String> {
         ("user".to_string(), text.to_string()),
     ];
     let body = rr_cloud_proto::rr3_chat_body(&cfg.llm_model, &messages, RR3_LLM_MAX_TOKENS);
-    let url = format!("{}/chat/completions", cfg.base.trim_end_matches('/'));
+    let url = format!("{}/chat/completions", cfg.llm_base.trim_end_matches('/'));
     let resp = crate::cloud::rr3_post_retry(
         "大模型接口",
         &url,

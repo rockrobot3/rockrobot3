@@ -39,6 +39,9 @@ const K_VOICE: &str = "tts.voice";
 /// W6-2：对话链两跳的模型行（供应商模型名归配置，不编译进固件）。
 const K_ASR_MODEL: &str = "asr.model";
 const K_LLM_MODEL: &str = "llm.model";
+/// LLM 基址（**完整 API 根，含版本段**；与 cloud.base 主机根不同义——Pi 侧
+/// `[rr3-brain.model].base_url` 同口径）。缺席时回退 `{cloud.base}/v1`。
+const K_LLM_BASE: &str = "llm.base";
 /// 值上限（写口与读口同门；超形即拒，防 NVS 被大值撑爆）。
 const MAX_BASE: usize = 128;
 const MAX_KEY: usize = 160;
@@ -87,11 +90,15 @@ struct Rr3CloudWrite {
     key: Option<String>,
     asr_model: Option<String>,
     llm_model: Option<String>,
+    llm_base: Option<String>,
 }
 
 /// 对话链配置（W6：ASR/LLM 两跳；key 零回显，不派生 Debug）。
 pub(crate) struct Rr3DialogCfg {
+    /// 主机根（ASR 拼 `/v1/...`）。
     pub(crate) base: String,
+    /// 完整 API 根（LLM 拼 `/chat/completions`）。
+    pub(crate) llm_base: String,
     pub(crate) key: String,
     pub(crate) asr_model: String,
     pub(crate) llm_model: String,
@@ -196,12 +203,19 @@ pub(crate) fn rr3_dialog_cfg() -> Result<Rr3DialogCfg, &'static str> {
     let Some(llm_model) = nvs_get(K_LLM_MODEL, MAX_MODEL) else {
         return Err("缺 llm.model");
     };
-    let ok = base.starts_with("https://") && !asr_model.is_empty() && !llm_model.is_empty();
+    // LLM 基址：显式键优先，缺席回退主机根 + /v1（SiliconFlow 等常见同源部署）。
+    let llm_base = nvs_get(K_LLM_BASE, MAX_BASE)
+        .unwrap_or_else(|| format!("{}/v1", base.trim_end_matches('/')));
+    let ok = base.starts_with("https://")
+        && llm_base.starts_with("https://")
+        && !asr_model.is_empty()
+        && !llm_model.is_empty();
     let true = ok else {
         return Err("对话配置不完整或 base 非 https");
     };
     Ok(Rr3DialogCfg {
         base,
+        llm_base,
         key: nvs_get(K_KEY, MAX_KEY).unwrap_or_default(),
         asr_model,
         llm_model,
@@ -236,6 +250,7 @@ fn rr3_cloud_body(body: &[u8]) -> Result<Rr3CloudWrite, &'static str> {
         key: rr3_opt_field(&v, "key")?.map(str::to_string),
         asr_model: rr3_opt_field(&v, "asr_model")?.map(str::to_string),
         llm_model: rr3_opt_field(&v, "llm_model")?.map(str::to_string),
+        llm_base: rr3_opt_field(&v, "llm_base")?.map(str::to_string),
     })
 }
 
@@ -251,6 +266,9 @@ fn rr3_cloud_check(c: &Rr3CloudWrite) -> Result<(), &'static str> {
         c.key.as_ref().map_or(true, |k| k.len() <= MAX_KEY),
         rr3_opt_len_ok(&c.asr_model),
         rr3_opt_len_ok(&c.llm_model),
+        c.llm_base
+            .as_ref()
+            .map_or(true, |b| b.starts_with("https://") && b.len() <= MAX_BASE),
     ];
     let true = checks.iter().all(|b| *b) else {
         return Err("云配置形制不合（https/长度门）");
@@ -273,6 +291,7 @@ fn rr3_cloud_store(c: &Rr3CloudWrite) -> Result<(), i32> {
         (K_KEY, c.key.as_deref()),
         (K_ASR_MODEL, c.asr_model.as_deref()),
         (K_LLM_MODEL, c.llm_model.as_deref()),
+        (K_LLM_BASE, c.llm_base.as_deref()),
     ] {
         if let Some(val) = val {
             let Ok(()) = nvs_set(key, val) else {
@@ -291,10 +310,11 @@ pub(crate) fn rr3_cloud_write(body: &[u8]) -> Result<(), &'static str> {
         return Err("NVS 写入失败（串口有 err 码）");
     };
     println!(
-        "[cloud] 配置已写入 NVS（key={}，asr_model={}，llm_model={}）",
+        "[cloud] 配置已写入 NVS（key={}，asr_model={}，llm_model={}，llm_base={}）",
         req.key.as_ref().map_or("保留", |_| "更新"),
         req.asr_model.as_ref().map_or("保留", |_| "更新"),
-        req.llm_model.as_ref().map_or("保留", |_| "更新")
+        req.llm_model.as_ref().map_or("保留", |_| "更新"),
+        req.llm_base.as_ref().map_or("缺省/保留", |_| "更新")
     );
     Ok(())
 }
@@ -402,12 +422,14 @@ mod tests {
             "voice": "alloy",
             "asr_model": "sensevoice",
             "llm_model": "chat-1",
+            "llm_base": "https://api.example.com/v1",
         }));
         let c = rr3_cloud_body(&b).unwrap();
         assert_eq!(c.base, "https://api.example.com");
         assert!(c.key.is_none(), "key 缺席＝保留旧值");
         assert_eq!(c.asr_model.as_deref(), Some("sensevoice"));
         assert_eq!(c.llm_model.as_deref(), Some("chat-1"));
+        assert_eq!(c.llm_base.as_deref(), Some("https://api.example.com/v1"));
         // 不用 unwrap_err：Rr3CloudWrite 故意不派生 Debug（key 零回显墙）。
         assert!(matches!(rr3_cloud_body(b"{}"), Err(e) if e.contains("base")));
         assert!(matches!(rr3_cloud_body(b"not json"), Err(e) if e.contains("JSON")));
@@ -426,6 +448,7 @@ mod tests {
             key: None,
             asr_model: None,
             llm_model: None,
+            llm_base: None,
         };
         assert_eq!(rr3_cloud_check(&ok), Ok(()));
         let empty_asr = Rr3CloudWrite {
