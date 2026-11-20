@@ -47,7 +47,7 @@
 | ⑬ | 仓面卫生门：追踪文件无本机绝对路径、无 `target/`/`build/`/`node_modules/`、源码类新件必须入册（`??` 即红）、shell `$name` 后接非 ASCII 即红 | `check.sh` ⑬ 段（git grep + git status 扫描） |
 | ⑭ | 装载门体量基线门：装配单锚函数的块行数、`read_to_string` 样板数、rr-registry 同形函数数按 `tools/ci/gate-size-baseline.txt` 只降不升；锚函数缺失或基线形状坏即红（fail-closed） | `steps/14.sh` |
 | ⑮ | 锁内 I/O 门：`lock·log` 同行 / 条件位临时 guard 延寿到块体 / 直调会写待落盘日志的 registry 方法（fanout/shadow/ctr_merge）；扫面打空即门禁失效 | `python3 tools/ci/lockio_audit.py`（先 `--self-test` 三负例） |
-| ⑯ | 源文件行数门：每个 `.rs` <600 行；超标文件数按 `tools/ci/gate-lines-baseline.txt` 只降不升 | `steps/16.sh` |
+| ⑯ | 源文件行数门：每个 `.rs/.py/.sh` <600 行（铁律）；≥500 下一档按 `tools/ci/gate-lines-baseline.txt` 只降不升 | `steps/16.sh` |
 
 **⑨-a…⑨-z 各门**（门 a/c/r/y/z 等，后续批次续增）：判据以 `check.sh` 各 `step`
 段注释为唯一真值，本表不逐行抄录——抄一份就多一处漂移面。
