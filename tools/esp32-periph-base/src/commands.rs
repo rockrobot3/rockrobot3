@@ -19,6 +19,7 @@ use crate::link::{drain_uart_quiet, read_line, reply, UartIo};
 use crate::oled::glyph;
 use crate::periph::CtlUart;
 use crate::ports_impl::Rr3BoardClock;
+use crate::power::RailTier;
 use crate::servo::{axis_check, Axis};
 use crate::state::{
     drain_audio, drain_outbox, esp_random_u32, lock_bus, now_ms, push_job, Bus, CtlState, Job,
@@ -413,6 +414,16 @@ fn cmd_audio(
     Ok(if on { "OK audio on" } else { "OK audio off" }.into())
 }
 
+/// INFO 的 5V 轨两栏（自 cmd_info 抽出）：有效报毫伏与档名，无效点名
+/// absent/unknown（原始码照回显）。
+fn rail_fields(valid: bool, mv: u32, raw: u32, tier: RailTier) -> (String, &'static str) {
+    if valid {
+        (format!("{mv}mV raw={raw}"), tier.name())
+    } else {
+        (format!("absent raw={raw}"), "unknown")
+    }
+}
+
 /// `INFO` 观测面：一拍取齐状态快照后拼行（取锁只此一次，避免中途跳变）。
 fn cmd_info(bus: &Arc<Mutex<Bus>>) -> Result<String, String> {
     let (plo, phi) = Axis::Pan.range();
@@ -459,16 +470,7 @@ fn cmd_info(bus: &Arc<Mutex<Bus>>) -> Result<String, String> {
             b.st.reply_drop,
         )
     };
-    let rail = if rail_valid {
-        format!("{rail_mv}mV raw={rail_raw}")
-    } else {
-        format!("absent raw={rail_raw}")
-    };
-    let rail_tier_name = if rail_valid {
-        rail_tier.name()
-    } else {
-        "unknown"
-    };
+    let (rail, rail_tier_name) = rail_fields(rail_valid, rail_mv, rail_raw, rail_tier);
     // SAFETY：两个堆查询都是无参只读的 IDF 系统调用，不触碰 Rust 内存状态。
     let (free, min_free) = unsafe { (esp_get_free_heap_size(), esp_get_minimum_free_heap_size()) };
     Ok(format!(
