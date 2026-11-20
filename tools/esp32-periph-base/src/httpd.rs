@@ -318,7 +318,7 @@ st();setInterval(st,3000);
 document.getElementById('f').onsubmit=async e=>{e.preventDefault();R.textContent='提交中…';
 try{const j=await (await fetch('/api/board/wifi',{method:'POST',
 headers:{'Content-Type':'application/json'},
-body:JSON.stringify({token:tok.value,ssid:ssid.value,password:pass.value})})).json();
+body:JSON.stringify({token:tok.value,ssid:ssid.value,pass:pass.value})})).json();
 R.textContent=JSON.stringify(j,null,1);
 if(j.connected){R.textContent+='\n✅ 已加入新 WiFi（本页可断开，改用新 IP 访问）'}
 else if(j.reverted){R.textContent+='\n⚠ 新凭据未连上，已回滚旧凭据'}

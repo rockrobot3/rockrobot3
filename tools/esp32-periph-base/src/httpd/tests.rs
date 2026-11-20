@@ -61,6 +61,20 @@ fn covers_wordform_shape() {
     }
 }
 
+/// 配网页字段名与写口解析器同源（2026-11-20 真板实锤：页面发 `password`、
+/// 写口认 `pass`，保存恒回 `stage:"body"`）。改任一侧必须同步。
+#[test]
+fn index_form_posts_pass_field() {
+    assert!(
+        RR3_BOARD_INDEX_HTML.contains("pass:pass.value"),
+        "配网页必须发 `pass` 字段（写口 rr3_wifi_write_body 只认 pass）"
+    );
+    assert!(
+        !RR3_BOARD_INDEX_HTML.contains("password:pass.value"),
+        "配网页不得再发 `password`（会被写口判 body 解析失败）"
+    );
+}
+
 /// 写口 body 解析域（纯函数）：合法/空密码合法（开放网络）/坏 JSON/缺字段/
 /// 非串字段全点名。
 #[test]
