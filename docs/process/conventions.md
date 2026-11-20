@@ -2676,9 +2676,10 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/gat
 | `lint` | fmt + clippy（workspace + 独立工程） | push / PR / 周程 |
 | `supply` | 供应链审计（cargo-deny）：许可证 / RustSec 公告 / 来源白名单 / 通配依赖；策略真值 = `.cargo/deny.toml`，全部工程根逐项执法（`tools/ci/supply-audit.sh --strict`） | push / PR / 手动 / 周程 |
 | `ipct003` / `distro-smoke` / `buildroot-assembly` / `sim-assemble` / `sim-chain` / `matrix` | 跨架构对拍、真装、装配冒烟、装配演练、全链、点验矩阵 | push / PR / 手动（`ipct003` 随 platforms 另有周程） |
-| `cross-artifacts`（矩阵） | 非 x86 芯片平台静态产物：构建七件 + ELF 断言 + **qemu 目标 ISA 执行冒烟** + 产物上传 | push / PR / 周程 |
+| `cross-artifacts`（矩阵） | 非 x86 芯片平台静态产物：构建七件 +（`with-brain` 腿加 `rr3-brain`）+ ELF 断言 + **qemu 目标 ISA 执行冒烟** + 产物上传 | push / PR / 周程 |
+| `riscv-image` | riscv64 运行镜像构建门：交叉产物 → 宿主 `rr3-pack` stage → QEMU `docker build` → 文件面/运行面两段冒烟（不推送）；发布腿复用同一脚本 | push / PR / 周程 |
 | `esp32-gates`（矩阵两腿） | xtensa/espidf 五门按芯片分腿：ESP32 腿 5 门（外设底座 / UART echo / espidf std / 哨兵 / act·sense classic 面）、ESP32-S3 腿 2 门（S3 外设底座 / act·sense S3 面）；每腿独立装本芯片工具链 | push / PR / 手动 / 周程 |
-| `publish`（`publish.yml`） | 运行镜像发布到 `ghcr.io/rockrobot3/rockrobot3`：amd64/arm64 原生构建 → 单架构镜像 → 多架构清单合并；镜像根 = rr3-pack stage 树 | 打 `v*` 标签 / main（edge）/ 手动 |
+| `publish`（`publish.yml`） | 运行镜像发布到 `ghcr.io/rockrobot3/rockrobot3`：amd64/arm64 原生构建 + riscv64 交叉（QEMU）→ 单架构镜像 → 三架构清单合并；tag 时 `firmware` job 另把 classic/S3 ELF 推 `rockrobot3-firmware`；镜像根 = rr3-pack stage 树 | 打 `v*` 标签 / main（edge）/ 手动 |
 
 **首发布回执（2026-11-15）**：`v0.0.9` 标签（锚提交 `e445f14`，dev/hubs-01）触发
 publish 首跑即全绿——amd64（`ubuntu-latest`）与 arm64（`ubuntu-24.04-arm`）两条原生腿
