@@ -31,8 +31,9 @@ use crate::state::{lock_bus, now_ms, push_job, rr3_expr_set, Bus, Job};
 const RR3_LLM_MAX_TOKENS: i64 = 150;
 /// 系统人设（策略量；回答短、口语化，避免 TTS 长文本）。
 const RR3_SYSTEM_PROMPT: &str = "你是桌面机器人小R，用简短口语化的中文回答，一般不超过50字。";
-/// 朗读文本上限（与 `/say` 的 512 B 门同源）。
-const MAX_REPLY: usize = 512;
+/// 朗读文本上限：180 B ≈ 60 汉字（TTS 512 KB ≈ 16 s 的安全上界；LLM 人设要求
+/// ≤50 字，这里做确定性截断，不把超长回复送 TTS）。
+const MAX_REPLY: usize = 180;
 /// 播放等待轮询步长与余量。
 const PLAY_POLL_MS: u64 = 200;
 const PLAY_SLACK_MS: u64 = 3_000;

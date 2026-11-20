@@ -49,8 +49,9 @@ const MAX_MODEL: usize = 64;
 const MAX_VOICE: usize = 64;
 /// 单条朗读文本上限（与 `/say` body 的 512 B 上界同源）。
 const MAX_TEXT: usize = 512;
-/// TTS PCM 响应上限：256 KB ≈ 8 s @16k mono s16。
-const MAX_PCM: usize = 262_144;
+/// TTS PCM 响应上限：512 KB ≈ 16 s @16k mono s16（2026-11-20 真板实锤：LLM
+/// 45 字回复的 CosyVoice PCM ≈9 s/288 KB，旧 256 KB 上限把正常回复判失败）。
+const MAX_PCM: usize = 524_288;
 /// 待朗读队列容量（条；满即拒，不阻塞 HTTP 任务）。
 const TTS_Q_CAP: usize = 2;
 /// worker 栈：mbedTLS 握手 + esp_http_client 缓冲。
