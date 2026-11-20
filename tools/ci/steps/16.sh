@@ -48,6 +48,11 @@ rr3_step_16() {
     return
   fi
 
+  tier_max=""
+  if [ "$tier_cnt" -gt 0 ]; then
+    tier_max="$(printf '%s\n' "${tier_list[@]}" | sort -rn | head -1 | awk '{print $1 " 行 " $2}')"
+  fi
+
   printf '⑯ 扫面 %s 个源文件：≥600 硬线 %s 个（上限 %s）；≥500 下一档 %s 个（上限 %s）\n' \
     "$scanned" "$hard_cnt" "$base_hard" "$tier_cnt" "$base_tier"
 
@@ -66,8 +71,8 @@ rr3_step_16() {
     printf 'FAIL  ⑯ ≥500 行文件回涨（%s > %s）：下一档目标只降不升\n' "$tier_cnt" "$base_tier"
     fail=1
   elif [ "$tier_cnt" -lt "$base_tier" ]; then
-    printf 'PASS  ⑯ 下一档 %s < 上限 %s（拆完同批下调 %s）\n' "$tier_cnt" "$base_tier" "$lines_base_file"
+    printf 'PASS  ⑯ 下一档 %s < 上限 %s（最大 %s；拆完同批下调 %s）\n' "$tier_cnt" "$base_tier" "$tier_max" "$lines_base_file"
   else
-    printf 'PASS  ⑯ 下一档 %s = 上限 %s（目标逐批拆到 0 = <500 行）\n' "$tier_cnt" "$base_tier"
+    printf 'PASS  ⑯ 下一档 %s = 上限 %s（最大 %s；目标逐批拆到 0 = <500 行）\n' "$tier_cnt" "$base_tier" "$tier_max"
   fi
 }
