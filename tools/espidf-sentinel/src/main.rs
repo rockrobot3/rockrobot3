@@ -200,19 +200,10 @@ fn ram_point(point: &str) {
     println!("[D1-RAM] point={point} free={free}B min_free={min_free}B");
 }
 
-fn main() {
-    // IDF 绑定面补丁（esp-idf-hal 工程惯例起手）
-    link_patches();
-    let epoch = Instant::now();
-
-    // 堆采样①：启动后（runbook §9.3 ③ 第一点）
-    ram_point("1-boot");
-
-    let peripherals = Peripherals::take()
-        .expect("Peripherals::take 失败：外设已被取走（启动期不应发生，查是否有二次取）");
-    // UART2：GPIO17→TX / GPIO16←RX，115200（批C 载体同款接线与波特率硬约束）。
-    // cts/rts 不用（None）；TX/RX 半体的独立 new() 会对同口二次
-    // uart_driver_install（IDF 一口一装），故整装 UartDriver 一次。
+/// UART2 装配：GPIO17→TX / GPIO16←RX，115200（批C 载体同款接线与波特率硬约束）。
+/// cts/rts 不用（None）；TX/RX 半体的独立 new() 会对同口二次
+/// uart_driver_install（IDF 一口一装），故整装 UartDriver 一次。
+fn open_uart(peripherals: Peripherals) -> (Arc<Mutex<UartTxInner>>, UartRxHalf) {
     let config = UartConfig::new().baudrate(Hertz(115200));
     let driver = UartDriver::new(
         peripherals.uart2,
@@ -227,11 +218,15 @@ fn main() {
     // 复位即整机复位），split 借 'static 引用得 'static 半体，进线程所需。
     let driver: &'static mut UartDriver<'static> = Box::leak(Box::new(driver));
     let (tx_driver, rx_driver) = driver.split();
+    (
+        Arc::new(Mutex::new(UartTxInner(tx_driver))),
+        UartRxHalf(rx_driver),
+    )
+}
 
-    let tx = Arc::new(Mutex::new(UartTxInner(tx_driver)));
-    let rx = UartRxHalf(rx_driver);
-
-    let shared = Arc::new(Shared {
+/// 共享状态装配（字段语义见 [`Shared`] 上各注记）。
+fn build_shared(tx: Arc<Mutex<UartTxInner>>, epoch: Instant) -> Arc<Shared> {
+    Arc::new(Shared {
         tx,
         rt: Mutex::new(Rr3ModuleRuntime::rr3_runtime_new(HEARTBEAT_MS)),
         task: AtomicU32::new(0),
@@ -241,27 +236,22 @@ fn main() {
         epoch,
         guard: Mutex::new(Rr3GuardBuf::rr3_guard_buf_new()),
         round_trips: AtomicU32::new(0),
-    });
+    })
+}
 
-    // SURFACE 自述行（runbook §9.3 ② 的观测面预期）
-    println!(
-        "[sentinel] surface=esp-rs-std runtime=rr-core::runtime transport=uart2@115200 name={NAME}"
-    );
-    shared.guard_line(Rr3GuardEvent::Boot(
-        rr_core::runtime::Rr3LinkState::Registering,
-    ));
+/// reader 必须先于注册帧上路：注册应答也走 pending 路由（client.rs 同序）。
+fn spawn_reader(rx: UartRxHalf, shared: &Arc<Shared>) {
+    let sh = shared.clone();
+    thread::Builder::new()
+        .name("sentinel-reader".into())
+        .stack_size(THREAD_STACK)
+        .spawn(move || reader_loop(rx, sh))
+        .expect("起 reader 线程失败");
+}
 
-    // reader 必须先于注册帧上路：注册应答也走 pending 路由（client.rs 同序）
-    {
-        let sh = shared.clone();
-        thread::Builder::new()
-            .name("sentinel-reader".into())
-            .stack_size(THREAD_STACK)
-            .spawn(move || reader_loop(rx, sh))
-            .expect("起 reader 线程失败");
-    }
-
-    // 注册（注册前没有 task，按契约 src=0）
+/// 注册（注册前没有 task，按契约 src=0）→ 机制核状态机 Registering → Online，
+/// 首拍 = 此刻 + heartbeat_ms；被拒/失败/缺 `src_task` 一律复位（不装活着）。
+fn register_module(shared: &Shared) {
     let reply = shared.call(
         "rr3.register",
         json!({"name": NAME, "manifest": MANIFEST_TEXT}),
@@ -277,7 +267,6 @@ fn main() {
         .and_then(Value::as_u64)
         .unwrap_or_else(|| shared.rr3_mark_restart("注册应答缺 result.src_task"));
     shared.task.store(task as u32, Ordering::Relaxed);
-    // 机制核状态机转移 Registering → Online，首拍 = 此刻 + heartbeat_ms
     let now_ms = shared.now_ms();
     shared
         .rt
@@ -290,18 +279,20 @@ fn main() {
     println!("[sentinel] 注册成功 task={task} hb={HEARTBEAT_MS}ms");
     // 堆采样②：注册帧应答后（runbook §9.3 ③ 第二点）
     ram_point("2-registered");
+}
 
-    // 心跳线程：拍点真值在机制核状态机（相对节拍）；worker 面只做平台事
-    {
-        let sh = shared.clone();
-        thread::Builder::new()
-            .name("sentinel-heartbeat".into())
-            .stack_size(THREAD_STACK)
-            .spawn(move || heartbeat_loop(sh))
-            .expect("起心跳线程失败");
-    }
+/// 心跳线程：拍点真值在机制核状态机（相对节拍）；worker 面只做平台事。
+fn spawn_heartbeat(shared: &Arc<Shared>) {
+    let sh = shared.clone();
+    thread::Builder::new()
+        .name("sentinel-heartbeat".into())
+        .stack_size(THREAD_STACK)
+        .spawn(move || heartbeat_loop(sh))
+        .expect("起心跳线程失败");
+}
 
-    // 主循环：周期状态行（观测面），Down 由各线程复位
+/// 主循环：周期状态行（观测面），Down 由各线程复位。
+fn status_loop(shared: &Shared) {
     loop {
         thread::sleep(Duration::from_secs(30));
         if shared.stop.load(Ordering::Relaxed) {
@@ -319,4 +310,31 @@ fn main() {
             shared.round_trips.load(Ordering::Relaxed)
         );
     }
+}
+
+fn main() {
+    // IDF 绑定面补丁（esp-idf-hal 工程惯例起手）
+    link_patches();
+    let epoch = Instant::now();
+
+    // 堆采样①：启动后（runbook §9.3 ③ 第一点）
+    ram_point("1-boot");
+
+    let peripherals = Peripherals::take()
+        .expect("Peripherals::take 失败：外设已被取走（启动期不应发生，查是否有二次取）");
+    let (tx, rx) = open_uart(peripherals);
+    let shared = build_shared(tx, epoch);
+
+    // SURFACE 自述行（runbook §9.3 ② 的观测面预期）
+    println!(
+        "[sentinel] surface=esp-rs-std runtime=rr-core::runtime transport=uart2@115200 name={NAME}"
+    );
+    shared.guard_line(Rr3GuardEvent::Boot(
+        rr_core::runtime::Rr3LinkState::Registering,
+    ));
+
+    spawn_reader(rx, &shared);
+    register_module(&shared);
+    spawn_heartbeat(&shared);
+    status_loop(&shared);
 }
