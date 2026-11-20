@@ -364,6 +364,9 @@ def release_problems(text, rel):
         ):
             if needle not in joined:
                 bad.append(f"{rel} build 矩阵缺 {needle}（原生发布腿缩水）")
+        for needle in ("stage-image.sh", "image-smoke.sh file", "image-smoke.sh run"):
+            if needle not in joined:
+                bad.append(f"{rel} build 缺 {needle}（发布镜像未按装机面验证）")
     riscv = jobs.get("build-riscv64")
     if riscv is not None:
         joined = "\n".join(riscv)
@@ -381,6 +384,8 @@ def release_problems(text, rel):
         for arch in ("amd64", "arm64", "riscv64"):
             if f"-{arch}" not in joined:
                 bad.append(f"{rel} merge 未合并 {arch} 单架构镜像")
+        if "image-smoke.sh file" not in joined:
+            bad.append(f"{rel} merge 缺 image-smoke（合并清单未验证可拉取）")
     firmware = jobs.get("firmware")
     if firmware is not None:
         joined = "\n".join(firmware)
@@ -613,6 +618,7 @@ def self_test():
         ("riscv 镜像腿缺失被抓", any("缺 job riscv-image" in b for b in bad)),
         ("发布面缺腿被抓", any("缺发布 job" in b for b in bad)),
         ("发布矩阵缺 arm64 被抓", any("build 矩阵缺" in b for b in bad)),
+        ("发布镜像冒烟缺失被抓", any("stage-image.sh" in b for b in bad)),
         ("门禁 job 缩水被抓", any("缺 job conventions" in b for b in bad)),
         ("固件缺 S3 被抓", any("未构建 S3 目标" in b for b in bad)),
         ("制品面缺名被抓", any("未推 rockrobot3-buildroot" in b for b in bad)),

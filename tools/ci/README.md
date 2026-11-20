@@ -147,12 +147,15 @@ job 定义 ≤10；integration/platforms 的 push/PR 必须 `paths-ignore` 含 `
 好例 + 缺并发/缺超时/版本漂移/needs 悬空/needs 成环/push 无范围/工具链未钉版/
 缓存缺参/paths-ignore 缺失/publish 可取消/job 超限/continue-on-error/缺 permissions/
 芯片矩阵缩水/芯片 job 缺失/芯片验证步骤缺失/riscv 镜像腿缺失/发布面缺腿/发布矩阵缺 arm64/
-门禁 job 缩水/固件缺 S3/制品面缺名二十二条负例，gate 的 `scripts` job 先自检后执法。
+发布镜像冒烟缺失/门禁 job 缩水/固件缺 S3/制品面缺名二十三条负例，gate 的 `scripts` job
+先自检后执法。
 **作业覆盖契约**：gate / integration / platforms / publish / buildroot 的 job 名全部按
 `REQUIRED_JOBS` 钉住（删名即红，改名须同批评审）；发布面完整性：
 `publish.yml` 必须有 build / build-riscv64 / merge / firmware 四腿；build 矩阵必须
-含 amd64/arm64 原生腿与 `ubuntu-24.04-arm`；build-riscv64 必须复用
-`build-riscv-image.sh` 并推送；merge 必须等两条构建腿、合并命令含三架构单镜像；
+含 amd64/arm64 原生腿与 `ubuntu-24.04-arm`；build 必须走 `stage-image.sh` 与
+`image-smoke.sh file|run`（发布镜像按装机面验证）；build-riscv64 必须复用
+`build-riscv-image.sh` 并推送；merge 必须等两条构建腿、合并命令含三架构单镜像并
+对合并清单跑 `image-smoke.sh file`；
 firmware 必须带 `packages: write`、推 `rockrobot3-firmware`，且 S3 目标
 （`xtensa-esp32s3-espidf` + `MCU=esp32s3` + `esp32s3` feature）与双 ELF 资产按名
 钉住——双芯片发布面不得缩成单芯片，发布路径不得分叉。**制品托管**：`buildroot.yml` 的 `release` 腿必须 tag 门、
