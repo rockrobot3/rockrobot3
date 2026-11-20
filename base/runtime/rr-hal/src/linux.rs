@@ -102,6 +102,47 @@ fn rr3_alsa_io_recover(pcm: &alsa::pcm::PCM, e: &alsa::Error) -> bool {
     false
 }
 
+/// 单次搬运推进（readi/writei 同口径）：成功推进 done 并清零 stall；零帧/可恢复
+/// 错误累计 stall 到界即带因上抛；硬错点名 errno 后上抛。
+fn rr3_alsa_advance(
+    op: &str,
+    got: Result<usize, alsa::Error>,
+    pcm: &alsa::pcm::PCM,
+    done: &mut usize,
+    frames: usize,
+    stall: &mut u32,
+) -> Result<(), Rr3HalError> {
+    match got {
+        Ok(n) if n > 0 => {
+            *done += n;
+            *stall = 0;
+        }
+        Ok(_) => {
+            *stall += 1;
+            if *stall >= RR3_ALSA_STALL_MAX {
+                return Err(rr3_alsa_stall_err(op, *done, frames, *stall));
+            }
+            std::thread::yield_now();
+        }
+        Err(e) if rr3_alsa_io_recover(pcm, &e) => {
+            *stall += 1;
+            if *stall >= RR3_ALSA_STALL_MAX {
+                let op = format!("{op}(recover)");
+                return Err(rr3_alsa_stall_err(&op, *done, frames, *stall));
+            }
+        }
+        Err(e) => {
+            let errno = e.errno();
+            eprintln!(
+                "rr-hal-alsa: {op} 硬错 errno={errno}（已搬 {}/{frames} 帧）",
+                *done
+            );
+            return Err(Rr3HalError::Busy);
+        }
+    }
+    Ok(())
+}
+
 struct Rr3AlsaOpen {
     cfg: Rr3AudioCfg,
     pcm: alsa::pcm::PCM,
@@ -145,30 +186,8 @@ impl Rr3AudioSource for Rr3AlsaAudioSource {
         let mut done = 0usize;
         let mut stall = 0u32;
         while done < frames {
-            match io.readi(&mut buf[done * ch..]) {
-                Ok(n) if n > 0 => {
-                    done += n;
-                    stall = 0;
-                }
-                Ok(_) => {
-                    stall += 1;
-                    if stall >= RR3_ALSA_STALL_MAX {
-                        return Err(rr3_alsa_stall_err("readi", done, frames, stall));
-                    }
-                    std::thread::yield_now();
-                }
-                Err(e) if rr3_alsa_io_recover(&open.pcm, &e) => {
-                    stall += 1;
-                    if stall >= RR3_ALSA_STALL_MAX {
-                        return Err(rr3_alsa_stall_err("readi(recover)", done, frames, stall));
-                    }
-                }
-                Err(e) => {
-                    let errno = e.errno();
-                    eprintln!("rr-hal-alsa: readi 硬错 errno={errno}（已搬 {done}/{frames} 帧）");
-                    return Err(Rr3HalError::Busy);
-                }
-            }
+            let got = io.readi(&mut buf[done * ch..]);
+            rr3_alsa_advance("readi", got, &open.pcm, &mut done, frames, &mut stall)?;
         }
         Ok(done * ch)
     }
@@ -211,37 +230,15 @@ impl Rr3AudioSink for Rr3AlsaAudioSink {
         let mut done = 0usize;
         let mut stall = 0u32;
         while done < total_frames {
-            match io.writei(&samples[done * ch..]) {
-                Ok(n) if n > 0 => {
-                    done += n;
-                    stall = 0;
-                }
-                Ok(_) => {
-                    stall += 1;
-                    if stall >= RR3_ALSA_STALL_MAX {
-                        return Err(rr3_alsa_stall_err("writei", done, total_frames, stall));
-                    }
-                    std::thread::yield_now();
-                }
-                Err(e) if rr3_alsa_io_recover(&open.pcm, &e) => {
-                    stall += 1;
-                    if stall >= RR3_ALSA_STALL_MAX {
-                        return Err(rr3_alsa_stall_err(
-                            "writei(recover)",
-                            done,
-                            total_frames,
-                            stall,
-                        ));
-                    }
-                }
-                Err(e) => {
-                    let errno = e.errno();
-                    eprintln!(
-                        "rr-hal-alsa: writei 硬错 errno={errno}（已搬 {done}/{total_frames} 帧）"
-                    );
-                    return Err(Rr3HalError::Busy);
-                }
-            }
+            let got = io.writei(&samples[done * ch..]);
+            rr3_alsa_advance(
+                "writei",
+                got,
+                &open.pcm,
+                &mut done,
+                total_frames,
+                &mut stall,
+            )?;
         }
         Ok(())
     }
