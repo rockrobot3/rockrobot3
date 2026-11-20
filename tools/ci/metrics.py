@@ -73,6 +73,14 @@ def _selftest_repo(td):
     subprocess.run(["git", "add", "-A"], cwd=td, check=True)
 
 
+def worst_row(rows):
+    """基线内最大落点（空 = 空串）：让下一拆目标在 CI 日志里直接可见。"""
+    if not rows:
+        return ""
+    rel, name, n = max(rows, key=lambda x: x[2])
+    return f"；最大 {n} 行 {rel}:{name}"
+
+
 def self_test():
     """夹具自检：生产面计数、测试面剔除、长睡扫面与重复窗口各一条判据。"""
     import tempfile
@@ -143,7 +151,7 @@ def main():
     tight_max = base["fn_over60_max"]
     if len(fn_over60) <= tight_max:
         print(f"PASS  ⑫ 生产函数 >{FN_TIGHT_MAX} 行 {len(fn_over60)} ≤ 基线 {tight_max}"
-              f"（只降不升；下一档目标逐批拆到 0）")
+              f"（只降不升{worst_row(fn_over60)}；下一档目标逐批拆到 0）")
     else:
         top = sorted(fn_over60, key=lambda x: -x[2])[:5]
         print(f"FAIL  ⑫ 生产函数 >{FN_TIGHT_MAX} 行回涨：{len(fn_over60)} > 基线 {tight_max}："
@@ -153,7 +161,7 @@ def main():
     next_max = base["fn_over50_max"]
     if len(fn_over50) <= next_max:
         print(f"PASS  ⑫ 生产函数 >{FN_NEXT_MAX} 行 {len(fn_over50)} ≤ 基线 {next_max}"
-              f"（目标档；只降不升，逐批拆到 0 = <{FN_NEXT_MAX} 行）")
+              f"（目标档；只降不升{worst_row(fn_over50)}，逐批拆到 0 = <{FN_NEXT_MAX} 行）")
     else:
         top = sorted(fn_over50, key=lambda x: -x[2])[:5]
         print(f"FAIL  ⑫ 生产函数 >{FN_NEXT_MAX} 行回涨：{len(fn_over50)} > 基线 {next_max}："
