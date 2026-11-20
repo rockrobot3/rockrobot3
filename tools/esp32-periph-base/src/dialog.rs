@@ -16,12 +16,13 @@
 //!
 //! 凭据零回显：配置只经 [`crate::cloud::rr3_dialog_cfg`] 读 NVS，日志不出 key。
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use rr_audio_mech::rr3_pcm_ms;
 use rr_autonomy::Rr3Task;
+use rr_intent_mech::wake::{rr3_wake_decide, Rr3WakeAction, Rr3WakeCfg};
 use rr_intent_mech::Rr3IntentAction;
 
 use crate::board::MIC_SR_HZ;
@@ -39,6 +40,18 @@ const PLAY_POLL_MS: u64 = 200;
 const PLAY_SLACK_MS: u64 = 3_000;
 /// 云端失败时的降级播报（契约 §4：不得静默弃轮；TTS 也失败则只留串口点名）。
 const RR3_DEGRADE_TEXT: &str = "网络不太通畅，请稍后再试。";
+/// S3 唤醒配置：与 classic `modules/rr3-brain/config.toml` 的 `[rr3-brain.wake]`
+/// 同值（enable=true、短语表、ack、30s 跟进窗）。云端 ASR 对"洛克"不稳定，
+/// 机制核保留"你好"兜底；未命中且窗外 → 静默（不 LLM、不 TTS）。
+static S3_WAKE_CFG: LazyLock<Rr3WakeCfg> = LazyLock::new(|| Rr3WakeCfg {
+    enable: true,
+    phrases: vec!["你好洛克".to_string(), "你好老师".to_string()],
+    ack: "我在呢，有什么可以帮您？".to_string(),
+    followup_ms: 30_000,
+});
+/// 最近一次唤醒命中时刻（ms；`None` = 从未唤醒）。cloud worker 单线程调用；
+/// xtensa 无 64 位原子，故用 `Mutex` 而非 `AtomicU64`。
+static LAST_WAKE_MS: Mutex<Option<u64>> = Mutex::new(None);
 
 /// `/api/board/dialog` body → 单声道 PCM：接受 16 kHz mono WAV 或裸 s16le；
 /// 立体声/异采样率显式拒（板侧不做重采样，避免把错误输入送云端）。
@@ -74,6 +87,9 @@ pub(crate) fn rr3_turn(bus: &Arc<Mutex<Bus>>, pcm: Vec<i16>) {
         Ok(_) => return rr3_turn_end(bus, "识别为空文本，弃轮"),
         Err(e) => return rr3_turn_fail(bus, &format!("ASR 失败，弃轮: {e}")),
     };
+    let Some(text) = rr3_wake_gate(bus, &text) else {
+        return;
+    };
     let actions = rr_intent_mech::rr3_extract_actions(&text);
     let acted = rr3_apply_actions(bus, &actions);
     let reply = match rr3_llm_stage(&text) {
@@ -85,6 +101,49 @@ pub(crate) fn rr3_turn(bus: &Arc<Mutex<Bus>>, pcm: Vec<i16>) {
         "[dialog] 轮完成 {}ms asr='{text}' reply='{reply}' actions={acted} {speak}",
         now_ms().saturating_sub(t0)
     );
+}
+
+/// 唤醒门控：ASR 文本 → 有效对话文本。
+///
+/// - `Ack`：播固定应答并返回 `None`（不进 LLM，不跑意图）；
+/// - `Ignore`：窗外未命中 → 静默，返回 `None`（不 LLM、不 TTS）；
+/// - `Command`：唤醒词已剥离，返回命令文本；
+/// - `FollowUp`：跟进窗内，返回原文本。
+fn rr3_wake_gate(bus: &Arc<Mutex<Bus>>, text: &str) -> Option<String> {
+    let now = now_ms();
+    let last = rr3_last_wake();
+    match rr3_wake_decide(text, &S3_WAKE_CFG, now, last) {
+        Rr3WakeAction::Ignore => {
+            rr3_turn_end(bus, &format!("未命中唤醒词，静默（ASR='{text}'）"));
+            None
+        }
+        Rr3WakeAction::Ack => {
+            rr3_mark_wake(now);
+            let ack = S3_WAKE_CFG.ack.clone();
+            let speak = rr3_speak_stage(bus, &ack);
+            println!("[dialog] 唤醒应答 asr='{text}' ack='{ack}' {speak}");
+            None
+        }
+        Rr3WakeAction::Command(cmd) => {
+            rr3_mark_wake(now);
+            println!("[dialog] 唤醒命中，命令='{cmd}'");
+            Some(cmd)
+        }
+        Rr3WakeAction::FollowUp => {
+            rr3_mark_wake(now);
+            Some(text.to_string())
+        }
+    }
+}
+
+/// 最近一次唤醒命中时刻（锁中毒不失效，同 `lock_bus` 纪律）。
+fn rr3_last_wake() -> Option<u64> {
+    *LAST_WAKE_MS.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// 记一次唤醒命中（跟进窗起点）。
+fn rr3_mark_wake(now: u64) {
+    *LAST_WAKE_MS.lock().unwrap_or_else(|p| p.into_inner()) = Some(now);
 }
 
 /// 弃轮收尾：表情回落 idle 并打印点名（不 panic，板其余功能照常）。
