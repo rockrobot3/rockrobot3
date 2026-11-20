@@ -67,58 +67,41 @@ fn rr3_role_row(table: &mut Rr3RoleTable, r: &toml::Table) {
     table.roles.insert(name.to_string(), rr3_role_entry(r));
 }
 
+/// 角色表字段读取（缺键/错型回落空串）。
+fn rr3_role_field(r: &toml::Table, key: &str) -> String {
+    r.get(key).and_then(Value::as_str).unwrap_or("").to_string()
+}
+
+/// 角色表字符串数组读取（缺键/错型回落空表，非串项跳过）。
+fn rr3_role_list(r: &toml::Table, key: &str) -> Vec<String> {
+    r.get(key)
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 角色表布尔位读取（缺键/错型回落 false）。
+fn rr3_role_bool(r: &toml::Table, key: &str) -> bool {
+    r.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
 /// 单条 `[[role]]` 的登记面：缺键按空串/false 收（逐字段次序同旧内联构造）。
 fn rr3_role_entry(r: &toml::Table) -> Rr3RoleEntry {
     Rr3RoleEntry {
-        slot: r
-            .get("slot")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        kind: r
-            .get("kind")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        iface: r
-            .get("iface")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        requires: r
-            .get("requires")
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default(),
-        derives: r
-            .get("derives")
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default(),
-        direction: r
-            .get("direction")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        droppable: r.get("droppable").and_then(Value::as_bool).unwrap_or(false),
-        input_only_ok: r
-            .get("input_only_ok")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-        per_instance: r
-            .get("per_instance")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
+        slot: rr3_role_field(r, "slot"),
+        kind: rr3_role_field(r, "kind"),
+        iface: rr3_role_field(r, "iface"),
+        requires: rr3_role_list(r, "requires"),
+        derives: rr3_role_list(r, "derives"),
+        direction: rr3_role_field(r, "direction"),
+        droppable: rr3_role_bool(r, "droppable"),
+        input_only_ok: rr3_role_bool(r, "input_only_ok"),
+        per_instance: rr3_role_bool(r, "per_instance"),
     }
 }
 
