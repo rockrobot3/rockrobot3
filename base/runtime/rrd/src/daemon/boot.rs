@@ -80,15 +80,15 @@ fn rr3_boot_profile(cfg: &RrdConfig, profile: &std::path::Path) -> Result<Rr3Dae
         ));
     }
     rr3_boot_notes(&boot);
-    let (degrade, degraded, predegraded) = rr3_boot_degrade(&boot);
+    let d = rr3_boot_degrade(&boot);
     rr3_boot_freeze(profile, &contracts, &wiring, &boot)?;
     Ok(Rr3DaemonBoot {
         manifests: boot.manifests,
-        degraded,
-        degrade,
+        degraded: d.missing_slots,
+        degrade: d.notes,
         hal_bindings: boot.hal_bindings,
         axis_state: boot.axis_state,
-        predegraded,
+        predegraded: d.broken,
         hal_backend: boot.hal_backend,
         audio_backend: boot.audio_backend,
         servo_backend: boot.servo_backend,
@@ -98,16 +98,20 @@ fn rr3_boot_profile(cfg: &RrdConfig, profile: &std::path::Path) -> Result<Rr3Dae
     })
 }
 
+/// 降级派生面：原因表（单源）+ 缺格/装配缺项两集合的投影。
+struct Rr3BootDegrade {
+    /// （模块, 类别, 点名文案）——启动摘要与 `ctl.health` 读回同一份
+    notes: Vec<(String, String, String)>,
+    /// 缺格模块（boot 序跳过这些名字）
+    missing_slots: BTreeSet<String>,
+    /// 装配缺项模块（注册入表即 Degraded）
+    broken: BTreeSet<String>,
+}
+
 /// 降级原因单源（模块, 类别, 点名文案）：缺格与装配缺项在此合流，
 /// degraded/predegraded 两集合由它投影，`ctl.health` 读回同一份。
-fn rr3_boot_degrade(
-    boot: &crate::profile::Rr3ProfileBoot,
-) -> (
-    Vec<(String, String, String)>,
-    BTreeSet<String>,
-    BTreeSet<String>,
-) {
-    let degrade: Vec<(String, String, String)> = boot
+fn rr3_boot_degrade(boot: &crate::profile::Rr3ProfileBoot) -> Rr3BootDegrade {
+    let notes: Vec<(String, String, String)> = boot
         .missing
         .iter()
         .map(|(m, slot)| (m.clone(), "missing_slot".to_string(), slot.clone()))
@@ -117,17 +121,21 @@ fn rr3_boot_degrade(
                 .map(|(m, msg)| (m.clone(), "assemble_broken".to_string(), msg.clone())),
         )
         .collect();
-    let degraded = degrade
+    let missing_slots = notes
         .iter()
         .filter(|(_, kind, _)| kind == "missing_slot")
         .map(|(m, _, _)| m.clone())
         .collect();
-    let predegraded = degrade
+    let broken = notes
         .iter()
         .filter(|(_, kind, _)| kind == "assemble_broken")
         .map(|(m, _, _)| m.clone())
         .collect();
-    (degrade, degraded, predegraded)
+    Rr3BootDegrade {
+        notes,
+        missing_slots,
+        broken,
+    }
 }
 
 /// 装配快照与契约记账定格（`ctl.wiring`/`ctl.contracts` 读面源；首份胜出）：
