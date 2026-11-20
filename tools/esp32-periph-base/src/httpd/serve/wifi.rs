@@ -161,8 +161,7 @@ pub(super) unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWrit
     esp_wifi_disconnect();
     let mut apply_ok = wifi_sta_set_cred(ssid.as_bytes(), pass.as_bytes()) == ESP_OK;
     apply_ok = apply_ok && esp_wifi_connect() == ESP_OK;
-    let applied = apply_ok && wifi_sta_wait_conn();
-    if applied {
+    if apply_ok && wifi_sta_wait_conn() {
         return Rr3WifiWriteResult {
             ok: true,
             connected: true,
@@ -170,7 +169,12 @@ pub(super) unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWrit
             stage: "apply",
         };
     }
-    // 新凭据未连——回退旧值（Some→写回；None→erase；cred 模块幂等语义在案）
+    wifi_revert(old)
+}
+
+/// 回退旧凭据（Some→写回；None→erase 回原空态）并重连；回退写败点名 stage=revert，
+/// 写成功后 apply 旧值（原空态停在断态，不 connect）并如实回 connected。
+unsafe fn wifi_revert(old: Option<crate::cred::Rr3Cred>) -> Rr3WifiWriteResult {
     let revert_ok = old.as_ref().map_or_else(
         || crate::cred::rr3_cred_erase().is_ok(),
         |c| crate::cred::rr3_cred_write(&c.ssid, c.pass()).is_ok(),
@@ -183,7 +187,6 @@ pub(super) unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWrit
             stage: "revert",
         };
     };
-    // 回退写成功——apply 旧凭据重连（原空态＝停在断态，不 connect）
     old.as_ref().map_or_else(
         || {
             esp_wifi_disconnect();
