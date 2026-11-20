@@ -352,6 +352,25 @@ def release_problems(text, rel):
     for job in ("build", "build-riscv64", "merge", "firmware"):
         if job not in jobs:
             bad.append(f"{rel} 缺发布 job {job}（发布面被削）")
+    build = jobs.get("build")
+    if build is not None:
+        joined = "\n".join(build)
+        for needle in (
+            "arch: amd64",
+            "arch: arm64",
+            "platform: linux/amd64",
+            "platform: linux/arm64",
+            "ubuntu-24.04-arm",
+        ):
+            if needle not in joined:
+                bad.append(f"{rel} build 矩阵缺 {needle}（原生发布腿缩水）")
+    riscv = jobs.get("build-riscv64")
+    if riscv is not None:
+        joined = "\n".join(riscv)
+        if "build-riscv-image.sh" not in joined:
+            bad.append(f"{rel} build-riscv64 未复用 build-riscv-image.sh（发布路径分叉）")
+        if "docker push" not in joined:
+            bad.append(f"{rel} build-riscv64 缺 docker push")
     merge = jobs.get("merge")
     if merge is not None:
         needs = needs_of(merge)
@@ -371,6 +390,10 @@ def release_problems(text, rel):
             bad.append(f"{rel} firmware 缺 packages: write（无法推 ghcr）")
         if "xtensa-esp32s3-espidf" not in joined:
             bad.append(f"{rel} firmware 未构建 S3 目标（双芯片覆盖缺失）")
+        if "MCU=esp32s3" not in joined or "--features esp32s3" not in joined:
+            bad.append(f"{rel} firmware S3 档缺 MCU/feature（芯片档漂移）")
+        if "rr3-periph-base-esp32-dev.elf" not in joined:
+            bad.append(f"{rel} firmware 缺 classic ELF 资产/推送")
         if "rr3-periph-base-esp32s3-dev.elf" not in joined:
             bad.append(f"{rel} firmware 缺 S3 ELF 资产/推送（双芯片覆盖缺失）")
     return bad
@@ -517,6 +540,10 @@ def self_test():
             "concurrency:\n  group: p\n  cancel-in-progress: true\njobs:\n"
             "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
             "    steps:\n      - uses: actions/checkout@v7\n"
+            "  build:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    strategy:\n      matrix:\n        include:\n"
+            "          - arch: amd64\n            platform: linux/amd64\n"
+            "    steps:\n      - uses: actions/checkout@v7\n"
             "  firmware:\n    if: startsWith(github.ref, 'refs/tags/v')\n"
             "    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
             "    steps:\n      - run: echo classic\n",
@@ -585,6 +612,7 @@ def self_test():
         ("芯片验证步骤缺失被抓", any("验证步骤" in b for b in bad)),
         ("riscv 镜像腿缺失被抓", any("缺 job riscv-image" in b for b in bad)),
         ("发布面缺腿被抓", any("缺发布 job" in b for b in bad)),
+        ("发布矩阵缺 arm64 被抓", any("build 矩阵缺" in b for b in bad)),
         ("门禁 job 缩水被抓", any("缺 job conventions" in b for b in bad)),
         ("固件缺 S3 被抓", any("未构建 S3 目标" in b for b in bad)),
         ("制品面缺名被抓", any("未推 rockrobot3-buildroot" in b for b in bad)),
