@@ -9,37 +9,9 @@
 
 use serde_json::Value;
 
-/// 唤醒词段的缺省应答（`[rr3-brain.wake].ack` 缺键回落）：用户口径
-/// "我在呢 / 有什么可以帮您" 的合并版，一句话即可（TTS 合成一次）。
-pub(crate) const RR3_WAKE_ACK_DEFAULT: &str = "我在呢，有什么可以帮您？";
-/// 唤醒后跟进窗缺省（`followup_ms` 缺键回落）：唤醒应答后 15s 内继续说话
-/// 不必重复唤醒词；每接受一轮即续窗（对话式追问）。
-pub(crate) const RR3_WAKE_FOLLOWUP_DEFAULT_MS: u64 = 15_000;
-
-/// 唤醒词配置（`[rr3-brain.wake]` 段，2026-10-31）：**ASR 文本前缀匹配**，
-/// 不是本地 KWS（仓内无端侧关键词引擎；云端 ASR 已在 VAD 起音后必跑）。
-/// 语义：命中任一短语（去标点/空白归一后的前缀）→ 唤醒；命中且无后续文本 →
-/// 回固定应答（不进 LLM）；命中带后续文本 → 后续文本进 LLM；未命中但在
-/// 唤醒后的跟进窗内 → 原文本进 LLM；窗外 → 静默丢弃（不 LLM、不 TTS）。
-/// `enable=false`（缺省）= 关闭门控，行为与未加唤醒词逐点等价。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Rr3WakeCfg {
-    pub(crate) enable: bool,
-    pub(crate) phrases: Vec<String>,
-    pub(crate) ack: String,
-    pub(crate) followup_ms: u64,
-}
-
-impl Default for Rr3WakeCfg {
-    fn default() -> Self {
-        Self {
-            enable: false,
-            phrases: vec!["你好洛克".to_string()],
-            ack: RR3_WAKE_ACK_DEFAULT.to_string(),
-            followup_ms: RR3_WAKE_FOLLOWUP_DEFAULT_MS,
-        }
-    }
-}
+/// 唤醒词配置结构由机制核 [`rr_intent_mech::wake`] 持有（Pi/S3 同源）；
+/// 本件只保留 `[rr3-brain.wake]` 段的解析与缺省应用。
+pub(crate) use rr_intent_mech::wake::Rr3WakeCfg;
 
 /// `[rr3-brain.wake]` 段解析（可选段：缺段 = 关闭门控，缺省值见 [`Rr3WakeCfg`]；
 /// 类型错/短语表空/应答空一律 Err 点名——配置劣化不静默收编）。
