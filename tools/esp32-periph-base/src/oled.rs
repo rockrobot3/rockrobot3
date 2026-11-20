@@ -52,6 +52,35 @@ fn i2c_write_retry(i2c: &mut impl Rr3I2cPort, addr: u8, bytes: &[u8]) -> Result<
     Err(format!("（重试 {I2C_RETRY} 次后）{last}"))
 }
 
+/// 丢拍重同步（运行期/启动期同机理）：打 9 个 SCL 时钟走完从机位计数器；只有 SDA
+/// 已释放才补 STOP——SDA 仍低 = 模块未上电/硬短/线松，硬打 STOP 是对着被拉住的线
+/// 灌电流（真板可触发 BOD 复位）。
+///
+/// # Safety
+///
+/// 两脚须已切到 GPIO 功能，且无并发 I2C 事务（运行面持总线锁，启动期单线程且驱动未装）。
+unsafe fn i2c_clock9(sda: i32, scl: i32) -> bool {
+    use esp_idf_sys as sys;
+    for _ in 0..9 {
+        sys::gpio_set_level(scl, 0);
+        sys::esp_rom_delay_us(5);
+        sys::gpio_set_level(scl, 1);
+        sys::esp_rom_delay_us(5);
+    }
+    if sys::gpio_get_level(sda) == 0 {
+        return false;
+    }
+    sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT_OUTPUT_OD);
+    sys::gpio_set_level(sda, 0);
+    sys::esp_rom_delay_us(5);
+    sys::gpio_set_level(scl, 1);
+    sys::esp_rom_delay_us(5);
+    sys::gpio_set_level(sda, 1);
+    sys::esp_rom_delay_us(5);
+    sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT);
+    true
+}
+
 /// I2C 总线自愈（**运行期恢复，与启动期 [`i2c_bus_unstick`] 同机理**）：SSD1306 在
 /// 某笔事务中途丢拍（总线噪声/轨压瞬降）时会把自己锁在"等后续时钟"状态——此后主机
 /// 每次 START 它一律不应答（真板实录：8 页胶囊眼密集页写中一笔数据段失败后，其后
@@ -95,30 +124,12 @@ pub(crate) fn i2c_bus_recover(force: bool) -> bool {
         sys::esp_rom_delay_us(5);
         let stuck = sys::gpio_get_level(sda) == 0;
         if force || stuck {
-            // SDA 被从机拉低 = 丢拍锁死：9 个时钟走完从机位计数器 + STOP 释放。
-            // force 但 SDA 高 = 半途态：同样打 9 时钟 + STOP 把从机推回 idle。
+            // SDA 被从机拉低 = 丢拍锁死；force 但 SDA 高 = 半途态。两者同打 9 时钟 + STOP。
             if stuck {
                 println!("[periph] I2C 自愈：SDA 被从机拉低（丢拍锁死），打 9 时钟 + STOP");
             }
-            for _ in 0..9 {
-                sys::gpio_set_level(scl, 0);
-                sys::esp_rom_delay_us(5);
-                sys::gpio_set_level(scl, 1);
-                sys::esp_rom_delay_us(5);
-            }
-            // **护栏（批N41 件二）**：9 时钟后 SDA 仍低 → 模块未上电/硬短/线松，
-            // 不把 SDA 驱高打 STOP（对着被拉住的线硬灌电流，真板可触发 BOD 复位）。
-            clear = sys::gpio_get_level(sda) != 0;
-            if clear {
-                sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT_OUTPUT_OD);
-                sys::gpio_set_level(sda, 0);
-                sys::esp_rom_delay_us(5);
-                sys::gpio_set_level(scl, 1);
-                sys::esp_rom_delay_us(5);
-                sys::gpio_set_level(sda, 1);
-                sys::esp_rom_delay_us(5);
-                sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT);
-            } else {
+            clear = i2c_clock9(sda, scl);
+            if !clear {
                 eprintln!(
                     "[periph] I2C 自愈：9 时钟后 SDA 仍低（疑似模块未上电/硬短/线松），不硬打 STOP"
                 );
@@ -165,30 +176,13 @@ pub(crate) unsafe fn i2c_bus_unstick() -> bool {
     sys::gpio_set_level(scl, 1);
     sys::esp_rom_delay_us(5);
     if sys::gpio_get_level(sda) == 0 {
-        // SDA 被从机拉低 = 卡死：走 9 个时钟
-        for _ in 0..9 {
-            sys::gpio_set_level(scl, 0);
-            sys::esp_rom_delay_us(5);
-            sys::gpio_set_level(scl, 1);
-            sys::esp_rom_delay_us(5);
-        }
-        // 护栏：9 时钟后仍低 → 模块未上电/硬短，不硬打 STOP（同运行面）。
-        let released = sys::gpio_get_level(sda) != 0;
-        if !released {
+        // SDA 被从机拉低 = 卡死：9 时钟 + STOP；未释放则如实点名、不硬打。
+        if !i2c_clock9(sda, scl) {
             eprintln!(
                 "[periph] I2C 总线解卡：9 时钟后 SDA 仍低（疑似模块未上电/硬短/线松），不硬打 STOP"
             );
             return false;
         }
-        // 补一个 STOP：SCL 高时 SDA 由低→高
-        sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT_OUTPUT_OD);
-        sys::gpio_set_level(sda, 0);
-        sys::esp_rom_delay_us(5);
-        sys::gpio_set_level(scl, 1);
-        sys::esp_rom_delay_us(5);
-        sys::gpio_set_level(sda, 1);
-        sys::esp_rom_delay_us(5);
-        sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT);
         println!("[periph] I2C 总线解卡：SDA 曾被拉低，已发 9 时钟 + STOP");
     }
     true
