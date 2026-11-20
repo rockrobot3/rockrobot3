@@ -329,16 +329,15 @@ impl Rr3BrainDispatcher {
 
     /// 唤醒门控 + LLM 段：命中唤醒 → 固定应答/命令进 LLM；窗外未命中 → 静默
     /// 丢弃（None）；窗内未命中 → 追问续轮。`enable=false` 时恒 FollowUp。
-    fn rr3_turn_reply<B: Rr3TurnBus>(
+    /// 唤醒门控段（自 [`rr3_turn_reply`] 抽出）：命中 → 固定应答/命令进 LLM；
+    /// 窗外未命中 → 静默丢弃；窗内未命中 → 追问续轮。`enable=false` 恒 FollowUp。
+    /// 返回 (LLM 输入, 固定应答文本, 是否唤醒应答)；None = 本轮回声都不出。
+    fn rr3_wake_gate(
         &mut self,
-        bus: &B,
         trace: u64,
         user_text: &str,
         asr_cost_ms: u128,
-    ) -> Option<Rr3TurnReply> {
-        // 唤醒门控（2026-10-31）：命中 → 固定应答/命令进 LLM；窗外未命中 → 静默
-        // 丢弃（不 LLM、不 TTS，用户听不到任何回声）；窗内未命中 → 追问续轮。
-        // `enable=false` 时 `rr3_wake_decide` 恒 FollowUp（既有行为逐点等价）。
+    ) -> Option<(Option<String>, String, bool)> {
         let now = self.tb.rr3_now_ms();
         let mut llm_input: Option<String> = None;
         let mut reply_text = String::new();
@@ -369,6 +368,18 @@ impl Rr3BrainDispatcher {
                 llm_input = Some(user_text.to_string());
             }
         }
+        Some((llm_input, reply_text, is_wake_ack))
+    }
+
+    fn rr3_turn_reply<B: Rr3TurnBus>(
+        &mut self,
+        bus: &B,
+        trace: u64,
+        user_text: &str,
+        asr_cost_ms: u128,
+    ) -> Option<Rr3TurnReply> {
+        let (llm_input, mut reply_text, is_wake_ack) =
+            self.rr3_wake_gate(trace, user_text, asr_cost_ms)?;
         let mut llm_cost_ms = "-".to_string();
         if let Some(input) = llm_input {
             let llm_started = Instant::now();
