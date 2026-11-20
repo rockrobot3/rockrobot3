@@ -55,23 +55,19 @@
 //! 缓冲 ≤512B＋`esp_netif_ip_info_t` ~16B 栈上临时——16KB 栈富余；事务不新增
 //! 常驻堆。
 
-use std::ffi::CString;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
 
 use esp_idf_sys::{
     esp_event_loop_create_default, esp_netif_create_default_wifi_ap,
     esp_netif_create_default_wifi_sta, esp_netif_get_ip_info, esp_netif_init, esp_netif_ip_info_t,
     esp_netif_t, esp_restart, esp_wifi_connect, esp_wifi_disconnect, esp_wifi_init,
     esp_wifi_set_config, esp_wifi_set_mode, esp_wifi_start, g_wifi_default_wpa_crypto_funcs,
-    g_wifi_osi_funcs, http_method_HTTP_GET, http_method_HTTP_POST, httpd_config_t,
-    httpd_err_code_t, httpd_err_code_t_HTTPD_400_BAD_REQUEST,
-    httpd_err_code_t_HTTPD_401_UNAUTHORIZED, httpd_err_code_t_HTTPD_404_NOT_FOUND, httpd_handle_t,
-    httpd_register_uri_handler, httpd_req_get_hdr_value_str, httpd_req_recv, httpd_req_t,
-    httpd_resp_send, httpd_resp_send_err, httpd_resp_set_type, httpd_start, httpd_uri_t,
-    nvs_flash_init, wifi_auth_mode_t_WIFI_AUTH_WPA2_PSK, wifi_config_t, wifi_init_config_t,
-    wifi_interface_t_WIFI_IF_AP, wifi_interface_t_WIFI_IF_STA, wifi_mode_t_WIFI_MODE_APSTA, ESP_OK,
-    WIFI_INIT_CONFIG_MAGIC,
+    g_wifi_osi_funcs, http_method_HTTP_GET, http_method_HTTP_POST, httpd_err_code_t,
+    httpd_err_code_t_HTTPD_400_BAD_REQUEST, httpd_err_code_t_HTTPD_401_UNAUTHORIZED,
+    httpd_err_code_t_HTTPD_404_NOT_FOUND, httpd_req_get_hdr_value_str, httpd_req_recv, httpd_req_t,
+    httpd_resp_send, httpd_resp_send_err, httpd_resp_set_type, wifi_auth_mode_t_WIFI_AUTH_WPA2_PSK,
+    wifi_config_t, wifi_init_config_t, wifi_interface_t_WIFI_IF_AP, wifi_interface_t_WIFI_IF_STA,
+    wifi_mode_t_WIFI_MODE_APSTA, ESP_OK, WIFI_INIT_CONFIG_MAGIC,
 };
 
 use rr_ipc::Rr3BoardBindings;
