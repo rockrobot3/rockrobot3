@@ -128,42 +128,37 @@ impl Board {
 
     /// 收一行（半行超时丢弃；'\\r' 剥离；超长吞尾）。
     fn read_line(&mut self, first: u8) -> Result<String, String> {
-        let mut buf: Vec<u8> = Vec::with_capacity(LINE_MAX);
         if first == b'\n' {
             return Ok(String::new());
         }
+        let mut buf: Vec<u8> = Vec::with_capacity(LINE_MAX);
         buf.push(first);
         let mut idle = 0u32;
         loop {
             let mut byte = [0u8; 1];
-            match self.uart.rr3_read_timeout(&mut byte, LINE_BYTE_TIMEOUT_MS) {
-                Ok(0) => {
-                    idle += 1;
-                    if idle >= 2 {
-                        return Err("line timeout（半行无进展丢弃）".into());
-                    }
-                    continue;
-                }
-                Ok(_) => {
-                    idle = 0;
-                    match byte[0] {
-                        b'\n' => {
-                            while matches!(buf.last(), Some(b'\r')) {
-                                buf.pop();
-                            }
-                            return Ok(String::from_utf8_lossy(&buf).into_owned());
-                        }
-                        b => {
-                            if buf.len() >= LINE_MAX {
-                                self.drain_line_tail();
-                                return Err("line too long".into());
-                            }
-                            buf.push(b);
-                        }
-                    }
-                }
+            let n = match self.uart.rr3_read_timeout(&mut byte, LINE_BYTE_TIMEOUT_MS) {
+                Ok(n) => n,
                 Err(e) => return Err(format!("uart read 失败: {e}")),
+            };
+            if n == 0 {
+                idle += 1;
+                if idle >= 2 {
+                    return Err("line timeout（半行无进展丢弃）".into());
+                }
+                continue;
             }
+            idle = 0;
+            if byte[0] == b'\n' {
+                while matches!(buf.last(), Some(b'\r')) {
+                    buf.pop();
+                }
+                return Ok(String::from_utf8_lossy(&buf).into_owned());
+            }
+            if buf.len() >= LINE_MAX {
+                self.drain_line_tail();
+                return Err("line too long".into());
+            }
+            buf.push(byte[0]);
         }
     }
 
