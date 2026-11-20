@@ -4,7 +4,7 @@
   "cc_max_fn": 11,
   "fn_over_max": 0,
   "fn_over60_max": 0,
-  "fn_over50_max": 11,
+  "fn_over50_max": 10,
   "long_names_max": 0,
   "long_sleep_max": 0,
   "unwrap_max": 60

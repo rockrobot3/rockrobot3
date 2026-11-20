@@ -161,34 +161,59 @@ fn rr3_serve_frame(
 
 /// 三个上行方法。RPC 解析失败一律回 Invalid——Task 6 已保证解析器不产别的码，
 /// 这里不重建 id→code 的映射，避免第二套真值。
+/// 上行解析（自 [`rr3_serve_request`] 抽出）：坏帧回 Invalid 并 Keep。
+/// None = 已应答，调用方直接按 Keep 收尾。
+fn rr3_req_or_reply(
+    out: &Arc<Mutex<UnixStream>>,
+    me: &Rr3Peer,
+    body: &[u8],
+) -> Option<Rr3RpcRequest> {
+    rr3_rpc_parse(body)
+        .map_err(|(_, msg)| {
+            rr3_reply_err(
+                out,
+                me,
+                rr3_best_effort_id(body),
+                Rr3StatusCode::Invalid,
+                &msg,
+            )
+        })
+        .ok()
+}
+
+/// 已注册连接的错向请求（重复注册 / rr3.ctl.*）：回错误帧、连接保持。
+/// 拒绝口径按方法显式选择，不随调用点漂移。
+fn rr3_reply_misroute(
+    out: &Arc<Mutex<UnixStream>>,
+    me: &Rr3Peer,
+    id: u64,
+    method: Rr3RpcMethod,
+) -> Rr3Flow {
+    let (status, msg) = match method {
+        Rr3RpcMethod::Register => (
+            Rr3StatusCode::Invalid,
+            "该连接已注册，拒绝重复 rr3.register",
+        ),
+        _ => (
+            Rr3StatusCode::Permission,
+            "rr3.ctl.* 只对未注册的控制连接开放，模块请走 rr3.register / rr3.heartbeat",
+        ),
+    };
+    rr3_reply_err(out, me, id, status, msg);
+    Rr3Flow::Keep
+}
+
 fn rr3_serve_request(
     out: &Arc<Mutex<UnixStream>>,
     ctx: &Rr3ConnCtx,
     me: &Rr3Peer,
     body: &[u8],
 ) -> Result<Rr3Flow, String> {
-    let Ok(req) = rr3_rpc_parse(body).map_err(|(_, msg)| {
-        rr3_reply_err(
-            out,
-            me,
-            rr3_best_effort_id(body),
-            Rr3StatusCode::Invalid,
-            &msg,
-        )
-    }) else {
+    let Some(req) = rr3_req_or_reply(out, me, body) else {
         return Ok(Rr3Flow::Keep);
     };
     match req.method {
-        Rr3RpcMethod::Register => {
-            rr3_reply_err(
-                out,
-                me,
-                req.id,
-                Rr3StatusCode::Invalid,
-                "该连接已注册，拒绝重复 rr3.register",
-            );
-            Ok(Rr3Flow::Keep)
-        }
+        Rr3RpcMethod::Register => rr3_reply_misroute(out, me, req.id, req.method),
         // ADR-0010：rr3.ctl.* 只对未注册的控制连接开放（握手分流）；已注册模块连接
         // 上行一律拒——回错误帧不断连，与 src_task 伪造同一口径（一次笔误不掉线）。
         // 显式 OR 臂而非 is_ctl 守卫：带守卫的臂不计入穷尽性，新增方法时这里必须表态。
@@ -200,16 +225,7 @@ fn rr3_serve_request(
         | Rr3RpcMethod::CtlReboot
         | Rr3RpcMethod::CtlWiring
         | Rr3RpcMethod::CtlContracts
-        | Rr3RpcMethod::CtlDomainSet => {
-            rr3_reply_err(
-                out,
-                me,
-                req.id,
-                Rr3StatusCode::Permission,
-                "rr3.ctl.* 只对未注册的控制连接开放，模块请走 rr3.register / rr3.heartbeat",
-            );
-            Ok(Rr3Flow::Keep)
-        }
+        | Rr3RpcMethod::CtlDomainSet => rr3_reply_misroute(out, me, req.id, req.method),
         Rr3RpcMethod::Heartbeat => beat::rr3_beat_handle(out, ctx, me, req.id, &req.params),
         Rr3RpcMethod::Unregister => {
             // 主动退场 ≠ 崩溃：直接移出在册表，不走 restart_policy。
