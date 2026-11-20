@@ -20,6 +20,38 @@ use crate::profile_pins::{rr3_pin_capabilities, rr3_pin_occupancy};
 pub(super) type Rr3BootChecks = (Vec<String>, BTreeMap<String, String>, Vec<(String, String)>);
 
 #[allow(clippy::too_many_arguments)]
+/// 轨/域/接线闭合段（自 [`rr3_boot_checks`] 抽出）：⑥ 轨与域、⑦ 接线闭合。
+fn rr3_chain_checks(
+    profile: &Rr3Profile,
+    roles: &Rr3RoleTable,
+    devices: &Rr3DeviceTable,
+    wiring: &crate::wiring::Rr3Wiring,
+    pin_ids: &BTreeSet<String>,
+) -> Vec<String> {
+    // 装载期校验⑥（增补轮六 §5，后果 = 拒）：有轨、轨在册、绑定归一。
+    // ⑥-a pins.rail ∈ supplies.domain.names；⑥-b kind=power 角色必有在册轨
+    // （"none" 只对 signal 侧控制线合法）；⑥-c armed=true 必有测点且龄期上界 > 0
+    // （无龄期快照不得充当拒动依据，§19 Y-4）；⑥-d 域的三个绑定引用位写 pin_id
+    // 且能在 [pins] 取到（F-2：第二套语法一条校验都打不到）。
+    let domain_names: BTreeSet<String> = profile
+        .supplies
+        .domains
+        .iter()
+        .map(|d| d.name.clone())
+        .collect();
+    let mut errs = rr3_check_rails(profile, roles, &domain_names);
+    errs.extend(rr3_check_domains(profile));
+    // 装载期校验⑦（增补轮六 §5，后果 = 拒）：接线闭合与额定加总。⑦-a wire.signal
+    // ⊆ pin_id ∪ {vcc,gnd}；⑦-b wire.net ⊆ domains；⑦-d wire.mate ∈ devices.toml
+    // 的 mate 集；闭合面（feeds 位号集）在接线档装载时已判。额定加总两位（§22
+    // 实-4 拆分）装载期均不预支：⑦-c1（器件侧，判据对象 = devices.toml peak_ma）
+    // 的自检时点判已随 assembly.rs 额定加总族先行（批N5 件五）；⑦-c2（件侧）的
+    // 判据对象是件 demands 申报（n1-7 才立数据面），批N2 同链补。
+    let mate_set = devices.rr3_dev_mates();
+    errs.extend(wiring.rr3_wiring_check(pin_ids, &domain_names, &mate_set));
+    errs
+}
+
 pub(super) fn rr3_boot_checks(
     profile: &Rr3Profile,
     table: &Rr3SlotTable,
@@ -46,27 +78,7 @@ pub(super) fn rr3_boot_checks(
     // 装载期校验③-a/③-b/③-c + ④-b（增补轮六 §5，后果 = 拒；Task 5）：三个资源
     // 空间各自不双占 + 平台 conflicts 反推互斥（组名取自平台表，漏声明即红）。
     errs.extend(rr3_pin_occupancy(profile, platform, devices));
-    // 装载期校验⑥（增补轮六 §5，后果 = 拒）：有轨、轨在册、绑定归一。
-    // ⑥-a pins.rail ∈ supplies.domain.names；⑥-b kind=power 角色必有在册轨
-    // （"none" 只对 signal 侧控制线合法）；⑥-c armed=true 必有测点且龄期上界 > 0
-    // （无龄期快照不得充当拒动依据，§19 Y-4）；⑥-d 域的三个绑定引用位写 pin_id
-    // 且能在 [pins] 取到（F-2：第二套语法一条校验都打不到）。
-    let domain_names: BTreeSet<String> = profile
-        .supplies
-        .domains
-        .iter()
-        .map(|d| d.name.clone())
-        .collect();
-    errs.extend(rr3_check_rails(profile, roles, &domain_names));
-    errs.extend(rr3_check_domains(profile));
-    // 装载期校验⑦（增补轮六 §5，后果 = 拒）：接线闭合与额定加总。⑦-a wire.signal
-    // ⊆ pin_id ∪ {vcc,gnd}；⑦-b wire.net ⊆ domains；⑦-d wire.mate ∈ devices.toml
-    // 的 mate 集；闭合面（feeds 位号集）在接线档装载时已判。额定加总两位（§22
-    // 实-4 拆分）装载期均不预支：⑦-c1（器件侧，判据对象 = devices.toml peak_ma）
-    // 的自检时点判已随 assembly.rs 额定加总族先行（批N5 件五）；⑦-c2（件侧）的
-    // 判据对象是件 demands 申报（n1-7 才立数据面），批N2 同链补。
-    let mate_set = devices.rr3_dev_mates();
-    errs.extend(wiring.rr3_wiring_check(pin_ids, &domain_names, &mate_set));
+    errs.extend(rr3_chain_checks(profile, roles, devices, wiring, pin_ids));
 
     // 门 c 装载执法（批N2 本体 ⑨-c）：装配扫描一次两用——形状/注入缺错误进
     // assemble_broken（G4 该格 Degraded，不 fatal），校验⑨⑩ 的预算判据进 errs
