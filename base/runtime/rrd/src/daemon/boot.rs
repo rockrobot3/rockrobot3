@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use rr_ipc::Rr3UdsListener;
 use serde_json::json;
@@ -188,6 +189,47 @@ fn rr3_dash_opt(s: Option<&str>) -> &str {
     s.filter(|v| !v.is_empty()).unwrap_or("-")
 }
 
+/// 启动摘要与读面定格：一行日志 + `ctl.status`/`ctl.health` 的同源快照。
+/// 后门（--manifest）无装配单：tier/chip 显示 `-`，不造假值；降级表是未知而非
+/// 事实，读面须为 null（`[]` 会被误读成"确认无降级"）。
+pub(super) fn rr3_boot_announce(cfg: &RrdConfig, boot: &Rr3DaemonBoot) {
+    let profile = cfg
+        .profile
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "--manifest".to_string());
+    let backends = rr3_backend_summary(
+        &boot.hal_backend,
+        boot.audio_backend.as_deref(),
+        boot.servo_backend.as_deref(),
+        boot.display_backend.as_deref(),
+    );
+    // 缺格数按 (模块, 格位) 条目计——一格一条，不是"缺格模块数"：同一模块缺两格
+    // 是两个缺格，报文只数模块会把严重度报小。
+    let missing_slots = boot
+        .degrade
+        .iter()
+        .filter(|(_, kind, _)| kind == "missing_slot")
+        .count();
+    let summary = rr3_boot_summary(
+        &boot.tier,
+        &boot.chip,
+        &profile,
+        boot.manifests.len(),
+        boot.predegraded.len(),
+        missing_slots,
+        &backends,
+    );
+    rr3_log(&summary);
+    // 同一行定格给 ctl.status：远程诊断读一次应答即可看到装配面，不必翻日志。
+    let _ = crate::rr3_boot_summary_set(summary);
+    // 降级原因同刻定格给 ctl.health：卡在哪一格、为何不 spawn，一条应答看全。
+    // 只在装配单正门定格——后门未跑装配链，未知不冒充"无降级"。
+    if cfg.profile.is_some() {
+        let _ = crate::rr3_degrade_set(rr3_degrade_json(&boot.degrade));
+    }
+}
+
 /// 缺角色点名（校验②：该格缺能力，修装配单 [pins] 后重启解除）。
 fn rr3_note_roles(boot: &crate::profile::Rr3ProfileBoot) {
     for (slot, role) in &boot.role_missing {
@@ -223,7 +265,12 @@ fn rr3_note_broken(boot: &crate::profile::Rr3ProfileBoot) {
     }
 }
 
-/// rrd 自身日志落盘（§17 运维留痕）：打不开 = 点名退纯内存，不放大成可用性故障
+/// rrd 自身日志落盘（§17 运维留痕）：`<socket>.log/rrd.log` append——与 per-unit 文件
+/// 同目录同派生单点。常持句柄：每行一次写、累计超 2MiB 单代轮转（`log/sink.rs`）；
+/// 启动回填把崩溃前的文件尾置回环头，`rr3.ctl.logs` 重启后仍取得到崩溃前的最后若干行。
+/// 打不开 = 点名退纯内存，观测通道故障降级、不放大成可用性故障（supervisor stderr
+/// 回退 inherit 同一条纪律）。调用位置钉死在装配链 **之后**：--profile 路径此刻环容量
+/// 已定格（回填行数按真容量收）；--manifest 调试路径按 512 兜底收。
 pub(super) fn rr3_daemon_logs(cfg: &RrdConfig) {
     if let Err(e) = crate::rr3_log_sink_set(&cfg.socket) {
         rr3_log(&format!(
@@ -282,4 +329,31 @@ pub(super) fn rr3_daemon_counters(shared: &Arc<Mutex<RrdRegistry>>) -> Option<Pa
         ),
     }
     counters_path
+}
+
+/// 计数持久化装配（R26 批W3）：路径判定 → 启动加载 → 合并写闸门 → 异步落盘线程 →
+/// SIGTERM/SIGINT 强制 flush。env 只在启动解析一次，闸门全连接共享一份——每连接
+/// 各持一份等于把窗口放大 N 连接倍；未启用持久化 = 落盘线程 None，闸门照建
+/// （协议面不因存储缺席而分叉）。
+pub(super) fn rr3_ctr_wire(
+    shared: &Arc<Mutex<RrdRegistry>>,
+    t0: Instant,
+) -> (
+    Option<std::sync::mpsc::SyncSender<()>>,
+    Arc<Mutex<crate::counters::Rr3CountersGate>>,
+) {
+    let counters_path = rr3_daemon_counters(shared);
+    let counters_gate = Arc::new(Mutex::new(crate::counters::Rr3CountersGate::rr3_new(
+        crate::counters::rr3_flush_ms(),
+        crate::counters::rr3_flush_max(),
+    )));
+    // 落盘执行面单线程（快照 + fsync + 回执 gate），心跳 reader 只投非阻塞信号；
+    // 线程起不来也回 None 并点名（不回落同步写）。
+    let ctr_store = counters_path.clone().and_then(|p| {
+        crate::counters::rr3_ctr_store_spawn(shared.clone(), counters_gate.clone(), p, t0)
+    });
+    // 合并写窗口内未落盘的尾部计数靠关停路径兜底，缺了它 R26 的"最多丢 M 秒"
+    // 只在断电时成立、正常关停会白丢。
+    super::ctl::rr3_flush_on_term(shared.clone(), counters_path);
+    (ctr_store, counters_gate)
 }
