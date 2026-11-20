@@ -78,6 +78,10 @@ integration / platforms / publish / buildroot 的 job 名按 `REQUIRED_JOBS` 钉
 riscv64 发布镜像路径跑通（交叉产物 → `rr3-pack` stage → QEMU `docker build`
 → 文件面/运行面两段冒烟），不推送 ghcr；`publish.yml` 的 `build-riscv64` 腿
 复用同一脚本，tag/main 时推送并把 riscv64 并入三架构清单（merge 判据同步）。
+**发布面判据（2026-11-20 补）**：`build` 矩阵必须同时含 amd64/arm64 原生腿
+（`ubuntu-24.04-arm`），`build-riscv64` 必须复用 `build-riscv-image.sh` 并推送，
+`firmware` 的 S3 档须同时带目标三元组、`MCU=esp32s3` 与 `esp32s3` feature——
+原生腿/发布路径/芯片档任一缩水即红。
 **固件制品（同日）**：tag 发布的 `firmware` job 同批构建 classic 与 ESP32-S3 的
 release ELF——release asset 双件可无凭据下载，同时以 oras 推
 `ghcr.io/<owner>/rockrobot3-firmware:<tag>`（不可变标签，含 sha256 清单），
