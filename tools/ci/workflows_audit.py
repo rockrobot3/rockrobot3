@@ -14,6 +14,9 @@
 - platforms.yml 的五芯片矩阵腿（英特尔/AMD x86_64、瑞芯微 aarch64、进迭时空
   riscv64、esp32、esp32s3）缺任一即红，腿内验证脚本缺一即红；riscv-image
   构建门（腿 + 脚本）同样钉住：覆盖缩水不能只靠评审记得。
+- publish.yml 的发布面完整性：build / build-riscv64 / merge / firmware 四腿
+  必须在；merge.needs 必须等两条构建腿、合并命令必须含三架构；firmware 必须
+  带 packages: write 且推 rockrobot3-firmware——发布面缺腿只在 tag 暴露太晚。
 
 用法：
     workflows_audit.py [--root <仓根>]
@@ -337,6 +340,35 @@ def chip_problems(text, rel):
     return bad
 
 
+def release_problems(text, rel):
+    """发布面完整性：四腿齐、merge 等两条构建腿并覆盖三架构、固件进 ghcr。"""
+    if rel.name != "publish.yml":
+        return []
+    jobs = dict(jobs_of(text))
+    bad = []
+    for job in ("build", "build-riscv64", "merge", "firmware"):
+        if job not in jobs:
+            bad.append(f"{rel} 缺发布 job {job}（发布面被削）")
+    merge = jobs.get("merge")
+    if merge is not None:
+        needs = needs_of(merge)
+        for dep in ("build", "build-riscv64"):
+            if dep not in needs:
+                bad.append(f"{rel} merge.needs 缺 {dep}（少一条腿就合并 = 少架构发布）")
+        joined = "\n".join(merge)
+        for arch in ("amd64", "arm64", "riscv64"):
+            if f"-{arch}" not in joined:
+                bad.append(f"{rel} merge 未合并 {arch} 单架构镜像")
+    firmware = jobs.get("firmware")
+    if firmware is not None:
+        joined = "\n".join(firmware)
+        if "rockrobot3-firmware" not in joined:
+            bad.append(f"{rel} firmware 未推 rockrobot3-firmware（正式制品必须进 ghcr）")
+        if not re.search(r"^\s+packages:\s*write\s*$", joined, re.M):
+            bad.append(f"{rel} firmware 缺 packages: write（无法推 ghcr）")
+    return bad
+
+
 def workflow_problems(path, root):
     text = path.read_text(encoding="utf-8")
     rel = path.relative_to(root)
@@ -344,6 +376,7 @@ def workflow_problems(path, root):
     bad.extend(trigger_problems(text, rel))
     bad.extend(paths_ignore_problems(text, rel))
     bad.extend(chip_problems(text, rel))
+    bad.extend(release_problems(text, rel))
     if not re.search(r"^concurrency:\s*$", text, re.M):
         bad.append(f"{rel} 缺顶层 concurrency（同 ref 并发组）")
     if rel.name == "publish.yml" and not re.search(r"cancel-in-progress:\s*false", text):
@@ -468,6 +501,7 @@ def self_test():
         ("芯片 job 缺失被抓", any("缺 job esp32-gates" in b for b in bad)),
         ("芯片验证步骤缺失被抓", any("验证步骤" in b for b in bad)),
         ("riscv 镜像腿缺失被抓", any("缺 job riscv-image" in b for b in bad)),
+        ("发布面缺腿被抓", any("缺发布 job" in b for b in bad)),
         ("好例零误报", not any("good.yml" in b for b in bad)),
     ]
     for name, ok in cases:
@@ -488,7 +522,7 @@ def main():
     if bad:
         print(f"FAIL  流水线结构缺口 {len(bad)} 处（修法见 tools/ci/README.md）")
         return 1
-    print("PASS  流水线结构审计通过（并发组 / job 超时 / action 版本矩阵 / 权限与失败显形 / 五芯片覆盖）")
+    print("PASS  流水线结构审计通过（并发组 / job 超时 / action 版本矩阵 / 权限与失败显形 / 五芯片覆盖 / 发布面完整性）")
     return 0
 
 
