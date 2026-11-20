@@ -146,10 +146,13 @@ job 定义 ≤10；integration/platforms 的 push/PR 必须 `paths-ignore` 含 `
 `continue-on-error` 非 `false` 即红（掩码会把漂红巡检变成假绿）。`--self-test` 给
 好例 + 缺并发/缺超时/版本漂移/needs 悬空/needs 成环/push 无范围/工具链未钉版/
 缓存缺参/paths-ignore 缺失/publish 可取消/job 超限/continue-on-error/缺 permissions/
-芯片矩阵缩水/芯片 job 缺失/芯片验证步骤缺失/riscv 镜像腿缺失/发布面缺腿十八条
-负例，gate 的 `scripts` job 先自检后执法。**发布面完整性**：`publish.yml` 必须
-有 build / build-riscv64 / merge / firmware 四腿；merge 必须等两条构建腿、合并
-命令含三架构单镜像；firmware 必须带 `packages: write` 且推 `rockrobot3-firmware`。
+芯片矩阵缩水/芯片 job 缺失/芯片验证步骤缺失/riscv 镜像腿缺失/发布面缺腿/制品面缺名
+十九条负例，gate 的 `scripts` job 先自检后执法。**发布面完整性**：`publish.yml`
+必须有 build / build-riscv64 / merge / firmware 四腿；merge 必须等两条构建腿、
+合并命令含三架构单镜像；firmware 必须带 `packages: write` 且推
+`rockrobot3-firmware`。**制品托管**：`buildroot.yml` 的 `release` 腿必须 tag 门、
+登录 ghcr、带 `packages: write`，并以 oras 推 `rockrobot3-ota` 与
+`rockrobot3-buildroot`——正式制品只发 release asset 不算托管完成。
 
 ## 平台覆盖矩阵（2026-11-17 首立，按 workflow 事实源抄录）
 
@@ -162,15 +165,15 @@ job 定义 ≤10；integration/platforms 的 push/PR 必须 `paths-ignore` 含 `
 |---|---|---|---|---|---|
 | 英特尔 / AMD（x86_64） | gate + integration 全量；`cross` x86_64 | 原生直跑 `rrd` / `rr3-ctl` | `ipct003_dump` golden | `publish` linux/amd64 镜像 | 工控真板未上（A 轨） |
 | 瑞芯微 RK3566/RK3588（aarch64） | `cross` aarch64-musl 七件；`buildroot` 全量镜像（aarch64） | alpine arm64 容器真跑 | 容器内 `ipct003_dump` golden | buildroot 镜像 artifact；`publish` linux/arm64 | 实烧/串口 shell 不在 CI |
-| 进迭时空 K1/K3（riscv64） | `cross` riscv64-gnu 七件 | `qemu-riscv64` 真跑 | qemu 内 golden 对拍（第 5 路编译期 const 已接） | **无**（publish 仅 amd64/arm64） | 真板环境与发布面缺 |
+| 进迭时空 K1/K3（riscv64） | `cross` riscv64-gnu 七件；`riscv-image` QEMU 构建门 | `qemu-riscv64` 真跑 | qemu 内 golden 对拍（第 5 路编译期 const 已接） | `publish` linux/riscv64（并入三架构清单） | 真板环境缺（上板归板批次） |
 | ESP32（classic） | `esp32-gates`：periph-base / uart-echo / espidf-std / sentinel / act-sense | **无运行腿**（xtensa 无 qemu，运行归真板） | 编译期 const + `ipct003` 第④路 | tag release 固件 ELF（`firmware` job） | 真板运行证据不在 CI |
-| ESP32-S3 | `esp32-gates`：periph-base S3 / act-sense S3 | **无运行腿** | xtensa 编译期 | **无**（firmware 仅 classic） | 真板运行与发布面缺 |
+| ESP32-S3 | `esp32-gates`：periph-base S3 / act-sense S3 | **无运行腿** | xtensa 编译期 | tag release 固件 ELF（`firmware` 双芯片 + ghcr） | 真板运行证据不在 CI |
 | 宿主 Windows x86_64 | `host-windows`：workspace check + test；独立工程中性子集（`mkmodule` / `rr3-codegen` / `rrctl` / `rr3-pack`） | 原生 | 由测试面覆盖 | — | 依赖 UDS/termios/HAL 实现面的独立工程按平台缺省排除（理由在缺口④） |
 | 宿主 macOS | `host-macos`：workspace 全量测试 + 独立工程测试（单腿串行，续轮二十五合并——托管 macOS 执行位紧张时第二腿会被取消并染红整个 run） | 原生 | 由测试面覆盖 | — | esp 条件工程按门禁口径排除 |
 
-**已知缺口四条**（下一轮补腿对象，不冒充已覆盖）：① riscv64 无发布镜像；
-② S3 无固件 release 资产；③ 三块真板（esp32 / rock3 / spacemit）的运行证据不属 CI
-能力，归板上批次；④ Windows 独立工程门**部分收口**（续轮十六起，续轮十八扩面）：
+**已知缺口两条**（下一轮补腿对象，不冒充已覆盖）：① 三块真板（esp32 / rock3 /
+spacemit）的运行证据不属 CI 能力，归板上批次；② Windows 独立工程门**部分收口**
+（续轮十六起，续轮十八扩面）：
 已覆盖 4 个可跨平台编译的工程（`tools/mkmodule` / `tools/rr3-codegen` /
 `tools/rrctl` / `tools/rr3-pack`，Unix 专属动作各自 `cfg` 门控；rrctl 的 UDS
 查询在非 Unix 如实返回"仅 Unix 可用"）；
