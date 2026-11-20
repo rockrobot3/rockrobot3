@@ -76,13 +76,18 @@ pub(crate) fn rr3_sense_probe(cfg: &Rr3SenseConfig) -> Result<Rr3SenseProbe, Str
     Ok((source, cmd_tx, backend, open_cfg))
 }
 
-/// 反射环启用的后端门：无命令旁路即点名（仅 esp32 档承载）。
+/// 反射环启用的后端门：宿主（Linux/macOS）没有 ESP32 桥的命令旁路，pan 指令
+/// 走总线点名 `rr3-act/servo/command`；espidf 档无旁路才是真缺口，点名。
 fn rr3_reflex_warn(cfg: &Rr3SenseConfig, has_cmd: bool, backend: &str) {
-    if cfg.reflex.enable && !has_cmd {
-        eprintln!(
-            "rr3-sense: 反射环已启用但后端 {backend} 无命令旁路，转头指令无处可去（仅 esp32 档承载）"
-        );
+    if !cfg.reflex.enable || has_cmd {
+        return;
     }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    eprintln!("反射环: 后端 {backend} 无板侧命令旁路，pan 指令走总线 rr3-act/servo/command");
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    eprintln!(
+        "rr3-sense: 反射环已启用但后端 {backend} 无命令旁路，转头指令无处可去（仅 esp32 档承载）"
+    );
 }
 
 /// 模块全量运行期配置（自原 composite.rs 迁入，逐字）

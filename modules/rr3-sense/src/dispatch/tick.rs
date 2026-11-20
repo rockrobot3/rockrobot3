@@ -230,10 +230,21 @@ impl Rr3SenseDispatcher {
         let Some(target) = self.pending_pan.take() else {
             return;
         };
-        let Some(tx) = self.cmd_tx.as_ref() else {
-            return;
-        };
-        tx.rr3_cmd_push(Rr3PeriphCmd::ServoPan(target));
+        if let Some(tx) = self.cmd_tx.as_ref() {
+            tx.rr3_cmd_push(Rr3PeriphCmd::ServoPan(target));
+        } else {
+            // 宿主 Linux 档没有 ESP32 桥的命令旁路：走总线点名 rr3-act 的
+            // `rr3-act/servo/command`（W5-3 Pi 单板 DoA 转头）。短超时——反射
+            // 动作不能把采集拍拖长；失败如实点名，下一轮判向自然重试。
+            let args = serde_json::json!({ "pan": target });
+            if let Err(e) = bus.call(
+                "rr3-act/servo/command",
+                &args,
+                std::time::Duration::from_millis(200),
+            ) {
+                eprintln!("反射环: 总线下发 pan={target}° 失败: {e}");
+            }
+        }
         bus.counter_bump(RR3_REFLEX_PAN_CMDS_KEY, 1);
         eprintln!("反射环: 判停后下发 pan={target}°");
         // 点头示意（0.0.8 批）：pan 之后接一手势，时序量全在 config；
