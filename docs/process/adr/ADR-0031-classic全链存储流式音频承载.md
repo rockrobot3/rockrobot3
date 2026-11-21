@@ -76,6 +76,13 @@ TTS 回包与日志落存储**，不把整段数据常驻 RAM。本 ADR 只裁�
 ## 施工与验收
 
 - **W7-b1**：分区表/flash spool 机制；host 可测的边界/失败路径。
+- **W7-b1a（2026-11-21 落树）**：自定义分区表（classic 4MB：factory 0x2F0000 +
+  spool 1MB，nvs/phy 偏移不变）与独立固件 spool 分区后端；记录机制在
+  `rr-audio-mech::spool`——16B 头（magic/version/kind/seq/len/CRC32）、4KB 扇区
+  惰性擦除、顺序写/分块读、`finish` 写回逐字节对账；断电只留无头载荷，`load`
+  判无有效记录。host 单测覆盖越界、IO 失败、写回不一致、掉电与 CRC 损坏；CI
+  双芯片构建并核验 `partition-table.bin` 含 spool 条目。**尚未接 VAD/dialog**，
+  真板容量/擦除时延与写寿命在 W7-b4 记账。
 - **W7-b2**：TTS 4KB 流式收包 → I2S 环；不完整回包失败语义。
 - **W7-b3**：无 PSRAM VAD 小窗 + spool 写入；半双工与丢段计数。
 - **W7-b4**：classic 真板 30min soak；`[mem]` 阶段列与 Go/No-Go 入 0014/后续证据。

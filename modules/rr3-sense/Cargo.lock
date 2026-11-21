@@ -776,6 +776,9 @@ dependencies = [
 [[package]]
 name = "rr-audio-mech"
 version = "0.0.1"
+dependencies = [
+ "rr-ipc",
+]
 
 [[package]]
 name = "rr-bus-api"

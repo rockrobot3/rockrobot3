@@ -144,6 +144,18 @@ fn crc32_known_vectors() {
     );
 }
 
+/// 分段 CRC32 组合律：任意切点续算必须与整段一次算逐位一致（flash spool 依赖）。
+#[test]
+fn crc32_incremental_matches_oneshot() {
+    let data = b"RR3S-spool-payload-0123456789";
+    for cut in 0..=data.len() {
+        let split = rr3_crc32_update(rr3_crc32_init(), &data[..cut]);
+        let joined = rr3_crc32_final(rr3_crc32_update(split, &data[cut..]));
+        assert_eq!(joined, rr3_crc32(data), "切点 {cut} 的续算不一致");
+    }
+    assert_eq!(rr3_crc32_final(rr3_crc32_init()), 0, "空段收尾");
+}
+
 /// IPC-T-010：未知 flags 位不得报错（前向兼容）；已定义位组合正常解析
 #[test]
 fn header_ignores_unknown_flags() {

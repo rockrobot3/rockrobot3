@@ -139,6 +139,15 @@ else
   fail=1
 fi
 
+# ⑦g W7-b1a 分区表落地核验（ADR-0031）：两芯片共用 partitions.csv，S3 腿同样
+#     必须看到 spool 条目（跨芯片快速部署是本项目核心口径，不按芯片漂移）。
+if rr3_partition_has xtensa-esp32s3-espidf spool; then
+  echo "PASS  S3 分区表含 spool 条目（W7-b1a 存储承载）"
+else
+  echo "FAIL  S3 分区表未含 spool（查 sdkconfig.defaults CUSTOM/FILENAME 与 partitions.csv）" >&2
+  fail=1
+fi
+
 # ⑧ 纯逻辑单测编译面（同 classic 门 ⑧；xtensa 目标本机不可跑，--no-run 只验编译）
 # panic=abort 下测试 harness 必须显式 `-Zpanic_abort_tests`；RUSTFLAGS 会覆盖
 # config 的 target rustflags，故整条重写（与 [target.xtensa-esp32s3-espidf] 同值）。

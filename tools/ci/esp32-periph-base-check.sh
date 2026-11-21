@@ -166,6 +166,16 @@ else
   fail=1
 fi
 
+# ⑦g W7-b1a 分区表落地核验（ADR-0031）：spool 分区必须出现在构建产物的
+#     partition-table.bin 里。CONFIG_PARTITION_TABLE_CUSTOM 未生效时编译照绿，
+#     但板上没有 spool——配置漂移必须点名，不能靠烧录后才发现。
+if rr3_partition_has xtensa-esp32-espidf spool; then
+  echo "PASS  classic 分区表含 spool 条目（W7-b1a 存储承载）"
+else
+  echo "FAIL  classic 分区表未含 spool（查 sdkconfig.defaults CUSTOM/FILENAME 与 partitions.csv）" >&2
+  fail=1
+fi
+
 # ⑧ 纯逻辑单测编译面（批N13 件一：httpd 路由/漂移/JSON 形状单测；批N14 cred
 #    零回显契约单测；批N23 件一起 atoms/<名>/mech.rs 机制核单测——xtensa 目标
 #    本机不可跑，--no-run 只验测试码编译；xtensa 测试 harness 执行面归真板批）

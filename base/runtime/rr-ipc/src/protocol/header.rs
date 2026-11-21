@@ -316,12 +316,29 @@ impl Rr3Header {
 /// 与一次查表访存；11KB 分片的逐位计算在 240MHz 上是数百微秒级，代价可接受，换来
 /// 零表、零依赖、const 可求值（测试里可直接在编译期钉向量）。
 pub const fn rr3_crc32(bytes: &[u8]) -> u32 {
-    let mut crc: u32 = 0xFFFF_FFFF;
+    rr3_crc32_final(rr3_crc32_update(rr3_crc32_init(), bytes))
+}
+
+/// 分段 CRC32 初值：数据被切成多段（如 flash spool 分块写/读）时从这里起算。
+pub const fn rr3_crc32_init() -> u32 {
+    0xFFFF_FFFF
+}
+
+/// 分段 CRC32 续算：`crc` 是上一段的运行态（初值或上一次返回值），输出新运行态。
+///
+/// 运行态**不取反**；对外可见的 CRC 必须经 [`rr3_crc32_final`] 收尾。
+/// 组合律：`final(update(update(init, a), b)) == crc32(a ++ b)`（测试钉住）。
+pub const fn rr3_crc32_update(mut crc: u32, bytes: &[u8]) -> u32 {
     let mut i = 0;
     while i < bytes.len() {
         crc = rr3_crc_byte(crc, bytes[i]);
         i += 1;
     }
+    crc
+}
+
+/// 分段 CRC32 收尾（按 IEEE 802.3 取反）。
+pub const fn rr3_crc32_final(crc: u32) -> u32 {
     !crc
 }
 

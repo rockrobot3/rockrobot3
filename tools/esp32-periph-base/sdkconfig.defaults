@@ -16,3 +16,14 @@ CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 # FULL 档覆盖主流 CA（Let's Encrypt/DigiCert/Google/Amazon 等），Flash 代价 ~64 KB。
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+
+# classic 板载 4MB Flash：spool 分区表要落到 0x400000，构建期必须按 4MB 校验
+# （IDF 缺省 2MB 会直接拒表）。S3 档由 sdkconfig.defaults.esp32s3 后载覆盖为 16MB。
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# W7-b1a 存储/流式承载（ADR-0031 裁定 1）：自定义分区表，追加 1MB spool 数据区，
+# 语音段落 flash、RAM 只留工作台。表文件随 crate 维护，经 .cargo/config.toml 的
+# ESP_IDF_GLOB 钩子搬进 IDF 构建 out/（PROJECT_DIR 不是 crate 根）；nvs/phy 偏移
+# 保持 IDF 缺省，重烧 app 不动 WiFi 凭据。classic/S3 共用同一张表。
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
