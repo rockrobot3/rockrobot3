@@ -21,20 +21,51 @@ pub struct Rr3WavPcm<'a> {
     pub data: &'a [u8],
 }
 
+/// WAV 容器头信息（流式收包用：只给偏移与声明长度，不要求 `data` 已到齐）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rr3WavInfo {
+    pub sample_rate: u32,
+    pub channels: u16,
+    /// `data` 载荷起点（相对文件开头）。
+    pub data_off: usize,
+    /// `data` 声明长度（已按当前缓冲截断；流式场景只信声明值由调用方另取）。
+    pub data_len: usize,
+}
+
+/// 扫描 WAV 容器头；非 RIFF/WAVE 回 `Ok(None)`，损坏/非 PCM 回错误。
+///
+/// 与 [`rr3_wav_pcm`] 共用同一份块扫描：`data` 尚为空（只到了头）也返回信息，
+/// 由流式调用方按声明长度继续收。
+pub fn rr3_wav_info(bytes: &[u8]) -> Result<Option<Rr3WavInfo>, &'static str> {
+    if !rr3_is_wav(bytes) {
+        return Ok(None);
+    }
+    let scan = rr3_wav_scan(bytes)?;
+    Ok(Some(Rr3WavInfo {
+        sample_rate: scan.rate,
+        channels: scan.channels,
+        data_off: scan.data_off,
+        data_len: scan.data_len,
+    }))
+}
+
 /// 识别并抽取 WAV 的 `data` 块；非 RIFF/WAVE 回 `Ok(None)`（调用方按裸 PCM 处理）。
 ///
 /// 接受 `audio_format = 1`（PCM）且 16 bit；其余编码（浮点/ADPCM/压缩）显式拒，
 /// 不把噪声送功放。`data` 声明长度超出文件尾时截断（常见编码器 bug），声明为 0
 /// 视为空体拒绝。
 pub fn rr3_wav_pcm(bytes: &[u8]) -> Result<Option<Rr3WavPcm<'_>>, &'static str> {
-    if !rr3_is_wav(bytes) {
+    let Some(info) = rr3_wav_info(bytes)? else {
         return Ok(None);
+    };
+    if info.data_len == 0 {
+        return Err("WAV data 为空");
     }
-    let (rate, channels, data) = rr3_wav_scan(bytes)?;
+    let end = info.data_off + info.data_len;
     Ok(Some(Rr3WavPcm {
-        sample_rate: rate,
-        channels,
-        data,
+        sample_rate: info.sample_rate,
+        channels: info.channels,
+        data: &bytes[info.data_off..end],
     }))
 }
 
@@ -60,17 +91,26 @@ fn rr3_is_wav(bytes: &[u8]) -> bool {
     )
 }
 
-/// 块扫描：`fmt ` 先于 `data`，返回 (采样率, 声道, data 载荷)。
-fn rr3_wav_scan(bytes: &[u8]) -> Result<(u32, u16, &[u8]), &'static str> {
+/// 块扫描结果：`fmt ` 先于 `data`；长度已按当前缓冲截断。
+struct Rr3WavScan {
+    rate: u32,
+    channels: u16,
+    data_off: usize,
+    data_len: usize,
+}
+
+/// 块扫描：`fmt ` 先于 `data`，返回格式与 `data` 偏移/可用长度。
+fn rr3_wav_scan(bytes: &[u8]) -> Result<Rr3WavScan, &'static str> {
     let mut off = 12usize;
-    let mut fmt: Option<(u16, u32, u16, u16)> = None; // (channels, rate, bits, format)
+    let mut fmt: Option<(u16, u32)> = None; // (channels, rate)
     while off + 8 <= bytes.len() {
         let (id, size, body) = rr3_chunk_at(bytes, off);
         let end = body.saturating_add(size).min(bytes.len());
         if id == b"fmt " {
-            fmt = Some(rr3_fmt_parse(&bytes[body..end])?);
+            let (channels, rate, _bits, _format) = rr3_fmt_parse(&bytes[body..end])?;
+            fmt = Some((channels, rate));
         } else if id == b"data" {
-            return rr3_wav_data(fmt, &bytes[body..end]);
+            return rr3_wav_data(fmt, bytes, body, size);
         }
         // 块按偶数字节对齐（RIFF 规范），越界即停（残块不猜）。
         off = body.saturating_add(size).saturating_add(size & 1);
@@ -90,18 +130,24 @@ fn rr3_chunk_at(bytes: &[u8], off: usize) -> (&[u8], usize, usize) {
     (id, size, off + 8)
 }
 
-/// `data` 块收口：必须已有 `fmt ` 且非空（格式门在 [`rr3_fmt_parse`] 已过）。
+/// `data` 块收口：必须已有 `fmt `（格式门在 [`rr3_fmt_parse`] 已过）；长度按
+/// 当前缓冲截断，空体由调用方按语义决定（流式头扫描允许空，抽 PCM 不允许）。
 fn rr3_wav_data(
-    fmt: Option<(u16, u32, u16, u16)>,
-    data: &[u8],
-) -> Result<(u32, u16, &[u8]), &'static str> {
-    let Some((channels, rate, _bits, _format)) = fmt else {
+    fmt: Option<(u16, u32)>,
+    bytes: &[u8],
+    body: usize,
+    size: usize,
+) -> Result<Rr3WavScan, &'static str> {
+    let Some((channels, rate)) = fmt else {
         return Err("WAV data 先于 fmt");
     };
-    if data.is_empty() {
-        return Err("WAV data 为空");
-    }
-    Ok((rate, channels, data))
+    let data_len = bytes.len().saturating_sub(body).min(size);
+    Ok(Rr3WavScan {
+        rate,
+        channels,
+        data_off: body,
+        data_len,
+    })
 }
 
 /// `fmt ` 块前 16 字节：编码 / 声道 / 采样率 / 位宽，并当场过播放格式门
@@ -166,7 +212,7 @@ pub fn rr3_pcm_stereo(
 
 /// 第 `i` 帧的 Q15 增益（满幅 = 32768，保证小样本经 `>>15` 不丢位）：首
 /// `fade_in` 帧从 0 升到满、尾 `fade_out` 帧降回 0，其余满幅。
-fn rr3_fade_gain(i: usize, frames: usize, fade_in: usize, fade_out: usize) -> i32 {
+pub(crate) fn rr3_fade_gain(i: usize, frames: usize, fade_in: usize, fade_out: usize) -> i32 {
     // fade=0 时 `min(0)=0` + 布尔项补满幅——用算术代替两个条件分支。
     let up = (i.min(fade_in) as i64 * 32_768 / fade_in.max(1) as i64) as i32
         + (fade_in == 0) as i32 * 32_768;
@@ -177,7 +223,7 @@ fn rr3_fade_gain(i: usize, frames: usize, fade_in: usize, fade_out: usize) -> i3
 }
 
 /// Q15 增益应用（右移 15，饱和到 i16 域）。
-fn rr3_apply(s: i16, gain: i32) -> i16 {
+pub(crate) fn rr3_apply(s: i16, gain: i32) -> i16 {
     let v = (s as i32 * gain) >> 15;
     v.clamp(i16::MIN as i32, i16::MAX as i32) as i16
 }
@@ -211,6 +257,18 @@ mod tests {
         out.extend_from_slice(&(data.len() as u32).to_le_bytes());
         out.extend_from_slice(data);
         out
+    }
+
+    #[test]
+    fn wav_info_accepts_header_before_data() {
+        let b = wav(16_000, 1, &[1, 0, 2, 0]);
+        let info = rr3_wav_info(&b[..44]).unwrap().unwrap();
+        assert_eq!(info.sample_rate, 16_000);
+        assert_eq!(info.channels, 1);
+        assert_eq!(info.data_off, 44);
+        assert_eq!(info.data_len, 0, "只到 data 头时载荷为空");
+        assert_eq!(rr3_wav_info(b"\x01\x02\x03").unwrap(), None);
+        assert_eq!(rr3_wav_pcm(&b[..44]).unwrap_err(), "WAV data 为空");
     }
 
     #[test]
