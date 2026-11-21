@@ -2,22 +2,8 @@
 
 use super::*;
 
-/// F-B 桥接微型形态（0.0.5 批K R3-D6 / H4+C2）：`profiles/esp32-mini.toml` 第二形态
-/// 装配自洽 pin。证命题："裁剪 = 改数据"——件码、对外主题、slots.toml 零改动，本文件只加数据。
-/// 三格微型形态：恰好 audio.capture/audio.vad → rr3-sense、act.servo → rr3-act；
-/// 不启用 net.*（桥即链路）与 cognition.*（认知在 host，理由 = 模块设计索引 §10 F-B 行）；
-/// tier = rtos 且全部引用格的 tier_scope 含 rtos（L-10 的 CI 全集层同判，rrd 装载门为运行期侧）；
-/// [slots].present 升序且恰为三格；[hardware] 缺省（九键是宿主侧语义，板侧描述符归
-/// 0.0.7 批G/批D1，进位同批改本断言）；看门狗在板且由板侧运行环喂（桥断仍守护）。
-#[test]
-fn esp32_mini_profile_binds_bridged_minimal_shape() {
-    let root = repo_root();
-    let table = rr_registry::rr3_slot_parse(&slots_toml());
-    let manifests: std::collections::BTreeMap<String, toml::Value> =
-        module_manifest_values().into_iter().collect();
-    let text = std::fs::read_to_string(root.join("profiles/esp32-mini.toml")).unwrap();
-    let v: toml::Value = toml::from_str(&text).expect("esp32-mini.toml 必须可解析");
-
+/// esp32-mini 的 schema / [runtime] / tier 三基线。
+fn mini_schema(v: &toml::Value) {
     assert_eq!(
         v.get("schema_version").and_then(toml::Value::as_integer),
         Some(5),
@@ -34,13 +20,12 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
             .is_some_and(|n| n > 0),
         "esp32-mini 缺 [runtime].log_ring_cap 或非正整数（日志环容量，行数）"
     );
-    assert_tier(&v, "rtos", "esp32-mini 档位漂移（F-B = rtos 经桥档）");
-    // 板侧必须自己守住（模块设计索引 §10 F-B 行）：看门狗在板、由板侧运行环喂——
-    // "经桥不等于把安全托付给网络"的硬判据落在装配单数据上
-    let supplies = v
-        .get("supplies")
-        .and_then(toml::Value::as_table)
-        .expect("esp32-mini 缺 [supplies]");
+    assert_tier(v, "rtos", "esp32-mini 档位漂移（F-B = rtos 经桥档）");
+}
+
+/// [supplies] 看门狗硬判据：在板、由板侧运行环（rr-core）喂——"经桥不等于把
+/// 安全托付给网络"落在装配单数据上（模块设计索引 §10 F-B 行）。
+fn mini_watchdog(supplies: &toml::Table) {
     assert_eq!(
         supplies
             .get("watchdog_present")
@@ -55,11 +40,12 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
         Some("rr-core"),
         "F-B 看门狗由板侧运行环（rr-core::runtime）喂，不是 rrd"
     );
-    // [supplies.budget]（schema 4，批N2 校验⑩ 分母）：rtos 档必填三数键，取值为
-    // **声明预算位**——与 profiles/esp32-mini.toml 注释同源（board.rs 任务栈 +
-    // S3 内部 SRAM 堆上限推算 + UART2_TX_RING 常驻缓冲 + audio_q 峰值 + 渲染 +
-    // 板侧配置服务预留，批N4 件二 N-13 全账 16384→98816），对账归 0.0.7 真板，
-    // 漂移即红（契约 append 同批更新全部形状 pin）。
+}
+
+/// [supplies.budget] 三数键（schema 4，校验⑩ 分母）：取值 = 声明预算位，与
+/// profiles/esp32-mini.toml 注释同源（board 任务栈 + S3 内部 SRAM 堆上限 +
+/// UART2_TX_RING 常驻 + audio_q 峰值 + 渲染 + 配置服务预留）。
+fn mini_budget(supplies: &toml::Table) {
     let budget = supplies
         .get("budget")
         .and_then(toml::Value::as_table)
@@ -80,22 +66,15 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
             "esp32-mini budget {k} 漂移（声明预算位，对账归 0.0.7）"
         );
     }
-    // [hardware] 板侧配置十一键（批N4 件七(b) 基-24 桥上配置腿三键 + 批N9 件五
-    // MC-7 缺③进位补齐七键 + 批N17 件三 cred_store 键半边）：板侧裸寄存器/外设
-    // 路径的引脚真值与非 GPIO 存储源标记——非 [pins] 派生面（无 role 对应，门 n
-    // 物理键集不收），rtos 档 [hardware] 原样直给进 RR3_HAL_BINDINGS，经桥
-    // rr3.set_bindings 注入板侧；注入前板侧消费面 fail-closed 拒（不回退硬编码）；
-    // 主驱动七键消费语义 = 装配对账锚（注入到达时板侧逐键判等，不齐 ERROR 点名＋
-    // 计数）；cred_store 消费语义 = 板侧读数面可见（GET /api/board/bindings 随键，
-    // boot 读链不消费＝批N14 架构事实，非引脚不进对账锚）。取值与板侧 main.rs
-    // 引脚真值段同源（SDA=21/SCL=22 = OLED I2C 总线；34 = 电池分压 ADC；UART2
-    // TX=18/RX=19；LEDC pan=32/tilt=33 与 [[pin]] physical 同源同值；I2S
-    // BCLK=4/SD=27/WS=26；cred_store = nvs:rr3 与板侧 cred namespace 单真值同源），
-    // 漂移即红。主驱动具名引脚面（esp-idf-hal 结构约束）的装载仍归 0.0.7 批G/批D1。
+}
+
+/// [hardware] 板侧配置十一键：引脚真值与非 GPIO 存储源标记（非 [pins] 派生面；
+/// 取值与板侧 main.rs 引脚真值段同源，漂移即红）。
+fn mini_hardware(v: &toml::Value) {
     let hardware = v
         .get("hardware")
         .and_then(toml::Value::as_table)
-        .expect("esp32-mini 缺 [hardware] 段（板侧配置十一键真值点，批N4 件七(b) + 批N9 件五 + 批N17 件三）");
+        .expect("esp32-mini 缺 [hardware] 段（板侧配置十一键真值点）");
     for (k, expected) in [
         ("i2c_sda", "21"),
         ("i2c_scl", "22"),
@@ -115,32 +94,16 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
             "esp32-mini hardware.{k} 漂移（板侧引脚真值，与板侧 main.rs 同源）"
         );
     }
-    // schema 3 [pins]（增补轮六批N1）：板侧执行件的物理绑定真值点——rtos 档 rrd
-    // 不派生（controller 词形 ledc<N> 是板侧词表），但校验①的形状照判。批N3 件五
-    // 双轴收敛：pan/tilt 两枚同角色 pin（act.axis.pwm × 2，instance 消歧）——
-    // 机型集 pin 变化同批改本 pin（文件头 C2 判据）。
-    assert_profile_pins_schema3(&v, &root, &["act.axis.pwm", "act.axis.pwm"]);
+}
 
-    // [bindings] 恰好三格——微型形态的"裁剪"是显式集合，多绑少绑都算漂移
-    let bindings = v
-        .get("bindings")
-        .and_then(toml::Value::as_table)
-        .expect("缺 [bindings]");
-    let bound: std::collections::BTreeMap<&str, &str> = bindings_walk(bindings, &table, &manifests)
-        .into_iter()
-        .collect();
-    assert_eq!(
-        bound,
-        std::collections::BTreeMap::from([
-            ("act.servo", "rr3-act"),
-            ("audio.capture", "rr3-sense"),
-            ("audio.vad", "rr3-sense"),
-        ]),
-        "F-B 三格绑定面漂移（裁剪是显式集合，模块设计索引 §10）"
-    );
-
-    // [enabled_slots]：恰两模块、格位是 provides 的子集（裁剪只能收窄不能自造）、
-    // 不启用 net.*/cognition.*
+/// [enabled_slots]：恰两模块、格位是 provides 子集（裁剪只能收窄不能自造）、
+/// 不启用 net.*/cognition.*；每条 binding 均被认领（与 rrd 装载门同判）。
+fn mini_enabled(
+    v: &toml::Value,
+    table: &rr_registry::Rr3SlotTable,
+    manifests: &std::collections::BTreeMap<String, toml::Value>,
+    bound: &std::collections::BTreeMap<&str, &str>,
+) {
     let enabled_slots = v
         .get("enabled_slots")
         .and_then(toml::Value::as_table)
@@ -175,17 +138,19 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
             );
         }
     }
-    // 每条 binding 都被 enabled_slots 认领（装配单结构自洽，与 rrd 装载门同判）
-    for (slot, module) in &bound {
-        let claimed = enabled_slots
-            .get(*module)
+    for (slot, module) in bound {
+        let claimed = v
+            .get("enabled_slots")
+            .and_then(|e| e.get(*module))
             .and_then(toml::Value::as_array)
             .is_some_and(|a| a.iter().filter_map(toml::Value::as_str).any(|s| s == *slot));
         assert!(claimed, "binding {slot}={module} 未被 enabled_slots 认领");
     }
+}
 
-    // [slots].present：恰为三格、升序（确定性）、全部在册非 base
-    let present = present_of(&v);
+/// [slots].present：恰为三格、升序（确定性）、全部在册非 base。
+fn mini_present(v: &toml::Value, table: &rr_registry::Rr3SlotTable) -> Vec<String> {
+    let present = present_of(v);
     assert_eq!(
         present,
         vec![
@@ -201,9 +166,20 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
             "[slots].present 格位 {s} 必须在册且非 base"
         );
     }
+    present
+}
 
-    // L-10 tier↔tier_scope（CI 全集层同判）：F-B 引用的每一格其 tier_scope 必须含 rtos。
-    // 三处引用（bindings / enabled_slots / present）合并去重，与 rrd 装载门同口径。
+/// L-10 tier↔tier_scope（CI 全集层同判）：三处引用合并去重后每格须含 rtos。
+fn mini_tier_scope(
+    v: &toml::Value,
+    bound: &std::collections::BTreeMap<&str, &str>,
+    present: &[String],
+    table: &rr_registry::Rr3SlotTable,
+) {
+    let enabled_slots = v
+        .get("enabled_slots")
+        .and_then(toml::Value::as_table)
+        .expect("缺 [enabled_slots]");
     let mut referenced: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for s in bound.keys() {
         referenced.insert((*s).to_string());
@@ -227,22 +203,68 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
     }
 }
 
+/// F-B 桥接微型形态（0.0.5 批K R3-D6 / H4+C2）：`profiles/esp32-mini.toml` 第二形态
+/// 装配自洽 pin。证命题："裁剪 = 改数据"——件码、对外主题、slots.toml 零改动，本文件只加数据。
+/// 三格微型形态：恰好 audio.capture/audio.vad → rr3-sense、act.servo → rr3-act；
+/// 不启用 net.*（桥即链路）与 cognition.*（认知在 host，理由 = 模块设计索引 §10 F-B 行）；
+/// tier = rtos 且全部引用格的 tier_scope 含 rtos（L-10 的 CI 全集层同判，rrd 装载门为运行期侧）；
+/// [slots].present 升序且恰为三格；[hardware] 缺省（九键是宿主侧语义，板侧描述符归
+/// 0.0.7 批G/批D1，进位同批改本断言）；看门狗在板且由板侧运行环喂（桥断仍守护）。
+#[test]
+fn esp32_mini_profile_binds_bridged_minimal_shape() {
+    let root = repo_root();
+    let table = rr_registry::rr3_slot_parse(&slots_toml());
+    let manifests: std::collections::BTreeMap<String, toml::Value> =
+        module_manifest_values().into_iter().collect();
+    let text = std::fs::read_to_string(root.join("profiles/esp32-mini.toml")).unwrap();
+    let v: toml::Value = toml::from_str(&text).expect("esp32-mini.toml 必须可解析");
+
+    mini_schema(&v);
+    let supplies = v
+        .get("supplies")
+        .and_then(toml::Value::as_table)
+        .expect("esp32-mini 缺 [supplies]");
+    mini_watchdog(supplies);
+    mini_budget(supplies);
+    mini_hardware(&v);
+    // schema 3 [pins]（增补轮六批N1）：板侧执行件的物理绑定真值点——rtos 档 rrd
+    // 不派生（controller 词形 ledc<N> 是板侧词表），但校验①的形状照判。批N3 件五
+    // 双轴收敛：pan/tilt 两枚同角色 pin（act.axis.pwm × 2，instance 消歧）。
+    assert_profile_pins_schema3(&v, &root, &["act.axis.pwm", "act.axis.pwm"]);
+
+    // [bindings] 恰好三格——微型形态的"裁剪"是显式集合，多绑少绑都算漂移
+    let bindings = v
+        .get("bindings")
+        .and_then(toml::Value::as_table)
+        .expect("缺 [bindings]");
+    let bound: std::collections::BTreeMap<&str, &str> = bindings_walk(bindings, &table, &manifests)
+        .into_iter()
+        .collect();
+    assert_eq!(
+        bound,
+        std::collections::BTreeMap::from([
+            ("act.servo", "rr3-act"),
+            ("audio.capture", "rr3-sense"),
+            ("audio.vad", "rr3-sense"),
+        ]),
+        "F-B 三格绑定面漂移（裁剪是显式集合，模块设计索引 §10）"
+    );
+    mini_enabled(&v, &table, &manifests, &bound);
+    let present = mini_present(&v, &table);
+    mini_tier_scope(&v, &bound, &present, &table);
+}
+
 /// S3 微型形态（W1/T2）：`profiles/esp32s3-mini.toml` 与 esp32-mini 同形态、异线束。
 /// 本测试只钉**差异面**（chip / [hardware] 十一键 / 双轴物理脚 / 绑定面），形态与
 /// 预算的完整形状由 esp32-mini 测试和 rrd 装载门共同覆盖；线束漂移即红。
-#[test]
-fn esp32s3_mini_profile_pins_s3_harness() {
-    let root = repo_root();
-    let text = std::fs::read_to_string(root.join("profiles/esp32s3-mini.toml"))
-        .expect("profiles/esp32s3-mini.toml 必须存在（W1/T2）");
-    let v: toml::Value = toml::from_str(&text).expect("esp32s3-mini.toml 必须可解析");
-
+/// S3 档的 schema / tier / chip 三基线。
+fn s3_basics(v: &toml::Value) {
     assert_eq!(
         v.get("schema_version").and_then(toml::Value::as_integer),
         Some(5),
         "esp32s3-mini schema_version 漂移"
     );
-    assert_tier(&v, "rtos", "esp32s3-mini 档位漂移（F-B = rtos 经桥档）");
+    assert_tier(v, "rtos", "esp32s3-mini 档位漂移（F-B = rtos 经桥档）");
     assert_eq!(
         v.get("platform")
             .and_then(|p| p.get("chip"))
@@ -250,15 +272,16 @@ fn esp32s3_mini_profile_pins_s3_harness() {
         Some("esp32s3"),
         "esp32s3-mini chip 漂移（平台表选 contracts/platform/esp32s3.toml）"
     );
+}
 
-    // [hardware] 十一键：与 board/pins_s3.rs、main.rs 具名装配三方同源。
+/// S3 线束面：板侧十一键、三格绑定/在位、双轴物理脚（4/5）。
+fn s3_harness(v: &toml::Value, root: &std::path::Path) {
     let hardware = v
         .get("hardware")
         .and_then(toml::Value::as_table)
         .expect("esp32s3-mini 缺 [hardware] 段（板侧配置十一键真值点）");
     s3_hardware_keys(hardware, "esp32s3-mini", "pins_s3.rs 同源");
 
-    // 形态面：三格绑定 + 三格在位，与 esp32-mini 同源同值。
     let bindings = v
         .get("bindings")
         .and_then(toml::Value::as_table)
@@ -281,8 +304,7 @@ fn esp32s3_mini_profile_pins_s3_harness() {
         .expect("esp32s3-mini 缺 [slots].present");
     assert_eq!(present.len(), 3, "esp32s3-mini 在位声明应恰三格");
 
-    // 双轴 [[pin]]：role / 通道 / 物理脚（S3 线束 4/5）。
-    assert_profile_pins_schema3(&v, &root, &["act.axis.pwm", "act.axis.pwm"]);
+    assert_profile_pins_schema3(v, root, &["act.axis.pwm", "act.axis.pwm"]);
     let pins = v
         .get("pin")
         .and_then(toml::Value::as_array)
@@ -300,4 +322,14 @@ fn esp32s3_mini_profile_pins_s3_harness() {
         vec![4, 5],
         "esp32s3-mini 双轴物理脚漂移（应为 S3 LEDC pan=4 / tilt=5）"
     );
+}
+
+#[test]
+fn esp32s3_mini_profile_pins_s3_harness() {
+    let root = repo_root();
+    let text = std::fs::read_to_string(root.join("profiles/esp32s3-mini.toml"))
+        .expect("profiles/esp32s3-mini.toml 必须存在（W1/T2）");
+    let v: toml::Value = toml::from_str(&text).expect("esp32s3-mini.toml 必须可解析");
+    s3_basics(&v);
+    s3_harness(&v, &root);
 }
