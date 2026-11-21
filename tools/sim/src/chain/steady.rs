@@ -280,11 +280,16 @@ fn rr3_steady_row(line: &str) -> Result<Option<Rr3SteadyRow>, String> {
     if f[0] == RR3_CHAIN_OBS {
         return Ok(None);
     }
-    let peak_ms = rr3_steady_opt_num(&f, 6, line, "beat_peak_ms")?.unwrap_or(0);
-    let boot_ms = rr3_steady_opt_num(&f, 7, line, "boot_ms")?;
+    Ok(Some(rr3_steady_row_of(&f, line)?))
+}
+
+/// 已拆好的 health 列 → 行结构：必填列数字校验，可选列缺位按 0/None（旧格式兼容）。
+fn rr3_steady_row_of(f: &[&str], line: &str) -> Result<Rr3SteadyRow, String> {
+    let peak_ms = rr3_steady_opt_num(f, 6, line, "beat_peak_ms")?.unwrap_or(0);
+    let boot_ms = rr3_steady_opt_num(f, 7, line, "boot_ms")?;
     // FAN_DROP 列缺位按 0（旧格式兼容；数值错仍报错）
-    let fan_dropped = rr3_steady_opt_num(&f, 8, line, "fan_dropped")?.unwrap_or(0);
-    Ok(Some(Rr3SteadyRow {
+    let fan_dropped = rr3_steady_opt_num(f, 8, line, "fan_dropped")?.unwrap_or(0);
+    Ok(Rr3SteadyRow {
         name: f[0].to_string(),
         phase: f[2].to_string(),
         heartbeat_ms: rr3_steady_num(f[3], line, "heartbeat_ms")?,
@@ -293,7 +298,7 @@ fn rr3_steady_row(line: &str) -> Result<Option<Rr3SteadyRow>, String> {
         peak_ms,
         boot_ms,
         fan_dropped,
-    }))
+    })
 }
 
 /// 可缺列（`?` = 未定格）的解析：缺列与 `?` 都回 None，其余必须是数字。
