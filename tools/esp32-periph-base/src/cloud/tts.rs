@@ -154,7 +154,7 @@ impl Rr3TtsSink {
         match rr3_wav_info(&self.head) {
             Ok(Some(info)) => Ok(Some(info)),
             Ok(None) => Err("WAV 头识别失败".into()),
-            Err(e) if e == "WAV 缺 data 块" => {
+            Err("WAV 缺 data 块") => {
                 if self.head.len() >= HEAD_CAP {
                     Err("WAV 头超出 1KB 窗口".into())
                 } else {
