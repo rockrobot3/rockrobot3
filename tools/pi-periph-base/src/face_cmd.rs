@@ -39,9 +39,9 @@ impl Board {
 
     /// 点阵臂：8 字节帧门 → 上屏 → 提交状态（同上，上屏成功才切模式）。
     fn frame_apply(&mut self, v: &Value) -> Result<Value, String> {
-        let arr = v
-            .as_array()
-            .ok_or_else(|| format!("frame 非法: {v}（须 8 字节数组）"))?;
+        let Some(arr) = v.as_array() else {
+            return Err(format!("frame 非法: {v}（须 8 字节数组）"));
+        };
         if arr.len() != 8 {
             return Err(format!("frame 长度非法: {}（须 8）", arr.len()));
         }

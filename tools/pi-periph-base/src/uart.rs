@@ -136,10 +136,10 @@ impl Board {
         let mut idle = 0u32;
         loop {
             let mut byte = [0u8; 1];
-            let n = match self.uart.rr3_read_timeout(&mut byte, LINE_BYTE_TIMEOUT_MS) {
-                Ok(n) => n,
-                Err(e) => return Err(format!("uart read 失败: {e}")),
-            };
+            let n = self
+                .uart
+                .rr3_read_timeout(&mut byte, LINE_BYTE_TIMEOUT_MS)
+                .map_err(|e| format!("uart read 失败: {e}"))?;
             if n == 0 {
                 idle += 1;
                 if idle >= 2 {

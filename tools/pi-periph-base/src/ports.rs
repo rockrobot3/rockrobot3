@@ -271,16 +271,7 @@ impl PwmPort {
                     export.display()
                 )
             })?;
-            let t0 = Instant::now();
-            while !dir.exists() {
-                if t0.elapsed() >= Duration::from_millis(50) {
-                    return Err(format!(
-                        "pwm 导出后通道目录 {} 未在 50ms 内出现（内核 sysfs 异常）",
-                        dir.display()
-                    ));
-                }
-                std::thread::sleep(Duration::from_millis(1));
-            }
+            wait_dir(&dir)?;
         }
         if read_u64(&dir.join("period")).unwrap_or(0) != PWM_PERIOD_NS as u64 {
             write_u64(&dir.join("duty_cycle"), 0)?;
@@ -303,6 +294,21 @@ impl Rr3PwmPort for PwmPort {
         write_u64(&dir.join("duty_cycle"), ns as u64)?;
         write_u64(&dir.join("enable"), if ns == 0 { 0 } else { 1 })
     }
+}
+
+/// 等内核生成 sysfs 通道目录（≤50ms；超时点名内核异常，不无限等）。
+fn wait_dir(dir: &Path) -> Result<(), String> {
+    let t0 = Instant::now();
+    while !dir.exists() {
+        if t0.elapsed() >= Duration::from_millis(50) {
+            return Err(format!(
+                "pwm 导出后通道目录 {} 未在 50ms 内出现（内核 sysfs 异常）",
+                dir.display()
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    Ok(())
 }
 
 fn read_u64(path: &Path) -> Option<u64> {
