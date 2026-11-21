@@ -99,19 +99,32 @@ fn rr3_client(
 
 /// 打开连接 → 写请求体 → 取状态码（200 之外按契约回 `{interface} HTTP {code}`）。
 fn rr3_send(client: esp_http_client_handle_t, body: &[u8], interface: &str) -> Result<(), String> {
-    // SAFETY：client 有效；写长由 body 长度给定。
-    let opened = unsafe { esp_http_client_open(client, body.len() as i32) };
-    if opened != ESP_OK {
-        return Err(format!("云端不可达: open err={opened}"));
+    rr3_open(client, body.len())?;
+    rr3_write(client, body)?;
+    rr3_head(client, interface)
+}
+
+/// 打开请求体通道（`content_len` 必须与实际写入字节数一致）。
+fn rr3_open(client: esp_http_client_handle_t, content_len: usize) -> Result<(), String> {
+    // SAFETY：client 有效；写长由调用方给定。
+    let opened = unsafe { esp_http_client_open(client, content_len as i32) };
+    if opened == ESP_OK {
+        Ok(())
+    } else {
+        Err(format!("云端不可达: open err={opened}"))
     }
+}
+
+/// 写一段请求体（短写循环；n<=0 视为传输失败）。
+fn rr3_write(client: esp_http_client_handle_t, bytes: &[u8]) -> Result<(), String> {
     let mut off = 0usize;
-    while off < body.len() {
-        // SAFETY：client 已 open；切片剩余长度由 off 保证不超过 body。
+    while off < bytes.len() {
+        // SAFETY：client 已 open；切片剩余长度由 off 保证不超过 bytes。
         let n = unsafe {
             esp_http_client_write(
                 client,
-                body[off..].as_ptr() as *const _,
-                (body.len() - off) as i32,
+                bytes[off..].as_ptr() as *const _,
+                (bytes.len() - off) as i32,
             )
         };
         if n <= 0 {
@@ -119,14 +132,20 @@ fn rr3_send(client: esp_http_client_handle_t, body: &[u8], interface: &str) -> R
         }
         off += n as usize;
     }
+    Ok(())
+}
+
+/// 取响应头并校验 200。
+fn rr3_head(client: esp_http_client_handle_t, interface: &str) -> Result<(), String> {
     // SAFETY：client 有效；返回长度不参与判定（状态码另取）。
     unsafe { esp_http_client_fetch_headers(client) };
     // SAFETY：头已取回，状态码只读。
     let status = unsafe { esp_http_client_get_status_code(client) };
-    if status != 200 {
-        return Err(format!("{interface} HTTP {status}"));
+    if status == 200 {
+        Ok(())
+    } else {
+        Err(format!("{interface} HTTP {status}"))
     }
-    Ok(())
 }
 
 /// 一次 HTTPS POST（原始字节响应）。
@@ -213,6 +232,87 @@ pub(crate) fn rr3_post_retry(
         thread::sleep(Duration::from_millis(RETRY_DELAY_MS));
     }
     Err(last)
+}
+
+/// 流式 ASR 上行（W7-b3a）：multipart 头/WAV 头/尾 + PCM 4 KB 边转边写，
+/// 不再构造 256KB s16le 与 256KB 整段 multipart。返回 JSON 应答（≤ [`MAX_JSON`]）。
+pub(crate) fn rr3_post_asr(
+    interface: &str,
+    url: &str,
+    key: &str,
+    content_type: &str,
+    plan: &rr_cloud_proto::Rr3AsrPlan,
+    pcm: &[i16],
+    max_body: usize,
+) -> Result<Vec<u8>, String> {
+    let mut last = String::new();
+    for _ in 0..2 {
+        crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
+        let attempt = rr3_asr_once(interface, url, key, content_type, plan, pcm, max_body);
+        crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
+        match attempt {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                if !rr_cloud_proto::rr3_cloud_retryable(interface, &e) {
+                    return Err(e);
+                }
+                last = e;
+            }
+        }
+        thread::sleep(Duration::from_millis(RETRY_DELAY_MS));
+    }
+    Err(last)
+}
+
+/// 单次 ASR 尝试：init → 分段写 → 状态码 → 读 JSON；cleanup 成对。
+fn rr3_asr_once(
+    interface: &str,
+    url: &str,
+    key: &str,
+    content_type: &str,
+    plan: &rr_cloud_proto::Rr3AsrPlan,
+    pcm: &[i16],
+    max_body: usize,
+) -> Result<Vec<u8>, String> {
+    let (url_c, auth, ctype) = rr3_cstrs(url, key, content_type)?;
+    let client = rr3_client(&url_c, auth.as_deref(), &ctype)?;
+    crate::mem::rr3_heap_mark(interface, "http-open");
+    let rc = rr3_asr_do(client, plan, pcm, interface, max_body);
+    crate::mem::rr3_heap_mark(interface, "http-done");
+    // SAFETY：client 由刚 init 且只在此处 cleanup。
+    unsafe { esp_http_client_cleanup(client) };
+    rc
+}
+
+/// 分段写请求体 → 取状态码 → 读应答。
+fn rr3_asr_do(
+    client: esp_http_client_handle_t,
+    plan: &rr_cloud_proto::Rr3AsrPlan,
+    pcm: &[i16],
+    interface: &str,
+    max_body: usize,
+) -> Result<Vec<u8>, String> {
+    rr3_open(client, plan.content_len)?;
+    rr3_write(client, &plan.head)?;
+    rr3_write(client, &plan.wav)?;
+    rr3_write_pcm(client, pcm)?;
+    rr3_write(client, &plan.tail)?;
+    rr3_head(client, interface)?;
+    rr3_http_read(client, interface, max_body)
+}
+
+/// i16 样本 → s16le 4 KB 搬运窗（不分配整段字节）。
+fn rr3_write_pcm(client: esp_http_client_handle_t, pcm: &[i16]) -> Result<(), String> {
+    let mut buf = [0u8; 4_096];
+    for chunk in pcm.chunks(buf.len() / 2) {
+        let mut n = 0usize;
+        for s in chunk {
+            buf[n..n + 2].copy_from_slice(&s.to_le_bytes());
+            n += 2;
+        }
+        rr3_write(client, &buf[..n])?;
+    }
+    Ok(())
 }
 
 /// 流式 POST：响应体按 4 KB 读块交给 sink；返回总字节数。

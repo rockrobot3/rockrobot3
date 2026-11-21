@@ -26,7 +26,7 @@ mod cfg;
 mod http;
 mod tts;
 pub(crate) use cfg::{rr3_cloud_write, rr3_dialog_cfg, rr3_say_body};
-pub(crate) use http::{rr3_post_retry, MAX_JSON};
+pub(crate) use http::{rr3_post_asr, rr3_post_retry, MAX_JSON};
 pub(crate) use tts::rr3_tts_stream;
 
 /// TTS 流式接收上限：512 KB ≈ 16 s @16k mono s16（2026-11-20 真板实锤：LLM
