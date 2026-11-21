@@ -49,6 +49,6 @@ espflash flash --chip esp32 \
 
 ## 验收（串口 115200）
 
-- boot 横幅点名芯片与 feature 档；`[mem]` 给堆账，`[mic]` 给采样率，
+- boot 横幅点名芯片与 PSRAM；`[mem]` 给堆账，`[mic]` 给采样率，
   full 档另有 `[spool]` 行。
 - safe 档不连云；full 档需 NVS 已有 WiFi 与 API key，缺则显式点名。
