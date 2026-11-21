@@ -14,8 +14,8 @@
 use std::sync::{Arc, Mutex};
 
 use rr_audio_mech::{
-    rr3_doa_fix, rr3_frame_rms, rr3_pcm_best_channel, Rr3DoaBin, Rr3DoaCfg, Rr3VadConfig,
-    Rr3VadEdge, Rr3VadState,
+    rr3_chan_pick, rr3_chan_take, rr3_doa_fix, rr3_frame_rms, rr3_pcm_best_channel, Rr3DoaBin,
+    Rr3DoaCfg, Rr3VadConfig, Rr3VadEdge, Rr3VadState,
 };
 
 use crate::board::MIC_SR_HZ;
@@ -38,21 +38,37 @@ const DOA_CFG: Rr3DoaCfg = Rr3DoaCfg {
     window_rms_min: 500,
     bin_threshold_deg: 30,
 };
-/// 采集块节拍（20 ms）与每块采样数（320 帧 × 2 声道）。
+/// 采集块节拍（20 ms）与每块采样数（320 帧 × 2 声道 / 单声道）。
 const FRAME_MS: u64 = 20;
 const BLOCK_SAMPLES: usize = (MIC_SR_HZ as usize / 1000) * 20 * 2;
-/// 预滚窗：VAD 起音至少 200 ms 才发 Onset；预滚 **600 ms**（30 块）确保
+const BLK_MONO: usize = BLOCK_SAMPLES / 2;
+/// spool 块长必须与写线程一致（两处常量同源，编译期钉死）。
+const _: () = assert!(BLK_MONO == crate::spool::RR3_SPOOL_BLK);
+/// 预滚窗：VAD 起音至少 200 ms 才发 Onset；内存路径预滚 **600 ms**（30 块）确保
 /// "你好洛克"这类唤醒前缀在起音偏晚时仍能进段（2026-11-21 真板：10 块预滚下
-/// ASR 曾把"你好洛克，今天天气怎么样"的唤醒前缀整段丢掉）。
-const PRE_ROLL_BLOCKS: usize = 30;
+/// ASR 曾把"你好洛克，今天天气怎么样"的唤醒前缀整段丢掉）。spool 路径受内部
+/// SRAM 约束只留 **200 ms**（10 块 = 起音判定窗本身），多出的前缀余量由云端
+/// 容错承担。
+const PRE_ROLL_MEM: usize = 30;
+const PRE_ROLL_SPOOL: usize = 10;
 /// 单段上限：8 s（与云 TTS 上限同量级；超长强制收段，不无限攒）。
 const MAX_UTTER_MS: usize = 8_000;
 const MAX_UTTER_SAMPLES: usize = (MIC_SR_HZ as usize / 1000) * MAX_UTTER_MS * 2;
+/// spool 路径上限是单声道样本数（8 s × 16 kHz = 128 k 样本）。
+const MAX_SEG_MONO: usize = MAX_UTTER_SAMPLES / 2;
 /// DoA 左右落 pan：**收进 70/110**（与意图三档同值）。2026-11-20 真板实锤：
 /// 右转落 120（机械行程上限）时舵机顶死堵转，300 s 内 13 次 BOD；左 60 偶发但
 /// 同样贴边。留 10° 机械余量，方向判据不变（left/center/right 分档独立）。
 const PAN_LEFT_DEG: u32 = 70;
 const PAN_RIGHT_DEG: u32 = 110;
+
+/// 段承载方式：PSRAM 内存缓冲（S3）/ flash spool 流式（classic）/ 停用。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Rr3VoiceMode {
+    Off,
+    Mem,
+    Flash,
+}
 
 /// 语音分段运行态（单线程：mic 采集线程独占）。
 pub(crate) struct VoiceRun {
@@ -64,12 +80,17 @@ pub(crate) struct VoiceRun {
     pending: Vec<i16>,
     /// 滚动预滚窗（立体声交错）。
     pre: Vec<i16>,
-    /// 当前语音段（立体声交错；起音时用预滚窗补头）。
+    /// 当前语音段（内存路径；spool 路径不驻留整段）。
     utter: Vec<i16>,
+    mode: Rr3VoiceMode,
+    /// 预滚窗块数（内存 30 / spool 10）。
+    pre_blocks: usize,
     recording: bool,
-    /// PSRAM 在位数（false = 本地分段停用，不拿内部 SRAM 硬撑 512 KB 段缓冲）。
-    enabled: bool,
-    /// 入队失败计数（dialog 未装配/队列满；串口抽样点名）。
+    /// spool 路径：起音定声道 / 已写单声道样本数 / 本段是否已开录。
+    sel: usize,
+    sent: usize,
+    seg: bool,
+    /// 弃段计数（spool 忙/写失败/入队失败；串口抽样点名）。
     dropped: u32,
     /// 诊断窗（100 块 = 2 s）：VAD 域 mono RMS 均值 + 最近一次播放门状态。
     blocks: u32,
@@ -79,21 +100,57 @@ pub(crate) struct VoiceRun {
 
 impl VoiceRun {
     pub(crate) fn new() -> Self {
-        let enabled = crate::psram::rr3_psram_total() > 0;
-        if !enabled {
-            println!("[mic] PSRAM 未启用：本地 VAD/分段停用（8s 语音段无法落内部 SRAM；S3 查 CONFIG_SPIRAM，classic 见 W7 §20.2）");
+        let mode = if crate::psram::rr3_psram_total() > 0 {
+            Rr3VoiceMode::Mem
+        } else if crate::spool::rr3_spool_avail() {
+            Rr3VoiceMode::Flash
+        } else {
+            Rr3VoiceMode::Off
+        };
+        match mode {
+            Rr3VoiceMode::Mem => {
+                println!("[mic] 语音段走 PSRAM 内存缓冲（600ms 预滚）")
+            }
+            Rr3VoiceMode::Flash => println!(
+                "[mic] PSRAM 未启用 → 语音段流式落 spool（200ms 预滚；上传期新段丢弃并点名）"
+            ),
+            Rr3VoiceMode::Off => println!(
+                "[mic] PSRAM 与 spool 均不可用：本地 VAD/分段停用（S3 查 CONFIG_SPIRAM；classic 查 spool 分区）"
+            ),
         }
-        let (raw, pending, pre, utter) = if enabled {
-            (
+        Self::rr3_new_mode(mode)
+    }
+
+    /// 按承载方式定型（测试可显式选内存路径，不依赖宿主 PSRAM）。
+    fn rr3_new_mode(mode: Rr3VoiceMode) -> Self {
+        let pre_blocks = if mode == Rr3VoiceMode::Flash {
+            PRE_ROLL_SPOOL
+        } else {
+            PRE_ROLL_MEM
+        };
+        let (raw, pending, pre, utter) = match mode {
+            Rr3VoiceMode::Mem => (
                 crate::psram::rr3_psram_vec(2048),
                 crate::psram::rr3_psram_vec(BLOCK_SAMPLES * 2),
-                crate::psram::rr3_psram_vec(PRE_ROLL_BLOCKS * BLOCK_SAMPLES + BLOCK_SAMPLES),
+                crate::psram::rr3_psram_vec(pre_blocks * BLOCK_SAMPLES + BLOCK_SAMPLES),
                 crate::psram::rr3_psram_vec(MAX_UTTER_SAMPLES + BLOCK_SAMPLES),
-            )
-        } else {
-            (Vec::new(), Vec::new(), Vec::new(), Vec::new())
+            ),
+            Rr3VoiceMode::Flash => (
+                crate::psram::rr3_psram_vec(2048),
+                crate::psram::rr3_psram_vec(BLOCK_SAMPLES * 2),
+                crate::psram::rr3_psram_vec(pre_blocks * BLOCK_SAMPLES + BLOCK_SAMPLES),
+                Vec::new(),
+            ),
+            Rr3VoiceMode::Off => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
         };
-        crate::mem::rr3_heap_mark("mic-voice", if enabled { "psram" } else { "off" });
+        crate::mem::rr3_heap_mark(
+            "mic-voice",
+            match mode {
+                Rr3VoiceMode::Mem => "psram",
+                Rr3VoiceMode::Flash => "spool",
+                Rr3VoiceMode::Off => "off",
+            },
+        );
         Self {
             vad: Rr3VadState::rr3_vad_new(VAD_CFG, FRAME_MS),
             dc: Rr3DcBlocker::new(),
@@ -101,8 +158,12 @@ impl VoiceRun {
             pending,
             pre,
             utter,
+            mode,
+            pre_blocks,
             recording: false,
-            enabled,
+            sel: 0,
+            sent: 0,
+            seg: false,
             dropped: 0,
             blocks: 0,
             rms_acc: 0,
@@ -113,7 +174,7 @@ impl VoiceRun {
     /// 一次 I2S read：原始帧 → DC/增益 → 20 ms 块 → VAD/DoA/分段。
     pub(crate) fn batch(&mut self, buf: &[u8], nbytes: usize, bus: &Arc<Mutex<Bus>>, gated: bool) {
         self.last_gate = gated;
-        if gated || !self.enabled {
+        if gated || self.mode == Rr3VoiceMode::Off {
             self.reset();
             return;
         }
@@ -138,15 +199,24 @@ impl VoiceRun {
     }
 
     /// 单块：预滚 → VAD 边沿（起音开录 / 判停收段）→ 录音累积。
+    ///
+    /// 每块只做一次能量择声道 + 一次抽取（`rr3_chan_pick/take`，零分配）：
+    /// spool 路径起音后固定 `sel`，避免段内声道跳变。
     fn block(&mut self, block: &[i16], bus: &Arc<Mutex<Bus>>) {
-        let mono = rr3_pcm_best_channel(block, 2);
+        let mut mono = [0i16; BLK_MONO];
+        let sel = if self.recording && self.mode == Rr3VoiceMode::Flash {
+            self.sel
+        } else {
+            rr3_chan_pick(block, 2)
+        };
+        rr3_chan_take(block, 2, sel, &mut mono);
         self.voice_stats(&mono);
         let edge = self.vad.rr3_vad_feed(&mono);
         self.pre_extend(block);
         match edge {
             Some(Rr3VadEdge::Onset { .. }) => self.onset(bus),
             Some(Rr3VadEdge::Offset { .. }) => self.finish(bus, "offset"),
-            None if self.recording => self.append(block, bus),
+            None if self.recording => self.append(bus, &mono, block),
             None => {}
         }
     }
@@ -167,22 +237,93 @@ impl VoiceRun {
         );
     }
 
-    /// 起音：预滚窗作段头（含本块）→ DoA 转头/聆听表情。
+    /// 起音：DoA 转头/聆听表情 → 按承载方式开段（内存补预滚 / spool 逐块落盘）。
+    ///
+    /// `oled_hold`（标定保持）：只判向与出表情，不落段——避免云端往返/回授打断
+    /// 3×10 的标定节奏，也避免无谓的 flash 写入。
     fn onset(&mut self, bus: &Arc<Mutex<Bus>>) {
         self.recording = true;
-        self.utter.clear();
-        self.utter.extend_from_slice(&self.pre);
         let steered = self.steer(bus);
         rr3_expr_set(bus, if steered { "turn" } else { "listen" });
-        println!(
-            "[mic] VAD onset（预滚 {}ms）doa={}",
-            self.utter.len() * 1000 / (MIC_SR_HZ as usize * 2),
-            if steered { "steer" } else { "center/none" }
-        );
+        let pre_ms = self.pre.len() * 1000 / (MIC_SR_HZ as usize * 2);
+        let doa = if steered { "steer" } else { "center/none" };
+        let hold = lock_bus(bus).st.oled_hold;
+        if hold {
+            self.recording = false;
+            println!("[mic] VAD onset（预滚 {pre_ms}ms）doa={doa} hold=只判向不落段");
+            return;
+        }
+        match self.mode {
+            Rr3VoiceMode::Mem => {
+                self.utter.clear();
+                self.utter.extend_from_slice(&self.pre);
+                println!("[mic] VAD onset（预滚 {pre_ms}ms）doa={doa} path=mem");
+            }
+            Rr3VoiceMode::Flash => {
+                self.flash_open();
+                println!(
+                    "[mic] VAD onset（预滚 {pre_ms}ms）doa={doa} path=spool sel={} seg={}",
+                    self.sel, self.seg
+                );
+            }
+            Rr3VoiceMode::Off => self.recording = false,
+        }
     }
 
-    /// 录音累积 + 超长强制收段（定容缓冲：先截余量再 push，绝不触发 realloc）。
-    fn append(&mut self, block: &[i16], bus: &Arc<Mutex<Bus>>) {
+    /// spool 开段：起音窗定声道（能量高者）→ 预滚逐块落盘；失败即弃段。
+    fn flash_open(&mut self) {
+        self.sel = rr3_chan_pick(&self.pre, 2);
+        self.sent = 0;
+        self.seg = crate::spool::rr3_spool_begin();
+        if !self.seg {
+            self.recording = false;
+            self.dropped = self.dropped.saturating_add(1);
+            println!(
+                "[mic] spool 忙/未装配：弃段（累计 {}；上一段待上传或写线程退出）",
+                self.dropped
+            );
+            return;
+        }
+        for chunk in self.pre.chunks_exact(BLOCK_SAMPLES) {
+            let mut mono = [0i16; BLK_MONO];
+            rr3_chan_take(chunk, 2, self.sel, &mut mono);
+            if !self.flash_push(&mono) {
+                return;
+            }
+        }
+    }
+
+    /// spool 写一块（非阻塞）；失败即弃段并回报调用方停止累积。
+    fn flash_push(&mut self, mono: &[i16; BLK_MONO]) -> bool {
+        if !self.seg {
+            return false;
+        }
+        if crate::spool::rr3_spool_block(mono) {
+            self.sent += mono.len();
+            return true;
+        }
+        self.seg = false;
+        self.recording = false;
+        self.dropped = self.dropped.saturating_add(1);
+        println!("[mic] spool 写失败/队列满：弃段（累计 {}）", self.dropped);
+        crate::spool::rr3_spool_abort();
+        false
+    }
+
+    /// 录音累积 + 超长强制收段；spool 路径逐块落盘，不驻留整段。
+    fn append(&mut self, bus: &Arc<Mutex<Bus>>, mono: &[i16; BLK_MONO], block: &[i16]) {
+        if self.mode == Rr3VoiceMode::Flash {
+            if !self.seg {
+                self.recording = false;
+                return;
+            }
+            if self.sent + mono.len() > MAX_SEG_MONO {
+                self.finish(bus, "max-utterance");
+                return;
+            }
+            self.flash_push(mono);
+            return;
+        }
         let room = MAX_UTTER_SAMPLES.saturating_sub(self.utter.len());
         if block.len() > room {
             self.utter.extend_from_slice(&block[..room]);
@@ -195,20 +336,17 @@ impl VoiceRun {
         }
     }
 
-    /// 收段：双麦取能量高通道 → 单声道 16 kHz → dialog 队列；VAD 重置。
+    /// 收段：按承载方式交 dialog（内存）或提交 spool（写线程入云队列）。
     fn finish(&mut self, bus: &Arc<Mutex<Bus>>, why: &str) {
+        if self.mode == Rr3VoiceMode::Flash {
+            return self.finish_flash(bus, why);
+        }
         let mono = rr3_pcm_best_channel(&self.utter, 2);
         let ms = mono.len() * 1000 / MIC_SR_HZ as usize;
         self.recording = false;
         self.utter.clear();
         self.vad = Rr3VadState::rr3_vad_new(VAD_CFG, FRAME_MS);
         if mono.is_empty() {
-            return;
-        }
-        // 标定保持模式（oled_hold）：只做 VAD/DoA 提示，不进 dialog——避免云端
-        // 往返/播放打断 3×10 的节奏，也避免回复声反馈污染下一轮判向。
-        if lock_bus(bus).st.oled_hold {
-            println!("[mic] 语音段 {ms}ms（{why}；hold 模式跳过 dialog）");
             return;
         }
         match crate::cloud::rr3_turn(mono) {
@@ -221,6 +359,29 @@ impl VoiceRun {
                         self.dropped
                     );
                 }
+            }
+        }
+        rr3_expr_set(bus, "think");
+    }
+
+    /// spool 收段：提交记录（写线程校 CRC 后入云队列），本线程立即可录下一段。
+    fn finish_flash(&mut self, bus: &Arc<Mutex<Bus>>, why: &str) {
+        let ms = self.sent * 1000 / MIC_SR_HZ as usize;
+        let seg = self.seg;
+        self.seg = false;
+        self.sent = 0;
+        self.recording = false;
+        self.vad = Rr3VadState::rr3_vad_new(VAD_CFG, FRAME_MS);
+        if seg {
+            if crate::spool::rr3_spool_finish() {
+                println!("[mic] 语音段 {ms}ms 已提交 spool（{why}）");
+            } else {
+                self.dropped = self.dropped.saturating_add(1);
+                println!(
+                    "[mic] spool 提交投递失败 {ms}ms（{why}；累计 {}）",
+                    self.dropped
+                );
+                crate::spool::rr3_spool_abort();
             }
         }
         rr3_expr_set(bus, "think");
@@ -256,18 +417,23 @@ impl VoiceRun {
         true
     }
 
-    /// 预滚窗滚动（上限 `PRE_ROLL_BLOCKS` 块）。
+    /// 预滚窗滚动（上限 `pre_blocks` 块）。
     fn pre_extend(&mut self, block: &[i16]) {
         self.pre.extend_from_slice(block);
-        let cap = PRE_ROLL_BLOCKS * BLOCK_SAMPLES;
+        let cap = self.pre_blocks * BLOCK_SAMPLES;
         if self.pre.len() > cap {
             let drop = self.pre.len() - cap;
             self.pre.drain(..drop);
         }
     }
 
-    /// 半双工/断流重置：VAD 与缓冲全部清零，回到未起音态。
+    /// 半双工/断流重置：VAD 与缓冲全部清零，回到未起音态；spool 段显式弃掉。
     fn reset(&mut self) {
+        if self.seg {
+            self.seg = false;
+            crate::spool::rr3_spool_abort();
+        }
+        self.sent = 0;
         if !self.recording && self.pending.is_empty() && self.pre.is_empty() {
             return;
         }
@@ -282,71 +448,4 @@ impl VoiceRun {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::VecDeque;
-
-    use crate::state::PeriphState;
-
-    fn bus() -> Arc<Mutex<Bus>> {
-        Arc::new(Mutex::new(Bus {
-            jobs: VecDeque::new(),
-            outbox: VecDeque::new(),
-            audio_q: VecDeque::new(),
-            st: PeriphState::boot(),
-        }))
-    }
-
-    fn block(amp: i16) -> [i16; BLOCK_SAMPLES] {
-        [amp; BLOCK_SAMPLES]
-    }
-
-    #[test]
-    fn constant_speech_opens_then_offset_closes() {
-        let bus = bus();
-        let mut v = VoiceRun::new();
-        for i in 0..9 {
-            v.block(&block(3000), &bus);
-            assert!(!v.recording, "第 {i} 块不足 min_speech，不得开录");
-        }
-        v.block(&block(3000), &bus);
-        assert!(v.recording, "第 10 块（200ms）应起音");
-        assert!(v.utter.len() >= BLOCK_SAMPLES, "预滚窗应补进段头");
-        for _ in 0..20 {
-            v.block(&block(3000), &bus);
-        }
-        for _ in 0..20 {
-            v.block(&block(0), &bus);
-        }
-        assert!(!v.recording, "silence_tail 到点应收段");
-        assert!(v.utter.is_empty(), "收段后段缓冲清空");
-    }
-
-    #[test]
-    fn overlong_utterance_is_forced_closed() {
-        let bus = bus();
-        let mut v = VoiceRun::new();
-        for _ in 0..10 {
-            v.block(&block(3000), &bus);
-        }
-        let blocks = MAX_UTTER_SAMPLES / BLOCK_SAMPLES + 2;
-        for _ in 0..blocks {
-            v.block(&block(3000), &bus);
-        }
-        assert!(!v.recording, "超过 8 s 必须强制收段");
-        assert!(v.utter.is_empty());
-    }
-
-    #[test]
-    fn gated_batch_resets_state() {
-        let bus = bus();
-        let mut v = VoiceRun::new();
-        for _ in 0..10 {
-            v.block(&block(3000), &bus);
-        }
-        assert!(v.recording);
-        v.batch(&[0u8; 8], 8, &bus, true);
-        assert!(!v.recording);
-        assert!(v.pre.is_empty() && v.utter.is_empty());
-    }
-}
+mod tests;

@@ -164,6 +164,28 @@ fn read_bounds_and_clear() {
 }
 
 #[test]
+fn abort_resets_recording_without_touching_committed() {
+    let mut sp = open();
+    sp.rr3_abort().unwrap();
+    sp.rr3_begin(11).unwrap();
+    sp.rr3_push(&[0x22; 64]).unwrap();
+    let erased_hdr = sp.dev.bytes[0..RR3_SPOOL_SECTOR].to_vec();
+    sp.rr3_abort().unwrap();
+    assert_eq!(
+        &sp.dev.bytes[0..RR3_SPOOL_SECTOR],
+        &erased_hdr[..],
+        "abort 不得再擦头（begin 已擦）"
+    );
+    assert_eq!(sp.rr3_load(), Ok(None), "放弃的段不得出现有效记录");
+    assert_eq!(sp.rr3_finish(), Err(Rr3SpoolErr::State));
+    sp.rr3_begin(12).unwrap();
+    sp.rr3_push(&[0x33; 8]).unwrap();
+    let info = sp.rr3_finish().unwrap();
+    assert_eq!(sp.rr3_abort(), Err(Rr3SpoolErr::State), "已提交只能 clear");
+    assert_eq!(sp.rr3_load(), Ok(Some(info)));
+}
+
+#[test]
 fn corrupt_header_is_named_not_empty() {
     let mut sp = open();
     let mut raw = rr3_hdr_encode(&Rr3SegInfo {

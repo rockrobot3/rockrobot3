@@ -26,7 +26,9 @@ mod cfg;
 mod http;
 mod tts;
 pub(crate) use cfg::{rr3_cloud_write, rr3_dialog_cfg, rr3_say_body};
-pub(crate) use http::{rr3_post_asr, rr3_post_retry, MAX_JSON};
+pub(crate) use http::{
+    rr3_post_asr, rr3_post_retry, Rr3PcmSrc, Rr3SliceSrc, Rr3SpoolSrc, MAX_JSON,
+};
 pub(crate) use tts::rr3_tts_stream;
 
 /// TTS 流式接收上限：512 KB ≈ 16 s @16k mono s16（2026-11-20 真板实锤：LLM
@@ -45,6 +47,8 @@ const IDLE_MS: u64 = 2_000;
 pub(crate) enum Rr3CloudJob {
     Say(String),
     Turn(Vec<i16>),
+    /// 已提交到 flash spool 的语音段：worker 从 spool 分块读并流式 ASR（无 PSRAM 路径）。
+    Spool(rr_audio_mech::Rr3SegInfo),
     /// `/api/board/play` 的已收全 PCM：入队后由 worker 喂 16 KB 环，HTTP 回调不阻塞。
     Play(Vec<u8>),
 }
@@ -54,17 +58,20 @@ static TTS_TX: Mutex<Option<SyncSender<Rr3CloudJob>>> = Mutex::new(None);
 
 /// 对话整轮策略入口（由装配面注入，cloud 只持机制：队列/传输/线程）。
 pub(crate) type Rr3TurnFn = fn(&Arc<Mutex<Bus>>, Vec<i16>);
+/// spool 段整轮策略入口（同注入纪律）。
+pub(crate) type Rr3SpoolFn = fn(&Arc<Mutex<Bus>>, rr_audio_mech::Rr3SegInfo);
 
 /// 起云端 worker（httpd 之前调用，避免 `/say` 与 `/dialog` 撞"未装配"窗）。
-/// `turn` 由调用方注入（`dialog::rr3_turn`）——cloud 不反向依赖策略层。
-pub(crate) fn spawn_tts(bus: Arc<Mutex<Bus>>, turn: Rr3TurnFn) {
+/// 两个整轮入口由调用方注入（`dialog::rr3_turn` / `dialog::rr3_turn_spool`）——
+/// cloud 不反向依赖策略层。
+pub(crate) fn spawn_tts(bus: Arc<Mutex<Bus>>, turn: Rr3TurnFn, spool: Rr3SpoolFn) {
     let (tx, rx) = sync_channel(TTS_Q_CAP);
     let _ = TTS_TX.lock().map(|mut slot| *slot = Some(tx));
-    println!("[cloud] 云端 worker 起（TTS 流式 + 对话整轮；单条 TLS 栈）");
+    println!("[cloud] 云端 worker 起（TTS 流式 + 对话整轮 + spool 段；单条 TLS 栈）");
     let _ = thread::Builder::new()
         .name("cloud-dialog".into())
         .stack_size(TTS_STACK)
-        .spawn(move || cloud_run(rx, bus, turn))
+        .spawn(move || cloud_run(rx, bus, turn, spool))
         .map_err(|e| println!("[cloud] 起云端线程失败: {e:?}"));
 }
 
@@ -76,6 +83,11 @@ pub(crate) fn rr3_say(text: String) -> Result<(), &'static str> {
 /// 入队一整轮对话（mic 切段 / `/api/board/dialog` 共用；不阻塞调用方）。
 pub(crate) fn rr3_turn(pcm: Vec<i16>) -> Result<(), &'static str> {
     rr3_enqueue(Rr3CloudJob::Turn(pcm))
+}
+
+/// 入队一段已提交的 spool 语音段（spool 写线程提交后调用）。
+pub(crate) fn rr3_turn_spool(info: rr_audio_mech::Rr3SegInfo) -> Result<(), &'static str> {
+    rr3_enqueue(Rr3CloudJob::Spool(info))
 }
 
 /// 入队一段已收全 PCM（`/api/board/play`）：worker 串行喂播放环，HTTP 不阻塞。
@@ -100,9 +112,9 @@ fn rr3_enqueue(job: Rr3CloudJob) -> Result<(), &'static str> {
     })
 }
 
-/// worker 主体：Say → 流式 TTS → 播放环；Turn → 注入的整轮策略；Play → 整段喂环；
-/// 空转续 dialog 心跳。
-fn cloud_run(rx: Receiver<Rr3CloudJob>, bus: Arc<Mutex<Bus>>, turn: Rr3TurnFn) {
+/// worker 主体：Say → 流式 TTS → 播放环；Turn/Spool → 注入的整轮策略；
+/// Play → 整段喂环；空转续 dialog 心跳。
+fn cloud_run(rx: Receiver<Rr3CloudJob>, bus: Arc<Mutex<Bus>>, turn: Rr3TurnFn, spool: Rr3SpoolFn) {
     loop {
         match rx.recv_timeout(Duration::from_millis(IDLE_MS)) {
             Ok(Rr3CloudJob::Say(text)) => tts_say(&text),
@@ -110,11 +122,11 @@ fn cloud_run(rx: Receiver<Rr3CloudJob>, bus: Arc<Mutex<Bus>>, turn: Rr3TurnFn) {
                 crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
                 turn(&bus, pcm);
             }
-            Ok(Rr3CloudJob::Play(pcm)) => {
-                if let Err(e) = crate::playout::rr3_play_stream(&pcm) {
-                    println!("[cloud] 播放失败: {e}");
-                }
+            Ok(Rr3CloudJob::Spool(info)) => {
+                crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
+                spool(&bus, info);
             }
+            Ok(Rr3CloudJob::Play(pcm)) => rr3_play(&pcm),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
             }
@@ -123,6 +135,13 @@ fn cloud_run(rx: Receiver<Rr3CloudJob>, bus: Arc<Mutex<Bus>>, turn: Rr3TurnFn) {
                 return;
             }
         }
+    }
+}
+
+/// 整段喂播放环（HTTP 回调不阻塞；失败点名不弃线程）。
+fn rr3_play(pcm: &[u8]) {
+    if let Err(e) = crate::playout::rr3_play_stream(pcm) {
+        println!("[cloud] 播放失败: {e}");
     }
 }
 
