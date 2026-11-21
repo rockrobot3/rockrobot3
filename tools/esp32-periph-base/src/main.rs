@@ -85,6 +85,8 @@ mod face;
 mod frame;
 mod httpd;
 mod link;
+// 堆账阶段采样（W7 内存门观测面）：只读 IDF 堆账，不参与分配。
+mod mem;
 mod mic;
 mod oled;
 mod periph;

@@ -70,7 +70,7 @@
 
 | 单板全链形态 / ESP32-S3 | 已实装 | **限于 0013 时点；当前 HEAD 唤醒门控待复验**：[0013](evidence/实测/0013.md) 单板自跑——云 ASR→LLM→TTS→本板播放、DoA 3×10（左/中/右各 10/10）、30 min soak（1800 s / 86 轮 / 93 次播放 / `tts_fail=0` / `restarts=0`）、功放出声。**2026-11-21 唤醒门控**（`5ee8cc58`/`b7e6ff8d`）加入后，0013 的麦克风轮文本“请向右看。”在 30 s 窗外会被 `Ignore`，HTTP WAV“你好，小二…”走“你好”兜底；复验前不得把 0013 当作当前 HEAD 的回执。 |
 | 单板全链形态 / Pi 4B | 骨架 | [`pi4b-solo.toml`](../profiles/pi4b-solo.toml) 十格 + [`hardware/pi4b-solo`](../hardware/pi4b-solo/wiring.toml) 接线/pan 轴 + [`pack-arm64.sh`](../tools/deploy/pack-arm64.sh) 按档出包；2026-11-20 真板五模块（act/brain/connect/interact/sense，无 power 格）running、`denied_publish=0`、`/api/beep` 200 ms、`/api/selftest=pass`、LLM 200/635 ms、TTS 预合成 437 ms/102318 B。**双麦两通道全零**：DoA 3×10、DoA→pan、云 ASR→LLM→TTS 三轮、30 min soak 与证据 0014 均未做。 |
-| 单板全链形态 / ESP32 classic | 骨架 | `autonomy,tts` 双芯片构建绿；真机起链后仅余约 22 KB 内部堆，`httpd` 需 `0xB008` 栈而起栈失败（计划册 §17）；无 PSRAM、4 MB 单槽，功放/扬声器未确认；W7 内存门（30 min free ≥20% SRAM、3 轮无 OOM）未测，单板全链不 claim。 |
+| 单板全链形态 / ESP32 classic | 骨架 | `autonomy,tts` 双芯片构建绿；真机起链后仅余约 22 KB 内部堆，`httpd` 需 `0xB008` 栈而起栈失败（计划册 §17）；无 PSRAM、4 MB 单槽，功放/扬声器未确认。**W7 静态终态（当前实现）No-Go**：无 PSRAM 时 `voice.rs` 停用本地 VAD/分段，ASR 峰值约 768 KB、TTS 回包 512 KB、播放队列最多约 1 MB，均超内部 SRAM；该结论指当前实现，不是 classic 硬件终态。存储/流式候选见计划册 §20.2，真板测出 30 min free ≥20% SRAM 前不排全链。 |
 
 ---
 
