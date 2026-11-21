@@ -81,7 +81,7 @@ impl VoiceRun {
     pub(crate) fn new() -> Self {
         let enabled = crate::psram::rr3_psram_total() > 0;
         if !enabled {
-            println!("[mic] PSRAM 未启用：本地 VAD/分段停用（W6 S3 档需 CONFIG_SPIRAM；查 sdkconfig.defaults 接线）");
+            println!("[mic] PSRAM 未启用：本地 VAD/分段停用（8s 语音段无法落内部 SRAM；S3 查 CONFIG_SPIRAM，classic 见 W7 §20.2）");
         }
         let (raw, pending, pre, utter) = if enabled {
             (
