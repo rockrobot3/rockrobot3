@@ -228,26 +228,35 @@ pub fn rr3_verify_signed<'a>(
 
 /// 目标兼容与降级策略。
 pub fn rr3_manifest_expect(m: &Rr3OtaManifest<'_>, e: &Rr3OtaExpect<'_>) -> Result<(), String> {
-    if let Some(p) = e.platform {
-        if p != m.platform {
-            return Err(format!("platform 不匹配（制品={}，期望={p}）", m.platform));
+    rr3_expect_identity("platform", m.platform, e.platform)?;
+    rr3_expect_identity("board", m.board, e.board)?;
+    rr3_expect_version(m, e)?;
+    Ok(())
+}
+
+/// 身份字段期望：缺席不校验，在场必须相等（文案按字段名逐字对位）。
+fn rr3_expect_identity(field: &str, got: &str, want: Option<&str>) -> Result<(), String> {
+    if let Some(w) = want {
+        if w != got {
+            return Err(format!("{field} 不匹配（制品={got}，期望={w}）"));
         }
     }
-    if let Some(b) = e.board {
-        if b != m.board {
-            return Err(format!("board 不匹配（制品={}，期望={b}）", m.board));
-        }
-    }
-    if let Some(cur) = e.current_version {
-        let cur = rr3_version_parse(cur)?;
-        let new = rr3_version_parse(m.version)?;
-        if new <= cur && !e.allow_downgrade {
-            return Err(format!(
-                "拒绝降级（制品 {} ≤ 当前 {}；如确需降级须显式 --allow-downgrade）",
-                m.version,
-                cur_text(cur)
-            ));
-        }
+    Ok(())
+}
+
+/// 降级门：在当前版本可解析且未显式允许降级时拒绝 `new <= cur`。
+fn rr3_expect_version(m: &Rr3OtaManifest<'_>, e: &Rr3OtaExpect<'_>) -> Result<(), String> {
+    let Some(raw) = e.current_version else {
+        return Ok(());
+    };
+    let cur = rr3_version_parse(raw)?;
+    let new = rr3_version_parse(m.version)?;
+    if new <= cur && !e.allow_downgrade {
+        return Err(format!(
+            "拒绝降级（制品 {} ≤ 当前 {}；如确需降级须显式 --allow-downgrade）",
+            m.version,
+            cur_text(cur)
+        ));
     }
     Ok(())
 }
