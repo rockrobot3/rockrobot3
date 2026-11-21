@@ -18,17 +18,21 @@ rr3_cargo_artifact() {
   printf '%s/%s/%s/%s\n' "$td" "$1" "$2" "$3"
 }
 
-# 分区表条目核验（W7-b1a 共享单点）：返回 0 = 指定 triple 的最新
-# partition-table.bin 含 label；产物目录/文件/条目任一缺位都返回非 0，
-# 调用方按各门纪律 FAIL 点名（"编译绿但分区没落地"必须可见）。
-# 用法：rr3_partition_has <target-triple> <label>
+# 分区表条目核验（W7-b1a 共享单点）：返回 0 = 指定 triple 中**晚于时间锚**的
+# partition-table.bin 含 label。锚点先于构建创建（缓存恢复的旧表早于锚点被排除），
+# 避免旧绿表冒充本轮；产物/条目缺位返回非 0，调用方按各门纪律 FAIL 点名。
+# 用法：rr3_partition_has <target-triple> <label> <marker-file>
 rr3_partition_has() {
-  local td ptb
+  local td f
   td="$(cargo metadata --format-version 1 --no-deps 2>/dev/null \
         | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')"
   [ -n "$td" ] || return 1
-  ptb="$(ls -t "$td/$1"/debug/build/esp-idf-sys-*/out/build/partition_table/partition-table.bin 2>/dev/null | head -1)"
-  [ -n "$ptb" ] && grep -qa -- "$2" "$ptb"
+  while IFS= read -r f; do
+    if grep -qa -- "$2" "$f"; then
+      return 0
+    fi
+  done < <(find "$td/$1/debug/build" -name partition-table.bin -newer "$3" 2>/dev/null)
+  return 1
 }
 
 # esp-clang 定位（ESP 门共享单点）：espup 把乐鑫 LLVM fork 的库目录挂到
