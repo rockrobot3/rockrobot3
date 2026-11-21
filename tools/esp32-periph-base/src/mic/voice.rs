@@ -115,7 +115,7 @@ impl VoiceRun {
                 "[mic] PSRAM 未启用 → 语音段流式落 spool（200ms 预滚；上传期新段丢弃并点名）"
             ),
             Rr3VoiceMode::Off => println!(
-                "[mic] PSRAM 与 spool 均不可用：本地 VAD/分段停用（S3 查 CONFIG_SPIRAM；classic 查 spool 分区）"
+                "[mic] 本地 VAD/分段停用：PSRAM 未启用且 spool 未装配（classic 看 [spool] 的堆预留/分区行；S3 查 CONFIG_SPIRAM）"
             ),
         }
         Self::rr3_new_mode(mode)
