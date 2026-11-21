@@ -140,7 +140,7 @@ fn rr3_tick_loop(mut sup: Rr3Supervisor) {
         thread::sleep(Duration::from_millis(SUP_CFG.tick_ms));
         rr3_drain(&mut sup, &mut ever);
         let ev = sup.rr3_sup_tick(crate::state::now_ms());
-        rr3_log_timeout(ev.timed_out);
+        rr3_log_timeout(ev.timed_out, &ever);
         health_publish(sup.rr3_sup_health());
         rr3_dead_step(&mut gate, &sup.rr3_sup_health(), &ever);
     }
@@ -172,15 +172,44 @@ fn health_publish(h: Rr3SupHealth) {
     }
 }
 
-/// 超时点名（仅在 Dead 迁移那一拍触发）。
-fn rr3_log_timeout(bits: u8) {
+/// 超时点名（仅在 Dead 迁移那一拍触发）。**按是否曾有过心跳分两行**：曾心跳
+/// 的才是"失联"（连续 DEAD_TICKS 拍会复位）；从未心跳的是"未启动/降级"，
+/// 只登记观测、不参与复位——旧版对两者都承诺复位，观测面失真。
+fn rr3_log_timeout(bits: u8, ever: &[bool; RR3_TASK_COUNT]) {
     if bits == 0 {
         return;
     }
-    println!(
-        "[autonomy] 心跳超时 task={}（已标 dead；连续 {DEAD_TICKS} 拍不恢复即整机复位）",
-        rr3_names(bits)
-    );
+    let (lost, never) = rr3_split_bits(bits, ever);
+    if lost != 0 {
+        println!(
+            "[autonomy] 心跳超时 task={}（曾有心跳，连续 {DEAD_TICKS} 拍不恢复即整机复位）",
+            rr3_names(lost)
+        );
+    }
+    if never != 0 {
+        println!(
+            "[autonomy] 任务未启动/降级 task={}（从未有心跳；不参与复位，查启动日志的 OOM/门禁点名）",
+            rr3_names(never)
+        );
+    }
+}
+
+/// 位图按"曾心跳/从未心跳"拆成两半（顺序无关，仅用于点名）。
+fn rr3_split_bits(bits: u8, ever: &[bool; RR3_TASK_COUNT]) -> (u8, u8) {
+    let mut lost = 0u8;
+    let mut never = 0u8;
+    for task in Rr3Task::ALL {
+        let i = task.index();
+        if bits & (1 << i) == 0 {
+            continue;
+        }
+        if ever[i] {
+            lost |= 1 << i;
+        } else {
+            never |= 1 << i;
+        }
+    }
+    (lost, never)
 }
 
 /// 复位去抖：已接线且**曾有过心跳**的 dead 任务连续 [`DEAD_TICKS`] 拍 → 复位；
