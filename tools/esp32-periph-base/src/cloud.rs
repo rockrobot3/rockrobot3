@@ -244,11 +244,11 @@ fn rr3_opt_field<'a>(v: &'a Value, k: &str) -> Result<Option<&'a str>, &'static 
 /// 写口 body 解析：字节面 JSON 门（纯函数，单测钉域）。
 fn rr3_cloud_body(body: &[u8]) -> Result<Rr3CloudWrite, &'static str> {
     let v: Value = serde_json::from_slice(body).map_err(|_| "body 非 JSON")?;
-    rr3_cloud_write(&v)
+    rr3_cloud_fields(&v)
 }
 
 /// 写口字段面：三必填 + 四可选（缺席保留旧值）。
-fn rr3_cloud_write(v: &Value) -> Result<Rr3CloudWrite, &'static str> {
+fn rr3_cloud_fields(v: &Value) -> Result<Rr3CloudWrite, &'static str> {
     Ok(Rr3CloudWrite {
         base: rr3_field(v, "base")?.to_string(),
         model: rr3_field(v, "model")?.to_string(),
