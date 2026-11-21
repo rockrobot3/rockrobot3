@@ -86,7 +86,8 @@ if cargo +esp clippy --version >/tmp/rr3-esp-clippy-ver 2>&1; then
        --config 'source.crates-io.replace-with="rsproxy-sparse"' \
        --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
        >"$esp_clippy_log" 2>&1; then
-    echo "::notice title=esp32-clippy::可用（${clippy_ver}）；默认档 all-targets 0 错误（可考虑设门）"
+    warn_n=$(grep -cE '^warning' "$esp_clippy_log" || true)
+    echo "::notice title=esp32-clippy::可用（${clippy_ver}）；默认档 all-targets warning=${warn_n} error=0（可评估设门）"
   else
     warn_n=$(grep -cE '^warning' "$esp_clippy_log" || true)
     err_n=$(grep -cE '^error' "$esp_clippy_log" || true)
