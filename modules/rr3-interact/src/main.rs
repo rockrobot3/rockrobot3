@@ -14,6 +14,7 @@ mod panel;
 #[path = "../atoms/player/player.rs"]
 mod player;
 mod rpc;
+mod tts_buf;
 
 use std::time::Duration;
 

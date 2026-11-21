@@ -11,9 +11,9 @@ use rr3mod::BusHandle;
 use serde_json::{json, Value};
 
 use crate::boot::{Rr3InteractCfg, Rr3PlayerCfg};
-use crate::dispatch::Rr3TtsPcmBuf;
 use crate::face;
 use crate::player;
+use crate::tts_buf::Rr3TtsPcmBuf;
 
 /// 本模块 exposes 的 ops 槽快照读口（批N4 件九二，module.toml [rpc].exposes 同源）：
 /// 白名单组体应答，槽名与 assemble.toml/composite.toml 槽表申报同源
@@ -284,9 +284,9 @@ pub(crate) fn rr3_interact_ops(cfg: &Rr3InteractCfg) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dispatch::Rr3TtsPcmBuf;
     use crate::face::{Rr3Face, Rr3FaceSetError};
     use crate::player::Rr3TtsPlayError;
+    use crate::tts_buf::Rr3TtsPcmBuf;
 
     /// 点名下钻与应答体形状（用例自件面随迁，I-8：承载层守字节面）。
     #[test]

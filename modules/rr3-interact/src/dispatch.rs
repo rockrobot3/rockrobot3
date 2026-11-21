@@ -22,22 +22,10 @@ use crate::face;
 use crate::panel::server::Rr3PanelAction;
 use crate::player;
 use crate::rpc;
+use crate::tts_buf::Rr3TtsPcmBuf;
 
 /// 面板状态页的链路卡片数据源（0.0.4 批C 只做订阅缓存，发布方 rr3-connect 随批D 上线）
 const RR3_NET_LINK_TOPIC: &str = "rr3-connect/net/link";
-
-/// tts_pcm 流收缓冲（MC-1）：brain 语音下行**先流后点名**——流是载荷通路，
-/// `rr3-interact/tts/text` 点名是"该不该播"的唯一判据（0.0.5 方案 §20 第 1 条
-/// (a)）。Event 帧逐帧解码进缓冲，点名对账后排空播放；对账不过整缓冲作废
-/// （残流不跨轮滞留）。
-#[derive(Default)]
-pub(crate) struct Rr3TtsPcmBuf {
-    bytes: Vec<u8>,
-}
-
-/// 全量收流上界（32MiB）：正常一轮 TTS 是秒级音频（≤数 MB），上界防"只流不
-/// 点名"或故障模块把 interact 内存顶穿。超界帧丢弃，点名对账必然失败→整轮拒播。
-const RR3_TTS_BUF_CAP: usize = 32 * 1024 * 1024;
 
 /// 收下的帧计数键（运维面，随心跳归并；与 `tts_pcm_bad` 互补对账）
 const RR3_TTS_PCM_FRAMES_KEY: &str = "tts_pcm_frames";
@@ -49,35 +37,6 @@ const RR3_TTS_PCM_BAD_KEY: &str = "tts_pcm_bad";
 /// 弃帧留痕抽样（首帧必留，其后每 N 帧一条）：坏源可能成百上千帧连续弃，
 /// 逐帧打会把日志文件撑爆；抽样保证"有没有在坏、坏因是什么"始终可查。
 const RR3_TTS_BAD_LOG_EVERY: u32 = 64;
-
-impl Rr3TtsPcmBuf {
-    /// 收一帧：`pcm_b64` 解码追加（STREAM 语义有序到达，帧序即字节序）。
-    /// 解码失败/超上界上抛，由调用方弃帧——缺口由点名的对账兜住，不静默。
-    pub(crate) fn rr3_tts_buf_push(&mut self, pcm_b64: &str) -> Result<(), String> {
-        self.rr3_tts_push_cap(pcm_b64, RR3_TTS_BUF_CAP)
-    }
-
-    /// 带帽收帧（帽参数显式化，单测用小帽钉边界）：先按 base64 上界估算，
-    /// 超帽时不解码、不分配。
-    fn rr3_tts_push_cap(&mut self, pcm_b64: &str, cap: usize) -> Result<(), String> {
-        rr3_push_room(cap, self.bytes.len(), pcm_b64.len() / 4 * 3)?;
-        let chunk = rr_ipc::rr3_base64_decode(pcm_b64)
-            .map_err(|e| format!("tts_pcm 帧 base64 解码失败: {e:?}"))?;
-        rr3_push_room(cap, self.bytes.len(), chunk.len())?;
-        self.bytes.extend_from_slice(&chunk);
-        Ok(())
-    }
-
-    /// 缓冲实收字节数（对账的一侧）
-    pub(crate) fn rr3_tts_buf_len(&self) -> usize {
-        self.bytes.len()
-    }
-
-    /// 排空：取走全部字节，缓冲归零（残流不跨轮滞留）。
-    pub(crate) fn rr3_tts_buf_take(&mut self) -> Vec<u8> {
-        std::mem::take(&mut self.bytes)
-    }
-}
 
 // ---------- beep 测试音（批N5 件五笔2，§17 缺口①：speaker 腿波形源） ----------
 
@@ -203,17 +162,6 @@ impl Rr3InteractDispatcher {
 /// 每 N 帧一条（"还在坏、坏因未变"），中间帧只进计数。
 fn rr3_bad_log_due(n: u32) -> bool {
     n == 1 || n.is_multiple_of(RR3_TTS_BAD_LOG_EVERY)
-}
-
-/// 收流缓冲余量判据（解码前后的估算值与实解值同文案）。
-fn rr3_push_room(cap: usize, have: usize, add: usize) -> Result<(), String> {
-    if have.saturating_add(add) > cap {
-        return Err(format!(
-            "tts_pcm 缓冲超界（>{}B）：丢弃本帧，后续点名对账将拒播",
-            cap
-        ));
-    }
-    Ok(())
 }
 
 /// 坏帧记账：计数 +1，按留痕闸门点名（中间帧只计数）。
