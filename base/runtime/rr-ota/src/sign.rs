@@ -122,9 +122,10 @@ fn rr3_manifest_body(bytes: &[u8]) -> Result<&str, String> {
     if text.contains('\r') || text.contains('\0') {
         return Err("manifest 不得含 CR/NUL（统一 LF 结尾）".into());
     }
-    let body = text
-        .strip_suffix('\n')
-        .ok_or_else(|| "manifest 必须以 LF 结尾".to_string())?;
+    if !text.ends_with('\n') {
+        return Err("manifest 必须以 LF 结尾".into());
+    }
+    let body = &text[..text.len() - 1];
     if body.ends_with('\n') {
         return Err("manifest 末尾不得有空行".into());
     }
@@ -350,6 +351,11 @@ fn rr3_field<'a>(line: &'a str, want: &str) -> Result<&'a str, String> {
     Ok(v)
 }
 
+/// 词形字节：小写字母/数字/'-'/'_'。
+fn rr3_token_byte(b: u8) -> bool {
+    b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_'
+}
+
 fn rr3_token_check(s: &str, max: usize, what: &str) -> Result<(), String> {
     if s.is_empty() {
         return Err(format!("{what} 不得为空"));
@@ -362,13 +368,15 @@ fn rr3_token_check(s: &str, max: usize, what: &str) -> Result<(), String> {
     if !first.is_ascii_alphanumeric() || !last.is_ascii_alphanumeric() {
         return Err(format!("{what} 必须以字母/数字开头和结尾: {s:?}"));
     }
-    if !s
-        .bytes()
-        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
-    {
+    if !s.bytes().all(rr3_token_byte) {
         return Err(format!("{what} 只允许小写字母/数字/'-'/'_'（实得 {s:?}）"));
     }
     Ok(())
+}
+
+/// 镜像名允许字节：字母/数字/'.'/'-'/'_'（单一路径分量）。
+fn rr3_image_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-')
 }
 
 fn rr3_image_name_check(s: &str) -> Result<(), String> {
@@ -382,13 +390,10 @@ fn rr3_image_name_check(s: &str) -> Result<(), String> {
     if !first.is_ascii_alphanumeric() {
         return Err(format!("image 必须以字母/数字开头: {s:?}"));
     }
-    if s == "." || s == ".." || s.contains("..") {
+    if s == "." || s.contains("..") {
         return Err(format!("image 不得含 '..'（路径穿越）: {s:?}"));
     }
-    if !s
-        .bytes()
-        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
-    {
+    if !s.bytes().all(rr3_image_byte) {
         return Err(format!(
             "image 只允许单一路径分量（字母/数字/'.'/'-'/'_'）: {s:?}"
         ));
