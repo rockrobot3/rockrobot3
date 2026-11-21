@@ -149,10 +149,7 @@ impl Board {
             }
             idle = 0;
             if byte[0] == b'\n' {
-                while matches!(buf.last(), Some(b'\r')) {
-                    buf.pop();
-                }
-                return Ok(String::from_utf8_lossy(&buf).into_owned());
+                return Ok(rr3_line_take(&mut buf));
             }
             if buf.len() >= LINE_MAX {
                 self.drain_line_tail();
@@ -160,6 +157,14 @@ impl Board {
             }
             buf.push(byte[0]);
         }
+    }
+
+    /// 行收尾：剥净尾部 '\r'，有损解码（串口噪声不炸行面）。
+    fn rr3_line_take(buf: &mut Vec<u8>) -> String {
+        while matches!(buf.last(), Some(b'\r')) {
+            buf.pop();
+        }
+        String::from_utf8_lossy(buf).into_owned()
     }
 
     fn drain_line_tail(&mut self) {
