@@ -102,8 +102,6 @@ fn rr3_alsa_io_recover(pcm: &alsa::pcm::PCM, e: &alsa::Error) -> bool {
     false
 }
 
-/// 单次搬运推进（readi/writei 同口径）：成功推进 done 并清零 stall；零帧/可恢复
-/// 错误累计 stall 到界即带因上抛；硬错点名 errno 后上抛。
 /// 无进展一拍：累加并判上限（到限即 stall 错，op 由调用方定型）。
 fn rr3_alsa_stall(
     op: &str,
@@ -118,6 +116,8 @@ fn rr3_alsa_stall(
     Ok(())
 }
 
+/// 单次搬运推进（readi/writei 同口径）：成功推进 done 并清零 stall；零帧/可恢复
+/// 错误累计 stall 到界即带因上抛；硬错点名 errno 后上抛。
 fn rr3_alsa_advance(
     op: &str,
     got: Result<usize, alsa::Error>,
@@ -130,14 +130,16 @@ fn rr3_alsa_advance(
         Ok(n) if n > 0 => {
             *done += n;
             *stall = 0;
+            Ok(())
         }
         Ok(_) => {
             rr3_alsa_stall(op, *done, frames, stall)?;
             std::thread::yield_now();
+            Ok(())
         }
         Err(e) if rr3_alsa_io_recover(pcm, &e) => {
             let op = format!("{op}(recover)");
-            rr3_alsa_stall(&op, *done, frames, stall)?;
+            rr3_alsa_stall(&op, *done, frames, stall)
         }
         Err(e) => {
             let errno = e.errno();
@@ -145,10 +147,9 @@ fn rr3_alsa_advance(
                 "rr-hal-alsa: {op} 硬错 errno={errno}（已搬 {}/{frames} 帧）",
                 *done
             );
-            return Err(Rr3HalError::Busy);
+            Err(Rr3HalError::Busy)
         }
     }
-    Ok(())
 }
 
 struct Rr3AlsaOpen {
