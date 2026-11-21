@@ -327,7 +327,7 @@ fn rr3_ops_store(
     if section_key == "dialog" {
         brain
             .as_object_mut()
-            .ok_or_else(|| "config [rr3-brain] 段须为表".to_string())?
+            .ok_or("config [rr3-brain] 段须为表".to_string())?
             .entry("dialog")
             .or_insert(json!({}));
     }
