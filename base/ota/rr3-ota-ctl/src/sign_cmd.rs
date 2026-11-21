@@ -331,11 +331,8 @@ pub(crate) fn rr3_cmd_install(args: &[String]) -> Result<String, (String, ExitCo
 }
 
 /// 普通文件目标的原子落位：临时件 → 摘要复核 → fsync 临时件 → rename → fsync 父目录。
-fn rr3_install_file(
-    src: &Path,
-    target: &Path,
-    m: &sign::Rr3OtaManifest<'_>,
-) -> Result<(), (String, ExitCode)> {
+/// 安装前置门：源≠目标、目标若存在须为普通文件、父目录必须存在。
+fn rr3_install_precheck(src: &Path, target: &Path) -> Result<(), (String, ExitCode)> {
     if src == target {
         return Err(("拒绝安装：源镜像与目标路径相同".into(), ExitCode::from(1)));
     }
@@ -357,6 +354,16 @@ fn rr3_install_file(
             ExitCode::from(1),
         ));
     }
+    Ok(())
+}
+
+fn rr3_install_file(
+    src: &Path,
+    target: &Path,
+    m: &sign::Rr3OtaManifest<'_>,
+) -> Result<(), (String, ExitCode)> {
+    rr3_install_precheck(src, target)?;
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
     let name = target
         .file_name()
         .and_then(|s| s.to_str())
