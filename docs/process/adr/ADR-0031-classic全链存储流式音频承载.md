@@ -83,6 +83,10 @@ TTS 回包与日志落存储**，不把整段数据常驻 RAM。本 ADR 只裁�
   判无有效记录。host 单测覆盖越界、IO 失败、写回不一致、掉电与 CRC 损坏；CI
   双芯片构建并核验 `partition-table.bin` 含 spool 条目。**尚未接 VAD/dialog**，
   真板容量/擦除时延与写寿命在 W7-b4 记账。
+- **W7-b1a CI 回执（2026-11-21，`17ac68f1`）**：gate（含 host 三平台单测）与
+  platforms 的 classic/S3 两条 esp32-gates 全绿；两芯片构建产物均核出 spool
+  分区，Actions 固件制品（solo / no-http）在册。真板 `[spool]` boot 行随下一次
+  烧录会话取证（写入路径尚未接线，本身不产生磨损）。
 - **W7-b2**：TTS 4KB 流式收包 → I2S 环；不完整回包失败语义。
 - **W7-b3**：无 PSRAM VAD 小窗 + spool 写入；半双工与丢段计数。
 - **W7-b4**：classic 真板 30min soak；`[mem]` 阶段列与 Go/No-Go 入 0014/后续证据。
