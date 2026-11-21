@@ -213,7 +213,7 @@ pub(crate) unsafe fn handle_play(req: *mut httpd_req_t, _bus: &Arc<Mutex<Bus>>) 
         );
     };
     let n = body.len();
-    let reply = match crate::playout::rr3_play(body) {
+    let reply = match crate::cloud::rr3_play_async(body) {
         Ok(()) => format!("{{\"ok\":true,\"bytes\":{n}}}"),
         Err(e) => format!("{{\"ok\":false,\"err\":\"{e}\"}}"),
     };

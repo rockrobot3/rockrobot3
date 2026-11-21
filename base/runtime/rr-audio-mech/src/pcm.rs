@@ -28,7 +28,9 @@ pub struct Rr3WavInfo {
     pub channels: u16,
     /// `data` 载荷起点（相对文件开头）。
     pub data_off: usize,
-    /// `data` 声明长度（已按当前缓冲截断；流式场景只信声明值由调用方另取）。
+    /// `data` 声明长度（原始值，未按缓冲截断；流式场景据此定总长）。
+    pub data_size: usize,
+    /// `data` 当前可用长度（按缓冲截断）。
     pub data_len: usize,
 }
 
@@ -45,6 +47,7 @@ pub fn rr3_wav_info(bytes: &[u8]) -> Result<Option<Rr3WavInfo>, &'static str> {
         sample_rate: scan.rate,
         channels: scan.channels,
         data_off: scan.data_off,
+        data_size: scan.data_size,
         data_len: scan.data_len,
     }))
 }
@@ -96,6 +99,7 @@ struct Rr3WavScan {
     rate: u32,
     channels: u16,
     data_off: usize,
+    data_size: usize,
     data_len: usize,
 }
 
@@ -146,6 +150,7 @@ fn rr3_wav_data(
         rate,
         channels,
         data_off: body,
+        data_size: size,
         data_len,
     })
 }
@@ -266,6 +271,7 @@ mod tests {
         assert_eq!(info.sample_rate, 16_000);
         assert_eq!(info.channels, 1);
         assert_eq!(info.data_off, 44);
+        assert_eq!(info.data_size, 4, "声明长度不按缓冲截断");
         assert_eq!(info.data_len, 0, "只到 data 头时载荷为空");
         assert_eq!(rr3_wav_info(b"\x01\x02\x03").unwrap(), None);
         assert_eq!(rr3_wav_pcm(&b[..44]).unwrap_err(), "WAV data 为空");
