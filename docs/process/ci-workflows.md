@@ -97,6 +97,10 @@ bootloader/分区表**，espflash 未显式给 `--bootloader` 时用它自带的
 `buildroot.yml` 的 `release` 腿必须 tag 门（`refs/tags/v`）、登录 ghcr、带
 `packages: write`，并以 oras 推 `rockrobot3-ota` 与 `rockrobot3-buildroot`；
 正式制品只发 release asset 不进 ghcr 即红。
+**缓存键治理（2026-11-22 v0.0.16 实锤）**：`actions/cache` 的 key **禁止逗号**；
+esp-toolchain 的 `targets` 允许逗号（espup 语法），归一必须在 action 内做
+（逗号→短横），不得让调用方各自清洗。组合档键为
+`esp-Linux-esp32-esp32s3-v0.17.1-idf5.2.2`；单 target 键字面不变、既有缓存不失效。
 
 **权限与失败显形（2026-11-18 续轮十六）**：
 
