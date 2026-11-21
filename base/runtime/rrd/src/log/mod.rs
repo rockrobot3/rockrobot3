@@ -166,13 +166,25 @@ pub fn rr3_log_backfill() {
     let Some(path) = sink::rr3_log_sink_path() else {
         return;
     };
-    let Ok(mut f) = std::fs::File::open(path) else {
+    let Some((text, partial)) = rr3_backfill_tail(&path) else {
         return;
     };
-    let len = match f.metadata() {
-        Ok(m) => m.len(),
-        Err(_) => return,
-    };
+    let cap = rr3_log_ring_cap();
+    let lines = rr3_backfill_lines(&text, partial, cap);
+    let mut ring = rr3_lock(rr3_log_ring());
+    for line in lines {
+        ring.push_front(line);
+    }
+    while ring.len() > cap {
+        ring.pop_front();
+    }
+}
+
+/// 读日志尾块（有界 64KB）：返回（有损解码文本，块首是否残行）；任何 IO 失败
+/// 回 None——回填是观测面兜底，不阻断 boot。
+fn rr3_backfill_tail(path: &std::path::Path) -> Option<(String, bool)> {
+    let mut f = std::fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
     // 从尾块取（append 不轮转下文件无界，整读违背"有界"本意）。64KB 对兜底
     // 容量 512 行 × 常见行长 ~80B 满配有余；起点不在文件头时块首行可能截断，
     // 丢弃（rr3_backfill_lines 的 drop_first）。
@@ -187,26 +199,14 @@ pub fn rr3_log_backfill() {
             prev = Some(one[0]);
         }
     }
-    if f.seek(SeekFrom::Start(start)).is_err() {
-        return;
-    }
+    f.seek(SeekFrom::Start(start)).ok()?;
     // 按字节读到尾块、有损解码：尾块起点常落在多字节字符中间（中文日志每行
     // 都可能是），旧序 `read_to_string` 遇非 UTF-8 边界整块 Err，回填被静默
     // 跳过＝重启后环里没有崩溃前的行；块首残行由 drop_first 丢弃。
     let mut bytes = Vec::new();
-    if f.read_to_end(&mut bytes).is_err() {
-        return;
-    }
-    let text = String::from_utf8_lossy(&bytes);
-    let cap = rr3_log_ring_cap();
-    let lines = rr3_backfill_lines(&text, rr3_tail_partial(prev, start), cap);
-    let mut ring = rr3_lock(rr3_log_ring());
-    for line in lines {
-        ring.push_front(line);
-    }
-    while ring.len() > cap {
-        ring.pop_front();
-    }
+    f.read_to_end(&mut bytes).ok()?;
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    Some((text, rr3_tail_partial(prev, start)))
 }
 
 /// 尾块首行是否残行（纯函数）：起点在文件头不算；否则看起点前一字节——上一行
