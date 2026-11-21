@@ -11,7 +11,7 @@ use rr_ipc::transport::Rr3TransportConn;
 use rr_ipc::{opcode, rr3_body_encode, rr3_body_split, Rr3Frame, Rr3FrameBuf, Rr3PayloadType};
 use serde_json::{json, Value};
 
-use crate::run::rr3_tally;
+use crate::report::rr3_tally;
 use crate::{HARNESS_TASK, PARITY_CALL_ID, ROUND_TRIP_ID};
 
 /// 组一帧 rrd 位形的下行帧（SEND、直连 trace、时间戳入参注入）。src 由调用方给：
