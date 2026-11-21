@@ -25,6 +25,60 @@ pub fn rr3_asr_text(resp: &[u8]) -> Result<String, String> {
         .ok_or_else(|| "识别应答缺 text 字段".to_string())
 }
 
+/// ASR multipart 分段计划（W7-b3 流式上行）：头/ WAV 头/尾与总长分离，
+/// PCM 由调用方按 4 KB 分块写 `esp_http_client_write`，不再聚合成整段请求体。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rr3AsrPlan {
+    /// model/language/file 三段 multipart 头（不含 WAV 头）。
+    pub head: Vec<u8>,
+    /// 44B WAV 头（`data` 长度 = PCM 字节数）。
+    pub wav: [u8; 44],
+    /// 结尾 boundary。
+    pub tail: Vec<u8>,
+    /// 请求体总长（head + wav + pcm_len + tail）。
+    pub content_len: usize,
+}
+
+/// 生成 ASR 分段计划；与 [`rr3_multipart_body`] 逐字节同源（测试钉住）。
+pub fn rr3_asr_plan(
+    model: &str,
+    pcm_len: usize,
+    sample_rate: u32,
+    boundary: &str,
+    language: Option<&str>,
+) -> Rr3AsrPlan {
+    let mut head = Vec::new();
+    head.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n{model}\r\n"
+        )
+        .as_bytes(),
+    );
+    if let Some(lang) = language {
+        head.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n{lang}\r\n"
+            )
+            .as_bytes(),
+        );
+    }
+    head.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.wav\"\r\nContent-Type: audio/wav\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    let wav = rr_audio_mech::rr3_wav_header(sample_rate, pcm_len as u32);
+    let tail = format!("\r\n--{boundary}--\r\n").into_bytes();
+    let content_len = head.len() + wav.len() + pcm_len + tail.len();
+    Rr3AsrPlan {
+        head,
+        wav,
+        tail,
+        content_len,
+    }
+}
+
 /// ASR multipart 请求体：model + language（可选）+ file（WAV 头仓内自建）。
 pub fn rr3_multipart_body(
     model: &str,
@@ -33,31 +87,12 @@ pub fn rr3_multipart_body(
     boundary: &str,
     language: Option<&str>,
 ) -> Vec<u8> {
-    let header = rr_audio_mech::rr3_wav_header(sample_rate, pcm.len() as u32);
-    let mut body = Vec::new();
-    body.extend_from_slice(
-        format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n{model}\r\n"
-        )
-        .as_bytes(),
-    );
-    if let Some(lang) = language {
-        body.extend_from_slice(
-            format!(
-                "--{boundary}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n{lang}\r\n"
-            )
-            .as_bytes(),
-        );
-    }
-    body.extend_from_slice(
-        format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.wav\"\r\nContent-Type: audio/wav\r\n\r\n"
-        )
-        .as_bytes(),
-    );
-    body.extend_from_slice(&header);
+    let plan = rr3_asr_plan(model, pcm.len(), sample_rate, boundary, language);
+    let mut body = Vec::with_capacity(plan.content_len);
+    body.extend_from_slice(&plan.head);
+    body.extend_from_slice(&plan.wav);
     body.extend_from_slice(pcm);
-    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    body.extend_from_slice(&plan.tail);
     body
 }
 
@@ -182,6 +217,21 @@ mod tests {
         let ping: Value = serde_json::from_slice(&rr3_ping_body("m")).unwrap();
         assert_eq!(ping["max_tokens"], 1);
         assert_eq!(ping["messages"][0]["content"], "ping");
+    }
+
+    #[test]
+    fn asr_plan_concatenates_to_legacy_body() {
+        let pcm = b"\x01\x02\x03\x04";
+        for lang in [Some("zh"), None] {
+            let plan = rr3_asr_plan("m", pcm.len(), 16000, "bd1", lang);
+            let mut joined = Vec::new();
+            joined.extend_from_slice(&plan.head);
+            joined.extend_from_slice(&plan.wav);
+            joined.extend_from_slice(pcm);
+            joined.extend_from_slice(&plan.tail);
+            assert_eq!(joined, rr3_multipart_body("m", pcm, 16000, "bd1", lang));
+            assert_eq!(plan.content_len, joined.len());
+        }
     }
 
     #[test]

@@ -162,26 +162,26 @@ fn rr3_turn_fail(bus: &Arc<Mutex<Bus>>, why: &str) {
     println!("[dialog] 降级播报 {speak}");
 }
 
-/// ASR 段：PCM → WAV/multipart → 识别文本。
+/// ASR 段：PCM → multipart（4 KB 边转边写）→ 识别文本。
 fn rr3_asr_stage(pcm: &[i16]) -> Result<String, String> {
     let cfg = crate::cloud::rr3_dialog_cfg().map_err(|e| format!("云配置缺席: {e}"))?;
-    let bytes = rr3_i16_le(pcm);
     let boundary = format!("rr3{:08x}", crate::state::esp_random_u32());
-    let body = rr_cloud_proto::rr3_multipart_body(
+    let plan = rr_cloud_proto::rr3_asr_plan(
         &cfg.asr_model,
-        &bytes,
+        pcm.len() * 2,
         MIC_SR_HZ,
         &boundary,
         Some("zh"),
     );
     let ctype = format!("multipart/form-data; boundary={boundary}");
     let url = format!("{}/v1/audio/transcriptions", cfg.base.trim_end_matches('/'));
-    let resp = crate::cloud::rr3_post_retry(
+    let resp = crate::cloud::rr3_post_asr(
         "识别接口",
         &url,
         &cfg.key,
-        &body,
         &ctype,
+        &plan,
+        pcm,
         crate::cloud::MAX_JSON,
     )?;
     rr_cloud_proto::rr3_asr_text(&resp)
@@ -291,15 +291,6 @@ fn rr3_beat_dialog() {
     crate::autonomy::rr3_beat(Rr3Task::Dialog);
 }
 
-/// i16 样本 → s16le 字节（ASR multipart 载荷）。
-fn rr3_i16_le(pcm: &[i16]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(pcm.len() * 2);
-    for s in pcm {
-        out.extend_from_slice(&s.to_le_bytes());
-    }
-    out
-}
-
 /// 文本上限（按 UTF-8 字符边界截断；TTS 输入与 `/say` 同门）。
 fn rr3_cap_text(text: &str, max: usize) -> String {
     let mut out = String::new();
@@ -352,12 +343,6 @@ mod tests {
         assert!(rr3_dialog_body(&stereo).unwrap_err().contains("声道"));
         assert!(rr3_dialog_body(&[0, 1, 2]).unwrap_err().contains("整样本"));
         assert!(rr3_dialog_body(&[]).unwrap_err().contains("整样本"));
-    }
-
-    #[test]
-    fn i16_bytes_are_little_endian_roundtrip() {
-        let bytes = rr3_i16_le(&[1, -2, 32767, -32768]);
-        assert_eq!(bytes, [0x01, 0x00, 0xFE, 0xFF, 0xFF, 0x7F, 0x00, 0x80]);
     }
 
     #[test]
