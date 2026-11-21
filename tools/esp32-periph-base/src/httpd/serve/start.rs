@@ -212,8 +212,11 @@ unsafe fn start_httpd(
         );
     }
     #[cfg(feature = "no-http")]
-    println!(
-        "[periph] 全链档 no-http：WiFi 已起（AP SSID={ap_ssid}，凭据源={cred_source}），HTTP 配置面关闭（ADR-0030）"
-    );
+    {
+        let _ = bus;
+        println!(
+            "[periph] 全链档 no-http：WiFi 已起（AP SSID={ap_ssid}，凭据源={cred_source}），HTTP 配置面关闭（ADR-0030）"
+        );
+    }
     Ok(())
 }
