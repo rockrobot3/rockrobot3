@@ -83,10 +83,17 @@ riscv64 发布镜像路径跑通（交叉产物 → `rr3-pack` stage → QEMU `d
 两段冒烟；`build-riscv64` 必须复用 `build-riscv-image.sh` 并推送；`merge` 必须对
 合并清单再跑 `image-smoke.sh file`；`firmware` 的 S3 档须同时带目标三元组、
 `MCU=esp32s3` 与 `esp32s3` feature——原生腿/发布路径/装机面验证/芯片档任一缩水即红。
-**固件制品（同日）**：tag 发布的 `firmware` job 同批构建 classic 与 ESP32-S3 的
-release ELF——release asset 双件可无凭据下载，同时以 oras 推
-`ghcr.io/<owner>/rockrobot3-firmware:<tag>`（不可变标签，含 sha256 清单），
-五类芯片的正式发布制品从此全部落在 ghcr。**制品托管审计（同日补）**：
+S3 门的 ⑨ release 与 `firmware` job 逐字同参（`esp32s3,autonomy,tts`），并在产出树
+断言同版 bootloader：tag 不是该形态的首次 release 编译。
+**固件制品（同日；2026-11-22 补同版 bootloader）**：tag 发布的 `firmware` job
+同批构建 classic `safe`（默认档）与 ESP32-S3 `full`（`esp32s3,autonomy,tts`）
+release ELF，并从同一 IDF 5.2.2 构建树取两份 `bootloader.bin`——**ELF 不内嵌
+bootloader/分区表**，espflash 未显式给 `--bootloader` 时用它自带的镜像（版本
+与 app 不保证一致）。资产集 = 双 ELF + 双 bootloader + `rr3-partitions.csv` +
+`FLASHING.md` + sha256 清单；release asset 无凭据可下载，同时以 oras 推
+`ghcr.io/<owner>/rockrobot3-firmware:<tag>`（不可变标签），五类芯片的正式发布
+制品从此全部落在 ghcr。**资产集缺一即红**（`workflows_audit` 的 firmware 断言
+与 `fail_on_unmatched_files` 双重拦截）。**制品托管审计（同日补）**：
 `buildroot.yml` 的 `release` 腿必须 tag 门（`refs/tags/v`）、登录 ghcr、带
 `packages: write`，并以 oras 推 `rockrobot3-ota` 与 `rockrobot3-buildroot`；
 正式制品只发 release asset 不进 ghcr 即红。

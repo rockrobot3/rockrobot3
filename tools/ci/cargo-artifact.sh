@@ -49,6 +49,24 @@ rr3_partition_has() {
   return 1
 }
 
+# bootloader 定位（发布固件集共享单点）：与 app 同一 IDF 构建树，先用
+# esp-idf-sys 复制到 ELF 同目录的那份（批N18 登记），没有再回 IDF 的 CMake
+# 产出树找。两处都没有返回 1；调用方按各自纪律点名（发布面 fail-closed，
+# 不得静默退回 espflash 自带镜像——IDF 版本与 app 不保证一致）。
+# 用法（在目标工程目录内调用）：rr3_idf_bootloader <elf>
+rr3_idf_bootloader() {
+  local dir hit
+  dir="$(dirname "$1")"
+  if [ -s "$dir/bootloader.bin" ]; then
+    printf '%s\n' "$dir/bootloader.bin"
+    return 0
+  fi
+  hit=$(find "$dir/build" -type f \
+        -path '*/out/build/bootloader/bootloader.bin' -print -quit 2>/dev/null)
+  [ -n "$hit" ] || return 1
+  printf '%s\n' "$hit"
+}
+
 # esp-clang 定位（ESP 门共享单点）：espup 把乐鑫 LLVM fork 的库目录挂到
 # ~/.espup/esp-clang，宿主库名随平台而异（macOS libclang.dylib / Linux libclang.so）。
 # 打印首个存在的库路径；缺位返回非 0，调用方按各自纪律 SKIP（CI 门）或 die（产线脚本）。
