@@ -237,7 +237,7 @@ unsafe fn start_httpd(
     {
         if httpd_mem_ok() {
             httpd_register(bus)?;
-            rr3_httpd_ready(cred_source, &ap_ssid);
+            rr3_httpd_ready(cred_source, ap_ssid);
         }
     }
     #[cfg(feature = "no-http")]
