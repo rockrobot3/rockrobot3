@@ -1,6 +1,8 @@
 # ADR-0031：classic 全链的存储/流式音频承载
 
-- **状态**：草案（2026-11-21，待评审）
+- **状态**：部分采纳（2026-11-22）：裁定 2（TTS 流式）生效；裁定 1/3（语音
+  spool 与无 PSRAM VAD）在 classic 4MB 实测否决，机制保留给有 PSRAM/更大
+  SRAM 的机型。详见“施工与验收 / W7-b4”。
 - **日期**：2026-11-21
 - **关联**：
   [ADR-0029](ADR-0029-单板自治与云直连-三独立形态全链收口.md)（单板全链口径）·
@@ -121,6 +123,18 @@ TTS 回包与日志落存储**，不把整段数据常驻 RAM。本 ADR 只裁�
     计划反推字节数 + 内联块显式预算（`67472d7b`）。
   - **未过 Go 门**：真板 spool 擦写时延、I2S DMA 是否被 flash 擦除的 cache 停顿
     拖出欠载、30min 内存曲线均未测，归 W7-b4；classic 全链仍 No-Go。
-- **W7-b4**：classic 真板 30min soak；`[mem]` 阶段列与 Go/No-Go 入 0014/后续证据。
+- **W7-b4（2026-11-22，classic 4MB 无 PSRAM，CI 制品 `d5963ce3`）**：30 min soak
+  完成——1 次上电复位、0 Guru/panic/心跳超时/OOM；`status free` 61 样本
+  36,288–36,448 B（7.0% SRAM），`min_free=1,884 B`；MIC 采样率 15,947–16,130 Hz；
+  播放面/WiFi/net 在线，HTTP 配置面按最大连续堆降级关闭，本地 VAD/spool 按
+  堆预留门停用。真板逐层红因与修复：6 KB 写线程栈不足（→12 KB）、语音 48 KB
+  预算超过启动余量（→spool 门）、httpd 16 KB 任务碎片失败挤掉播放栈（→HTTP
+  门）、播放 16 KB 栈在 15.3 KB 最大连续块处 OOM（→起栈前等连续块）、
+  net-watch 16 KB 栈在 8 KB 块处 OOM（→6 KB）、监督壳对“未启动”误报即将复位
+  （→按 ever 拆分点名）。**裁定：classic 全链/板上 VAD No-Go**——TLS 无余量、
+  HTTP 与语音入口均不可用；TTS/ASR 流式继续有效，spool 机制保留给 PSRAM 或
+  更大 SRAM 机型。Go 判据（30min free ≥20% SRAM）未达，不再以 classic 4MB
+  作为全链候选。
 
-每件单独提交、单独 CI 回执；未完成三件前不把 classic 全链写成 Go。
+每件单独提交、单独 CI 回执；W7-b4 已完成并按实测裁定 classic 4MB No-Go
+（见上），不得再以静态预算或单一时点 `free` 反推 Go。
