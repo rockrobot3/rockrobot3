@@ -75,33 +75,25 @@ for d in "$venv_sp"/ruamel_yaml-*.dist-info; do
   fi
 done
 
-# ⑧pre clippy 可用性/告警面探针（2026-11-21 治理，**非阻断**）：esp fork 工具链
-# 是否带 clippy、以 xtensa 目标跑起来有多少告警，此前无任何 CI 证据。本探针只出
-# `::notice` 注解（匿名 API 可读），不改变门禁结论；结论入册后再决定是否设门。
-# 用固件最全特性档 autonomy,tts + all-targets（覆盖 W6 形态），其余档由既有
-# 五档 build/test 编译面覆盖；探针只看告警面，不重复跑五档以免耗时翻倍。
+# ⑧pre clippy 门（2026-11-21 治理）：esp fork 工具链实测带 clippy（0.1.97），以
+# 固件最全特性档 autonomy,tts + all-targets 跑 -D warnings；其余档由既有五档
+# build/test 编译面覆盖。测试目标在 panic=abort 下必须带 -Zpanic_abort_tests
+# （与 ⑧ 单测编译同口径，否则 clippy 直接拒编测试目标）。
 esp_clippy_log=/tmp/rr3-esp32-periph-clippy.log
-# 测试目标在 panic=abort 下必须带 -Zpanic_abort_tests（与 ⑧ 单测编译同口径，
-# 否则 clippy 直接拒编测试目标，探针只能看到生产面）。
 esp_probe_rf="--cfg espidf_time64 -Zunstable-options -Cpanic=immediate-abort -Zpanic_abort_tests"
-if cargo +esp clippy --version >/tmp/rr3-esp-clippy-ver 2>&1; then
-  clippy_ver=$(head -1 /tmp/rr3-esp-clippy-ver)
-  if RUSTFLAGS="$esp_probe_rf" cargo +esp clippy --all-targets --features autonomy,tts \
-       --config 'source.crates-io.replace-with="rsproxy-sparse"' \
-       --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
-       >"$esp_clippy_log" 2>&1; then
-    warn_n=$(grep -E '^warning: ' "$esp_clippy_log" | grep -vc ' generated ' || true)
-    sample=$(grep -A1 -E '^warning: ' "$esp_clippy_log" | grep -v ' generated ' | head -40 | tr '\n' '|' | cut -c1-3500)
-    echo "::notice title=esp32-clippy::可用（${clippy_ver}）；默认档 all-targets warning=${warn_n} error=0；样本 ${sample}"
-  else
-    warn_n=$(grep -E '^warning: ' "$esp_clippy_log" | grep -vc ' generated ' || true)
-    err_n=$(grep -cE '^error' "$esp_clippy_log" || true)
-    first=$(grep -E '^error' "$esp_clippy_log" | head -1 | cut -c1-300)
-    sample=$(grep -A1 -E '^warning: ' "$esp_clippy_log" | grep -v ' generated ' | head -8 | tr '\n' '|' | cut -c1-900)
-    echo "::notice title=esp32-clippy::可用（${clippy_ver}）；warning=${warn_n} error=${err_n}；首错 ${first}；样本 ${sample}"
-  fi
+if ! cargo +esp clippy --version >/tmp/rr3-esp-clippy-ver 2>&1; then
+  echo "FAIL  esp clippy 不可用（esp 工具链缺 clippy 组件）: $(tail -1 /tmp/rr3-esp-clippy-ver)" >&2
+  fail=1
+elif RUSTFLAGS="$esp_probe_rf" cargo +esp clippy --all-targets --features autonomy,tts \
+     --config 'source.crates-io.replace-with="rsproxy-sparse"' \
+     --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
+     -- -D warnings >"$esp_clippy_log" 2>&1; then
+  echo "PASS  esp32-periph-base clippy -D warnings（autonomy,tts all-targets）"
 else
-  echo "::notice title=esp32-clippy::不可用（$(tail -1 /tmp/rr3-esp-clippy-ver)）"
+  errs=$(grep -A1 -E '^error' "$esp_clippy_log" | head -12 | tr '\n' '|' | cut -c1-900)
+  echo "FAIL  esp32-periph-base clippy -D warnings: ${errs}" >&2
+  tail -3 "$esp_clippy_log" >&2
+  fail=1
 fi
 
 # target-dir 由仓根 .cargo/config.toml 统一到 /tmp/rr3-build（P0-5），
