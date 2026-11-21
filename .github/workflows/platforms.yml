@@ -326,6 +326,14 @@ jobs:
           path: /tmp/rr3-build/xtensa-esp32-espidf/debug/esp32-periph-base
           if-no-files-found: error
           retention-days: 7
+      - name: 上传 classic no-http 探针固件
+        if: matrix.chip == 'esp32'
+        uses: actions/upload-artifact@v7
+        with:
+          name: esp32-classic-nohttp-firmware
+          path: /tmp/rr3-build/esp32-classic-nohttp
+          if-no-files-found: error
+          retention-days: 7
 
   # 自治健康面集成腿（W3-3/W4-2）：host 真跑监督核状态迁移（30 s 模拟 + 复位
   # 闸门），不占 ESP 工具链；双芯片 autonomy/tts 构建面仍归 esp32-gates。

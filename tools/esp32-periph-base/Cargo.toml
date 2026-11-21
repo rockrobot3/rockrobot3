@@ -32,6 +32,9 @@ autonomy = []
 # 与 spk-tone 互斥（同占 I2S1）；**隐含 autonomy**——TLS 证书校验依赖 SNTP 对时，
 # 单独开 tts 也必须带健康壳与对时，避免"能编译、连不上云"的隐性坏档。
 tts = ["autonomy", "dep:rr-audio-mech", "dep:rr-cloud-proto", "dep:rr-intent-mech"]
+# ADR-0030：全链档关闭 HTTP 配置面。网络（WiFi bringup + net 心跳）照常起，
+# 只跳过 esp_http_server 起栈；默认固件不带此 feature，行为不变。
+no-http = []
 
 # 批D③ 真板实锤（2026-10-13）：dev 缺省 opt-level=0 下 mic 线程的逐元素堆写
 # （extend_from_slice / String::push / serde_json 序列化）慢两个数量级——组帧

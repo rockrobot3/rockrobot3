@@ -2,17 +2,22 @@
 //!
 //! unsafe 壳层仍集中于此；HTTP 原语与 endpoint 留在父模块。
 
+#[cfg(not(feature = "no-http"))]
 use std::ffi::CString;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+#[cfg(not(feature = "no-http"))]
 use esp_idf_sys::{
     http_method_HTTP_GET, http_method_HTTP_POST, httpd_config_t, httpd_handle_t,
-    httpd_register_uri_handler, httpd_start, httpd_uri_t, nvs_flash_init, ESP_OK,
+    httpd_register_uri_handler, httpd_start, httpd_uri_t,
 };
+use esp_idf_sys::{nvs_flash_init, ESP_OK};
 
 use super::wifi::{self, wifi_bringup};
+#[cfg(not(feature = "no-http"))]
 use super::{rr3_httpd_dispatch, HTTPD_BUS, HTTPD_SERVER_PORT, HTTPD_STACK_SIZE};
+#[cfg(not(feature = "no-http"))]
 use crate::httpd::RR3_BOARD_ROUTES;
 use crate::state::Bus;
 
@@ -129,6 +134,7 @@ fn thread_spawn(bus: Arc<Mutex<Bus>>, cred_source: &'static str, ssid: Vec<u8>, 
 ///
 /// 只能在 `wifi_bringup` 成功后调用一次；`HTTPD_BUS` 先写后注册 handler，
 /// 保证回调可达时 bus 必在位；注册表路径 CString 活到函数返回。
+#[cfg(not(feature = "no-http"))]
 unsafe fn httpd_register(bus: &Arc<Mutex<Bus>>) -> Result<(), i32> {
     let mut h: httpd_handle_t = std::ptr::null_mut();
     let conf = httpd_config_t {
@@ -191,16 +197,23 @@ unsafe fn start_httpd(
 ) -> Result<(), i32> {
     let ap_ssid = wifi_bringup(ssid, pass)?;
     // ---- W3-3 net 任务接线：网络可达即心跳（1 s 一拍），**先于 httpd 起栈**。
-    // 配置腿在 classic 上会因 httpd 栈不足失败（W7 实测 45064），但网络本身已起；
+    // 配置腿在 classic 上会因 httpd 分配失败（W7 实测 0xB008=ESP_ERR_HTTPD_ALLOC_MEM），但网络本身已起；
     // 心跳若绑在 httpd 成功之后，net 任务会被监督壳判死并整机复位（classic 实测
     // 8 次 SW_CPU_RESET）。HTTP 是配置面，不是网络在位的判据。
     #[cfg(feature = "autonomy")]
     net_watch_spawn();
-    httpd_register(bus)?;
+    #[cfg(not(feature = "no-http"))]
+    {
+        httpd_register(bus)?;
+        println!(
+            "[periph] 配置腿起（N-13，凭据源={cred_source}）: SoftAP SSID={ap_ssid}（WPA2，口令见 wifi_ap_configure 注）+ http://0.0.0.0:{}/api/board/*（白名单 {} 端点，端点表＝RR3_BOARD_ROUTES）",
+            HTTPD_SERVER_PORT,
+            RR3_BOARD_ROUTES.len()
+        );
+    }
+    #[cfg(feature = "no-http")]
     println!(
-        "[periph] 配置腿起（N-13，凭据源={cred_source}）: SoftAP SSID={ap_ssid}（WPA2，口令见 wifi_ap_configure 注）+ http://0.0.0.0:{}/api/board/*（白名单 {} 端点，端点表＝RR3_BOARD_ROUTES）",
-        HTTPD_SERVER_PORT,
-        RR3_BOARD_ROUTES.len()
+        "[periph] 全链档 no-http：WiFi 已起（AP SSID={ap_ssid}，凭据源={cred_source}），HTTP 配置面关闭（ADR-0030）"
     );
     Ok(())
 }
