@@ -106,12 +106,24 @@ pub(crate) fn spawn_player(
     bus: Arc<Mutex<Bus>>,
 ) {
     let state = Arc::new(Mutex::new(Rr3PlayState::new()));
+    // 环在 spawn 时即可收（早期 /say 不撞"未存活"窗）；I2S 装配失败时线程翻回
+    // false，阻塞在 feed 里的生产者随即失败，不会无限等。
+    let _ = state.lock().map(|mut st| st.alive = true);
     let _ = PLAY_SLOT.lock().map(|mut slot| *slot = Some(state.clone()));
-    let _ = thread::Builder::new()
+    let spawned = thread::Builder::new()
         .name("spk-play".into())
         .stack_size(PLAY_STACK)
-        .spawn(move || play_run(i2s1, bclk, dout, ws, state, bus))
-        .map_err(|e| println!("[spk] 起播放线程失败: {e:?}"));
+        .spawn(move || play_run(i2s1, bclk, dout, ws, state, bus));
+    if let Err(e) = spawned {
+        println!("[spk] 起播放线程失败: {e:?}");
+        if let Ok(mut st) = PLAY_SLOT.lock() {
+            if let Some(state) = st.as_ref() {
+                if let Ok(mut s) = state.lock() {
+                    s.alive = false;
+                }
+            }
+        }
+    }
 }
 
 /// 取环句柄（未装配/锁中毒都如实回错）。
@@ -127,12 +139,6 @@ pub(crate) fn rr3_play_begin() -> Result<(), &'static str> {
     loop {
         {
             let mut st = state.lock().map_err(|_| "播放面锁中毒")?;
-            // 起播早于 I2S 装配完成是合法竞态；给 1 s 装配窗，逾时才判死。
-            if !st.alive && t0.elapsed() < Duration::from_millis(1_000) {
-                drop(st);
-                thread::sleep(Duration::from_millis(10));
-                continue;
-            }
             if !st.alive {
                 return Err("播放线程未存活");
             }
@@ -219,16 +225,27 @@ pub(crate) fn rr3_play_stream(src: &[u8]) -> Result<(), &'static str> {
 
 /// 整段源字节的流式整形（WAV 头剥离、声道/采样率门、全局淡入淡出）。
 fn rr3_play_feed_all(src: &[u8]) -> Result<(), &'static str> {
-    let wav = rr3_wav_pcm(src).map_err(|_| "WAV 容器不合法（缺 fmt/data 或非 16bit PCM）")?;
-    let (rate, channels, data) = wav.map_or((PLAY_RATE_HZ, 1u16, src), |w| {
-        (w.sample_rate, w.channels, w.data)
-    });
-    if rate != PLAY_RATE_HZ {
-        return Err("采样率非 16 kHz（板侧不重采样，请云侧按 16000 请求）");
-    }
+    let (channels, data) = rr3_play_fmt(src)?;
     if data.is_empty() {
         return Err("PCM 为空");
     }
+    rr3_feed_pcm(data, channels)
+}
+
+/// 容器/格式门：WAV 校验采样率，裸流按 16k 单声道。
+fn rr3_play_fmt(src: &[u8]) -> Result<(u16, &[u8]), &'static str> {
+    let wav = rr3_wav_pcm(src).map_err(|_| "WAV 容器不合法（缺 fmt/data 或非 16bit PCM）")?;
+    let Some(w) = wav else {
+        return Ok((1, src));
+    };
+    if w.sample_rate != PLAY_RATE_HZ {
+        return Err("采样率非 16 kHz（板侧不重采样，请云侧按 16000 请求）");
+    }
+    Ok((w.channels, w.data))
+}
+
+/// 源载荷 → 整形 → 播放环 → end（单条流的完整喂入）。
+fn rr3_feed_pcm(data: &[u8], channels: u16) -> Result<(), &'static str> {
     let want_ms = rr3_pcm_ms(data.len(), channels, PLAY_RATE_HZ);
     let mut stream = Rr3PcmStream::rr3_new(channels, Some(data.len()), PLAY_FADE_FRAMES)?;
     let mut out = Vec::with_capacity(PLAY_SRC_CHUNK * 2);
@@ -257,15 +274,13 @@ fn play_run(
             println!("[spk] I2S1 TX 装配失败: {e:?}（播放面缺席，查功放三线与供电/共地）")
         })
     else {
+        play_dead(&state);
         return;
     };
     if tx.tx_enable().is_err() {
         println!("[spk] I2S1 tx_enable 失败（播放面缺席）");
+        play_dead(&state);
         return;
-    }
-    {
-        let Ok(mut st) = state.lock() else { return };
-        st.alive = true;
     }
     println!(
         "[spk] 播放面起：I2S1 TX {PLAY_RATE_HZ}Hz 16bit stereo ring={PLAY_RING_BYTES}B（W7-b2 流式）"
@@ -295,6 +310,13 @@ fn play_run(
                 src_bytes,
             } => play_done(&bus, abort, want_ms, src_bytes, &mut t0),
         }
+    }
+}
+
+/// I2S 装配失败：把环标成不可用（阻塞中的生产者据此失败，不无限等）。
+fn play_dead(state: &Arc<Mutex<Rr3PlayState>>) {
+    if let Ok(mut st) = state.lock() {
+        st.alive = false;
     }
 }
 

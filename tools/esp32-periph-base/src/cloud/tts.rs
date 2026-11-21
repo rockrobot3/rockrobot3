@@ -8,7 +8,7 @@
 //! 失败语义：整形/播放环失败立即中止并点名，绝不把半条流记成播完；HTTP 层在首块
 //! 之后不再重试（重放音频比失败更糟），首块之前仍按契约 2 次/500 ms。
 
-use rr_audio_mech::{rr3_pcm_ms, rr3_wav_info, Rr3PcmStream};
+use rr_audio_mech::{rr3_pcm_ms, rr3_wav_info, Rr3PcmStream, Rr3WavInfo};
 
 use super::cfg::rr3_cloud_cfg;
 use super::http::{rr3_http_post_stream, Rr3StreamSink};
@@ -118,43 +118,70 @@ impl Rr3TtsSink {
             return Ok(());
         }
         if &self.head[0..4] != b"RIFF" {
-            let total = self.total;
-            let head = core::mem::take(&mut self.head);
-            self.start(1, total, total.unwrap_or(MAX_PCM), None)?;
-            return self.feed(&head);
+            return self.start_raw();
         }
         if self.head.len() < 44 {
             return Ok(());
         }
-        let info = match rr3_wav_info(&self.head) {
-            Ok(Some(info)) => info,
-            // data 块头还没到：继续收；超过头窗仍解析不出才判死。
-            Err(e) if e == "WAV 缺 data 块" => {
-                if self.head.len() >= HEAD_CAP {
-                    return Err("WAV 头超出 1KB 窗口".into());
-                }
-                return Ok(());
-            }
-            Err(e) => return Err(format!("WAV 头不合法: {e}")),
-            Ok(None) => return Err("WAV 头识别失败".into()),
+        self.start_wav()
+    }
+
+    /// 裸 s16le：首块即起流，后续块直投。
+    fn start_raw(&mut self) -> Result<(), String> {
+        let total = self.total;
+        let head = core::mem::take(&mut self.head);
+        self.start(1, total, total.unwrap_or(MAX_PCM), None)?;
+        self.feed(&head)
+    }
+
+    /// WAV：解析头 → 定总长 → 起流；data 块头未到则继续收。
+    fn start_wav(&mut self) -> Result<(), String> {
+        let Some(info) = self.wav_info()? else {
+            return Ok(());
         };
         if info.sample_rate != TTS_RATE {
             return Err(format!("TTS 采样率 {} ≠ {TTS_RATE}", info.sample_rate));
         }
-        let avail = self.total.map(|c| c.saturating_sub(info.data_off));
-        let total = match avail {
-            Some(a) if info.data_size == 0 || info.data_size > a => a,
-            Some(_) => info.data_size,
-            None if info.data_size == 0 => return Err("WAV data 长度未知".into()),
-            None => info.data_size,
-        };
-        if total == 0 {
-            return Err("WAV data 为空".into());
-        }
+        let total = self.wav_total(&info)?;
         let head = core::mem::take(&mut self.head);
         self.start(info.channels, Some(total), total, Some(total))?;
         let payload = head.get(info.data_off..).unwrap_or(&[]);
         self.feed(payload)
+    }
+
+    /// 头窗内解析 WAV；`Ok(None)` = data 块头未到、需继续收。
+    fn wav_info(&self) -> Result<Option<Rr3WavInfo>, String> {
+        match rr3_wav_info(&self.head) {
+            Ok(Some(info)) => Ok(Some(info)),
+            Ok(None) => Err("WAV 头识别失败".into()),
+            Err(e) if e == "WAV 缺 data 块" => {
+                if self.head.len() >= HEAD_CAP {
+                    Err("WAV 头超出 1KB 窗口".into())
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(e) => Err(format!("WAV 头不合法: {e}")),
+        }
+    }
+
+    /// `data` 总长：声明值优先；0/越界用 Content-Length 截断；都不可知即拒。
+    fn wav_total(&self, info: &Rr3WavInfo) -> Result<usize, String> {
+        let declared = info.data_size;
+        let total = match self.total.map(|c| c.saturating_sub(info.data_off)) {
+            Some(avail) => {
+                if declared == 0 || declared > avail {
+                    avail
+                } else {
+                    declared
+                }
+            }
+            None => declared,
+        };
+        if total == 0 {
+            return Err("WAV data 长度未知或为空".into());
+        }
+        Ok(total)
     }
 }
 
