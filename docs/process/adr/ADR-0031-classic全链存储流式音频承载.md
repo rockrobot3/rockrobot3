@@ -93,6 +93,11 @@ TTS 回包与日志落存储**，不把整段数据常驻 RAM。本 ADR 只裁�
   播放队列由“2 条全量 PCM”降为 16KB 环，512KB 回包 Vec 不再存在。CI 双芯片绿；
   真板听感、时长误差与 30min 内存列在 W7-b4 取。
 - **W7-b3**：无 PSRAM VAD 小窗 + spool 写入；半双工与丢段计数。
+- **W7-b3a（2026-11-21 落树，`657f1af8`）**：ASR multipart 改 4KB 分块上行——
+  `rr-cloud-proto` 出 `Rr3AsrPlan`（head/wav/tail/content_len，与整段组包逐字节
+  对拍），`cloud/http` 按头/WAV/样本/尾顺序写 `esp_http_client_write`；删除
+  256KB s16le 与 256KB 整段 multipart 两份临时体。重试仍 2 次/500ms。语音段
+  缓冲（VAD 段）尚未落 spool，无 PSRAM 写入路径仍归 W7-b3b。
 - **W7-b4**：classic 真板 30min soak；`[mem]` 阶段列与 Go/No-Go 入 0014/后续证据。
 
 每件单独提交、单独 CI 回执；未完成三件前不把 classic 全链写成 Go。
