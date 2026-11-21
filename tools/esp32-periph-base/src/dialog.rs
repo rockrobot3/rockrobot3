@@ -91,11 +91,23 @@ pub(crate) fn rr3_turn_spool(bus: &Arc<Mutex<Bus>>, info: rr_audio_mech::Rr3SegI
         "[dialog] spool 段 seq={} len={}B crc={:#010x} 上传",
         info.seq, info.len, info.crc32
     );
+    if let Err(why) = rr3_spool_gate() {
+        let _ = crate::spool::rr3_spool_clear();
+        return rr3_turn_end(bus, &why);
+    }
     let asr = rr3_asr_spool(info);
     if let Err(e) = crate::spool::rr3_spool_clear() {
         println!("[dialog] spool 段释放失败: {e}（后续语音段将被背压拒绝）");
     }
     rr3_turn_text(bus, t0, asr);
+}
+
+/// 上传前校验：CRC 不符或写线程异常都不送云端（损坏音频只会在云端得到错文本）。
+fn rr3_spool_gate() -> Result<(), String> {
+    if crate::spool::rr3_spool_verify()? {
+        return Ok(());
+    }
+    Err("spool 段 CRC 不符，弃轮（记录已清理）".into())
 }
 
 /// 轮首公共段：计时起点、堆账、心跳、思考表情。
