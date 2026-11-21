@@ -145,6 +145,7 @@ pub struct Rr3Spool<D: Rr3SpoolIo> {
     state: State,
     seq: u16,
     len: u32,
+    /// 记录期间是 CRC 运行态；`Done` 后是最终值（供 `rr3_crc_check` 对账）。
     crc: u32,
     /// 本段已擦除到的载荷偏移（4KB 对齐）。
     erased: usize,
@@ -261,10 +262,11 @@ impl<D: Rr3SpoolIo> Rr3Spool<D> {
             self.state = State::Idle;
             return Err(Rr3SpoolErr::Empty);
         }
+        let crc = rr3_crc32_final(self.crc);
         let info = Rr3SegInfo {
             seq: self.seq,
             len: self.len,
-            crc32: rr3_crc32_final(self.crc),
+            crc32: crc,
         };
         let raw = rr3_hdr_encode(&info);
         if let Err(e) = self.dev.rr3_write(0, &raw) {
@@ -281,6 +283,7 @@ impl<D: Rr3SpoolIo> Rr3Spool<D> {
             return Err(Rr3SpoolErr::HdrMismatch);
         }
         self.state = State::Done;
+        self.crc = crc;
         Ok(info)
     }
 

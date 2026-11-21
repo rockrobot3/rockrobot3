@@ -37,6 +37,10 @@ cd "$root/tools/esp32-periph-base" || { echo "ERROR: 无法进入 tools/esp32-pe
 . "$root/tools/ci/cargo-artifact.sh"
 . "$root/tools/ci/skip.sh"
 
+# W7-b1a 分区表核验时间锚：先于本门任何构建创建（语义同 classic 门）。
+part_marker=/tmp/rr3-part-marker-esp32s3
+: > "$part_marker"
+
 # ① esp fork 工具链（rustup alias esp，0.0.7 批A'）
 if ! rustup toolchain list 2>/dev/null | grep -q '^esp'; then
   rr3_skip "esp 工具链未安装（rustup toolchain list 无 'esp'）——esp32s3-periph-base 门不执行"
