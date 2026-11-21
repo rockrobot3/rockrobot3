@@ -12,7 +12,7 @@ use rr_ipc::audio_session::{
 use rr_ipc::Rr3UartConn;
 
 use crate::exit::bail_with_recovery;
-use crate::watch::WatchState;
+use crate::state::WatchState;
 
 /// 读线程（收流端机制面，判据② A/B 定案改造）：**只做大块裸读**——单次
 /// [`Rr3UartConn::rr3_read_timeout`]（poll 等就绪 + read 一次 [`READ_BLOCK`] 窗）

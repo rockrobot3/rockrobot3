@@ -7,7 +7,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{mpsc, Arc};
 
 use crate::exit::exit_with_recovery;
-use crate::watch::WatchState;
+use crate::state::WatchState;
 use crate::wav::wav_header;
 
 /// 写线程（落盘独占面）：占位头 → 逐片写透（write_all + flush，崩溃面数据风险
