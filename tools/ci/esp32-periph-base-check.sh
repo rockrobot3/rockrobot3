@@ -75,6 +75,28 @@ for d in "$venv_sp"/ruamel_yaml-*.dist-info; do
   fi
 done
 
+# ⑧pre clippy 可用性/告警面探针（2026-11-21 治理，**非阻断**）：esp fork 工具链
+# 是否带 clippy、以 xtensa 目标跑起来有多少告警，此前无任何 CI 证据。本探针只出
+# `::notice` 注解（匿名 API 可读），不改变门禁结论；结论入册后再决定是否设门。
+# 用默认特性 + all-targets（等价最终门形状），不叠加五档特性以免重复耗时。
+esp_clippy_log=/tmp/rr3-esp32-periph-clippy.log
+if cargo +esp clippy --version >/tmp/rr3-esp-clippy-ver 2>&1; then
+  clippy_ver=$(head -1 /tmp/rr3-esp-clippy-ver)
+  if cargo +esp clippy --all-targets \
+       --config 'source.crates-io.replace-with="rsproxy-sparse"' \
+       --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
+       >"$esp_clippy_log" 2>&1; then
+    echo "::notice title=esp32-clippy::可用（${clippy_ver}）；默认档 all-targets 0 错误（可考虑设门）"
+  else
+    warn_n=$(grep -cE '^warning' "$esp_clippy_log" || true)
+    err_n=$(grep -cE '^error' "$esp_clippy_log" || true)
+    first=$(grep -E '^error' "$esp_clippy_log" | head -1 | cut -c1-300)
+    echo "::notice title=esp32-clippy::可用（${clippy_ver}）；warning=${warn_n} error=${err_n}；首错 ${first}"
+  fi
+else
+  echo "::notice title=esp32-clippy::不可用（$(tail -1 /tmp/rr3-esp-clippy-ver)）"
+fi
+
 # target-dir 由仓根 .cargo/config.toml 统一到 /tmp/rr3-build（P0-5），
 # 严禁在源码区留构建产物；CI 与本地同口径。
 elf="$(rr3_cargo_artifact xtensa-esp32-espidf debug esp32-periph-base)" || {
