@@ -228,8 +228,16 @@ fn rr3_speak_stage(bus: &Arc<Mutex<Bus>>, reply: &str) -> String {
     };
     crate::mem::rr3_heap_mark("tts", "stream-ok");
     rr3_wait_played(bus, played0, fail0, want_ms + PLAY_SLACK_MS);
+    let failed = {
+        let b = lock_bus(bus);
+        b.st.tts_fail > fail0
+    };
     rr3_face(bus, "idle");
-    format!("tts_ms={want_ms} pcm={pcm}B")
+    if failed {
+        format!("tts_fail=播放中止 pcm={pcm}B")
+    } else {
+        format!("tts_ms={want_ms} pcm={pcm}B")
+    }
 }
 
 /// 播放等待：按 `tts_played/tts_fail` 计数收敛，轮询期续 dialog 心跳。
