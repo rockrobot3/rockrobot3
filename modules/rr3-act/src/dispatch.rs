@@ -198,18 +198,9 @@ impl Dispatcher for Rr3ActDispatcher {
                 self.tb.rr3_now_ms(),
                 &self.cfg.led.effects,
             ),
-            relay::RR3_RELAY_SET_TOPIC => {
-                if blocked {
-                    Err(rpc::rr3_low_power_reject(relay::RR3_RELAY_SET_TOPIC))
-                } else {
-                    rpc::rr3_relay_parse_args(args)
-                        .and_then(|on| {
-                            relay::rr3_relay_apply(&mut *self.relay_gpio, on)
-                                .map_err(|e| rpc::rr3_relay_err_text(&e))
-                        })
-                        .map(|(on, prev)| (rpc::rr3_relay_result(on), None, Some((on, prev))))
-                }
-            }
+            relay::RR3_RELAY_SET_TOPIC => self
+                .rr3_relay_cmd(args, blocked)
+                .map(|(reply, applied)| (reply, None, applied)),
             rpc::RR3_OPS_LIST_TOPIC => Ok((
                 json!({ "ops": rpc::rr3_act_ops_snapshot(&self.cfg) }),
                 None,
@@ -248,6 +239,48 @@ impl Dispatcher for Rr3ActDispatcher {
             eprintln!("intent: trace={trace}（纯对话轮，无动作）");
             return Ok(());
         };
+        self.rr3_intent_apply(actions, trace, bus)
+    }
+
+    /// 帧无关节拍：led 节拍（自原 composite.rs 主循环逐字迁入，批I A-1 线程上收
+    /// 组合件）：每圈先推状态机，眨眼到点即落电平（写失败折日志不退——妆面件）。
+    /// `now`/`bus` 实参 act 不消费——tb 字段承担毫秒时基（限速门/led 节拍/led
+    /// 点名三处同锚 `rr3_now_ms`，Instant 换算引入漂移违零改动，批N30 计划册裁定 5）。
+    fn on_tick(&mut self, _now: Instant, _bus: &BusHandle) -> Result<(), String> {
+        if let Some(level) = led::rr3_led_tick(self.tb.rr3_now_ms(), &mut self.led_ctrl) {
+            self.led_gpio
+                .set(level)
+                .unwrap_or_else(|e| eprintln!("rr3-act-led: 翻转写电平失败: {e}"));
+        }
+        Ok(())
+    }
+}
+
+impl Rr3ActDispatcher {
+    /// relay/set 臂：低电闸门 → 参数解析 → 执行；返回应答体与生效对。
+    fn rr3_relay_cmd(
+        &mut self,
+        args: &Value,
+        blocked: bool,
+    ) -> Result<(Value, Option<(bool, bool)>), String> {
+        if blocked {
+            return Err(rpc::rr3_low_power_reject(relay::RR3_RELAY_SET_TOPIC));
+        }
+        rpc::rr3_relay_parse_args(args)
+            .and_then(|on| {
+                relay::rr3_relay_apply(&mut *self.relay_gpio, on)
+                    .map_err(|e| rpc::rr3_relay_err_text(&e))
+            })
+            .map(|(on, prev)| (rpc::rr3_relay_result(on), Some((on, prev))))
+    }
+
+    /// intent 臂：逐个 outcome 执行并发布（拒执行折日志，不中断本轮）。
+    fn rr3_intent_apply(
+        &mut self,
+        actions: &Value,
+        trace: u64,
+        bus: &BusHandle,
+    ) -> Result<(), String> {
         for r in intent::rr3_actions_handle(
             actions,
             &mut *self.relay_gpio,
@@ -270,21 +303,6 @@ impl Dispatcher for Rr3ActDispatcher {
         Ok(())
     }
 
-    /// 帧无关节拍：led 节拍（自原 composite.rs 主循环逐字迁入，批I A-1 线程上收
-    /// 组合件）：每圈先推状态机，眨眼到点即落电平（写失败折日志不退——妆面件）。
-    /// `now`/`bus` 实参 act 不消费——tb 字段承担毫秒时基（限速门/led 节拍/led
-    /// 点名三处同锚 `rr3_now_ms`，Instant 换算引入漂移违零改动，批N30 计划册裁定 5）。
-    fn on_tick(&mut self, _now: Instant, _bus: &BusHandle) -> Result<(), String> {
-        if let Some(level) = led::rr3_led_tick(self.tb.rr3_now_ms(), &mut self.led_ctrl) {
-            self.led_gpio
-                .set(level)
-                .unwrap_or_else(|e| eprintln!("rr3-act-led: 翻转写电平失败: {e}"));
-        }
-        Ok(())
-    }
-}
-
-impl Rr3ActDispatcher {
     /// 状态摘要发布（顺序语义）：servo/state 受限速门节流，relay/state 仅在
     /// 电平真变时发——两者都在应答之前上路，失败即上抛。
     fn rr3_pub_state(
