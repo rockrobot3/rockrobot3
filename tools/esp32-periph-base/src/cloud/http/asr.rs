@@ -86,7 +86,8 @@ impl Rr3PcmSrc for Rr3SpoolSrc {
 }
 
 /// 流式 ASR 上行（W7-b3a/W7-b3b）：multipart 头/WAV 头/尾 + PCM 4 KB 边取边写，
-/// 不再构造整段 s16le 与整段 multipart。`expect` = PCM 字节数（须与源产出一致）。
+/// 不再构造整段 s16le 与整段 multipart。PCM 字节数由计划反推（head/wav/tail
+/// 之外的部分），与 `content_len` 天然一致，不另设易漂移的参数。
 /// 返回 JSON 应答（≤ `MAX_JSON`）。
 pub(crate) fn rr3_post_asr(
     interface: &str,
@@ -95,22 +96,12 @@ pub(crate) fn rr3_post_asr(
     content_type: &str,
     plan: &rr_cloud_proto::Rr3AsrPlan,
     src: &mut dyn Rr3PcmSrc,
-    expect: usize,
     max_body: usize,
 ) -> Result<Vec<u8>, String> {
     let mut last = String::new();
     for _ in 0..2 {
         crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
-        let attempt = rr3_asr_once(
-            interface,
-            url,
-            key,
-            content_type,
-            plan,
-            src,
-            expect,
-            max_body,
-        );
+        let attempt = rr3_asr_once(interface, url, key, content_type, plan, src, max_body);
         crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
         match attempt {
             Ok(v) => return Ok(v),
@@ -134,14 +125,13 @@ fn rr3_asr_once(
     content_type: &str,
     plan: &rr_cloud_proto::Rr3AsrPlan,
     src: &mut dyn Rr3PcmSrc,
-    expect: usize,
     max_body: usize,
 ) -> Result<Vec<u8>, String> {
     src.rr3_reset();
     let (url_c, auth, ctype) = rr3_cstrs(url, key, content_type)?;
     let client = rr3_client(&url_c, auth.as_deref(), &ctype)?;
     crate::mem::rr3_heap_mark(interface, "http-open");
-    let rc = rr3_asr_do(client, plan, src, expect, interface, max_body);
+    let rc = rr3_asr_do(client, plan, src, interface, max_body);
     crate::mem::rr3_heap_mark(interface, "http-done");
     // SAFETY：client 由刚 init 且只在此处 cleanup。
     unsafe { esp_http_client_cleanup(client) };
@@ -153,10 +143,12 @@ fn rr3_asr_do(
     client: esp_http_client_handle_t,
     plan: &rr_cloud_proto::Rr3AsrPlan,
     src: &mut dyn Rr3PcmSrc,
-    expect: usize,
     interface: &str,
     max_body: usize,
 ) -> Result<Vec<u8>, String> {
+    let expect = plan
+        .content_len
+        .saturating_sub(plan.head.len() + plan.wav.len() + plan.tail.len());
     rr3_open(client, plan.content_len)?;
     rr3_write(client, &plan.head)?;
     rr3_write(client, &plan.wav)?;

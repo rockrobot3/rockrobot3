@@ -228,7 +228,6 @@ fn rr3_asr_upload(bytes: usize, src: &mut dyn crate::cloud::Rr3PcmSrc) -> Result
         &ctype,
         &plan,
         src,
-        bytes,
         crate::cloud::MAX_JSON,
     )?;
     rr_cloud_proto::rr3_asr_text(&resp)
