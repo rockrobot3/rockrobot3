@@ -315,6 +315,19 @@ fn rr3_no_model_rows(brain: &Value) -> bool {
 
 /// 写源落盘（B9 自 apply 抽出）：model → 唯一 active 行；dialog 缺段建段；
 /// 其余段直写。old = 键现值（缺键 Null），new 由调用方克隆写入。
+/// dialog 段惰性建表（只对 dialog 键生效，其余段保持缺失即拒）。
+fn rr3_dialog_init(brain: &mut Value, section_key: &str) -> Result<(), String> {
+    if section_key != "dialog" {
+        return Ok(());
+    }
+    brain
+        .as_object_mut()
+        .ok_or_else(|| "config [rr3-brain] 段须为表".to_string())?
+        .entry("dialog")
+        .or_insert(json!({}));
+    Ok(())
+}
+
 fn rr3_ops_store(
     brain: &mut Value,
     section_key: &str,
@@ -324,13 +337,7 @@ fn rr3_ops_store(
     if section_key == "model" {
         return rr3_row_store(brain, key, new);
     }
-    if section_key == "dialog" {
-        brain
-            .as_object_mut()
-            .ok_or("config [rr3-brain] 段须为表".to_string())?
-            .entry("dialog")
-            .or_insert(json!({}));
-    }
+    rr3_dialog_init(brain, section_key)?;
     let section = brain
         .get_mut(section_key)
         .ok_or_else(|| format!("config 缺 [rr3-brain.{section_key}] 段"))?;
