@@ -64,9 +64,9 @@ use esp_idf_sys::{
     esp_wifi_set_config, esp_wifi_set_mode, esp_wifi_start, g_wifi_default_wpa_crypto_funcs,
     g_wifi_osi_funcs, http_method_HTTP_GET, http_method_HTTP_POST, httpd_err_code_t,
     httpd_err_code_t_HTTPD_400_BAD_REQUEST, httpd_err_code_t_HTTPD_401_UNAUTHORIZED,
-    httpd_err_code_t_HTTPD_404_NOT_FOUND, httpd_req_get_hdr_value_str, httpd_req_recv, httpd_req_t,
-    httpd_resp_send, httpd_resp_send_err, httpd_resp_set_type, wifi_auth_mode_t_WIFI_AUTH_WPA2_PSK,
-    wifi_config_t, wifi_init_config_t, wifi_interface_t_WIFI_IF_AP, wifi_interface_t_WIFI_IF_STA,
+    httpd_err_code_t_HTTPD_404_NOT_FOUND, httpd_req_recv, httpd_req_t, httpd_resp_send,
+    httpd_resp_send_err, httpd_resp_set_type, wifi_auth_mode_t_WIFI_AUTH_WPA2_PSK, wifi_config_t,
+    wifi_init_config_t, wifi_interface_t_WIFI_IF_AP, wifi_interface_t_WIFI_IF_STA,
     wifi_mode_t_WIFI_MODE_APSTA, ESP_OK, WIFI_INIT_CONFIG_MAGIC,
 };
 
