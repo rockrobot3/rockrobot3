@@ -72,6 +72,8 @@ enum Rr3SpoolCmd {
         len: u16,
         tx: SyncSender<Result<Vec<u8>, String>>,
     },
+    /// 上传前整段 CRC 对账（true = 载荷与头一致）。
+    Verify(SyncSender<Result<bool, String>>),
     Clear(SyncSender<Result<(), String>>),
 }
 
@@ -178,6 +180,11 @@ pub(crate) fn rr3_start_spool(on_seg: Rr3SegFn) {
         }
     };
     rr3_boot_sweep(&mut sp);
+    rr3_spawn_writer(sp, on_seg);
+}
+
+/// 起写线程并发布发送端（失败保持未装配，语音显式降级）。
+fn rr3_spawn_writer(sp: Rr3Spool<Rr3FlashSpool>, on_seg: Rr3SegFn) {
     let cap = sp.rr3_cap();
     let (tx, rx) = sync_channel(SPOOL_Q_CAP);
     let spawned = thread::Builder::new()
@@ -250,6 +257,10 @@ fn rr3_cmd(
         Rr3SpoolCmd::Rec(rc) => rr3_rec_cmd(rc, sp, on_seg, rec),
         Rr3SpoolCmd::Read { off, len, tx } => {
             let _ = tx.send(rr3_do_read(sp, off, len));
+            rec
+        }
+        Rr3SpoolCmd::Verify(tx) => {
+            let _ = tx.send(rr3_do_verify(sp));
             rec
         }
         Rr3SpoolCmd::Clear(tx) => {
@@ -369,6 +380,13 @@ fn rr3_do_read(sp: &mut Rr3Spool<Rr3FlashSpool>, off: u32, len: u16) -> Result<V
     Ok(buf)
 }
 
+/// 整段 CRC 对账：顺序读全段续算，与头里的 crc 比对；非 `Done` 态显式回错。
+fn rr3_do_verify(sp: &mut Rr3Spool<Rr3FlashSpool>) -> Result<bool, String> {
+    let mut buf = [0u8; READ_MAX];
+    sp.rr3_crc_check(&mut buf)
+        .map_err(|e| format!("spool CRC 对账失败: {e:?}"))
+}
+
 /// 释放记录（只擦头扇区）并回 Idle。
 fn rr3_do_clear(sp: &mut Rr3Spool<Rr3FlashSpool>) -> Result<(), String> {
     sp.rr3_clear()
@@ -433,9 +451,6 @@ pub(crate) fn rr3_spool_abort() {
 
 /// 分块读（消费面；阻塞至写线程应答，超时回错）。
 pub(crate) fn rr3_spool_read(off: u32, out: &mut [u8]) -> Result<usize, String> {
-    if out.is_empty() {
-        return Ok(0);
-    }
     let (tx, rx) = sync_channel(1);
     rr3_send(Rr3SpoolCmd::Read {
         off,
@@ -447,6 +462,14 @@ pub(crate) fn rr3_spool_read(off: u32, out: &mut [u8]) -> Result<usize, String> 
         .map_err(|e| format!("spool 读应答超时/断开: {e:?}"))??;
     out[..data.len()].copy_from_slice(&data);
     Ok(data.len())
+}
+
+/// 上传前 CRC 对账（消费面；阻塞至写线程应答）。
+pub(crate) fn rr3_spool_verify() -> Result<bool, String> {
+    let (tx, rx) = sync_channel(1);
+    rr3_send(Rr3SpoolCmd::Verify(tx))?;
+    rx.recv_timeout(Duration::from_millis(READ_WAIT_MS))
+        .map_err(|e| format!("spool 校验应答超时/断开: {e:?}"))?
 }
 
 /// 释放记录（消费面；上传结束后必调，成功才回 `Idle`）。
