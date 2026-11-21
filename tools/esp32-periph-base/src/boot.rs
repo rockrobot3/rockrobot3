@@ -319,7 +319,11 @@ fn start_services(bus: &Arc<Mutex<Bus>>) {
     #[cfg(feature = "autonomy")]
     crate::autonomy::rr3_start();
     #[cfg(feature = "tts")]
-    crate::cloud::spawn_tts(bus.clone(), crate::dialog::rr3_turn);
+    crate::cloud::spawn_tts(
+        bus.clone(),
+        crate::dialog::rr3_turn,
+        crate::dialog::rr3_turn_spool,
+    );
     crate::httpd::rr3_httpd_spawn(bus);
     #[cfg(feature = "autonomy")]
     crate::sntp::spawn_sntp();
@@ -450,9 +454,12 @@ pub(crate) fn rr3_boot() {
     let (_timer, ctl, rt, audio) = open_parts(p);
     let bus = bus_seed();
     ram_point("2-periph-ready");
-    // W7-b1a 存储承载：只读记录头点名 spool 分区状态，不写不擦（启动路径零磨损）。
+    // W7-b3b 存储承载：仅无 PSRAM 档起 spool 写线程（启动清扫残留段；擦写读
+    // 全在写线程）。S3 有 PSRAM 走内存路径，不占 6 KB 栈与命令队列。
     #[cfg(feature = "tts")]
-    crate::spool::rr3_spool_probe();
+    if crate::psram::rr3_psram_total() == 0 {
+        crate::spool::rr3_start_spool(crate::cloud::rr3_turn_spool);
+    }
     start_services(&bus);
     spawn_planes(ctl, rt, bus.clone());
     spawn_audio(audio, &bus);

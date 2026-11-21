@@ -329,6 +329,21 @@ impl<D: Rr3SpoolIo> Rr3Spool<D> {
         Ok(rr3_crc32_final(crc) == self.crc)
     }
 
+    /// 放弃进行中的记录：只复位状态，不再擦头（`begin` 已擦头，未提交的记录本就
+    /// 无效）。`Idle` 幂等；`Done` 回 `State`——已提交的记录只能走 `clear`。
+    pub fn rr3_abort(&mut self) -> Result<(), Rr3SpoolErr<D::Err>> {
+        match self.state {
+            State::Rec => {
+                self.state = State::Idle;
+                self.len = 0;
+                self.erased = 0;
+                Ok(())
+            }
+            State::Idle => Ok(()),
+            State::Done => Err(Rr3SpoolErr::State),
+        }
+    }
+
     /// 使记录失效：只擦头扇区（载荷留待下次 `begin` 惰性擦除）。
     pub fn rr3_clear(&mut self) -> Result<(), Rr3SpoolErr<D::Err>> {
         self.dev

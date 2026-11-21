@@ -75,14 +75,41 @@ pub(crate) fn rr3_dialog_body(body: &[u8]) -> Result<Vec<i16>, String> {
         .collect())
 }
 
-/// 一整轮：ASR → 意图执行 → LLM → TTS → 播放等待 → 表情回落。
+/// 一整轮（内存段）：ASR → 意图执行 → LLM → TTS → 播放等待 → 表情回落。
 /// 由 cloud worker 在收 `Rr3CloudJob::Turn` 时调用（线程与 TLS 栈同 TTS）。
 pub(crate) fn rr3_turn(bus: &Arc<Mutex<Bus>>, pcm: Vec<i16>) {
+    let t0 = rr3_turn_open(bus);
+    let asr = rr3_asr_stage(&pcm);
+    rr3_turn_text(bus, t0, asr);
+}
+
+/// 一整轮（spool 段，无 PSRAM 路径）：从 flash 分块读并流式 ASR，随后释放记录。
+/// 无论识别成败都释放——段已消费，`Done` 拒新段会让后续语音全部丢弃。
+pub(crate) fn rr3_turn_spool(bus: &Arc<Mutex<Bus>>, info: rr_audio_mech::Rr3SegInfo) {
+    let t0 = rr3_turn_open(bus);
+    println!(
+        "[dialog] spool 段 seq={} len={}B crc={:#010x} 上传",
+        info.seq, info.len, info.crc32
+    );
+    let asr = rr3_asr_spool(info);
+    if let Err(e) = crate::spool::rr3_spool_clear() {
+        println!("[dialog] spool 段释放失败: {e}（后续语音段将被背压拒绝）");
+    }
+    rr3_turn_text(bus, t0, asr);
+}
+
+/// 轮首公共段：计时起点、堆账、心跳、思考表情。
+fn rr3_turn_open(bus: &Arc<Mutex<Bus>>) -> u64 {
     let t0 = now_ms();
     crate::mem::rr3_heap_mark("dialog", "start");
     rr3_beat_dialog();
     rr3_face(bus, "think");
-    let text = match rr3_asr_stage(&pcm) {
+    t0
+}
+
+/// ASR 之后的共用链（识别文本 → 唤醒门 → 意图 → LLM → TTS）。
+fn rr3_turn_text(bus: &Arc<Mutex<Bus>>, t0: u64, asr: Result<String, String>) {
+    let text = match asr {
         Ok(t) if !t.trim().is_empty() => t,
         Ok(_) => return rr3_turn_end(bus, "识别为空文本，弃轮"),
         Err(e) => return rr3_turn_fail(bus, &format!("ASR 失败，弃轮: {e}")),
@@ -162,17 +189,24 @@ fn rr3_turn_fail(bus: &Arc<Mutex<Bus>>, why: &str) {
     println!("[dialog] 降级播报 {speak}");
 }
 
-/// ASR 段：PCM → multipart（4 KB 边转边写）→ 识别文本。
+/// ASR 段（内存）：PCM 切片 → 4 KB 边转边写 → 识别文本。
 fn rr3_asr_stage(pcm: &[i16]) -> Result<String, String> {
+    let mut src = crate::cloud::Rr3SliceSrc::rr3_new(pcm);
+    rr3_asr_upload(pcm.len() * 2, &mut src)
+}
+
+/// ASR 段（spool）：按记录长度从 flash 分块读 → 同一份 multipart 上行。
+fn rr3_asr_spool(info: rr_audio_mech::Rr3SegInfo) -> Result<String, String> {
+    let mut src = crate::cloud::Rr3SpoolSrc::rr3_new(info.len);
+    rr3_asr_upload(info.len as usize, &mut src)
+}
+
+/// ASR 公共段：同一份 multipart 计划 + 传输（源不同，字节契约一致）。
+fn rr3_asr_upload(bytes: usize, src: &mut dyn crate::cloud::Rr3PcmSrc) -> Result<String, String> {
     let cfg = crate::cloud::rr3_dialog_cfg().map_err(|e| format!("云配置缺席: {e}"))?;
     let boundary = format!("rr3{:08x}", crate::state::esp_random_u32());
-    let plan = rr_cloud_proto::rr3_asr_plan(
-        &cfg.asr_model,
-        pcm.len() * 2,
-        MIC_SR_HZ,
-        &boundary,
-        Some("zh"),
-    );
+    let plan =
+        rr_cloud_proto::rr3_asr_plan(&cfg.asr_model, bytes, MIC_SR_HZ, &boundary, Some("zh"));
     let ctype = format!("multipart/form-data; boundary={boundary}");
     let url = format!("{}/v1/audio/transcriptions", cfg.base.trim_end_matches('/'));
     let resp = crate::cloud::rr3_post_asr(
@@ -181,7 +215,8 @@ fn rr3_asr_stage(pcm: &[i16]) -> Result<String, String> {
         &cfg.key,
         &ctype,
         &plan,
-        pcm,
+        src,
+        bytes,
         crate::cloud::MAX_JSON,
     )?;
     rr_cloud_proto::rr3_asr_text(&resp)
