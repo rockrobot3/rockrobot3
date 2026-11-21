@@ -38,7 +38,7 @@ compile_error!("tts 与 spk-tone 互斥：两者都独占 I2S1（分开烧录/�
 /// 播放采样率（云 TTS 请求值与采集链同源）。
 const PLAY_RATE_HZ: u32 = 16_000;
 /// 首尾淡化帧数（10 ms @16k，消功放上/下电爆音）。
-const PLAY_FADE_FRAMES: usize = 160;
+pub(crate) const PLAY_FADE_FRAMES: usize = 160;
 /// 环容量（立体声 s16le 字节；16 KB = 128 ms @16k 双声道——ADR-0031 的 8–16 KB 档）。
 const PLAY_RING_BYTES: usize = 16_384;
 /// 播放线程单次 I2S 写块（4 KB = 64 ms @16k 双声道；栈上）。
@@ -203,22 +203,22 @@ pub(crate) fn rr3_play_abort() {
     st.bytes.clear();
 }
 
-/// 整段 PCM（WAV/裸 16k）→ 流式环：`/say` 与旧调用点兼容入口。
+/// 整段 PCM（WAV/裸 16k）→ 流式环：`/api/board/play` 与云端 `Play` 作业共用。
 ///
-/// 源 Vec 仍由调用方持有（HTTP 已收全的短消息路径）；播放本身走 16 KB 环，
-/// 不再把整段拷进播放队列。失败路径中止并点名，不阻塞调用方之外的无界缓冲。
-pub(crate) fn rr3_play(pcm: Vec<u8>) -> Result<(), &'static str> {
+/// 源 Vec 由云 worker 持有（HTTP 已收全的短消息路径）；播放本身走 16 KB 环，
+/// 不再把整段拷进播放队列。失败路径中止并点名，不残留半条流。
+pub(crate) fn rr3_play_stream(src: &[u8]) -> Result<(), &'static str> {
     crate::mem::rr3_heap_mark("playout", "start");
-    if let Err(e) = rr3_play_stream(&pcm) {
+    let rc = rr3_play_feed_all(src);
+    if rc.is_err() {
         rr3_play_abort();
         crate::mem::rr3_heap_mark("playout", "fail");
-        return Err(e);
     }
-    Ok(())
+    rc
 }
 
 /// 整段源字节的流式整形（WAV 头剥离、声道/采样率门、全局淡入淡出）。
-fn rr3_play_stream(src: &[u8]) -> Result<(), &'static str> {
+fn rr3_play_feed_all(src: &[u8]) -> Result<(), &'static str> {
     let wav = rr3_wav_pcm(src).map_err(|_| "WAV 容器不合法（缺 fmt/data 或非 16bit PCM）")?;
     let (rate, channels, data) = wav.map_or((PLAY_RATE_HZ, 1u16, src), |w| {
         (w.sample_rate, w.channels, w.data)

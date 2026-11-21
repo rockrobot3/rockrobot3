@@ -20,7 +20,6 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use rr_audio_mech::rr3_pcm_ms;
 use rr_autonomy::Rr3Task;
 use rr_intent_mech::wake::{rr3_wake_decide, Rr3WakeAction, Rr3WakeCfg};
 use rr_intent_mech::Rr3IntentAction;
@@ -208,35 +207,29 @@ fn rr3_llm_stage(text: &str) -> Result<String, String> {
     rr_cloud_proto::rr3_reply_text(&resp).ok_or_else(|| "大模型应答形状不符".to_string())
 }
 
-/// TTS 段：回复文本 → 云 PCM → 播放队列 → 有界等待播完 → 表情 idle。
+/// TTS 段：回复文本 → 云 PCM 4 KB 流式 → 16 KB 播放环 → 有界等待播完 → 表情 idle。
 fn rr3_speak_stage(bus: &Arc<Mutex<Bus>>, reply: &str) -> String {
     if reply.trim().is_empty() {
         rr3_face(bus, "idle");
         return "tts=skip(空回复)".to_string();
     }
-    crate::mem::rr3_heap_mark("tts", "fetch-start");
-    let pcm = match crate::cloud::rr3_tts_fetch(reply) {
-        Ok(p) => p,
-        Err(e) => {
-            rr3_face(bus, "idle");
-            return format!("tts_fail={e}");
-        }
-    };
-    crate::mem::rr3_heap_mark("tts", "fetch-ok");
-    let want_ms = rr3_pcm_ms(pcm.len(), 1, MIC_SR_HZ);
+    crate::mem::rr3_heap_mark("tts", "stream-start");
     let (played0, fail0) = {
         let b = lock_bus(bus);
         (b.st.tts_played, b.st.tts_fail)
     };
     rr3_face(bus, "talk");
-    let queued = crate::playout::rr3_play(pcm);
-    if queued.is_err() {
-        rr3_face(bus, "idle");
-        return format!("play_enqueue={queued:?}");
-    }
+    let (pcm, want_ms) = match crate::cloud::rr3_tts_stream(reply) {
+        Ok(v) => v,
+        Err(e) => {
+            rr3_face(bus, "idle");
+            return format!("tts_fail={e}");
+        }
+    };
+    crate::mem::rr3_heap_mark("tts", "stream-ok");
     rr3_wait_played(bus, played0, fail0, want_ms + PLAY_SLACK_MS);
     rr3_face(bus, "idle");
-    format!("tts_ms={want_ms} played=1")
+    format!("tts_ms={want_ms} pcm={pcm}B")
 }
 
 /// 播放等待：按 `tts_played/tts_fail` 计数收敛，轮询期续 dialog 心跳。
