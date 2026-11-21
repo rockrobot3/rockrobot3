@@ -116,7 +116,7 @@ pub(crate) fn spawn_player(
         .spawn(move || play_run(i2s1, bclk, dout, ws, state, bus));
     if let Err(e) = spawned {
         println!("[spk] 起播放线程失败: {e:?}");
-        if let Ok(mut st) = PLAY_SLOT.lock() {
+        if let Ok(st) = PLAY_SLOT.lock() {
             if let Some(state) = st.as_ref() {
                 if let Ok(mut s) = state.lock() {
                     s.alive = false;
