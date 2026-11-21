@@ -9,7 +9,7 @@ use rr_ipc::{Rr3Frame, Rr3FrameBuf, Rr3PayloadType};
 use serde_json::Value;
 
 use crate::probe::{heartbeat_reply, parse_upstream, register_reply, rr3_recv_frame};
-use crate::report::{histogram_text, verdict};
+use crate::report::{histogram_text, rr3_tally, verdict};
 use crate::{
     BEAT_AVG_CEIL_SLACK_MS, BEAT_AVG_FLOOR_SLACK_MS, BEAT_FLOOR_SLACK_MS, HARNESS_TASK,
     HEARTBEAT_STALL_FAIL_MS, WATCHDOG_BASE_SECS, WATCHDOG_PER_BEAT_MS,
@@ -242,15 +242,6 @@ pub(super) fn rr3_timing(intervals: &[u128], beats: usize, hb_ms: u64) -> (Strin
     println!("② 直方图(10ms桶): {hist}");
     fail += rr3_beat_window(intervals, hb_ms, max_dt as i64, avg_dt as i64);
     (hist, fail)
-}
-
-/// 单条判据计数：不过即记 1（打印与文案仍归 `verdict` 单点）。
-pub(super) fn rr3_tally(ok: bool, msg: &str) -> u32 {
-    if verdict(ok, msg) {
-        0
-    } else {
-        1
-    }
 }
 
 /// ⑦ 间隔对表：区间与均值窗判定，返回 FAIL 计数。

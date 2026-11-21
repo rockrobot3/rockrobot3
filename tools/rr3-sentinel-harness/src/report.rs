@@ -89,6 +89,15 @@ pub(super) fn verdict(ok: bool, label: &str) -> bool {
     ok
 }
 
+/// 单条判据计数：不过即记 1（打印与文案仍归 `verdict` 单点）。
+pub(super) fn rr3_tally(ok: bool, msg: &str) -> u32 {
+    if verdict(ok, msg) {
+        0
+    } else {
+        1
+    }
+}
+
 /// C12 证据文件（三样契约）：fail 也写，原始数据留痕。
 pub(super) fn rr3_evidence_write(
     ep: Option<&String>,
