@@ -166,7 +166,7 @@ pub fn rr3_log_backfill() {
     let Some(path) = sink::rr3_log_sink_path() else {
         return;
     };
-    let Some((text, partial)) = rr3_backfill_tail(&path) else {
+    let Some((text, partial)) = rr3_backfill_tail(path) else {
         return;
     };
     let cap = rr3_log_ring_cap();

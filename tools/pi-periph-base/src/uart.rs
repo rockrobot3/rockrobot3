@@ -149,7 +149,7 @@ impl Board {
             }
             idle = 0;
             if byte[0] == b'\n' {
-                return Ok(rr3_line_take(&mut buf));
+                return Ok(Self::rr3_line_take(&mut buf));
             }
             if buf.len() >= LINE_MAX {
                 self.drain_line_tail();
