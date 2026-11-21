@@ -70,7 +70,7 @@
 
 | 单板全链形态 / ESP32-S3 | 已实装 | **限于 0013 时点；当前 HEAD 唤醒门控待复验**：[0013](evidence/实测/0013.md) 单板自跑——云 ASR→LLM→TTS→本板播放、DoA 3×10（左/中/右各 10/10）、30 min soak（1800 s / 86 轮 / 93 次播放 / `tts_fail=0` / `restarts=0`）、功放出声。**2026-11-21 唤醒门控**（`5ee8cc58`/`b7e6ff8d`）加入后，0013 的麦克风轮文本“请向右看。”在 30 s 窗外会被 `Ignore`，HTTP WAV“你好，小二…”走“你好”兜底；复验前不得把 0013 当作当前 HEAD 的回执。 |
 | 单板全链形态 / Pi 4B | 骨架 | [`pi4b-solo.toml`](../profiles/pi4b-solo.toml) 十格 + [`hardware/pi4b-solo`](../hardware/pi4b-solo/wiring.toml) 接线/pan 轴 + [`pack-arm64.sh`](../tools/deploy/pack-arm64.sh) 按档出包；2026-11-20 真板五模块（act/brain/connect/interact/sense，无 power 格）running、`denied_publish=0`、`/api/beep` 200 ms、`/api/selftest=pass`、LLM 200/635 ms、TTS 预合成 437 ms/102318 B。**双麦两通道全零**：DoA 3×10、DoA→pan、云 ASR→LLM→TTS 三轮、30 min soak 与证据 0014 均未做。 |
-| 单板全链形态 / ESP32 classic | 骨架 | 2026-11-21 真板 W7 实测（[0014](evidence/实测/0014.md)）：boot 273,072B → periph 249,012B → mic 62,848B → 播放面主体 **22,152B（4.2% SRAM）**；`httpd` 需 45,064B 必失败；60s 内 11 次复位。复位环根因＝net 心跳绑在 httpd 起栈之后，源码 `60381a0e` 已修为 net 心跳先行；修复版未重烧。**当前实现 No-Go**：无 PSRAM 时本地 VAD/分段停用，ASR 峰值约 768KB、TTS 512KB、播放队列约 1MB；该结论指当前实现，不是 classic 硬件终态。存储/流式候选见计划册 §20.2，真板测出 30min free ≥20% SRAM 前不排全链。 |
+| 单板全链形态 / ESP32 classic | 骨架 | 2026-11-21 真板 W7 实测（[0014](evidence/实测/0014.md)）：旧固件 60s 内 11 次复位；CI 修复版（`2ecd1bea`，含 `60381a0e`）重烧后 **60s 零复位**，`[mem]` 播放面后 `free=34,336B` / `int_free=61,160B`（6.6% / 11.8% SRAM），`httpd` 需 45,064B 仍失败，SNTP 无 WiFi 凭据未同步。**当前实现 No-Go**：无 PSRAM 时本地 VAD/分段停用，ASR 峰值约 768KB、TTS 512KB、播放队列约 1MB；全链 30min 前置未成立。该结论指当前实现，不是 classic 硬件终态；存储/流式候选见计划册 §20.2。 |
 
 ---
 
