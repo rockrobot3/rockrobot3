@@ -164,7 +164,7 @@ impl MicStats {
         let n_total = (self.frames as f64).max(1.0);
         let l_rms = ((self.l_sum as f64) / n_total).sqrt() as i32;
         let r_rms = ((self.r_sum as f64) / n_total).sqrt() as i32;
-        let eq_pct = (self.equal * 100 / self.frames.max(1)) as u64;
+        let eq_pct = self.equal * 100 / self.frames.max(1);
         let build_ms = if self.build_n > 0 {
             self.build_us as f64 / self.build_n as f64 / 1000.0
         } else {
