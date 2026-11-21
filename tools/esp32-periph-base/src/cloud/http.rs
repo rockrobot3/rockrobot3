@@ -293,6 +293,19 @@ fn rr3_stream_read(
     let len = unsafe { esp_http_client_get_content_length(client) };
     let total = (len > 0).then_some(len as usize);
     sink.rr3_begin(total);
+    let got = rr3_read_chunks(client, interface, max_body, sink)?;
+    rr3_stream_check(interface, got, total)?;
+    crate::mem::rr3_heap_mark(interface, "rx-done");
+    Ok(got)
+}
+
+/// 逐块读（4 KB）并交 sink；返回总字节数。
+fn rr3_read_chunks(
+    client: esp_http_client_handle_t,
+    interface: &str,
+    max_body: usize,
+    sink: &mut dyn Rr3StreamSink,
+) -> Result<usize, String> {
     let mut buf = [0u8; STREAM_BUF];
     let mut got = 0usize;
     let mut first = true;
@@ -318,6 +331,11 @@ fn rr3_stream_read(
             first = false;
         }
     }
+    Ok(got)
+}
+
+/// 收尾判据：空回包显式拒；长度已知时必须逐字节收满。
+fn rr3_stream_check(interface: &str, got: usize, total: Option<usize>) -> Result<(), String> {
     if got == 0 {
         return Err(format!("{interface} 应答为空"));
     }
@@ -326,6 +344,5 @@ fn rr3_stream_read(
             return Err(format!("{interface} 回包不完整 {got}/{total}B"));
         }
     }
-    crate::mem::rr3_heap_mark(interface, "rx-done");
-    Ok(got)
+    Ok(())
 }
