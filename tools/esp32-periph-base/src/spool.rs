@@ -56,6 +56,10 @@ static SPOOL_STATE: AtomicU8 = AtomicU8::new(ST_IDLE);
 static SPOOL_SEQ: AtomicU16 = AtomicU16::new(0);
 
 /// 录制面命令（音频热路径发；写线程串行执行）。
+///
+/// `Block` 内联 640B 是有意为之：50 块/s 若走 Box 就是每秒 50 次内部堆分配，
+/// 音频热路径不接受这种抖动；通道容量 16 时的固定开销约 10KB，可预算。
+#[allow(clippy::large_enum_variant)]
 enum Rr3RecCmd {
     Begin(u16),
     Block([i16; RR3_SPOOL_BLK]),
@@ -64,7 +68,9 @@ enum Rr3RecCmd {
 }
 
 /// 写线程命令：录制面与消费面（Read/Clear）共用一条串行通道——`Rr3Spool`
-/// 始终只有一个线程持有，读也不需要跨线程锁。
+/// 始终只有一个线程持有，读也不需要跨线程锁。体积由 `Rec` 决定（同上，内联块
+/// 换零分配）。
+#[allow(clippy::large_enum_variant)]
 enum Rr3SpoolCmd {
     Rec(Rr3RecCmd),
     Read {
