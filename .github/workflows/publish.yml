@@ -257,14 +257,19 @@ jobs:
           # 指向的层都在（清单指向丢失层是"看起来发布成功"的经典形态）。
           bash tools/deploy/image-smoke.sh file "${IMAGE}:${tag}"
 
-  # 板侧固件制品（2026-11-16 立，2026-11-20 扩双芯片 + ghcr）：
-  # classic 与 S3 的 release ELF 同时作为 tag release 资产与 ghcr OCI 制品。
-  # 为什么双载体：release asset 无凭据可下载、便于烧录；ghcr 是"正式发布制品"
-  # 的统一托管面（与运行镜像/OTA/buildroot 同址），审计与拉取走同一凭据面。
-  # 开发令牌档显式带 -dev 后缀，不冒充生产凭据。
+  # 板侧固件制品（2026-11-16 立；2026-11-20 扩双芯片 + ghcr；2026-11-22 补同版
+  # bootloader、分区表真值与烧录说明）：
+  # classic 出 `safe` 档（默认 feature：外设底座 + 麦克风采集，不含云/播放），
+  # S3 出 `full` 档（esp32s3,autonomy,tts：全链）。两档同带 -dev：构建期
+  # RR3_ALLOW_DEV_ADMIN_TOKEN=1，开发令牌不冒充生产凭据。
+  # 三载体同源：release asset（无凭据下载）、ghcr OCI（正式制品统一托管面，
+  # 与运行镜像/OTA/buildroot 同址）、仓内 tools/deploy/flash-artifact.sh
+  # （只校验 + 烧录，不构建）。
   #
-  # 资产是 ELF 而非裸 bin：ESP-IDF ELF 自带 bootloader/partition-table 段，
-  # 烧录侧 `espflash flash --chip <esp32|esp32s3> <elf>` 直接生成并写入 app 镜像，保留 NVS。
+  # 资产不止 app ELF：ESP-IDF ELF **不内嵌** bootloader 与分区表。espflash 未显式
+  # 给 --bootloader 时用其自带镜像（IDF 版本与 app 不保证一致），故这里从同一
+  # IDF 5.2.2 构建树取 bootloader.bin 一并发布；分区表以 partitions.csv 为真值，
+  # 烧录时由 espflash 现场生成。烧录命令见随包的 FLASHING.md。
   firmware:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -280,11 +285,11 @@ jobs:
       - uses: ./.github/actions/esp-toolchain
         with:
           targets: esp32,esp32s3
-      - name: 构建 classic / S3 release 固件
+      - name: 构建 classic safe / S3 full release 固件
         env:
           RR3_ALLOW_DEV_ADMIN_TOKEN: "1"
         run: |
-          set -o pipefail
+          set -euo pipefail
           export PATH="$HOME/.cargo/bin:$PATH"
           export IDF_PATH="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
           export IDF_GITHUB_ASSETS=dl.espressif.com/github_assets
@@ -299,15 +304,15 @@ jobs:
           )
           if ! cargo +esp build "${fw_args[@]}" > /tmp/fw-classic.log 2>&1; then
             errs=$(grep -E "error(\[|:)|panicked at" /tmp/fw-classic.log | head -5 | tr '\n' ' ')
-            echo "::error title=fw-build::classic release 构建失败：${errs:0:800}"
+            echo "::error title=fw-build::classic safe release 构建失败：${errs:0:800}"
             exit 1
           fi
           if ! MCU=esp32s3 cargo +esp build "${fw_args[@]}" \
                --target xtensa-esp32s3-espidf \
-               --no-default-features --features esp32s3 \
+               --no-default-features --features esp32s3,autonomy,tts \
                > /tmp/fw-s3.log 2>&1; then
             errs=$(grep -E "error(\[|:)|panicked at" /tmp/fw-s3.log | head -5 | tr '\n' ' ')
-            echo "::error title=fw-build-s3::S3 release 构建失败：${errs:0:800}"
+            echo "::error title=fw-build-s3::S3 full release 构建失败：${errs:0:800}"
             exit 1
           fi
           classic="$(rr3_cargo_artifact xtensa-esp32-espidf release esp32-periph-base)"
@@ -315,19 +320,46 @@ jobs:
           for f in "$classic" "$s3"; do
             [ -f "$f" ] || { echo "::error title=fw-elf::release ELF 不在树: $f"; exit 1; }
           done
-          cp "$classic" "$GITHUB_WORKSPACE/rr3-periph-base-esp32-dev.elf"
-          cp "$s3" "$GITHUB_WORKSPACE/rr3-periph-base-esp32s3-dev.elf"
+          # bootloader 必须与 app 同一 IDF 构建（定位规则见 cargo-artifact.sh
+          # 的 rr3_idf_bootloader；两处都没有即红，不退回 espflash 自带镜像）。
+          boot_classic="$(rr3_idf_bootloader "$classic")" || {
+            echo "::error title=fw-boot::classic bootloader.bin 不在产出树"; exit 1; }
+          boot_s3="$(rr3_idf_bootloader "$s3")" || {
+            echo "::error title=fw-boot-s3::S3 bootloader.bin 不在产出树"; exit 1; }
           cd "$GITHUB_WORKSPACE"
-          ls -l rr3-periph-base-esp32-dev.elf rr3-periph-base-esp32s3-dev.elf
-          sha256sum rr3-periph-base-esp32-dev.elf rr3-periph-base-esp32s3-dev.elf \
+          cp "$classic" rr3-periph-base-esp32-safe-dev.elf
+          cp "$s3" rr3-periph-base-esp32s3-full-dev.elf
+          cp "$boot_classic" rr3-bootloader-esp32-dev.bin
+          cp "$boot_s3" rr3-bootloader-esp32s3-dev.bin
+          cp tools/esp32-periph-base/partitions.csv rr3-partitions.csv
+          cp tools/deploy/flash-firmware.md FLASHING.md
+          test -s FLASHING.md
+          grep -Eq '^[[:space:]]*spool' rr3-partitions.csv || {
+            echo "::error title=fw-partitions::rr3-partitions.csv 缺 spool 条目"; exit 1; }
+          for b in rr3-bootloader-esp32-dev.bin rr3-bootloader-esp32s3-dev.bin; do
+            if [ "$(head -c 1 "$b" | od -An -tx1 | tr -d ' \n')" != "e9" ]; then
+              echo "::error title=fw-boot::$b 首字节非 e9（不是 ESP 引导镜像）"
+              exit 1
+            fi
+          done
+          ls -l rr3-periph-base-*.elf rr3-bootloader-*.bin rr3-partitions.csv FLASHING.md
+          sha256sum rr3-periph-base-esp32-safe-dev.elf \
+                    rr3-periph-base-esp32s3-full-dev.elf \
+                    rr3-bootloader-esp32-dev.bin rr3-bootloader-esp32s3-dev.bin \
+                    rr3-partitions.csv FLASHING.md \
             | tee firmware-sha256.txt
-      - name: 上传 release 资产（双芯片）
+      - name: 上传 release 资产（双芯片 + 同版 bootloader + 分区表 + 烧录说明）
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           files: |
-            rr3-periph-base-esp32-dev.elf
-            rr3-periph-base-esp32s3-dev.elf
+            rr3-periph-base-esp32-safe-dev.elf
+            rr3-periph-base-esp32s3-full-dev.elf
+            rr3-bootloader-esp32-dev.bin
+            rr3-bootloader-esp32s3-dev.bin
+            rr3-partitions.csv
+            FLASHING.md
+            firmware-sha256.txt
           fail_on_unmatched_files: true
       - uses: docker/login-action@v3
         with:
@@ -349,8 +381,12 @@ jobs:
           fi
           oras push "$ref" \
             --artifact-type application/vnd.rr3.firmware.v1+json \
-            rr3-periph-base-esp32-dev.elf:application/octet-stream \
-            rr3-periph-base-esp32s3-dev.elf:application/octet-stream \
+            rr3-periph-base-esp32-safe-dev.elf:application/octet-stream \
+            rr3-periph-base-esp32s3-full-dev.elf:application/octet-stream \
+            rr3-bootloader-esp32-dev.bin:application/octet-stream \
+            rr3-bootloader-esp32s3-dev.bin:application/octet-stream \
+            rr3-partitions.csv:text/csv \
+            FLASHING.md:text/markdown \
             firmware-sha256.txt:text/plain
           oras manifest fetch "$ref" >/dev/null
-          echo "PASS  已推送 $ref（classic + S3 ELF 与 sha256 清单）"
+          echo "PASS  已推送 $ref（双 ELF + 双 bootloader + 分区表 + 烧录说明 + sha256）"

@@ -15,7 +15,8 @@
   构建门（腿 + 脚本）同样钉住：覆盖缩水不能只靠评审记得。
 - publish.yml 的发布面完整性：build / build-riscv64 / merge / firmware 四腿
   必须在；merge.needs 必须等两条构建腿、合并命令必须含三架构；firmware 必须
-  带 packages: write 且推 rockrobot3-firmware——发布面缺腿只在 tag 暴露太晚。
+  带 packages: write、推 rockrobot3-firmware 且资产集完整（双 ELF + 双
+  bootloader + 分区表 + 烧录说明 + sha256）——发布面缺腿只在 tag 暴露太晚。
 - buildroot.yml 的正式制品面：release 腿必须 tag 门、登录 ghcr、带
   packages: write，并以 oras 推 rockrobot3-ota / rockrobot3-buildroot——
   正式制品只发 release asset 不进 ghcr 等于托管面残缺。
@@ -361,10 +362,20 @@ def release_problems(text, rel):
             bad.append(f"{rel} firmware 未构建 S3 目标（双芯片覆盖缺失）")
         if "MCU=esp32s3" not in joined or "--features esp32s3" not in joined:
             bad.append(f"{rel} firmware S3 档缺 MCU/feature（芯片档漂移）")
-        if "rr3-periph-base-esp32-dev.elf" not in joined:
-            bad.append(f"{rel} firmware 缺 classic ELF 资产/推送")
-        if "rr3-periph-base-esp32s3-dev.elf" not in joined:
-            bad.append(f"{rel} firmware 缺 S3 ELF 资产/推送（双芯片覆盖缺失）")
+        # 资产契约（2026-11-22）：双 ELF + 双 bootloader + 分区表 CSV + 烧录说明
+        # + sha256 清单，release 与 ghcr 同集，缺一即红。ELF 不内嵌 bootloader/
+        # 分区表，espflash 自带的引导镜像与 app 的 IDF 版本不保证一致。
+        for asset in (
+            "rr3-periph-base-esp32-safe-dev.elf",
+            "rr3-periph-base-esp32s3-full-dev.elf",
+            "rr3-bootloader-esp32-dev.bin",
+            "rr3-bootloader-esp32s3-dev.bin",
+            "rr3-partitions.csv",
+            "FLASHING.md",
+            "firmware-sha256.txt",
+        ):
+            if asset not in joined:
+                bad.append(f"{rel} firmware 资产缺 {asset}（发布集不完整）")
     return bad
 
 

@@ -230,6 +230,17 @@ if cargo +esp build --release \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
   if [ -f "$rel_elf" ]; then
     echo "PASS  classic release 构建（生产烧录档）: $rel_elf"
+    # 发布固件集随带同版 bootloader（与 publish firmware job 同一导航函数）：
+    # release 面也必须在产出树找到它，否则发布面缺件。
+    if ! rel_boot="$(rr3_idf_bootloader "$rel_elf")"; then
+      echo "FAIL  classic release bootloader 不在产出树（发布集缺件）" >&2
+      fail=1
+    elif [ "$(head -c 1 "$rel_boot" | od -An -tx1 | tr -d ' \n')" != "e9" ]; then
+      echo "FAIL  classic release bootloader magic≠e9: $rel_boot" >&2
+      fail=1
+    else
+      echo "PASS  classic release bootloader 同树: $rel_boot"
+    fi
   else
     echo "FAIL  classic release 编译退出 0 但 ELF 不在树: $rel_elf" >&2
     fail=1
