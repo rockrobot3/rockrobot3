@@ -75,6 +75,16 @@ fn rr3_key_ref_input(name: &str, args: &Value) -> Result<(Option<String>, bool),
     Ok((Some(s.to_string()), false))
 }
 
+/// `active` 三态核：缺席 = 保留现值（None）；在场须布尔。
+fn rr3_active_input(name: &str, args: &Value) -> Result<Option<bool>, String> {
+    let Some(v) = args.get("active") else {
+        return Ok(None);
+    };
+    v.as_bool()
+        .map(Some)
+        .ok_or_else(|| format!("模型行 {name} active 须布尔"))
+}
+
 /// 模型行进参解析：必填/域名/键引用/active 逐项按旧文案 fail-closed。
 pub(super) fn rr3_model_row_input<'a>(
     name: &str,
@@ -97,13 +107,7 @@ pub(super) fn rr3_model_row_input<'a>(
     let api_format = rr3_api_format_of(name, args)?;
     let mode = rr3_mode_of(name, args)?;
     let (key_ref, key_ref_clear) = rr3_key_ref_input(name, args)?;
-    let active = args
-        .get("active")
-        .map(|v| {
-            v.as_bool()
-                .ok_or_else(|| format!("模型行 {name} active 须布尔"))
-        })
-        .transpose()?;
+    let active = rr3_active_input(name, args)?;
     Ok(Rr3ModelRowInput {
         base_url,
         model_id,
