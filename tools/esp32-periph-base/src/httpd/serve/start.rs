@@ -9,8 +9,8 @@ use std::time::Duration;
 
 #[cfg(not(feature = "no-http"))]
 use esp_idf_sys::{
-    http_method_HTTP_GET, http_method_HTTP_POST, httpd_config_t, httpd_handle_t,
-    httpd_register_uri_handler, httpd_start, httpd_uri_t,
+    heap_caps_get_largest_free_block, http_method_HTTP_GET, http_method_HTTP_POST, httpd_config_t,
+    httpd_handle_t, httpd_register_uri_handler, httpd_start, httpd_uri_t, MALLOC_CAP_DEFAULT,
 };
 use esp_idf_sys::{nvs_flash_init, ESP_OK};
 
@@ -182,6 +182,37 @@ unsafe fn httpd_register(bus: &Arc<Mutex<Bus>>) -> Result<(), i32> {
     Ok(())
 }
 
+/// HTTP 起栈的最小连续堆（httpd 任务栈 16KB + endpoint/连接结构余量）。
+#[cfg(not(feature = "no-http"))]
+const HTTPD_MIN_LARGEST: usize = 40 * 1024;
+
+/// HTTP 配置面内存门：**WiFi/net 已在前面起好**，本门只决定 httpd 是否起栈。
+/// 2026-11-21 classic 真板实测：`httpd_start` 的 16KB 任务分配在碎片化堆上失败
+/// （0xB008），失败窗口又让播放线程 16KB 栈起不来、监督壳整机复位。最大连续块
+/// 不足即降级关闭 HTTP（等同 no-http），保住播放/云链，不再用复位换配置面。
+#[cfg(not(feature = "no-http"))]
+fn httpd_mem_ok() -> bool {
+    // SAFETY：无参只读的 IDF 堆账查询。
+    let largest = unsafe { heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT) } as usize;
+    if largest >= HTTPD_MIN_LARGEST {
+        return true;
+    }
+    println!(
+        "[periph] HTTP 配置面降级关闭：最大连续堆 {largest}B < {HTTPD_MIN_LARGEST}B（WiFi/net 已起；等同 no-http，播放/云链优先）"
+    );
+    false
+}
+
+/// 配置腿起栈成功点名（SSID 与白名单端点；端点表真值在 `RR3_BOARD_ROUTES`）。
+#[cfg(not(feature = "no-http"))]
+fn rr3_httpd_ready(cred_source: &str, ap_ssid: &str) {
+    println!(
+        "[periph] 配置腿起（N-13，凭据源={cred_source}）: SoftAP SSID={ap_ssid}（WPA2，口令见 wifi_ap_configure 注）+ http://0.0.0.0:{}/api/board/*（白名单 {} 端点，端点表＝RR3_BOARD_ROUTES）",
+        HTTPD_SERVER_PORT,
+        RR3_BOARD_ROUTES.len()
+    );
+}
+
 /// WiFi 起栈 + httpd 起与注册（unsafe 集中段；NVS init 已前移到
 /// [`rr3_httpd_spawn`]——本段只做起栈链与服务工作面）。
 ///
@@ -204,12 +235,10 @@ unsafe fn start_httpd(
     net_watch_spawn();
     #[cfg(not(feature = "no-http"))]
     {
-        httpd_register(bus)?;
-        println!(
-            "[periph] 配置腿起（N-13，凭据源={cred_source}）: SoftAP SSID={ap_ssid}（WPA2，口令见 wifi_ap_configure 注）+ http://0.0.0.0:{}/api/board/*（白名单 {} 端点，端点表＝RR3_BOARD_ROUTES）",
-            HTTPD_SERVER_PORT,
-            RR3_BOARD_ROUTES.len()
-        );
+        if httpd_mem_ok() {
+            httpd_register(bus)?;
+            rr3_httpd_ready(cred_source, &ap_ssid);
+        }
     }
     #[cfg(feature = "no-http")]
     {
