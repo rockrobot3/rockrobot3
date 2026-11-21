@@ -80,21 +80,24 @@ done
 # `::notice` 注解（匿名 API 可读），不改变门禁结论；结论入册后再决定是否设门。
 # 用默认特性 + all-targets（等价最终门形状），不叠加五档特性以免重复耗时。
 esp_clippy_log=/tmp/rr3-esp32-periph-clippy.log
+# 测试目标在 panic=abort 下必须带 -Zpanic_abort_tests（与 ⑧ 单测编译同口径，
+# 否则 clippy 直接拒编测试目标，探针只能看到生产面）。
+esp_probe_rf="--cfg espidf_time64 -Zunstable-options -Cpanic=immediate-abort -Zpanic_abort_tests"
 if cargo +esp clippy --version >/tmp/rr3-esp-clippy-ver 2>&1; then
   clippy_ver=$(head -1 /tmp/rr3-esp-clippy-ver)
-  if cargo +esp clippy --all-targets \
+  if RUSTFLAGS="$esp_probe_rf" cargo +esp clippy --all-targets \
        --config 'source.crates-io.replace-with="rsproxy-sparse"' \
        --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
        >"$esp_clippy_log" 2>&1; then
-    warn_n=$(grep -cE '^warning' "$esp_clippy_log" || true)
-    first_w=$(grep -E '^warning' "$esp_clippy_log" | head -2 | tr '\n' ' ' | cut -c1-400)
-    echo "::notice title=esp32-clippy::可用（${clippy_ver}）；默认档 all-targets warning=${warn_n} error=0；首警 ${first_w}"
+    warn_n=$(grep -E '^warning: ' "$esp_clippy_log" | grep -vc ' generated ' || true)
+    sample=$(grep -A1 -E '^warning: ' "$esp_clippy_log" | grep -v ' generated ' | head -12 | tr '\n' '|' | cut -c1-1400)
+    echo "::notice title=esp32-clippy::可用（${clippy_ver}）；默认档 all-targets warning=${warn_n} error=0；样本 ${sample}"
   else
-    warn_n=$(grep -cE '^warning' "$esp_clippy_log" || true)
+    warn_n=$(grep -E '^warning: ' "$esp_clippy_log" | grep -vc ' generated ' || true)
     err_n=$(grep -cE '^error' "$esp_clippy_log" || true)
     first=$(grep -E '^error' "$esp_clippy_log" | head -1 | cut -c1-300)
-    first_w=$(grep -E '^warning' "$esp_clippy_log" | head -1 | cut -c1-300)
-    echo "::notice title=esp32-clippy::可用（${clippy_ver}）；warning=${warn_n} error=${err_n}；首错 ${first}；首警 ${first_w}"
+    sample=$(grep -A1 -E '^warning: ' "$esp_clippy_log" | grep -v ' generated ' | head -8 | tr '\n' '|' | cut -c1-900)
+    echo "::notice title=esp32-clippy::可用（${clippy_ver}）；warning=${warn_n} error=${err_n}；首错 ${first}；样本 ${sample}"
   fi
 else
   echo "::notice title=esp32-clippy::不可用（$(tail -1 /tmp/rr3-esp-clippy-ver)）"
