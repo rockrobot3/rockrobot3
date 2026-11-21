@@ -110,6 +110,14 @@ pub(crate) fn spawn_player(
     // false，阻塞在 feed 里的生产者随即失败，不会无限等。
     let _ = state.lock().map(|mut st| st.alive = true);
     let _ = PLAY_SLOT.lock().map(|mut slot| *slot = Some(state.clone()));
+    // 起栈前等连续块：启动期 httpd/WiFi 线程与音频面并发，16KB 栈偶发被碎片
+    // 卡住（真板实测最大连续块 15,360B < 16,384B，总空闲却有 32KB）。等线程
+    // 退出合并大块，最多 2s；超时仍尝试，失败由 spawn 点名。
+    let need = PLAY_STACK + 4_096;
+    let largest = crate::mem::rr3_heap_wait(need, 2_000);
+    if largest < need {
+        println!("[spk] 起栈前连续堆不足 largest={largest}B < {need}B，仍尝试");
+    }
     let spawned = thread::Builder::new()
         .name("spk-play".into())
         .stack_size(PLAY_STACK)

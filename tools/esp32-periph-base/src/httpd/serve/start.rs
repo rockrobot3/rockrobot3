@@ -9,8 +9,8 @@ use std::time::Duration;
 
 #[cfg(not(feature = "no-http"))]
 use esp_idf_sys::{
-    heap_caps_get_largest_free_block, http_method_HTTP_GET, http_method_HTTP_POST, httpd_config_t,
-    httpd_handle_t, httpd_register_uri_handler, httpd_start, httpd_uri_t, MALLOC_CAP_DEFAULT,
+    http_method_HTTP_GET, http_method_HTTP_POST, httpd_config_t, httpd_handle_t,
+    httpd_register_uri_handler, httpd_start, httpd_uri_t,
 };
 use esp_idf_sys::{nvs_flash_init, ESP_OK};
 
@@ -192,8 +192,7 @@ const HTTPD_MIN_LARGEST: usize = 40 * 1024;
 /// 不足即降级关闭 HTTP（等同 no-http），保住播放/云链，不再用复位换配置面。
 #[cfg(not(feature = "no-http"))]
 fn httpd_mem_ok() -> bool {
-    // SAFETY：无参只读的 IDF 堆账查询。
-    let largest = unsafe { heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT) } as usize;
+    let largest = crate::mem::rr3_heap_largest();
     if largest >= HTTPD_MIN_LARGEST {
         return true;
     }

@@ -7,11 +7,35 @@
 //! 采样点只放阶段边界（云调用首包/收尾、对话轮、播放、httpd 起栈），不放音频
 //! 热路径——日志在 1.5M 串口上与音频上行抢带宽的教训在案。
 
+use std::thread;
+use std::time::Duration;
+
 use esp_idf_sys::{
     esp_get_free_heap_size, esp_get_minimum_free_heap_size, heap_caps_get_free_size,
-    heap_caps_get_minimum_free_size, heap_caps_get_total_size, MALLOC_CAP_INTERNAL,
-    MALLOC_CAP_SPIRAM,
+    heap_caps_get_largest_free_block, heap_caps_get_minimum_free_size, heap_caps_get_total_size,
+    MALLOC_CAP_DEFAULT, MALLOC_CAP_INTERNAL, MALLOC_CAP_SPIRAM,
 };
+
+/// 当前最大连续可分配块（字节；0 = 堆空）。线程栈/大缓冲要的是**连续**块，
+/// 总空闲足够但碎片化时仍会失败——启动期门禁用它而不是只读 free。
+pub(crate) fn rr3_heap_largest() -> usize {
+    // SAFETY：无参只读的 IDF 堆账查询。
+    unsafe { heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT) as usize }
+}
+
+/// 等一块 ≥ `need` 的连续堆（启动期 WiFi/httpd 线程与音频起栈并发，碎片会让
+/// 线程栈分配偶发失败；线程退出后大块会合并）。轮询 50 ms，最多 `max_ms`；
+/// 返回最后一次最大块，超时是否仍尝试由调用方决定。
+pub(crate) fn rr3_heap_wait(need: usize, max_ms: u64) -> usize {
+    let mut largest = rr3_heap_largest();
+    let mut waited = 0u64;
+    while largest < need && waited < max_ms {
+        thread::sleep(Duration::from_millis(50));
+        waited += 50;
+        largest = rr3_heap_largest();
+    }
+    largest
+}
 
 /// 打一行阶段堆账：`stage` 是业务阶段，`phase` 是阶段内点位（首包/收尾等）。
 pub(crate) fn rr3_heap_mark(stage: &str, phase: &str) {
