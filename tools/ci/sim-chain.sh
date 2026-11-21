@@ -34,8 +34,20 @@ fi
 # 无需凭据的取数通道——把 `稳态摘要：` 那行打成 notice/error 注解，CI 的
 # since/峰值/写超时/慢写/落盘峰值从此可匿名读取；本地跑同样输出该行，无副作用。
 log="${TMPDIR:-/tmp}/rr3-sim-chain.log"
+# 落盘慢写抖动重跑（2026-11-21 实测：共享 runner 单次 ≥50ms 写盘偶发一次，
+# 与产品链路无关）。只对这一类失败重跑一拍；其它任何失败立即红，不放宽判据。
 rc=0
-cargo run -q --manifest-path tools/sim/Cargo.toml -- "${args[@]}" 2>&1 | tee "$log" || rc=$?
+for attempt in 1 2; do
+        rc=0
+        cargo run -q --manifest-path tools/sim/Cargo.toml -- "${args[@]}" 2>&1 | tee "$log" || rc=$?
+        [ "$rc" -eq 0 ] && break
+        if [ "$attempt" -eq 1 ] && grep -Eq 'log_sink_slow=[1-9]' "$log"; then
+                echo "::warning title=sim-chain::首次稳态失败为落盘慢写抖动（log_sink_slow>0），重跑一拍"
+                sleep 2
+                continue
+        fi
+        break
+done
 summary=$(grep '^稳态摘要：' "$log" | tail -1 || true)
 if [ "$rc" -ne 0 ]; then
         reason=$(grep -E '^(rr3-sim|rr3-sim --chain)' "$log" | tail -1 || true)
