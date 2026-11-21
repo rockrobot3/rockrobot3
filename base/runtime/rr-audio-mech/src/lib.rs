@@ -22,13 +22,15 @@ extern crate alloc;
 
 mod doa;
 mod pcm;
+mod pcm_stream;
 mod spool;
 mod wav;
 
 pub use doa::{
     rr3_doa_fix, rr3_frames_per_tick, rr3_pcm_best_channel, Rr3DoaBin, Rr3DoaCfg, Rr3DoaFix,
 };
-pub use pcm::{rr3_pcm_ms, rr3_pcm_stereo, rr3_wav_pcm, Rr3WavPcm};
+pub use pcm::{rr3_pcm_ms, rr3_pcm_stereo, rr3_wav_info, rr3_wav_pcm, Rr3WavInfo, Rr3WavPcm};
+pub use pcm_stream::Rr3PcmStream;
 pub use spool::{
     rr3_hdr_decode, rr3_hdr_encode, Rr3HdrErr, Rr3SegInfo, Rr3Spool, Rr3SpoolErr, Rr3SpoolIo,
     RR3_SPOOL_DATA, RR3_SPOOL_HDR, RR3_SPOOL_MAGIC, RR3_SPOOL_PCM, RR3_SPOOL_SECTOR, RR3_SPOOL_VER,
