@@ -181,7 +181,7 @@ mod tests {
     /// 空分片不推进状态；reset 回到首帧置位语义
     #[test]
     fn dc_blocker_empty_and_reset_keep_state_discipline() {
-        let samples: Vec<i32> = (0..800).map(|i| i as i32 * 7 - 3000).collect();
+        let samples: Vec<i32> = (0..800).map(|i| i * 7 - 3000).collect();
         let mut dc = Rr3DcBlocker::new();
         let first = chunk_to_pcm(&samples[..400], 1, &mut dc);
         assert!(chunk_to_pcm(&[], 1, &mut dc).is_empty());

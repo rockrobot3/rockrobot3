@@ -264,12 +264,12 @@ fn rr3_cloud_check(c: &Rr3CloudWrite) -> Result<(), &'static str> {
         c.model.len() <= MAX_MODEL,
         !c.voice.is_empty(),
         c.voice.len() <= MAX_VOICE,
-        c.key.as_ref().map_or(true, |k| k.len() <= MAX_KEY),
+        c.key.as_ref().is_none_or(|k| k.len() <= MAX_KEY),
         rr3_opt_len_ok(&c.asr_model),
         rr3_opt_len_ok(&c.llm_model),
         c.llm_base
             .as_ref()
-            .map_or(true, |b| b.starts_with("https://") && b.len() <= MAX_BASE),
+            .is_none_or(|b| b.starts_with("https://") && b.len() <= MAX_BASE),
     ];
     let true = checks.iter().all(|b| *b) else {
         return Err("云配置形制不合（https/长度门）");
@@ -280,7 +280,7 @@ fn rr3_cloud_check(c: &Rr3CloudWrite) -> Result<(), &'static str> {
 /// 可选模型行形制：缺席合法；在场须非空且 ≤ [`MAX_MODEL`]。
 fn rr3_opt_len_ok(v: &Option<String>) -> bool {
     v.as_ref()
-        .map_or(true, |s| !s.is_empty() && s.len() <= MAX_MODEL)
+        .is_none_or(|s| !s.is_empty() && s.len() <= MAX_MODEL)
 }
 
 /// 落 NVS：三必填键 + 可选 key/asr_model/llm_model（缺席保留旧值）。
