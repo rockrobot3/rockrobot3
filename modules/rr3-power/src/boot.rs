@@ -11,6 +11,7 @@ use rr_hal_api::{Rr3BatteryState, Rr3Power, Rr3Rail};
 
 use crate::battery::Rr3BatteryCfg;
 use crate::charger::Rr3ChargerCfg;
+use crate::config::{Rr3PowerCfg, Rr3RailCfg};
 
 /// HAL 电源面选择 + 开机探活：首读即探活（Unsupported / 读数失败显式回错），
 /// 「电源面就绪」回显归本编排（方案 §4.1 映射表字面）。返回三元——句柄半、
@@ -67,28 +68,6 @@ pub(crate) fn rr3_power_ready(
         cfg,
         first,
     ))
-}
-
-/// 本模块 config 的汇总形状（自原 composite.rs 迁入，字段形状零改动）
-#[derive(Debug, Clone)]
-pub(crate) struct Rr3PowerCfg {
-    pub(crate) battery: Rr3BatteryCfg,
-    pub(crate) charger: Rr3ChargerCfg,
-    pub(crate) rail: Rr3RailCfg,
-}
-
-/// rail 段形状（批N2 件五）：段必填＋全部键必填——`up = false` 时其余键为惰性
-/// 但显式写（F-6 精神：合法不适用也要写出来，统一解析路径无分支）；`max_age_ms
-/// = 0` 合法（0 = 龄期恒超界 ⇒ 恒 Unknown，诚实语义）；`severe_mv < mild_mv`
-/// 严格校验（相等也红——Mild 档不可达）。
-#[derive(Debug, Clone)]
-pub(crate) struct Rr3RailCfg {
-    pub(crate) up: bool,
-    pub(crate) domain: String,
-    pub(crate) sample_period_ms: u64,
-    pub(crate) mild_mv: u16,
-    pub(crate) severe_mv: u16,
-    pub(crate) max_age_ms: u32,
 }
 
 /// 采样周期下限（ms）：0/极小值若折 1ms，会变成 I2C/轨压读数自旋，把 CPU 与
