@@ -190,11 +190,13 @@ unsafe fn start_httpd(
     pass: &[u8],
 ) -> Result<(), i32> {
     let ap_ssid = wifi_bringup(ssid, pass)?;
-    httpd_register(bus)?;
-    // ---- W3-3 net 任务接线：网络服务可达即心跳（1 s 一拍）；仅自治档起线程，
-    // 默认固件零行为变化。判死/复位归 [`crate::autonomy`] 监督壳，本线程不决策。
+    // ---- W3-3 net 任务接线：网络可达即心跳（1 s 一拍），**先于 httpd 起栈**。
+    // 配置腿在 classic 上会因 httpd 栈不足失败（W7 实测 45064），但网络本身已起；
+    // 心跳若绑在 httpd 成功之后，net 任务会被监督壳判死并整机复位（classic 实测
+    // 8 次 SW_CPU_RESET）。HTTP 是配置面，不是网络在位的判据。
     #[cfg(feature = "autonomy")]
     net_watch_spawn();
+    httpd_register(bus)?;
     println!(
         "[periph] 配置腿起（N-13，凭据源={cred_source}）: SoftAP SSID={ap_ssid}（WPA2，口令见 wifi_ap_configure 注）+ http://0.0.0.0:{}/api/board/*（白名单 {} 端点，端点表＝RR3_BOARD_ROUTES）",
         HTTPD_SERVER_PORT,
