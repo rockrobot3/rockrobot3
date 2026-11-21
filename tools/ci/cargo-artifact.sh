@@ -32,6 +32,20 @@ rr3_partition_has() {
       return 0
     fi
   done < <(find "$td/$1/debug/build" -name partition-table.bin -newer "$3" 2>/dev/null)
+  # 失败归因（只在红时打印）：本轮表里到底有哪些 label、CSV 有没有进 out/、
+  # sdkconfig 的分区档位是什么——三者足以区分"配置没生效 / 文件没搬入 / 表没重建"。
+  echo "DIAG 分区表核验未命中 triple=$1 label=$2 marker=$3" >&2
+  find "$td/$1/debug/build" -name partition-table.bin -newer "$3" 2>/dev/null \
+    | while IFS= read -r f; do
+        printf 'DIAG table=%s labels=' "$f" >&2
+        grep -aoE 'nvs|phy_init|factory|spool' "$f" 2>/dev/null | sort -u | tr '\n' ',' >&2
+        printf '\n' >&2
+      done
+  find "$td/$1/debug/build" -path '*esp-idf-sys-*/out/partitions.csv' -newer "$3" -print >&2
+  cfg="$(find "$td/$1/debug/build" -path '*esp-idf-sys-*/out/sdkconfig' -newer "$3" -print 2>/dev/null | head -1)"
+  if [ -n "$cfg" ]; then
+    grep -E '^CONFIG_PARTITION_TABLE_(CUSTOM|CUSTOM_FILENAME|SINGLE_APP)' "$cfg" >&2 || true
+  fi
   return 1
 }
 

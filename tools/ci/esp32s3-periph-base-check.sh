@@ -145,7 +145,7 @@ fi
 
 # ⑦g W7-b1a 分区表落地核验（ADR-0031）：两芯片共用 partitions.csv，S3 腿同样
 #     必须看到 spool 条目（跨芯片快速部署是本项目核心口径，不按芯片漂移）。
-if rr3_partition_has xtensa-esp32s3-espidf spool; then
+if rr3_partition_has xtensa-esp32s3-espidf spool "$part_marker"; then
   echo "PASS  S3 分区表含 spool 条目（W7-b1a 存储承载）"
 else
   echo "FAIL  S3 分区表未含 spool（查 sdkconfig.defaults CUSTOM/FILENAME 与 partitions.csv）" >&2
