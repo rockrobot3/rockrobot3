@@ -1,7 +1,7 @@
 {
   "dup_max_pct": 3.0,
   "cc_mean_max": 2.5,
-  "cc_max_fn": 9,
+  "cc_max_fn": 8,
   "fn_over_max": 0,
   "fn_over60_max": 0,
   "fn_over50_max": 0,
