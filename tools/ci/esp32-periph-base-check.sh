@@ -87,12 +87,14 @@ if cargo +esp clippy --version >/tmp/rr3-esp-clippy-ver 2>&1; then
        --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
        >"$esp_clippy_log" 2>&1; then
     warn_n=$(grep -cE '^warning' "$esp_clippy_log" || true)
-    echo "::notice title=esp32-clippy::可用（${clippy_ver}）；默认档 all-targets warning=${warn_n} error=0（可评估设门）"
+    first_w=$(grep -E '^warning' "$esp_clippy_log" | head -2 | tr '\n' ' ' | cut -c1-400)
+    echo "::notice title=esp32-clippy::可用（${clippy_ver}）；默认档 all-targets warning=${warn_n} error=0；首警 ${first_w}"
   else
     warn_n=$(grep -cE '^warning' "$esp_clippy_log" || true)
     err_n=$(grep -cE '^error' "$esp_clippy_log" || true)
     first=$(grep -E '^error' "$esp_clippy_log" | head -1 | cut -c1-300)
-    echo "::notice title=esp32-clippy::可用（${clippy_ver}）；warning=${warn_n} error=${err_n}；首错 ${first}"
+    first_w=$(grep -E '^warning' "$esp_clippy_log" | head -1 | cut -c1-300)
+    echo "::notice title=esp32-clippy::可用（${clippy_ver}）；warning=${warn_n} error=${err_n}；首错 ${first}；首警 ${first_w}"
   fi
 else
   echo "::notice title=esp32-clippy::不可用（$(tail -1 /tmp/rr3-esp-clippy-ver)）"
