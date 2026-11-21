@@ -115,9 +115,15 @@ fn rr3_image_name(image: &Path) -> Result<String, (String, ExitCode)> {
         })
 }
 
-/// sign：对 manifest 原始字节签名；manifest 的 key_id 必须与私钥派生值一致。
-pub(crate) fn rr3_cmd_sign(args: &[String]) -> Result<String, (String, ExitCode)> {
-    let manifest_path = PathBuf::from(
+/// sign 的参数面（三个必填；解析与执行分离，主流程只做校验与落盘）。
+struct Rr3SignArgs {
+    manifest: PathBuf,
+    key: PathBuf,
+    sig_out: PathBuf,
+}
+
+fn rr3_sign_args(args: &[String]) -> Result<Rr3SignArgs, (String, ExitCode)> {
+    let manifest = PathBuf::from(
         rr3_val_arg(args, "--manifest", "sign 必须显式传 --manifest").map_err(rr3_use)?,
     );
     let key = PathBuf::from(
@@ -126,10 +132,20 @@ pub(crate) fn rr3_cmd_sign(args: &[String]) -> Result<String, (String, ExitCode)
     let sig_out = PathBuf::from(
         rr3_val_arg(args, "--sig-out", "sign 必须显式传 --sig-out").map_err(rr3_use)?,
     );
-    let bytes = rr3_read_bytes(&manifest_path, "manifest")?;
+    Ok(Rr3SignArgs {
+        manifest,
+        key,
+        sig_out,
+    })
+}
+
+/// sign：对 manifest 原始字节签名；manifest 的 key_id 必须与私钥派生值一致。
+pub(crate) fn rr3_cmd_sign(args: &[String]) -> Result<String, (String, ExitCode)> {
+    let a = rr3_sign_args(args)?;
+    let bytes = rr3_read_bytes(&a.manifest, "manifest")?;
     let m = sign::rr3_manifest_parse(&bytes)
         .map_err(|e| (format!("拒绝签名：manifest 非法：{e}"), ExitCode::from(1)))?;
-    let seed = rr3_read_seed(&key)?;
+    let seed = rr3_read_seed(&a.key)?;
     let pubkey = sign::rr3_pubkey(&seed);
     let key_id = sign::rr3_key_id(&pubkey);
     if key_id != m.key_id {
@@ -144,12 +160,12 @@ pub(crate) fn rr3_cmd_sign(args: &[String]) -> Result<String, (String, ExitCode)
     }
     let sig = sign::rr3_sign(&bytes, &seed);
     let sig_hex = sign::rr3_hex_encode(&sig);
-    rr3_write_atomic(&sig_out, format!("{sig_hex}\n").as_bytes())?;
+    rr3_write_atomic(&a.sig_out, format!("{sig_hex}\n").as_bytes())?;
     Ok(format!(
         "签名已写出：{}（key_id={}，manifest={}）",
-        sig_out.display(),
+        a.sig_out.display(),
         sign::rr3_hex_encode(&key_id),
-        manifest_path.display()
+        a.manifest.display()
     ))
 }
 
@@ -192,6 +208,25 @@ fn rr3_downgrade_ok(allow: bool, current: Option<&String>) -> Result<(), (String
     Ok(())
 }
 
+/// verify 的可选参数面（image/platform/board/current-version）。
+type Rr3VerifyOpt = (
+    Option<PathBuf>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+fn rr3_verify_opt(args: &[String]) -> Result<Rr3VerifyOpt, (String, ExitCode)> {
+    Ok((
+        rr3_opt_arg(args, "--image")
+            .map_err(rr3_use)?
+            .map(PathBuf::from),
+        rr3_opt_arg(args, "--platform").map_err(rr3_use)?,
+        rr3_opt_arg(args, "--board").map_err(rr3_use)?,
+        rr3_opt_arg(args, "--current-version").map_err(rr3_use)?,
+    ))
+}
+
 fn rr3_verify_args(args: &[String]) -> Result<Rr3VerifyArgs, (String, ExitCode)> {
     let manifest = PathBuf::from(
         rr3_val_arg(args, "--manifest", "verify 必须显式传 --manifest").map_err(rr3_use)?,
@@ -199,12 +234,7 @@ fn rr3_verify_args(args: &[String]) -> Result<Rr3VerifyArgs, (String, ExitCode)>
     let sig =
         PathBuf::from(rr3_val_arg(args, "--sig", "verify 必须显式传 --sig").map_err(rr3_use)?);
     let (pubkey, pub_dir) = rr3_key_src(args)?;
-    let image = rr3_opt_arg(args, "--image")
-        .map_err(rr3_use)?
-        .map(PathBuf::from);
-    let platform = rr3_opt_arg(args, "--platform").map_err(rr3_use)?;
-    let board = rr3_opt_arg(args, "--board").map_err(rr3_use)?;
-    let current = rr3_opt_arg(args, "--current-version").map_err(rr3_use)?;
+    let (image, platform, board, current) = rr3_verify_opt(args)?;
     let allow_downgrade = rr3_flag(args, "--allow-downgrade");
     rr3_downgrade_ok(allow_downgrade, current.as_ref())?;
     Ok(Rr3VerifyArgs {
