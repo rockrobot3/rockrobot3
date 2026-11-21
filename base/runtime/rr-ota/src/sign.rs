@@ -106,6 +106,17 @@ fn rr3_manifest_ids(
     ))
 }
 
+/// 文本形制：只收 ASCII，且不得含 CR/NUL（统一 LF 结尾）。
+fn rr3_text_check(text: &str) -> Result<(), String> {
+    if !text.is_ascii() {
+        return Err("manifest 只允许 ASCII".into());
+    }
+    if text.contains('\r') || text.contains('\0') {
+        return Err("manifest 不得含 CR/NUL（统一 LF 结尾）".into());
+    }
+    Ok(())
+}
+
 /// 字节层形制（自 [`rr3_manifest_lines`] 抽出）：上限、UTF-8/ASCII、LF 结尾、
 /// 无空行；返回去尾 LF 的正文。
 fn rr3_manifest_body(bytes: &[u8]) -> Result<&str, String> {
@@ -116,16 +127,10 @@ fn rr3_manifest_body(bytes: &[u8]) -> Result<&str, String> {
         ));
     }
     let text = std::str::from_utf8(bytes).map_err(|e| format!("manifest 不是 UTF-8: {e}"))?;
-    if !text.is_ascii() {
-        return Err("manifest 只允许 ASCII".into());
-    }
-    if text.contains('\r') || text.contains('\0') {
-        return Err("manifest 不得含 CR/NUL（统一 LF 结尾）".into());
-    }
-    if !text.ends_with('\n') {
-        return Err("manifest 必须以 LF 结尾".into());
-    }
-    let body = &text[..text.len() - 1];
+    rr3_text_check(text)?;
+    let body = text
+        .strip_suffix('\n')
+        .ok_or_else(|| "manifest 必须以 LF 结尾".to_string())?;
     if body.ends_with('\n') {
         return Err("manifest 末尾不得有空行".into());
     }
