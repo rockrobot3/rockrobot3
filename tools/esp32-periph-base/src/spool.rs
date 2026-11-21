@@ -37,10 +37,13 @@ use rr_audio_mech::{Rr3SegInfo, Rr3Spool, Rr3SpoolIo, RR3_SPOOL_SECTOR};
 const SPOOL_LABEL: &[u8] = b"spool\0";
 /// 投递块长：20 ms @ 16 kHz 单声道（与 mic VAD 节拍同源）。
 pub(crate) const RR3_SPOOL_BLK: usize = 320;
-/// 命令队列容量（块；16 × 20 ms = 320 ms 缓冲）。
-const SPOOL_Q_CAP: usize = 16;
-/// 写线程栈：Flash 调用 + 格式化点名（不含 TLS）。
-const SPOOL_STACK: usize = 6_144;
+/// 命令队列容量（块；8 × 20 ms = 160 ms 缓冲）。写线程擦除占空比约 40%，
+/// 160 ms 已能吸收单次扇区擦除；再大只是白占内部堆。
+const SPOOL_Q_CAP: usize = 8;
+/// 写线程栈：真板实测线程启动 → `recv_timeout` 调用链约 7.2 KB（6 KB 栈在第
+/// 一次 recv 即溢出为 IllegalInstruction 复位环），12 KB 留出 Flash 调用与
+/// 格式化点名余量。
+const SPOOL_STACK: usize = 12_288;
 /// 写线程空闲判定：`Rec` 且 2 s 无命令即弃段（语音侧异常兜底）。
 const IDLE_MS: u64 = 2_000;
 /// 分块读单次上限与应答等待上限。
@@ -170,7 +173,7 @@ fn rr3_open() -> Option<Rr3FlashSpool> {
     Some(Rr3FlashSpool { part, cap: size })
 }
 
-/// 起 spool 写线程（boot 在云 worker 之后、音频面之前调用）。
+/// 起 spool 写线程（boot 在总线装配之后、云服务与音频面之前调用）。
 ///
 /// 启动期只读一次记录头：残留段点名后清理——语音跨重启已失效，不做补传。
 /// 分区缺位/几何不符/线程起不来时保持"未装配"，语音侧据此显式降级。
@@ -234,6 +237,10 @@ fn rr3_boot_clear(sp: &mut Rr3Spool<Rr3FlashSpool>, what: &str) {
 
 /// 写线程主体：单线程串行执行命令；`Rec` 空闲超时自行弃段。
 fn rr3_spool_run(rx: Receiver<Rr3SpoolCmd>, mut sp: Rr3Spool<Rr3FlashSpool>, on_seg: Rr3SegFn) {
+    println!(
+        "[spool] 写线程进入命令环 cap={}B（等 Begin/Read/Clear）",
+        sp.rr3_cap()
+    );
     let mut rec = false;
     loop {
         match rx.recv_timeout(Duration::from_millis(IDLE_MS)) {
