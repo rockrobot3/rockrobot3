@@ -87,7 +87,11 @@ TTS 回包与日志落存储**，不把整段数据常驻 RAM。本 ADR 只裁�
   platforms 的 classic/S3 两条 esp32-gates 全绿；两芯片构建产物均核出 spool
   分区，Actions 固件制品（solo / no-http）在册。真板 `[spool]` boot 行随下一次
   烧录会话取证（写入路径尚未接线，本身不产生磨损）。
-- **W7-b2**：TTS 4KB 流式收包 → I2S 环；不完整回包失败语义。
+- **W7-b2（2026-11-21 落树，`12676402`）**：TTS 回包 4KB 边收边播——头窗识别
+  WAV/裸 PCM → `Rr3PcmStream` 全局淡入淡出 → 16KB 播放环；首块前按契约重试、
+  开播后不重放；Content-Length 与 WAV 声明长度双向对账，不完整回包显式中止。
+  播放队列由“2 条全量 PCM”降为 16KB 环，512KB 回包 Vec 不再存在。CI 双芯片绿；
+  真板听感、时长误差与 30min 内存列在 W7-b4 取。
 - **W7-b3**：无 PSRAM VAD 小窗 + spool 写入；半双工与丢段计数。
 - **W7-b4**：classic 真板 30min soak；`[mem]` 阶段列与 Go/No-Go 入 0014/后续证据。
 
