@@ -9,7 +9,7 @@ use rr_ipc::{Rr3Frame, Rr3FrameBuf, Rr3PayloadType};
 use serde_json::Value;
 
 use crate::probe::{heartbeat_reply, parse_upstream, register_reply, rr3_recv_frame};
-use crate::report::{histogram_text, rr3_tally, verdict};
+use crate::report::{histogram_text, rr3_tally};
 use crate::{
     BEAT_AVG_CEIL_SLACK_MS, BEAT_AVG_FLOOR_SLACK_MS, BEAT_FLOOR_SLACK_MS, HARNESS_TASK,
     HEARTBEAT_STALL_FAIL_MS, WATCHDOG_BASE_SECS, WATCHDOG_PER_BEAT_MS,
