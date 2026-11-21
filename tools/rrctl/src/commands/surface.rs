@@ -239,6 +239,16 @@ fn rr3_role_rows(result: &Value) -> Result<Vec<Vec<String>>, String> {
         .collect())
 }
 
+/// `wiring` 固定五段（引脚 → 供电域 → 接线 → 轴 → 角色）按表渲染。
+fn rr3_wiring_std(out: &mut String, result: &Value) -> Result<(), String> {
+    rr3_section(out, "PINS", &RR3_PIN_HEAD, &rr3_pin_rows(result)?);
+    rr3_section(out, "DOMAINS", &RR3_DOM_HEAD, &rr3_dom_rows(result)?);
+    rr3_section(out, "WIRES", &RR3_WIRE_HEAD, &rr3_wire_rows(result)?);
+    rr3_section(out, "AXIS", &RR3_AXIS_HEAD, &rr3_axis_rows(result)?);
+    rr3_section(out, "ROLES", &RR3_ROLE_HEAD, &rr3_role_rows(result)?);
+    Ok(())
+}
+
 /// `wiring` 装配快照读口（批N4 件九笔4 实装，续轮十五补 CLI）：段序 = 引脚 →
 /// 供电域 → 接线 → 轴 → 角色 → 交叉判据；判据真值在 rrd 的装配面，CLI 只透传。
 pub(super) fn format_wiring(envelope: &Value) -> Result<String, String> {
@@ -247,11 +257,7 @@ pub(super) fn format_wiring(envelope: &Value) -> Result<String, String> {
         return Ok(format_unavailable(result));
     }
     let mut out = String::new();
-    rr3_section(&mut out, "PINS", &RR3_PIN_HEAD, &rr3_pin_rows(result)?);
-    rr3_section(&mut out, "DOMAINS", &RR3_DOM_HEAD, &rr3_dom_rows(result)?);
-    rr3_section(&mut out, "WIRES", &RR3_WIRE_HEAD, &rr3_wire_rows(result)?);
-    rr3_section(&mut out, "AXIS", &RR3_AXIS_HEAD, &rr3_axis_rows(result)?);
-    rr3_section(&mut out, "ROLES", &RR3_ROLE_HEAD, &rr3_role_rows(result)?);
+    rr3_wiring_std(&mut out, result)?;
     let checks = rr3_check_rows(result)?;
     rr3_section(
         &mut out,
