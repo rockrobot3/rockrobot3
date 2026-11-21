@@ -136,6 +136,25 @@ else
   fail=1
 fi
 
+# ⑦e ADR-0030 全链档 no-http 编译面（网络照常起，HTTP 配置面关闭；W7 探针）
+nohttp_elf=""
+if cargo +esp build --features autonomy,tts,no-http \
+     --config 'source.crates-io.replace-with="rsproxy-sparse"' \
+     --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
+  nohttp_elf="$(rr3_cargo_artifact xtensa-esp32-espidf debug esp32-periph-base)" \
+    || { echo "FAIL  no-http 档无法解析 target_directory" >&2; fail=1; }
+  if [ -n "${nohttp_elf:-}" ] && [ -f "$nohttp_elf" ]; then
+    cp "$nohttp_elf" /tmp/rr3-build/esp32-classic-nohttp
+    echo "PASS  classic autonomy+tts+no-http 档构建（W7 全链探针）"
+  else
+    echo "FAIL  no-http 档 ELF 不在树" >&2
+    fail=1
+  fi
+else
+  echo "FAIL  classic autonomy+tts+no-http 档构建失败" >&2
+  fail=1
+fi
+
 # ⑦d W4-2 播放面编译（tts feature；与 autonomy 组合＝W6 全链固件形态；
 #     与 spk-tone 互斥，故单独一条腿）
 if cargo +esp build --features autonomy,tts \

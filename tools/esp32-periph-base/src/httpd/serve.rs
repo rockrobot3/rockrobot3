@@ -15,9 +15,11 @@ pub(crate) use start::rr3_httpd_spawn;
 // ---------------------------------------------------------------------------
 
 /// httpd 任务栈（账面见模块文档；同 THREAD_STACK 口径）。
+#[cfg(not(feature = "no-http"))]
 pub(super) const HTTPD_STACK_SIZE: usize = 16384;
 /// HTTP 监听口（板侧只读面，80 与 host 面板同档；端口号住常量＝资源参数
 /// 同型病例的既有口径，本件不定新配置键）。
+#[cfg(not(feature = "no-http"))]
 pub(super) const HTTPD_SERVER_PORT: u16 = 80;
 
 /// bus 单点（handler 裸壳取态的唯一入口——OnceLock 存 Arc clone，无裸指针
