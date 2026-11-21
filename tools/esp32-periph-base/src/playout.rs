@@ -273,29 +273,8 @@ fn play_run(
     let mut buf = [0u8; PLAY_CHUNK];
     let mut t0: Option<Instant> = None;
     loop {
-        let action = {
-            let Ok(mut st) = state.lock() else {
-                return;
-            };
-            if !st.running {
-                Action::Idle { running: false }
-            } else if !st.bytes.is_empty() {
-                let n = st.bytes.len().min(buf.len());
-                for (dst, src) in buf[..n].iter_mut().zip(st.bytes.drain(..n)) {
-                    *dst = src;
-                }
-                Action::Data(n)
-            } else if st.end {
-                let action = Action::Done {
-                    abort: st.abort,
-                    want_ms: st.want_ms,
-                    src_bytes: st.src_bytes,
-                };
-                st.finish();
-                action
-            } else {
-                Action::Idle { running: true }
-            }
+        let Some(action) = play_take(&state, &mut buf) else {
+            return;
         };
         match action {
             Action::Idle { running } => {
@@ -304,55 +283,104 @@ fn play_run(
                 thread::sleep(Duration::from_millis(ms));
             }
             Action::Data(n) => {
-                lock_bus(&bus).st.tts_gate = true;
-                if tx.write_all(&buf[..n], PLAY_TIMEOUT).is_err() {
-                    crate::mem::rr3_heap_mark("playout", "fail");
-                    println!("[spk] I2S 写失败（DMA 不排空？查功放供电/时钟）——中止本条流");
-                    {
-                        let mut b = lock_bus(&bus);
-                        b.st.tts_fail = b.st.tts_fail.saturating_add(1);
-                        b.st.tts_gate = false;
-                    }
-                    if let Ok(mut st) = state.lock() {
-                        st.finish();
-                    }
+                if play_write(&mut tx, &bus, &state, &buf[..n]) {
+                    t0.get_or_insert_with(Instant::now);
+                } else {
                     t0 = None;
-                    continue;
                 }
-                t0.get_or_insert_with(Instant::now);
-                crate::autonomy::rr3_beat(Rr3Task::AudioOut);
             }
             Action::Done {
                 abort,
                 want_ms,
                 src_bytes,
-            } => {
-                lock_bus(&bus).st.tts_gate = false;
-                let elapsed = t0.take().map_or(0, |t| t.elapsed().as_millis() as u64);
-                if abort || src_bytes == 0 {
-                    {
-                        let mut b = lock_bus(&bus);
-                        b.st.tts_fail = b.st.tts_fail.saturating_add(1);
-                    }
-                    crate::mem::rr3_heap_mark("playout", "fail");
-                    println!(
-                        "[spk] 播放{}: src={src_bytes}B 应播={want_ms}ms 实耗={elapsed}ms",
-                        if abort { "中止" } else { "空流" }
-                    );
-                } else {
-                    {
-                        let mut b = lock_bus(&bus);
-                        b.st.tts_played = b.st.tts_played.saturating_add(1);
-                    }
-                    crate::mem::rr3_heap_mark("playout", "done");
-                    println!(
-                        "[spk] 播放完成 pcm={src_bytes}B 应播={want_ms}ms 实耗={elapsed}ms 误差={}%",
-                        err_pct(want_ms, elapsed)
-                    );
-                }
-            }
+            } => play_done(&bus, abort, want_ms, src_bytes, &mut t0),
         }
     }
+}
+
+/// 单拍取数（锁内只做判态/搬块，I2S 写在锁外）；None = 播放线程退出。
+fn play_take(state: &Arc<Mutex<Rr3PlayState>>, buf: &mut [u8; PLAY_CHUNK]) -> Option<Action> {
+    let Ok(mut st) = state.lock() else {
+        return None;
+    };
+    if !st.running {
+        return Some(Action::Idle { running: false });
+    }
+    if !st.bytes.is_empty() {
+        let n = st.bytes.len().min(buf.len());
+        for (dst, src) in buf[..n].iter_mut().zip(st.bytes.drain(..n)) {
+            *dst = src;
+        }
+        return Some(Action::Data(n));
+    }
+    if st.end {
+        let action = Action::Done {
+            abort: st.abort,
+            want_ms: st.want_ms,
+            src_bytes: st.src_bytes,
+        };
+        st.finish();
+        return Some(action);
+    }
+    Some(Action::Idle { running: true })
+}
+
+/// 写一块到 I2S；失败计数并复位本条流，返回 false（不 panic）。
+fn play_write(
+    tx: &mut I2sDriver<'static, I2sTx>,
+    bus: &Arc<Mutex<Bus>>,
+    state: &Arc<Mutex<Rr3PlayState>>,
+    chunk: &[u8],
+) -> bool {
+    lock_bus(bus).st.tts_gate = true;
+    if tx.write_all(chunk, PLAY_TIMEOUT).is_ok() {
+        crate::autonomy::rr3_beat(Rr3Task::AudioOut);
+        return true;
+    }
+    crate::mem::rr3_heap_mark("playout", "fail");
+    println!("[spk] I2S 写失败（DMA 不排空？查功放供电/时钟）——中止本条流");
+    {
+        let mut b = lock_bus(bus);
+        b.st.tts_fail = b.st.tts_fail.saturating_add(1);
+        b.st.tts_gate = false;
+    }
+    if let Ok(mut st) = state.lock() {
+        st.finish();
+    }
+    false
+}
+
+/// 流结束收尾：清半双工门，按 abort/空流计 fail，否则计 played 并对账时长。
+fn play_done(
+    bus: &Arc<Mutex<Bus>>,
+    abort: bool,
+    want_ms: u64,
+    src_bytes: usize,
+    t0: &mut Option<Instant>,
+) {
+    lock_bus(bus).st.tts_gate = false;
+    let elapsed = t0.take().map_or(0, |t| t.elapsed().as_millis() as u64);
+    if abort || src_bytes == 0 {
+        {
+            let mut b = lock_bus(bus);
+            b.st.tts_fail = b.st.tts_fail.saturating_add(1);
+        }
+        crate::mem::rr3_heap_mark("playout", "fail");
+        println!(
+            "[spk] 播放{}: src={src_bytes}B 应播={want_ms}ms 实耗={elapsed}ms",
+            if abort { "中止" } else { "空流" }
+        );
+        return;
+    }
+    {
+        let mut b = lock_bus(bus);
+        b.st.tts_played = b.st.tts_played.saturating_add(1);
+    }
+    crate::mem::rr3_heap_mark("playout", "done");
+    println!(
+        "[spk] 播放完成 pcm={src_bytes}B 应播={want_ms}ms 实耗={elapsed}ms 误差={}%",
+        err_pct(want_ms, elapsed)
+    );
 }
 
 /// 播放线程单拍动作（锁内只做判态/取数，I2S 写在锁外）。
