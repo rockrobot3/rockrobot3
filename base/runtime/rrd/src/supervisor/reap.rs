@@ -30,7 +30,14 @@ pub(super) fn rr3_reap(
         // 也绝不让下一轮把它当还活着的进程重复收一次）。
         let _ = children.remove(&name);
         let clean = status.success();
-        let job = jobs.get(&name).expect("children 里的 name 必有 job");
+        // 内部账不一致（children 有、jobs 无）只可能是代码缺陷；点名跳过而不是 panic
+        // 打穿监督核——一个模块的账错不该拖垮全部模块的收尸/重启。
+        let Some(job) = jobs.get(&name) else {
+            rr3_log(&format!(
+                "收尸跳过 {name}：children 有句柄但 jobs 无记录（内部账不一致，请查 spawn 链）"
+            ));
+            continue;
+        };
         // 硬规矩：先 `let` 绑结果。记账 + 相位 + 广播**只在这一次**发生——owned 的模块，
         // conn 那一路已把相位/记账/广播三件事全让了出来（`Rr3Death::DeferredToExitStatus`）。
         let verdict = rr3_lock(shared).rr3_reg_child_exit(&job.facts, clean, rr3_now_ms(t0));
