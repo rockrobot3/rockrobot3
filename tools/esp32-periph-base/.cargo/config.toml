@@ -48,6 +48,13 @@ MCU = "esp32"
 # relative=true 把值钉到本文件目录；esp-idf-sys 会再按 MCU 自动叠加
 # sdkconfig.defaults.esp32s3 / .esp32（存在才吃）。
 ESP_IDF_SDKCONFIG_DEFAULTS = { value = "sdkconfig.defaults", relative = true }
+# W7-b1a 自定义分区表（ADR-0031）：IDF 的 C 工程 PROJECT_DIR 是构建 out/，不是本
+# crate 根——partitions.csv 必须经 esp-idf-sys 官方 GLOB 钩子先搬进 out/，
+# CONFIG_PARTITION_TABLE_CUSTOM_FILENAME 才能找到。BASE=本文件目录（空值 +
+# relative=true），掩码=partitions.csv；搬入位置保持相对路径（out/partitions.csv）。
+# 源码区不落任何构建产物（target-dir 仍在 /tmp）。
+ESP_IDF_GLOB_CSV_BASE = { value = "", relative = true }
+ESP_IDF_GLOB_CSV_PART = "partitions.csv"
 # IDF_PATH 由环境变量提供：tools/ci 的 esp32*/esp32s3* 门用 $HOME 下版本钉克隆
 # 自行 export；本地直接 `cargo +esp build` 前也自行 export。仓库不写本机绝对路径，
 # 换机/CI 不靠改源码（Custom 路径仍跳过 esp-idf-sys 的 managed 网络探测）。

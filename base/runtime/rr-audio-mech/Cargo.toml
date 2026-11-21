@@ -5,8 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "语音机制核：VAD/DoA/切段/WAV 的整数纯逻辑（no_std，零平台依赖）"
+description = "语音机制核：VAD/DoA/切段/WAV/flash spool 记录的整数纯逻辑（no_std，零平台依赖）"
 
 [lib]
 name = "rr_audio_mech"
 path = "src/lib.rs"
+
+[dependencies]
+# CRC32 单点真值（IEEE 802.3 分段实现）：spool 记录头与 IPC 载荷共用一份，不复制算法。
+rr-ipc = { path = "../rr-ipc" }

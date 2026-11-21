@@ -1,0 +1,8 @@
+# RR3 classic/S3 flash layout (ADR-0031): single app + speech-segment spool.
+# ASCII only: IDF's partition generator reads this file before any locale is set.
+# Keep nvs/phy at IDF default offsets so WiFi credentials survive reflash.
+# name,    type, subtype,   offset,    size,      flags
+nvs,       data, nvs,       0x9000,    0x6000,
+phy_init,  data, phy,       0xf000,    0x1000,
+factory,   app,  factory,   0x10000,   0x2F0000,
+spool,     data, undefined, 0x300000,  0x100000,

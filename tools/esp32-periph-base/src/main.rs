@@ -102,9 +102,13 @@ mod psram;
 // I2S1 TX 真实 PCM 播放面（W4-2）：仅 --features tts 编译；与 spk-tone 互斥。
 #[cfg(feature = "tts")]
 mod playout;
+// 语音段 flash spool 分区后端（ADR-0031 W7-b1a）：仅 tts 全链档编译；
+// 分区缺位/几何不符在 boot 点名，不在音频热路径写擦。
 mod ports_impl;
 mod power;
 mod runtime;
+#[cfg(feature = "tts")]
+mod spool;
 // I2S TX 功放/扬声器上板验收（W4-1）：仅 --features spk-tone 编译，默认固件零行为变化。
 #[cfg(feature = "spk-tone")]
 mod speaker;

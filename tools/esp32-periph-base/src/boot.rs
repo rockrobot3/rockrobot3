@@ -490,6 +490,9 @@ pub(crate) fn rr3_boot() {
     let (_timer, ctl, rt, audio) = open_parts(p);
     let bus = bus_seed();
     ram_point("2-periph-ready");
+    // W7-b1a 存储承载：只读记录头点名 spool 分区状态，不写不擦（启动路径零磨损）。
+    #[cfg(feature = "tts")]
+    crate::spool::rr3_spool_probe();
     start_services(&bus);
     spawn_planes(ctl, rt, bus.clone());
     spawn_audio(audio, &bus);

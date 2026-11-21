@@ -66,8 +66,9 @@ pub use persist::{rr3_atomic_store, rr3_stage_excl, rr3_store_perm};
 pub use protocol::b64::{rr3_base64_decode, rr3_base64_encode, Rr3Base64Error};
 pub use protocol::body::{rr3_body_encode, rr3_body_split, Rr3BodyError, RR3_BODY_TYPE_PREFIX_LEN};
 pub use protocol::header::{
-    flags, opcode, rr3_crc32, rr3_header_encode, Rr3HdrError, Rr3Header, Rr3PayloadType,
-    Rr3StatusCode, MAGIC, MAX_PAYLOAD_LEN, RR3_IPC_HDR_SIZE,
+    flags, opcode, rr3_crc32, rr3_crc32_final, rr3_crc32_init, rr3_crc32_update, rr3_header_encode,
+    Rr3HdrError, Rr3Header, Rr3PayloadType, Rr3StatusCode, MAGIC, MAX_PAYLOAD_LEN,
+    RR3_IPC_HDR_SIZE,
 };
 // 窄缝与帧缓冲（no_std 可达，无条件导出）；帧数据形状（Rr3Frame / 编码）住
 // protocol::wire；io 半边（读写）依赖 std::io，随门控。

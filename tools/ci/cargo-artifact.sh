@@ -18,6 +18,19 @@ rr3_cargo_artifact() {
   printf '%s/%s/%s/%s\n' "$td" "$1" "$2" "$3"
 }
 
+# 分区表条目核验（W7-b1a 共享单点）：返回 0 = 指定 triple 的最新
+# partition-table.bin 含 label；产物目录/文件/条目任一缺位都返回非 0，
+# 调用方按各门纪律 FAIL 点名（"编译绿但分区没落地"必须可见）。
+# 用法：rr3_partition_has <target-triple> <label>
+rr3_partition_has() {
+  local td ptb
+  td="$(cargo metadata --format-version 1 --no-deps 2>/dev/null \
+        | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')"
+  [ -n "$td" ] || return 1
+  ptb="$(ls -t "$td/$1"/debug/build/esp-idf-sys-*/out/build/partition_table/partition-table.bin 2>/dev/null | head -1)"
+  [ -n "$ptb" ] && grep -qa -- "$2" "$ptb"
+}
+
 # esp-clang 定位（ESP 门共享单点）：espup 把乐鑫 LLVM fork 的库目录挂到
 # ~/.espup/esp-clang，宿主库名随平台而异（macOS libclang.dylib / Linux libclang.so）。
 # 打印首个存在的库路径；缺位返回非 0，调用方按各自纪律 SKIP（CI 门）或 die（产线脚本）。
