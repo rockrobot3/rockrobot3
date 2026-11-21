@@ -18,6 +18,17 @@ runs:
     # 只保留先存者——若 classic 腿与 S3 腿共用一个 key，后跑的那腿每次都要重装
     # 自己芯片的 Xtensa/IDF 工具集（网络、分钟级）。按 targets 分键后各腿各存一份，
     # 同 targets 的 job（esp32 与 ipct003）继续共享。
+    #
+    # 键归一（2026-11-22 v0.0.16 firmware 首跑实锤）：targets 允许逗号分隔
+    # （espup 语法），但 actions/cache 的 key **禁止逗号**（Key Validation Error），
+    # 组合档会在装工具链前就红。这里把逗号换成短横；单 target 键保持原字面，
+    # 既有 esp32/esp32s3 缓存不失效。
+    - name: 归一缓存键（targets 逗号 → 短横）
+      id: ck
+      shell: bash
+      env:
+        TARGETS: ${{ inputs.targets }}
+      run: echo "key=esp-${RUNNER_OS}-${TARGETS//,/-}-v0.17.1-idf5.2.2" >> "$GITHUB_OUTPUT"
     - name: 缓存 esp 工具链与 ESP-IDF
       uses: actions/cache@v4
       with:
@@ -26,7 +37,7 @@ runs:
           ~/.rustup/toolchains/esp
           ~/.espressif
           ~/.cargo/bin/ldproxy
-        key: esp-${{ runner.os }}-${{ inputs.targets }}-v0.17.1-idf5.2.2
+        key: ${{ steps.ck.outputs.key }}
     - name: 安装 esp 工具链（espup 钉版）
       shell: bash
       env:
