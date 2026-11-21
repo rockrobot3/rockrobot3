@@ -92,11 +92,15 @@ fn cred_read() -> Result<(&'static str, Vec<u8>, Vec<u8>), String> {
 
 /// net 任务心跳线程（W3-3）：只读网络面在位真值（[`wifi::rr3_net_up`]），
 /// 每 1 s 一次；起线程失败只点名——net 任务随后按 timeout 判死，健康面可见。
+///
+/// 栈 6KB：本线程只 sleep + 读 netif 单例 + 一次心跳，无格式化/无缓冲；16KB 栈
+/// 在 WiFi 初始化后的碎片堆上会 OOM（真板实测最大连续块 8KB），导致 net 假死。
+/// 6KB 栈体 + TCB 仍小于该连续块，且比 4KB 留出 std 线程启动链余量。
 #[cfg(feature = "autonomy")]
 fn net_watch_spawn() {
     let spawned = std::thread::Builder::new()
         .name("net-watch".into())
-        .stack_size(crate::board::THREAD_STACK)
+        .stack_size(6_144)
         .spawn(|| loop {
             std::thread::sleep(Duration::from_secs(1));
             // SAFETY：rr3_net_up 只读启动期写一次的 netif 单例（见 wifi 模块）。
