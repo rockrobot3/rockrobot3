@@ -147,6 +147,14 @@ unsafe fn httpd_register(bus: &Arc<Mutex<Bus>>) -> Result<(), i32> {
         ..Default::default()
     };
     let r = httpd_start(&mut h, &conf);
+    crate::mem::rr3_heap_mark(
+        "httpd",
+        if r == ESP_OK {
+            "start-ok"
+        } else {
+            "start-fail"
+        },
+    );
     let true = r == ESP_OK else { return Err(r) };
     let _ = HTTPD_BUS.set(Arc::clone(bus));
     for (method, path, _, _, _) in RR3_BOARD_ROUTES {

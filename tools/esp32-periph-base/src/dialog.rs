@@ -80,6 +80,7 @@ pub(crate) fn rr3_dialog_body(body: &[u8]) -> Result<Vec<i16>, String> {
 /// 由 cloud worker 在收 `Rr3CloudJob::Turn` 时调用（线程与 TLS 栈同 TTS）。
 pub(crate) fn rr3_turn(bus: &Arc<Mutex<Bus>>, pcm: Vec<i16>) {
     let t0 = now_ms();
+    crate::mem::rr3_heap_mark("dialog", "start");
     rr3_beat_dialog();
     rr3_face(bus, "think");
     let text = match rr3_asr_stage(&pcm) {
@@ -87,6 +88,7 @@ pub(crate) fn rr3_turn(bus: &Arc<Mutex<Bus>>, pcm: Vec<i16>) {
         Ok(_) => return rr3_turn_end(bus, "识别为空文本，弃轮"),
         Err(e) => return rr3_turn_fail(bus, &format!("ASR 失败，弃轮: {e}")),
     };
+    crate::mem::rr3_heap_mark("dialog", "asr-ok");
     let Some(text) = rr3_wake_gate(bus, &text) else {
         return;
     };
@@ -96,11 +98,13 @@ pub(crate) fn rr3_turn(bus: &Arc<Mutex<Bus>>, pcm: Vec<i16>) {
         Ok(r) => rr3_cap_text(&r, MAX_REPLY),
         Err(e) => return rr3_turn_fail(bus, &format!("LLM 失败，弃轮: {e}")),
     };
+    crate::mem::rr3_heap_mark("dialog", "llm-ok");
     let speak = rr3_speak_stage(bus, &reply);
     println!(
         "[dialog] 轮完成 {}ms asr='{text}' reply='{reply}' actions={acted} {speak}",
         now_ms().saturating_sub(t0)
     );
+    crate::mem::rr3_heap_mark("dialog", "done");
 }
 
 /// 唤醒门控：ASR 文本 → 有效对话文本。
@@ -210,6 +214,7 @@ fn rr3_speak_stage(bus: &Arc<Mutex<Bus>>, reply: &str) -> String {
         rr3_face(bus, "idle");
         return "tts=skip(空回复)".to_string();
     }
+    crate::mem::rr3_heap_mark("tts", "fetch-start");
     let pcm = match crate::cloud::rr3_tts_fetch(reply) {
         Ok(p) => p,
         Err(e) => {
@@ -217,6 +222,7 @@ fn rr3_speak_stage(bus: &Arc<Mutex<Bus>>, reply: &str) -> String {
             return format!("tts_fail={e}");
         }
     };
+    crate::mem::rr3_heap_mark("tts", "fetch-ok");
     let want_ms = rr3_pcm_ms(pcm.len(), 1, MIC_SR_HZ);
     let (played0, fail0) = {
         let b = lock_bus(bus);

@@ -119,6 +119,7 @@ fn play_run(
 
 /// 播一条：容器识别 → 分块整形 → 写 I2S（逐块心跳）→ 时长对账。
 fn play_one(tx: &mut I2sDriver<'static, I2sTx>, bus: &Arc<Mutex<Bus>>, body: Vec<u8>) {
+    crate::mem::rr3_heap_mark("playout", "start");
     let Ok(wav) = rr3_wav_pcm(&body) else {
         return play_fail(bus, "WAV 容器不合法（缺 fmt/data 或非 16bit PCM）");
     };
@@ -133,6 +134,7 @@ fn play_one(tx: &mut I2sDriver<'static, I2sTx>, bus: &Arc<Mutex<Bus>>, body: Vec
     if let Err(e) = play_write(tx, bus, data, channels) {
         return play_fail(bus, &e);
     }
+    crate::mem::rr3_heap_mark("playout", "done");
     let elapsed = t0.elapsed().as_millis() as u64;
     {
         let mut b = lock_bus(bus);
@@ -198,6 +200,7 @@ fn play_fail(bus: &Arc<Mutex<Bus>>, msg: &str) {
         let mut b = lock_bus(bus);
         b.st.tts_fail = b.st.tts_fail.saturating_add(1);
     }
+    crate::mem::rr3_heap_mark("playout", "fail");
     println!("[spk] 播放失败: {msg}");
 }
 

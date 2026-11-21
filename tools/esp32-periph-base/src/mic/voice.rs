@@ -93,6 +93,7 @@ impl VoiceRun {
         } else {
             (Vec::new(), Vec::new(), Vec::new(), Vec::new())
         };
+        crate::mem::rr3_heap_mark("mic-voice", if enabled { "psram" } else { "off" });
         Self {
             vad: Rr3VadState::rr3_vad_new(VAD_CFG, FRAME_MS),
             dc: Rr3DcBlocker::new(),

@@ -61,7 +61,9 @@ pub(crate) fn rr3_http_post(
     let Some(client) = (!client.is_null()).then_some(client) else {
         return Err("云端不可达: HTTP 客户端初始化失败（堆不足？）".into());
     };
+    crate::mem::rr3_heap_mark(interface, "http-open");
     let rc = rr3_http_do(client, auth.as_deref(), &ctype, body, interface, max_body);
+    crate::mem::rr3_heap_mark(interface, "http-done");
     // SAFETY：client 由本函数 init 且只在此处 cleanup。
     unsafe { esp_http_client_cleanup(client) };
     rc
@@ -123,6 +125,7 @@ fn rr3_http_read(
 ) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     let mut buf = [0u8; 4096];
+    let mut first = true;
     loop {
         // SAFETY：client 有效；缓冲 4 KB 可写；长度按缓冲大小给。
         let n =
@@ -136,10 +139,15 @@ fn rr3_http_read(
             return Err(format!("{interface} 应答超上限"));
         };
         out.extend_from_slice(&buf[..n]);
+        if first {
+            crate::mem::rr3_heap_mark(interface, "rx-first");
+            first = false;
+        }
     }
     let true = !out.is_empty() else {
         return Err(format!("{interface} 应答为空"));
     };
+    crate::mem::rr3_heap_mark(interface, "rx-done");
     Ok(out)
 }
 
