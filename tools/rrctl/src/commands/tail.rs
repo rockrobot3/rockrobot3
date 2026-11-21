@@ -110,15 +110,20 @@ mod imp {
                 *secs = rr3_tail_num(rest.get(i + 1), "--secs")?;
                 Ok(2)
             }
-            flag if flag.starts_with('-') => {
-                Err(format!("未知选项 {flag}（tail 支持 --count N / --secs S）"))
-            }
-            arg if topic.is_none() => {
-                *topic = Some(arg.to_string());
-                Ok(1)
-            }
-            extra => Err(format!("多余的参数 {extra}")),
+            arg => rr3_tail_pos(arg, topic),
         }
+    }
+
+    /// 位置参数：首个即 topic；未知选项与多余参数分别点名（文案逐字保留）。
+    fn rr3_tail_pos(arg: &str, topic: &mut Option<String>) -> Result<usize, String> {
+        if arg.starts_with('-') {
+            return Err(format!("未知选项 {arg}（tail 支持 --count N / --secs S）"));
+        }
+        if topic.is_none() {
+            *topic = Some(arg.to_string());
+            return Ok(1);
+        }
+        Err(format!("多余的参数 {arg}"))
     }
 
     /// 开关值：缺值 / 非整数都点名（不在下游拿 0 冒充）。
