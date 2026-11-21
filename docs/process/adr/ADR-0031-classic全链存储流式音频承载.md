@@ -98,6 +98,29 @@ TTS 回包与日志落存储**，不把整段数据常驻 RAM。本 ADR 只裁�
   对拍），`cloud/http` 按头/WAV/样本/尾顺序写 `esp_http_client_write`；删除
   256KB s16le 与 256KB 整段 multipart 两份临时体。重试仍 2 次/500ms。语音段
   缓冲（VAD 段）尚未落 spool，无 PSRAM 写入路径仍归 W7-b3b。
+- **W7-b3b（2026-11-21 落树，`67472d7b`）**：无 PSRAM 的 spool 写入路径全链接通。
+  - **写线程**：`spool` 分区后端独占一条 `spool-w` 线程，擦/写/读全在其内串行；
+    音频线程只做非阻塞投递（`SyncSender` 容量 16 块 = 320ms）。块内联
+    `[i16; 320]`（20ms mono），零堆分配；队列满即弃段并计数，绝不阻塞 I2S。
+  - **状态即背压**：`Idle → Rec → Done → Idle`；`Done` 未释放前开新段失败并点名，
+    不覆盖、不排队。写线程空闲 2s 仍处 `Rec` 时自行弃段（语音侧异常兜底）。
+  - **上传校验**：`dialog` 先向写线程发 `Verify` 做整段 CRC 对账，一致才上传；
+    不符即清理并弃轮。ASR 源抽为 `Rr3PcmSrc`（内存切片 / spool 分块两实现），
+    与既有 multipart、2 次/500ms 重试共用同一份传输代码；PCM 字节数由
+    `content_len` 反推，不设易漂移的独立参数。
+  - **语音策略**：无 PSRAM 时 200ms 预滚（10 块，起音判定窗本身），起音窗内定
+    声道（能量高者）后段内不跳变，逐块落盘；单段 8s 上限；`oled_hold` 只判向
+    不落段。S3（有 PSRAM）保持内存路径，不起 spool 写线程、不占 6KB 栈。
+  - **启动清扫**：上电只读记录头，残留段点名后清理（语音跨重启已过期，不补传）。
+  - **CI 回执（2026-11-21，`67472d7b`）**：gate `44901448372`、integration
+    `44901448361`、platforms `44901448369` 全绿；classic 与 S3 两条 esp32-gates
+    均过（clippy `-D warnings` / 五档构建 / 测试码编译 / 分区核验），
+    `esp32-classic-solo-firmware` 等固件制品在册。中途红因已按根因修复：
+    `doa.rs` 触 500 行门 → 下混拆 `chan.rs`（`144bdd1f`）；预滚窗借用冲突
+    E0502 → `mem::take` 迭代（`6615961d`）；ASR 参数数与 spool 枚举体积 →
+    计划反推字节数 + 内联块显式预算（`67472d7b`）。
+  - **未过 Go 门**：真板 spool 擦写时延、I2S DMA 是否被 flash 擦除的 cache 停顿
+    拖出欠载、30min 内存曲线均未测，归 W7-b4；classic 全链仍 No-Go。
 - **W7-b4**：classic 真板 30min soak；`[mem]` 阶段列与 Go/No-Go 入 0014/后续证据。
 
 每件单独提交、单独 CI 回执；未完成三件前不把 classic 全链写成 Go。
