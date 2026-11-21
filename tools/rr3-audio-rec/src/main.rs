@@ -53,6 +53,7 @@ mod event;
 mod exit;
 mod reader;
 mod session;
+mod state;
 mod track;
 mod watch;
 mod wav;

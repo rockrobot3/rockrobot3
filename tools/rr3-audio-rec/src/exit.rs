@@ -1,6 +1,6 @@
 //! 异常退出收口：按盘侧真相补 wav 恢复头后再按码退出。
 
-use crate::watch::WatchState;
+use crate::state::WatchState;
 use crate::wav::{rr3_head_patch, rr3_recover_head};
 
 /// fail-honest 退出（重连失败路径）：已落盘数据补恢复头保住，exit(4) 点名。

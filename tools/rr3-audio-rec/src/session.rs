@@ -9,8 +9,9 @@ use rr_ipc::Rr3UartConn;
 
 use crate::decode::DecodeState;
 use crate::reader::reader_run;
+use crate::state::WatchState;
 use crate::track::measured_rate;
-use crate::watch::{watchdog_run, WatchState};
+use crate::watch::watchdog_run;
 use crate::wav::rr3_head_write;
 use crate::writer::writer_run;
 

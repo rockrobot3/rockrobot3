@@ -4,7 +4,7 @@ use std::fs::{File, OpenOptions};
 use std::os::unix::fs::FileExt;
 use std::sync::atomic::Ordering;
 
-use crate::watch::WatchState;
+use crate::state::WatchState;
 
 /// wav 头（44B PCM RIFF；s16le 双通道，rate 由调用方按**实测率**给定）。
 pub(crate) fn wav_header(data_len: u32, channels: u16, rate: u32, bits: u16) -> [u8; 44] {

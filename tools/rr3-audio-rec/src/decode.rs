@@ -8,8 +8,8 @@ use rr_ipc::{FrameAssembler, Rr3Frame};
 
 use crate::event::{parse_audio_event, AudioChunk};
 use crate::exit::bail_with_recovery;
+use crate::state::WatchState;
 use crate::track::{account_chunk, rate_progress, DoaTracker, SeqTracker};
-use crate::watch::WatchState;
 use crate::{DECODE_TICK, ERR_STREAK_RESYNC};
 
 /// 解码主循环的滚动账（主线程独占；`watch` 是跨线程共享原子面，不在此）。

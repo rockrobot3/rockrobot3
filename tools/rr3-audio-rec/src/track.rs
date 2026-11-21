@@ -3,7 +3,7 @@
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
-use crate::watch::WatchState;
+use crate::state::WatchState;
 use crate::NOMINAL_RATE_FALLBACK_HZ;
 
 /// seq 连续性记账（wrapping u32）：断档数 = (seq - prev) - 1（wrapping 域），
