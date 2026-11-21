@@ -284,13 +284,17 @@ impl VoiceRun {
             );
             return;
         }
-        for chunk in self.pre.chunks_exact(BLOCK_SAMPLES) {
+        // 预滚窗临时移出：迭代期间还要可变借用 self 写 spool（Vec move 零拷贝），
+        // 写完原样放回，下一段起音的预测窗从当前滚动位置继续。
+        let pre = std::mem::take(&mut self.pre);
+        for chunk in pre.chunks_exact(BLOCK_SAMPLES) {
             let mut mono = [0i16; BLK_MONO];
             rr3_chan_take(chunk, 2, self.sel, &mut mono);
             if !self.flash_push(&mono) {
-                return;
+                break;
             }
         }
+        self.pre = pre;
     }
 
     /// spool 写一块（非阻塞）；失败即弃段并回报调用方停止累积。
