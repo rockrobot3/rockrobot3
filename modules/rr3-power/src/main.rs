@@ -9,6 +9,7 @@ mod battery;
 mod boot;
 #[path = "../atoms/charger/charger.rs"]
 mod charger;
+mod config;
 mod dispatch;
 
 use std::time::Duration;

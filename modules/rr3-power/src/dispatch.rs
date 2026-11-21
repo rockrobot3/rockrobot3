@@ -24,7 +24,7 @@ use serde_json::{json, Value};
 use crate::battery::{
     Rr3LowEdge, RR3_BATTERY_LOW_TOPIC, RR3_BATTERY_OK_TOPIC, RR3_BATTERY_STATE_TOPIC,
 };
-use crate::boot::Rr3PowerCfg;
+use crate::config::Rr3PowerCfg;
 use crate::charger::RR3_CHARGER_STATE_TOPIC;
 
 /// 电源域电平观测主题（contracts/topics.toml 在册，批N2 件二落的）
