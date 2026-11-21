@@ -115,7 +115,7 @@ fn empty_finish_is_rejected() {
 fn io_failure_is_reported_and_poisons_record() {
     let mut sp = open();
     sp.rr3_begin(5).unwrap();
-    sp.fail_at = Some(RR3_SPOOL_DATA);
+    sp.dev.fail_at = Some(RR3_SPOOL_DATA);
     assert_eq!(sp.rr3_push(&[0u8; 4096]), Err(Rr3SpoolErr::Io(())));
     assert_eq!(sp.rr3_push(&[0u8; 1]), Err(Rr3SpoolErr::State));
 }
