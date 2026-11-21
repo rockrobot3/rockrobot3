@@ -21,7 +21,7 @@
 
 use std::sync::atomic::{AtomicU16, AtomicU8, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
-use std::sync::{mpsc, Mutex};
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
