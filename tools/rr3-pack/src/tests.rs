@@ -108,7 +108,6 @@ fn cfg_of(payload: &Path, repo: &Path) -> (Rr3PackConfig, PathBuf) {
     )
 }
 
-#[test]
 /// 三枚二进制注入位（usr/bin）。
 fn assert_bins(stage: &std::path::Path) {
     assert_eq!(
