@@ -72,6 +72,7 @@ fn rr3_role_is_logic(roles: &Rr3RoleTable, role: &str) -> bool {
 /// - 组内全为 logic 角色 → 无物理绑定面，跳过（现状四格能力面角色）；
 /// - 否则组内至少一条角色在 [pins] 有绑定即满足——同组角色是同一物理位置的
 ///   可替代实现（ui.face 的 SPI 点阵 / I2C OLED），装配单按板二选一。
+///
 /// 缺组点名以组名为第二列（组名缺省 = 角色名，既有可观测输出逐字不变）。
 pub(crate) fn rr3_role_gaps(profile: &Rr3Profile, roles: &Rr3RoleTable) -> Vec<(String, String)> {
     let mut gaps = Vec::new();
