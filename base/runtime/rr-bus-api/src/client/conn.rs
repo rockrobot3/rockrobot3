@@ -138,7 +138,7 @@ impl Rr3Inner {
 
     /// 运维计数自增（reader 线程满箱丢流帧时记账；业务侧仍走
     /// [`Rr3BusClient::rr3_counter_bump`]，同一张 counters 表、同一条心跳增量）。
-    pub(super) fn rr3_counter_bump_inner(&self, key: &str, by: u64) {
+    pub(super) fn rr3_counter_add(&self, key: &str, by: u64) {
         let mut t = self.counters.lock().unwrap_or_else(|p| p.into_inner());
         *t.entry(key.to_string()).or_insert(0) += by;
     }

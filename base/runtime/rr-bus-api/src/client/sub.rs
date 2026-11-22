@@ -112,7 +112,7 @@ fn rr3_inbox_push(
 ) -> bool {
     let droppable = matches!(ty, Rr3PayloadType::Event | Rr3PayloadType::Stream);
     if droppable && inner.inbox_len.load(Ordering::Relaxed) >= RR3_INBOX_CAP {
-        inner.rr3_counter_bump_inner(RR3_COUNTER_INBOX_BACKLOG_DROP, 1);
+        inner.rr3_counter_add(RR3_COUNTER_INBOX_BACKLOG_DROP, 1);
         return true;
     }
     // 先记水位再入箱：消费侧收到帧时一定已计过账，fetch_sub 不会欠账。

@@ -1,20 +1,52 @@
-//! 满箱饥饿路径回归（2026-11-22 Pi 真机实证）。
+//! 满箱饥饿路径回归（2026-11-22 Pi 真机实证，集成测试面：不进 ⑫ 生产度量）。
 
-use super::super::conn::RR3_COUNTER_INBOX_BACKLOG_DROP;
-use super::super::{rr3_manifest_ident, Rr3BusClient};
-use super::{frame_send, tmp_bus_path, MANIFEST};
-use rr_ipc::{rr3_body_encode, rr3_body_split, rr3_frame_read, rr3_frame_write, Rr3PayloadType};
+use rr_bus_api::Rr3BusClient;
+use rr_ipc::{
+    opcode, rr3_body_encode, rr3_body_split, rr3_frame_read, rr3_frame_write, Rr3Frame, Rr3Header,
+    Rr3PayloadType,
+};
 use serde_json::{json, Value};
 use std::os::unix::net::UnixListener;
+use std::path::PathBuf;
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+const MANIFEST: &str = "[manifest]\nschema_version = 1\nname = \"rr3-bus-it\"\nversion = \"0.0.1\"\ntype = \"module\"\nlang = \"rust\"\nentry = \"/bin/true\"\n\n[events]\npublishes = []\nsubscribes = []\n\n[health]\nheartbeat_ms = 50\n";
+
+fn tmp_bus_path() -> PathBuf {
+    let mut p = std::env::temp_dir();
+    p.push(format!(
+        "rr3-bus-it-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos()
+    ));
+    p
+}
+
+fn frame_send(payload: Vec<u8>) -> Rr3Frame {
+    Rr3Frame {
+        header: Rr3Header {
+            opcode: opcode::SEND,
+            flags: 0,
+            trace_id: 0,
+            timestamp_ns: 0,
+            src_task: 1,
+            dst_task: 7,
+            payload_len: payload.len() as u32,
+            payload_crc32: rr_ipc::rr3_crc32(&payload),
+        },
+        payload,
+    }
+}
 
 /// 主循环被长动作（ASR 超时重试、整段 TTS 播放）占住、inbox 被广播帧填满时，
 /// reader 不能卡在 send 上——否则心跳应答读不到，模块被自己的心跳宽限判死。
-/// 满箱只丢 Event/Stream 并计数，心跳必须继续通。
 #[test]
-fn full_inbox_drops_backlog_frames_and_keeps_heartbeat_alive() {
-    let path = tmp_bus_path("stream-drop");
+fn inbox_full_keeps_heartbeat() {
+    let path = tmp_bus_path();
     let listener = UnixListener::bind(&path).unwrap();
     let (hb_tx, hb_rx) = mpsc::channel::<Value>();
     std::thread::spawn(move || {
@@ -41,43 +73,33 @@ fn full_inbox_drops_backlog_frames_and_keeps_heartbeat_alive() {
                 let reply = json!({"jsonrpc":"2.0","id":id,"result":{"src_task":7}});
                 let payload =
                     rr3_body_encode(Rr3PayloadType::Response, reply.to_string().as_bytes());
-                if rr3_frame_write(&mut stream, &frame_send(payload)).is_err() {
-                    return;
-                }
+                rr3_frame_write(&mut stream, &frame_send(payload)).unwrap();
                 // 灌 >256 帧广播（当前线上全是 Event）：客户端不 poll，
                 // 旧实现 reader 会卡在第 257 帧
                 for i in 0..320u32 {
                     let body = json!({"topic":"rr3-fake/pcm","seq":i,"pcm_b64":"AA=="});
                     let payload =
                         rr3_body_encode(Rr3PayloadType::Event, body.to_string().as_bytes());
-                    if rr3_frame_write(&mut stream, &frame_send(payload)).is_err() {
-                        return;
-                    }
+                    rr3_frame_write(&mut stream, &frame_send(payload)).unwrap();
                 }
             } else if method == "rr3.heartbeat" {
-                let _ = hb_tx.send(v["params"].clone());
+                hb_tx.send(v["params"].clone()).unwrap();
                 let reply = json!({"jsonrpc":"2.0","id":id,"result":{}});
                 let payload =
                     rr3_body_encode(Rr3PayloadType::Response, reply.to_string().as_bytes());
-                if rr3_frame_write(&mut stream, &frame_send(payload)).is_err() {
-                    return;
-                }
+                rr3_frame_write(&mut stream, &frame_send(payload)).unwrap();
             }
         }
     });
-    let client = Rr3BusClient::rr3_connect_with(
-        path.to_str().unwrap(),
-        rr3_manifest_ident(MANIFEST).unwrap(),
-        MANIFEST,
-    )
-    .expect("连假 rrd 应成功");
+    let client =
+        Rr3BusClient::rr3_connect_at(path.to_str().unwrap(), MANIFEST).expect("连假 rrd 应成功");
     let deadline = Instant::now() + Duration::from_secs(3);
     let mut drops = 0u64;
     while Instant::now() < deadline {
         let Ok(params) = hb_rx.recv_timeout(Duration::from_millis(500)) else {
             continue;
         };
-        drops = params["counters"][RR3_COUNTER_INBOX_BACKLOG_DROP]
+        drops = params["counters"]["inbox_backlog_drop"]
             .as_u64()
             .unwrap_or(0);
         if drops > 0 {
