@@ -80,7 +80,7 @@ fn pi4b_solo_profile_is_complete_single_board_chain() {
         );
     }
 
-    // 两条 [[pin]]：pan 单轴 + MAX7219 SPI；不得登记 tilt。
+    // 两条 [[pin]]：pan 单轴 + OLED I2C 显示；不得登记 tilt。
     let pins = v
         .get("pin")
         .and_then(toml::Value::as_array)
@@ -106,11 +106,21 @@ fn pi4b_solo_profile_is_complete_single_board_chain() {
     );
     let face = pins
         .iter()
-        .find(|p| p.get("role").and_then(toml::Value::as_str) == Some("ui.face.spi"))
-        .expect("缺 ui.face.spi 引脚");
+        .find(|p| p.get("role").and_then(toml::Value::as_str) == Some("ui.face.i2c"))
+        .expect("缺 ui.face.i2c 引脚（W5-3 OLED 换装）");
     assert_eq!(
         face.get("controller").and_then(toml::Value::as_str),
-        Some("spidev0")
+        Some("i2c1")
+    );
+    assert_eq!(
+        face.get("addr").and_then(toml::Value::as_str),
+        Some("0x3c"),
+        "SSD1306 7-bit 从地址漂移（真机探测档 0x3C）"
+    );
+    assert_eq!(
+        face.get("device").and_then(toml::Value::as_str),
+        Some("SSD1306"),
+        "显示器件型号词漂移（devices.toml 在册行）"
     );
 
     // enabled_slots 与 present 三处一致。

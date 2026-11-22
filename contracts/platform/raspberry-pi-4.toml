@@ -11,9 +11,9 @@
 schema_version = 1
 platform = "raspberry-pi-4"
 
-# 无冲突矩阵：现役两路 PWM 走 GPIO12/13（pwm0 的 channel 0/1），显示走 SPI0
-# CE0（GPIO8；board 实录见 base/os/distro/boards/raspberry-pi-64.md 的
-# VCC/GND/DIN(GPIO10)/CS(GPIO8)/CLK(GPIO11) 行），I2C1 走 GPIO2/3——按
+# 无冲突矩阵：现役两路 PWM 走 GPIO12/13（pwm0 的 channel 0/1），I2C1 走 GPIO2/3
+# （W5-3 起承载 SSD1306 OLED@0x3C；INA219@0x40 同总线可选，两器件地址不同不冲突）；
+# SPI0 CE0（GPIO8）在 MAX7219 换装后空闲，接线档仍保留——按
 # profiles/pi4b-board.toml [[pin]] 与 hardware 接线表逐脚比对无交叠，故空集。
 # **2026-11-16 实机 pinmux 复核**（/sys/kernel/debug/pinctrl/*/pinmux-pins）：
 # pin2/3=alt0 i2c、pin7/8=gpio_out（SPI CS）、pin9/10/11=alt0 spi、
@@ -44,7 +44,8 @@ channels = 0
 [[controller]]
 # I2C1（树莓派 40-pin 排针惯用总线，GPIO2/3）。
 # 来源：实测 0008.md —— `i2cdetect -y 1` 对总线 1 完整扫面（0x03–0x77 全空 =
-# 总线在、从机未接），证明 i2c1 控制器在位；BOM #5 INA219@0x40 挂本总线。
+# 总线在、从机未接），证明 i2c1 控制器在位；W5-3 真机探测（2026-11-22）
+# 0x3C 写事务 ACK = SSD1306 OLED 在位；BOM #5 INA219@0x40 可选挂本总线。
 name = "i2c1"
 kind = "i2c"
 channels = 0

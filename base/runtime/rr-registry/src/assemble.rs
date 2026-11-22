@@ -19,7 +19,7 @@
 //!
 //! 两级真值、两处消费（`rrd` 与裸机装配段共用本模块，不各说一套）：
 //! - **形状级**（[`rr3_assemble_parse`]）：schema 版本、未知字段点名、
-//!   trait ∈ 九能力面在册表、desc_key ∈ 九描述符键在册表、参数槽与来源键非空点路径。
+//!   trait ∈ 能力面在册表、desc_key ∈ 描述符键在册表、参数槽与来源键非空点路径。
 //!   空数组**合法**，但**两数组均空时须明写 `no_injection = true`**（0.0.5 批M MC-10 L-5：
 //!   把"漏填"与"本件确无注入面"分开——否则空申报与漏填不可区分，门里无内容可校验）。
 //! - **注入缺级**（[`rr3_injection_gaps`]）：ops 的 `src_key`
@@ -97,6 +97,10 @@ pub const RR3_ASSEMBLE_DESC_KEYS: &[&str] = &[
     "ina219_addr",
     "link_ifname",
     "spi_device",
+    // W5-3（Pi 显示面 OLED 换装）：SSD1306 I2C 从地址键（7-bit，0x 前缀十六进制）。
+    // 与 i2c_bus 两键齐备 = 显示面走 OLED 档（rr-hal acts.rs 选择函数）；
+    // 真值源 rr-hal descriptor.rs，两处同批（contract.rs 机判）。
+    "oled_addr",
     // P0-3/P0-4：ESP32 外设桥 UART 设备路径（组合档宿主侧真值，描述符 [hardware].periph_uart）
     "periph_uart",
     "i2c_sda",

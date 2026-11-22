@@ -3,7 +3,7 @@
 # 机型集 pin 在 rr-registry 契约测试，新增/删除本文件须同批改那条 pin 与形状测试）。
 #
 # 形态语义（ADR-0029 裁定 1）：Pi 4B 是**独立整机**——rrd + 六模块全部跑在本机，
-# 本机 ALSA 采集、本机 USB 声卡回放、本机 sysfs PWM 舵机、本机 MAX7219 表情。
+# 本机 ALSA 采集、本机 USB 声卡回放、本机 sysfs PWM 舵机、本机 I2C OLED 表情。
 # 与 pi4b-host 的差别不是"多一个板"，而是补齐全链缺的两格：
 #   audio.capture / audio.vad（本机麦）与 act.servo（本机 pan 舵机）。
 # pi4b-host-esp32-* 组合档继续作测试台架，不是本档的前身或上位形态。
@@ -11,7 +11,8 @@
 # 判定边界（W5 验收）：
 #   - 舵机面只要求 pan 单轴（DoA 左右转头）；tilt 不作 Pi 全链判据；
 #   - 麦必须 ≥2 通道才能做 DoA；单声道输入只跑 ASR，不承诺听声识位；
-#   - 显示面 = MAX7219 双片级联（spidev0.0，链④真件档已在板上跑过）；
+#   - 显示面 = SSD1306 128x64 单色 OLED（I2C1，7-bit 从地址 0x3C，2026-11-22 真机
+#     探测 ACK；W5-3 由 MAX7219 点阵换装而来，ui.face.i2c 角色登记）；
 #   - host 档描述符单轴，正好承载 pan；双轴属 pi4b-board（rtos 板端点档）。
 #
 # schema_version = 5（与 default/distro 同版：[runtime] 段必填，缺即红）。
@@ -23,7 +24,7 @@ route = "distro" # Raspberry Pi OS（Debian 13 trixie 真机），发行版快�
 
 [runtime]
 log_ring_cap = 512
-# 单板全链的 HAL 后端全在 linux：ALSA 采集/回放、sysfs PWM、spidev 显示、nmcli 链路。
+# 单板全链的 HAL 后端全在 linux：ALSA 采集/回放、sysfs PWM、I2C 显示、nmcli 链路。
 hal_backend = "linux"
 
 [platform]
@@ -110,10 +111,12 @@ failsafe = "release"
 mux_group = []
 
 [[pin]]
-# MAX7219 双片级联：spidev0 = 总线 0、channel 0 = 片选 0，派生 /dev/spidev0.0。
-role = "ui.face.spi"
-controller = "spidev0"
-channel = 0
+# SSD1306 OLED：i2c1（GPIO2/3）7-bit 从地址 0x3C，派生 i2c_bus=1 + oled_addr=0x3c
+# （W5-3 显示面换装；型号词外键 → contracts/devices.toml 的 SSD1306 行）。
+role = "ui.face.i2c"
+controller = "i2c1"
+addr = "0x3c"
+device = "SSD1306"
 direction = "out"
 mux_group = []
 

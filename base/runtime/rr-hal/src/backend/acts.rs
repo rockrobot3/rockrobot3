@@ -184,11 +184,12 @@ fn rr3_gpio_line(b: &crate::descriptor::Rr3HalBindings, role: &str) -> Option<u3
         .and_then(|(_, line)| *line)
 }
 
-/// 按环境选显示面（与 [`rr3_audio_source`] 同一套规则）。linux 档走
-/// MAX7219 spidev 后端（[`crate::linux_display`]，链④真件档实装），设备路径
-/// 来自生效绑定（描述符 `spi_device`，`RR3_HAL_SPI_DEVICE` env 应急覆盖）；
-/// 键缺失、合成失败或开口失败 → 占位件使用时以 `Unsupported` 回错
-/// （fail-closed）——rr3-interact 开机探活会按"能力缺失显式回错"退出，不
+/// 按环境选显示面（与 [`rr3_audio_source`] 同一套规则）。linux 档两路：
+/// `i2c_bus` + `oled_addr` 齐备走 SSD1306 OLED（[`crate::linux_oled`]，W5-3
+/// Pi 显示面换装档），否则 `spi_device` 走 MAX7219 spidev（[`crate::linux_display`]，
+/// 链④真件档）。两者都来自生效绑定，`RR3_HAL_OLED_ADDR` / `RR3_HAL_SPI_DEVICE`
+/// env 应急覆盖；键缺失、合成失败或开口失败 → 占位件使用时以 `Unsupported`
+/// 回错（fail-closed）——rr3-interact 开机探活会按"能力缺失显式回错"退出，不
 /// 静默换 sim。mac 宿主档（C4 修正）：Mac 天然无 LED 矩阵，显示面落 sim 同
 /// 款虚拟点阵（内存记录，机制同源）——宿主开发档不因显示件缺席整体判死。
 pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
@@ -216,25 +217,57 @@ pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
     }
 }
 
-/// linux 档显示：MAX7219 spidev 后端，设备路径取自生效绑定（缺键落占位回错）。
+/// linux 档显示取档：OLED 两键齐备优先，否则 MAX7219 spidev；都没给 = 占位回错。
+///
+/// 两路键同时出现 = 装配单自相矛盾（组合件只承载一路显示）：OLED 档仍可服务，
+/// 但当场 `eprintln!` 点名两份取值——现场排障不靠猜（与描述符解析失败的
+/// "错误当场可见"同一条纪律）。
 fn rr3_display_linux() -> (Box<dyn crate::Rr3Display>, &'static str) {
     #[cfg(target_os = "linux")]
     {
         rr3_bindings_eff_log("显示")
-            .and_then(|b| {
-                Some((
-                    Box::new(crate::linux_display::Rr3Max7219SpiDisplay::rr3_max7219_new(
-                        std::path::Path::new(b.spi_device.as_deref()?),
-                    )) as Box<dyn crate::Rr3Display>,
-                    RR3_BACKEND_LINUX,
-                ))
-            })
+            .and_then(|b| rr3_display_pick(&b))
             .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER))
     }
     #[cfg(not(target_os = "linux"))]
     {
         unreachable!("上面 guard 已保证只在本分支编译")
     }
+}
+
+/// 显示面两路绑定的取档（纯策略在数据上一条判据）：
+/// `(i2c_bus, oled_addr)` 齐备 → SSD1306；否则 `spi_device` → MAX7219；都缺 → None。
+#[cfg(target_os = "linux")]
+fn rr3_display_pick(
+    b: &crate::descriptor::Rr3HalBindings,
+) -> Option<(Box<dyn crate::Rr3Display>, &'static str)> {
+    let oled = match (b.i2c_bus, b.oled_addr) {
+        (Some(bus), Some(addr)) => Some((bus, addr)),
+        _ => None,
+    };
+    if let (Some((bus, addr)), Some(dev)) = (oled, b.spi_device.as_deref()) {
+        eprintln!(
+            "rr-hal: 显示面绑定同时含 oled_addr（i2c{bus}@0x{addr:02x}）与 spi_device（{dev}）——取 OLED 档；装配单应只留一条显示 [[pin]]"
+        );
+    }
+    if let Some((bus, addr)) = oled {
+        eprintln!("rr-hal: 显示面选 OLED（i2c{bus}@0x{addr:02x}，SSD1306 128x64）");
+        return Some((
+            Box::new(crate::linux_oled::Rr3Ssd1306I2cDisplay::rr3_ssd1306_new(
+                std::path::Path::new(crate::linux_oled::RR3_OLED_I2C_ROOT_DEFAULT),
+                bus,
+                addr,
+            )) as Box<dyn crate::Rr3Display>,
+            RR3_BACKEND_LINUX,
+        ));
+    }
+    let dev = b.spi_device.as_deref()?;
+    Some((
+        Box::new(crate::linux_display::Rr3Max7219SpiDisplay::rr3_max7219_new(
+            std::path::Path::new(dev),
+        )) as Box<dyn crate::Rr3Display>,
+        RR3_BACKEND_LINUX,
+    ))
 }
 
 /// esp32 档显示：UART 帧面承载，UART 路径缺失即点名落占位（fail-closed）。

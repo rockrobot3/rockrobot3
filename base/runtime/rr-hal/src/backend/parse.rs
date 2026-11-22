@@ -1,8 +1,10 @@
 //! 各 `RR3_HAL_*` 环境变量取值的纯函数裁决。
 
-/// INA219 从地址键的取值裁决（只认 `0x` 前缀十六进制——裸写有十进制歧义
+/// I2C 7-bit 从地址键的取值裁决（只认 `0x` 前缀十六进制——裸写有十进制歧义
 /// （"40" 是 0x28 还是 40？），不收；7-bit 可寻址域 0x08..=0x77 外不认）。
-pub fn rr3_ina219_parse(s: &str) -> Option<u8> {
+/// 真值单点：`ina219_addr` 与 `oled_addr` 两键共用（同一 7-bit 地址域，
+/// 两种器件不各写一套解析）。
+pub fn rr3_i2c_addr_parse(s: &str) -> Option<u8> {
     let s = s.trim();
     let v = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"))?;
     u8::from_str_radix(v, 16)

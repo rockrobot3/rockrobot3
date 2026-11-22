@@ -1,4 +1,4 @@
-//! 引脚派生机制：平台词形匹配、八物理键取值法与字段在场判定。
+//! 引脚派生机制：平台词形匹配、九物理键取值法与字段在场判定。
 
 use rr_registry::Rr3PlatformTable;
 
@@ -31,12 +31,13 @@ fn rr3_wordform_prefix(platform: &Rr3PlatformTable, key: &str) -> Result<String,
     Ok(w.to_string())
 }
 
-/// 单条 pin 的派生取值（机制侧，八物理键封闭）：role.derives（策略，contracts/
+/// 单条 pin 的派生取值（机制侧，九物理键封闭）：role.derives（策略，contracts/
 /// roles.toml）只声明"该角色供给哪些键"，取值法一律查本函数——键不在册/来源字段
 /// 留空/控制器词形不合都红。gpio_led_line 与 gpio_relay_line 同取 physical[0]，由
 /// 角色声明区分（两角色不共用同一派生键名，不歧义）；spi_device 由词形段前缀
 /// （总线号）+ channel（片选号）合成 /dev/spidev<N>.<M>，与旧 [hardware] 直给值
-/// （profiles/distro.toml 链④真件档）逐字节对齐。
+/// （profiles/distro.toml 链④真件档）逐字节对齐；oled_addr 与 ina219_addr 同取
+/// addr（I2C 7-bit 从地址，两器件不共用键名）。
 pub(super) fn rr3_pin_derive_value(
     pin: &Rr3PinEntry,
     key: &str,
@@ -46,12 +47,12 @@ pub(super) fn rr3_pin_derive_value(
         .iter()
         .find(|(k, _)| *k == key)
         .map(|(_, derive)| derive(pin, key, platform))
-        .unwrap_or_else(|| Err(format!("派生键 {key} 不在派生规则表（八物理键封闭）")))
+        .unwrap_or_else(|| Err(format!("派生键 {key} 不在派生规则表（九物理键封闭）")))
 }
 
-/// 派生规则表：八物理键 → 取值法（同法可由多键共用）。
+/// 派生规则表：九物理键 → 取值法（同法可由多键共用）。
 type Rr3DeriveFn = fn(&Rr3PinEntry, &str, &Rr3PlatformTable) -> Result<String, String>;
-const RR3_DERIVE_RULES: [(&str, Rr3DeriveFn); 8] = [
+const RR3_DERIVE_RULES: [(&str, Rr3DeriveFn); 9] = [
     ("pwm_chip", rr3_derive_word),
     ("gpio_chip", rr3_derive_word),
     ("i2c_bus", rr3_derive_word),
@@ -60,6 +61,7 @@ const RR3_DERIVE_RULES: [(&str, Rr3DeriveFn); 8] = [
     ("gpio_led_line", |p, _, _| rr3_derive_line(p)),
     ("gpio_relay_line", |p, _, _| rr3_derive_line(p)),
     ("ina219_addr", |p, _, _| rr3_derive_addr(p)),
+    ("oled_addr", |p, _, _| rr3_derive_addr(p)),
 ];
 
 /// 词形键派生（B9 自 pin_derive_value 抽出）：controller 必须合 `<prefix><N>`，

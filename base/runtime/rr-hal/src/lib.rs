@@ -53,6 +53,10 @@ pub mod linux_gpio;
 /// Command 零新依赖），同为单重平台门，不挂 alsa feature。
 #[cfg(target_os = "linux")]
 pub mod linux_link;
+/// linux I2C SSD1306 OLED 显示后端（W5-3，Pi 显示面换装）：128x64 单色屏，
+/// libc 仅做 ioctl/write 声明壳，同为单重平台门，不挂 alsa feature。
+#[cfg(target_os = "linux")]
+pub mod linux_oled;
 /// linux I2C 电池读数后端（R18，INA219@0x40）：libc 仅做 ioctl/read/write/close
 /// 声明壳，同为单重平台门，不挂 alsa feature。
 #[cfg(target_os = "linux")]

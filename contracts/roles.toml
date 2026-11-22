@@ -27,7 +27,9 @@
 #   注入文本（键名 = rr-hal descriptor.rs 在册键），门 n"注入路径唯一"的另一侧真值。
 #   非引脚键 alsa_device/link_ifname 不派生，留 [hardware] 直给；spi_device 批N3
 #   件六起进派生轨（controller 词形 spidev<N> + channel 片选 → /dev/spidev<N>.<M>，
-#   敞口 18 行收口——裁定 = decisions.md §2 行 2"先立词形、批N3 拆格"）。
+#   敞口 18 行收口——裁定 = decisions.md §2 行 2"先立词形、批N3 拆格"）；OLED 批
+#   起 oled_addr 进派生轨（addr 给 I2C 7-bit 从地址，与 i2c_bus 两键齐备即显示面
+#   OLED 档）。
 # 变更纪律：加角色 = append（同步六表对账面）；字段语义变更 = 破坏性 = 升
 #   schema_version 并走契约级评审。格位命名两段式同 slots.toml，角色名点分式、
 #   前缀 = 格名的动作侧。
@@ -137,6 +139,27 @@ droppable = true
 input_only_ok = false
 per_instance = false
 note = "SPI 显示器件（链④真件档 MAX7219 点阵类）；host 侧 controller 词形 spidev<N> 派生总线号、channel 派生片选号，合成 spi_device=/dev/spidev<N>.<M>（与旧 [hardware] 直给值逐字节对齐，profiles/distro.toml 迁移批N3 件六）。物理走线（DIN/CS/CLK）由总线自身钉死，不占 physical 维"
+
+# —— W5-3（Pi 显示面 OLED 换装）：同格 ui.face 的第二条物理路径。SSD1306 128x64
+#    单色屏走 I2C1（GPIO2/3，7-bit 从地址 0x3C，2026-11-22 真机 ACK 实测），与
+#    ui.face.spi 二选一（组合件只承载一路显示；装配单同时登记两条属配置错误，
+#    rr-hal 选择面当场点名并取 OLED 档）。derives 两键：i2c_bus 与
+#    power.battery.meter 共用同一词形派生机制（i2c<N> → 总线号；同总线同值，
+#    多实例共键判据天然成立），oled_addr 由 addr 派生（7-bit 地址域与 INA219
+#    同一个裁决函数）。requires 带 device：型号词外键 → contracts/devices.toml
+#    （SSD1306 已在册，addrs 0x3C/0x3D）——把"屏幕型号"从注释搬进机器判据。
+[[role]]
+name = "ui.face.i2c"
+slot = "ui.face"
+kind = "signal"
+iface = "Rr3Display"
+requires = ["controller", "addr", "device"]
+derives = ["i2c_bus", "oled_addr"]
+direction = "out"
+droppable = true
+input_only_ok = false
+per_instance = false
+note = "I2C 显示器件（链④ OLED 档 SSD1306 128x64 @ 0x3C）；host 侧 controller 词形 i2c<N> 派生 i2c_bus=N、addr 派生 oled_addr（0x 前缀十六进制）。physical 不占：SDA/SCL 由总线自身钉死（GPIO2/3）。显示是观感面，欠压降载可切（同 ui.face.spi）"
 
 # —— P1 审计件四（2026-11-12，基-39 转执法收口）：四格能力面角色进场。
 #    这四格的共同事实：**今天没有任何 [[pin]] 物理绑定**——链路身份是 [hardware].link_ifname，

@@ -4,11 +4,11 @@
 
 use super::*;
 
-/// rrd 注入器产物形状的全键正例：十四键逐字段落位（值全字符串——注入器已
-/// 字符串化；原十三键 = 十 host 键 + 批N4 三键，批N17 件二随键集补 cred_store；
-/// 批N9 七键不在本测试覆盖面，键域由 entry/rr-ipc 侧单测钉）。
+/// rrd 注入器产物形状的全键正例：十五键逐字段落位（值全字符串——注入器已
+/// 字符串化；原十三键 = 十 host 键 + 批N4 三键，批N17 件二随键集补 cred_store，
+/// W5-3 补 oled_addr；批N9 七键不在本测试覆盖面，键域由 entry/rr-ipc 侧单测钉）。
 #[test]
-fn full_descriptor_parses_all_fourteen_keys() {
+fn full_descriptor_parses_all_fifteen_keys() {
     let text = concat!(
         "alsa_device = \"default\"\n",
         "pwm_chip = \"0\"\n",
@@ -20,6 +20,7 @@ fn full_descriptor_parses_all_fourteen_keys() {
         "ina219_addr = \"0x40\"\n",
         "link_ifname = \"wlan0\"\n",
         "spi_device = \"/dev/spidev0.0\"\n",
+        "oled_addr = \"0x3c\"\n",
         "i2c_sda = \"21\"\n",
         "i2c_scl = \"22\"\n",
         "adc_rail_pin = \"34\"\n",
@@ -36,6 +37,7 @@ fn full_descriptor_parses_all_fourteen_keys() {
     assert_eq!(b.ina219_addr, Some(0x40));
     assert_eq!(b.link_ifname.as_deref(), Some("wlan0"));
     assert_eq!(b.spi_device.as_deref(), Some("/dev/spidev0.0"));
+    assert_eq!(b.oled_addr, Some(0x3C));
     assert_eq!(b.i2c_sda, Some(21));
     assert_eq!(b.i2c_scl, Some(22));
     assert_eq!(b.adc_rail_pin, Some(34));
@@ -59,6 +61,7 @@ fn unknown_keys_and_bad_values_are_all_named() {
         "pwm_chip = \"abc\"\n",
         "i2c_bus = \"-1\"\n",
         "ina219_addr = \"40\"\n", // 裸写有十进制歧义，只认 0x 前缀
+        "oled_addr = \"3c\"\n",   // 同上（OLED 与 INA219 共用 7-bit 地址裁决）
         "alsa_device = \"  \"\n", // trim 后空 = 不认
         "mystery_key = \"x\"\n",
         "link_ifname = 3\n",             // 非字符串标量
@@ -66,7 +69,7 @@ fn unknown_keys_and_bad_values_are_all_named() {
         "cred_store = \"flash:boot\"\n", // 非 nvs: 前缀，批N17 件二
     );
     let errs = rr3_bindings_parse(text).expect_err("坏值必须报错");
-    assert_eq!(errs.len(), 8, "{errs:?}");
+    assert_eq!(errs.len(), 9, "{errs:?}");
     assert!(
         errs.iter().any(|e| e.contains("pwm_chip 取值不认")),
         "{errs:?}"
@@ -77,6 +80,10 @@ fn unknown_keys_and_bad_values_are_all_named() {
     );
     assert!(
         errs.iter().any(|e| e.contains("ina219_addr 取值不认")),
+        "{errs:?}"
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("oled_addr 取值不认")),
         "{errs:?}"
     );
     assert!(

@@ -36,12 +36,16 @@
 //! 板侧读数面可见（GET /api/board/bindings 随键），boot 读链不消费＝批N14 架构
 //! 事实（注入晚于 WiFi 起栈）、无装配对账语义（非引脚不进对账锚）。同上款：不在
 //! [pins] 派生键集、不设应急 env 覆盖位、rr-ipc/rr-registry/contract.rs 三处同批。
+//! OLED 键批（W5-3，Pi 显示面换装）：`oled_addr` 进场——SSD1306 的 7-bit 从地址，
+//! 与既有 `i2c_bus` 两键齐备即显示面走 OLED 档；本键走 [pins] 派生轨
+//! （`ui.face.i2c` 的 addr → oled_addr），取值域与 `ina219_addr` 同一裁决函数
+//! （`rr3_i2c_addr_parse`，两器件共用 7-bit 地址域，不写第二套解析）。
 
 use std::collections::BTreeMap;
 
 use rr_ipc::{rr3_cred_store_parse, rr3_gpio_num_parse};
 
-use crate::backend::{rr3_ina219_parse, rr3_pwm_index_parse};
+use crate::backend::{rr3_i2c_addr_parse, rr3_pwm_index_parse};
 
 /// 描述符 env 键：rrd spawn 注入（装配单 `[hardware]` 的序列化文本，每行
 /// `键 = "值"`）。未设 = 无描述符（`--manifest` 调试后门或纯 sim 形态）。
@@ -75,6 +79,9 @@ pub struct Rr3HalBindings {
     pub link_ifname: Option<String>,
     /// spidev 设备路径（显示面 MAX7219；链④真件档，参考机 = /dev/spidev0.0）
     pub spi_device: Option<String>,
+    /// I2C 显示面 SSD1306 从地址（7-bit，`0x` 前缀十六进制；Pi 真机 = 0x3C）。
+    /// 与 `i2c_bus` 两键齐备 = 显示面走 OLED 档；缺一回落 `spi_device`。
+    pub oled_addr: Option<u8>,
     /// I2C 数据线 GPIO 编号（板侧自愈路径；esp32-mini = 21，真值源
     /// profiles/esp32-mini.toml [hardware]，经桥 rr3.set_bindings 注入板侧）
     pub i2c_sda: Option<u8>,
@@ -121,8 +128,8 @@ fn rr3_non_empty(s: &str) -> Option<String> {
 type Rr3BindSet = fn(&mut Rr3HalBindings, &str) -> bool;
 
 /// 在册键表：非空串域 4 + 索引数域 6 + GPIO 号域 10 + 两种特殊值域
-/// + INA219 分流两键（正整数域）。
-const RR3_BIND_SETS: [(&str, Rr3BindSet); 24] = [
+/// + INA219 分流两键（正整数域）+ OLED 地址一键（7-bit 地址域）。
+const RR3_BIND_SETS: [(&str, Rr3BindSet); 25] = [
     ("alsa_device", |b, s| {
         rr3_non_empty(s).map(|v| b.alsa_device = Some(v)).is_some()
     }),
@@ -214,9 +221,15 @@ const RR3_BIND_SETS: [(&str, Rr3BindSet); 24] = [
         ok
     }),
     ("ina219_addr", |b, s| {
-        let v = rr3_ina219_parse(s);
+        let v = rr3_i2c_addr_parse(s);
         let ok = v.is_some();
         b.ina219_addr = v;
+        ok
+    }),
+    ("oled_addr", |b, s| {
+        let v = rr3_i2c_addr_parse(s);
+        let ok = v.is_some();
+        b.oled_addr = v;
         ok
     }),
     ("ina219_shunt_mohm", |b, s| {
@@ -348,6 +361,7 @@ pub fn rr3_env_override_map() -> BTreeMap<String, String> {
         ("ina219_ilsb_ua", crate::backend::RR3_HAL_INA219_ILSB_ENV),
         ("link_ifname", crate::backend::RR3_HAL_LINK_IFNAME_ENV),
         ("spi_device", crate::backend::RR3_HAL_SPI_DEVICE_ENV),
+        ("oled_addr", crate::backend::RR3_HAL_OLED_ADDR_ENV),
         // ESP32 外设桥 UART 路径：常量直引（不经过 cfg 门控的 esp32_uart 模块，
         // 保证 Windows 等非宿主平台也能编译描述符）。
         (

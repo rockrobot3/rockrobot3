@@ -4,11 +4,16 @@
 schema_version = 2
 
 [assemble]
-# 显示面句柄（0.0.6 链④真件档补立，预留注记兑现）：Rr3Display ← 描述符键
-# spi_device（MAX7219 spidev 设备路径，十键批两处同批）；ops 同前（I-11），
-# 故不写 no_injection（该键只允许两数组都空，rr-registry 形状级规则）。
+# 显示面句柄（0.0.6 链④真件档补立，预留注记兑现）：Rr3Display 的可用读数源
+# 三条并列——spi_device（MAX7219 spidev 设备路径，十键批两处同批）与
+# i2c_bus + oled_addr（W5-3 OLED 档 SSD1306，两键齐备即选本路）。
+# 装配单按板只登记其中一路 [[pin]]；句柄表是"件可消费的描述符键面"声明，
+# 不承诺三键同时存在（与 battery 件并列 i2c_bus/ina219_addr 同形）。
+# ops 同前（I-11），故不写 no_injection（该键只允许两数组都空，rr-registry 形状级规则）。
 handles = [
   { trait = "Rr3Display", desc_key = "spi_device" },
+  { trait = "Rr3Display", desc_key = "i2c_bus" },
+  { trait = "Rr3Display", desc_key = "oled_addr" },
 ]
 ops = [
   # 不可点名集 ← config.toml [rr3-interact.face] non_pointable（I-11：规则从件内

@@ -88,11 +88,13 @@ pub(super) const RR3_BUDGET_KEYS: [&str; 4] = [
 /// [platform] tier 三档（ADR-0018 修订 1：承载二分 → 三档）
 pub(super) const RR3_PLATFORM_TIERS: [&str; 3] = ["host", "rtos", "bare"];
 
-/// 描述符物理键集（增补轮六 §4.2：自 [hardware] 下移 [pins] 派生的**八个**引脚侧键——
+/// 描述符物理键集（增补轮六 §4.2：自 [hardware] 下移 [pins] 派生的**九个**引脚侧键——
 /// 全案 §4.2/§8 门 n 写"六个"但枚举列了七键，以枚举为准；第八键 `spi_device` 批N3
-/// 件六进场（敞口 18 行收口：spidev<N> 词形 + channel 派生 /dev/spidev<N>.<M>））。
+/// 件六进场（敞口 18 行收口：spidev<N> 词形 + channel 派生 /dev/spidev<N>.<M>），
+/// 第九键 `oled_addr` W5-3 进场（Pi 显示面 OLED 换装：addr 派生 7-bit 从地址，
+/// 与 i2c_bus 两键齐备即 rr-hal 显示面选 OLED 档））。
 /// [hardware] 出现任一即红（门 n 稳态判据）；注入文本键名不变，rr-hal 描述符解析端零改动。
-pub(crate) const RR3_PIN_DERIVED_KEYS: [&str; 8] = [
+pub(crate) const RR3_PIN_DERIVED_KEYS: [&str; 9] = [
     "pwm_chip",
     "pwm_channel",
     "gpio_chip",
@@ -101,6 +103,7 @@ pub(crate) const RR3_PIN_DERIVED_KEYS: [&str; 8] = [
     "i2c_bus",
     "ina219_addr",
     "spi_device",
+    "oled_addr",
 ];
 
 /// [[pin]] 条目字段词表（§4.2 [pins] 段；role 的 requires 域即此表子集——
@@ -297,9 +300,9 @@ pub struct Rr3Profile {
     pub slots_device_absent: BTreeMap<String, String>,
     /// [supplies]：平台供给声明（看门狗三键 + 时序预算位三键）
     pub supplies: Rr3Supplies,
-    /// [hardware]：非引脚键直给（`alsa_device`/`link_ifname`；八物理键
-    /// 出现即红——门 n 注入路径唯一，`spi_device` 批N3 件六起同进物理键集（敞口 18 行
-    /// 收口），键位语义与取值域由 rr-hal 描述符解析裁，
+    /// [hardware]：非引脚键直给（`alsa_device`/`link_ifname`；九物理键
+    /// 出现即红——门 n 注入路径唯一，`spi_device` 批N3 件六起、`oled_addr`
+    /// W5-3 起同进物理键集（敞口 18 行收口），键位语义与取值域由 rr-hal 描述符解析裁，
     /// rrd 只管装配形状——标量字符串化，注入时不解释）
     pub hardware: BTreeMap<String, String>,
     /// [runtime].log_ring_cap：日志环容量（行数，批N5 件二 F-30）。rrd 自身的

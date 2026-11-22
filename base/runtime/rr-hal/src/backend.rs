@@ -6,6 +6,7 @@
 //! | `linux`（舵机） | 批F5a（`linux_pwm.rs`，仅 `target_os = "linux"` 单门，纯 std） | 树莓派 sysfs PWM 驱动 SG90（R11①/R22 定案档，GPIO12/13） |
 //! | `linux`（GPIO） | 批F5a（`linux_gpio.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | 树莓派 chardev GPIO 数字输出：LED / 继电器（R11②，R8 预算表 GPIO4/17 软件路行） |
 //! | `linux`（显示） | 链④真件档（`linux_display.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | MAX7219 spidev 点阵帧渲染（R11③ trait 立面 + 链④真件到位实装；设备路径来自描述符 `spi_device`） |
+//! | `linux`（显示·OLED） | W5-3（`linux_oled.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | SSD1306 128x64 I2C 单色屏（8x8 帧 8 倍放大居中；`i2c_bus` + `oled_addr` 两键齐备即选本档，优先于 MAX7219） |
 //! | `linux`（电源） | 批F5a（`linux_power.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | INA219@0x40 I2C 总线电压读数（R18，判据 12；charging 判定随真件档校准） |
 //! | `linux`（链路） | 批F5a（`linux_link.rs`，仅 `target_os = "linux"` 单门，nmcli 子进程） | NetworkManager 链路状态读数（R18，判据 13；配网/断链重连是 NM 自身行为，HAL 只如实报数） |
 //! | `sim` | M3（`sim.rs`：正弦/噪声/静音三模式虚拟麦克风 + 尾窗虚拟扬声器） | `tools/sim`（bin `rr3-sim`）与 CI、无硬件开发 |
@@ -31,7 +32,7 @@ mod tests;
 pub use acts::{rr3_hal_display, rr3_hal_gpio_out, rr3_hal_servo};
 pub use link::{rr3_hal_link, rr3_hal_wifi_store};
 pub use parse::{
-    rr3_gpio_line_key, rr3_ina219_parse, rr3_pwm_index_parse, rr3_sim_batt_parse,
+    rr3_gpio_line_key, rr3_i2c_addr_parse, rr3_pwm_index_parse, rr3_sim_batt_parse,
     rr3_sim_chg_parse, rr3_sim_doa_parse, rr3_sim_rssi_parse, rr3_sim_up_parse,
 };
 pub use power::{rr3_hal_power, rr3_hal_rail};
@@ -132,6 +133,11 @@ pub const RR3_HAL_LINK_IFNAME_ENV: &str = "RR3_HAL_LINK_IFNAME";
 /// `spi_device` 同域；都没给 → 显示面占位显式回错（fail-closed，链④真件档
 /// 参考机 spidev0.0 在 profiles）。
 pub const RR3_HAL_SPI_DEVICE_ENV: &str = "RR3_HAL_SPI_DEVICE";
+
+/// linux I2C 显示面的 OLED 从地址键（`0x` 前缀十六进制，如 `0x3c`）。应急覆盖：
+/// 描述符键 `oled_addr` 同域；与 `i2c_bus` 两键齐备时显示面选 OLED 档
+/// （SSD1306），缺一回落 `spi_device`（MAX7219）。都没给 → 显示面占位显式回错。
+pub const RR3_HAL_OLED_ADDR_ENV: &str = "RR3_HAL_OLED_ADDR";
 
 /// sim 电池的初始电量键（0–100 的十进制整数；未设/取值不认 → 80）。
 /// e2e 注入低电量的正门：真 rr3-power 进程从 rrd 继承环境，按此值起表。

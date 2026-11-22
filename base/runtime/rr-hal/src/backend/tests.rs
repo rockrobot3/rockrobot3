@@ -220,11 +220,11 @@ fn backend_parse_whitelist_platform_doors_and_key_naming() {
 /// 垃圾不认。
 #[test]
 fn ina219_addr_parse_accepts_hex_within_7bit() {
-    assert_eq!(rr3_ina219_parse("0x40"), Some(0x40), "BOM #5 定案档");
-    assert_eq!(rr3_ina219_parse("0X48"), Some(0x48), "大写前缀");
-    assert_eq!(rr3_ina219_parse(" 0x48 "), Some(0x48), "trim");
+    assert_eq!(rr3_i2c_addr_parse("0x40"), Some(0x40), "BOM #5 定案档");
+    assert_eq!(rr3_i2c_addr_parse("0X48"), Some(0x48), "大写前缀");
+    assert_eq!(rr3_i2c_addr_parse(" 0x48 "), Some(0x48), "trim");
     for bad in ["0x00", "0x07", "0x78", "0xFF", "16", "40", "", "zz"] {
-        assert_eq!(rr3_ina219_parse(bad), None, "{bad}");
+        assert_eq!(rr3_i2c_addr_parse(bad), None, "{bad}");
     }
 }
 

@@ -198,8 +198,8 @@ fn pi4b_host_profile_boot_inputs_drill() {
 
 /// Pi 4B 单板全链装配演练（W5-1）：`profiles/pi4b-solo.toml` + 真契约走完整
 /// boot 输入装配——host 档五模块（act/brain/connect/interact/sense，升序）、
-/// 十格在位、[[pin]] 两条（pan PWM + MAX7219 SPI）；[hardware] 两键 + 派生键
-/// （pwm_chip/pwm_channel/spi_device）进注入文本。
+/// 十格在位、[[pin]] 两条（pan PWM + OLED I2C）；[hardware] 两键 + 派生键
+/// （pwm_chip/pwm_channel/i2c_bus/oled_addr）进注入文本。
 #[test]
 fn pi4b_solo_profile_boot_inputs_drill() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
@@ -239,7 +239,7 @@ fn pi4b_solo_profile_boot_inputs_drill() {
     );
     assert!(
         boot.role_missing.is_empty(),
-        "pan 与 ui.face.spi 的 [[pin]] 真值点在位（校验②无缺角色）: {:?}",
+        "pan 与 ui.face.i2c 的 [[pin]] 真值点在位（校验②无缺角色）: {:?}",
         boot.role_missing
     );
     assert!(
@@ -248,10 +248,9 @@ fn pi4b_solo_profile_boot_inputs_drill() {
             && boot.hal_bindings.contains("link_ifname = \"wlan0\"")
             && boot.hal_bindings.contains("pwm_chip = \"0\"")
             && boot.hal_bindings.contains("pwm_channel = \"0\"")
-            && boot
-                .hal_bindings
-                .contains("spi_device = \"/dev/spidev0.0\""),
-        "pi4b-solo [hardware] 两键与派生三键必须进注入文本: {:?}",
+            && boot.hal_bindings.contains("i2c_bus = \"1\"")
+            && boot.hal_bindings.contains("oled_addr = \"0x3c\""),
+        "pi4b-solo [hardware] 两键与派生四键必须进注入文本: {:?}",
         boot.hal_bindings
     );
 }

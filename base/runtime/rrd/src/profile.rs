@@ -8,7 +8,7 @@
 //! `spi_device` 批N3 件六起同进派生轨——敞口 18 行收口）、`[[pin]]` 物理绑定（增补轮六
 //! §4.2：**引脚侧唯一真值点**——八物理键
 //! `pwm_chip`/`pwm_channel`/`gpio_chip`/`gpio_led_line`/`gpio_relay_line`/`i2c_bus`/
-//! `ina219_addr`/`spi_device` 自 [hardware] 下移，role 外键 → `contracts/roles.toml`，host 档由
+//! `ina219_addr`/`spi_device`/`oled_addr` 自 [hardware] 下移，role 外键 → `contracts/roles.toml`，host 档由
 //! 派生器合成注入文本，rtos/bare 档板侧消费归 0.0.7 批G/批D1）。
 //! schema_version=4 起新增 `[supplies.budget]` 内存预算子段（批N2 n2c-v10，校验⑩
 //! 分母——ADR-0021 修订 3：栈/堆预算不住 platform 表，住 [supplies].budget，
