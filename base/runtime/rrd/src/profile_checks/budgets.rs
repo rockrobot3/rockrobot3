@@ -66,7 +66,13 @@ fn rr3_role_is_logic(roles: &Rr3RoleTable, role: &str) -> bool {
     roles.rr3_role_kind(role).as_deref() == Some("logic")
 }
 
-/// 校验②（后果 = 降不拒）：present ∩ enabled_slots 的缺角色清单
+/// 校验②（后果 = 降不拒）：present ∩ enabled_slots 的缺角色清单。
+///
+/// 判据按**绑定组**（roles.toml `group`，缺省 = 角色名本身）：
+/// - 组内全为 logic 角色 → 无物理绑定面，跳过（现状四格能力面角色）；
+/// - 否则组内至少一条角色在 [pins] 有绑定即满足——同组角色是同一物理位置的
+///   可替代实现（ui.face 的 SPI 点阵 / I2C OLED），装配单按板二选一。
+/// 缺组点名以组名为第二列（组名缺省 = 角色名，既有可观测输出逐字不变）。
 pub(crate) fn rr3_role_gaps(profile: &Rr3Profile, roles: &Rr3RoleTable) -> Vec<(String, String)> {
     let mut gaps = Vec::new();
     let enabled_all: BTreeSet<String> = profile.enabled_slots.values().flatten().cloned().collect();
@@ -74,28 +80,34 @@ pub(crate) fn rr3_role_gaps(profile: &Rr3Profile, roles: &Rr3RoleTable) -> Vec<(
         if !profile.slots_present.contains(slot) {
             continue;
         }
-        for role in roles.rr3_role_slot_names(slot) {
-            rr3_role_gap(profile, roles, slot, &role, &mut gaps);
+        for (group, members) in rr3_slot_groups(roles, slot) {
+            if !rr3_group_covered(profile, roles, &members) {
+                gaps.push((slot.clone(), group));
+            }
         }
     }
     gaps.sort();
     gaps
 }
 
-/// 单角色缺格判定：logic 角色无物理绑定，其余须在 [pins] 有绑定。
-fn rr3_role_gap(
-    profile: &Rr3Profile,
-    roles: &Rr3RoleTable,
-    slot: &str,
-    role: &str,
-    gaps: &mut Vec<(String, String)>,
-) {
-    if rr3_role_is_logic(roles, role) {
-        return;
+/// 格位内按绑定组归并（BTreeMap 定序；组名缺省已在 roles 解析层补成角色名）。
+fn rr3_slot_groups(roles: &Rr3RoleTable, slot: &str) -> BTreeMap<String, Vec<String>> {
+    let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for role in roles.rr3_role_slot_names(slot) {
+        let group = roles.rr3_role_group(&role).unwrap_or_else(|| role.clone());
+        groups.entry(group).or_default().push(role);
     }
-    if !profile.pins.iter().any(|p| p.role == role) {
-        gaps.push((slot.to_string(), role.to_string()));
+    groups
+}
+
+/// 组覆盖判定：全 logic = 无需 [pins]；否则组内任一角色有绑定即覆盖。
+fn rr3_group_covered(profile: &Rr3Profile, roles: &Rr3RoleTable, members: &[String]) -> bool {
+    if members.iter().all(|r| rr3_role_is_logic(roles, r)) {
+        return true;
     }
+    members
+        .iter()
+        .any(|r| profile.pins.iter().any(|p| p.role == *r))
 }
 
 /// 缺格三源合一（方案 §15）：实测缺（探测）+ 声明缺（present）+ 注入缺
@@ -186,5 +198,46 @@ fn rr3_declared_gaps(
                 missing.push((module.clone(), slot.clone()));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::profile::Rr3PinEntry;
+
+    /// 真契约（与装载链同源）：roles 名词域以生产文件为准，不抄第二份。
+    const ROLES: &str = include_str!("../../../../../contracts/roles.toml");
+
+    /// ui.face 两角色同属 ui.face.phys 绑定组：组内一路绑定即满足，缺组点名组名
+    /// （W5-3 校验②按组判——SPI 点阵与 I2C OLED 二选一）。
+    #[test]
+    fn face_group_satisfies_with_one_binding() {
+        let roles = rr_registry::rr3_role_parse(ROLES);
+        let mut profile = Rr3Profile::default();
+        profile
+            .enabled_slots
+            .insert("rr3-interact".into(), vec!["ui.face".into()]);
+        profile.slots_present.push("ui.face".into());
+        profile
+            .bindings
+            .insert("ui.face".into(), "rr3-interact".into());
+        assert_eq!(
+            rr3_role_gaps(&profile, &roles),
+            vec![("ui.face".to_string(), "ui.face.phys".to_string())],
+            "组内零绑定须点名组名"
+        );
+        profile.pins.push(Rr3PinEntry {
+            role: "ui.face.i2c".into(),
+            controller: "i2c1".into(),
+            addr: "0x3c".into(),
+            device: "SSD1306".into(),
+            direction: "out".into(),
+            ..Default::default()
+        });
+        assert!(
+            rr3_role_gaps(&profile, &roles).is_empty(),
+            "组内一路绑定（OLED）即满足"
+        );
     }
 }

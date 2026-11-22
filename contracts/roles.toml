@@ -17,6 +17,10 @@
 #   droppable     欠压降载时可否被切断（舵机 true=松轴放行、电表 false=测量面须活着才知欠压）。
 #   input_only_ok 该角色是否允许绑到 input-only 引脚（校验⑤-a 的另一侧输入）。
 #   per_instance  一角色可多实例（双轴即两条 instance）；false 时填 instance 即红（校验①-b）。
+#   group         绑定组（W5-3 增补）：同 (slot, group) 的角色是**同一物理位置的可替代
+#                 实现**——校验② 只要求组内至少一条 [pins] 绑定（缺省 = 角色名本身 =
+#                 各自成组，既有角色零语义变化）。用途：ui.face 一格的 SPI 点阵与
+#                 I2C OLED 二选一，装配单按板登记其中一路。
 #   status        登记状态：缺省 = 有 prod 实现者的常设角色（键可省）；planned = iface
 #                 无 prod 实现（裁-17：iface 在册 ≠ 有实现者），格升 normal 随真后端
 #                 落位一并转（门 a D 段执法，批N8 件二）。
@@ -138,6 +142,7 @@ direction = "out"
 droppable = true
 input_only_ok = false
 per_instance = false
+group = "ui.face.phys"
 note = "SPI 显示器件（链④真件档 MAX7219 点阵类）；host 侧 controller 词形 spidev<N> 派生总线号、channel 派生片选号，合成 spi_device=/dev/spidev<N>.<M>（与旧 [hardware] 直给值逐字节对齐，profiles/distro.toml 迁移批N3 件六）。物理走线（DIN/CS/CLK）由总线自身钉死，不占 physical 维"
 
 # —— W5-3（Pi 显示面 OLED 换装）：同格 ui.face 的第二条物理路径。SSD1306 128x64
@@ -159,6 +164,7 @@ direction = "out"
 droppable = true
 input_only_ok = false
 per_instance = false
+group = "ui.face.phys"
 note = "I2C 显示器件（链④ OLED 档 SSD1306 128x64 @ 0x3C）；host 侧 controller 词形 i2c<N> 派生 i2c_bus=N、addr 派生 oled_addr（0x 前缀十六进制）。physical 不占：SDA/SCL 由总线自身钉死（GPIO2/3）。显示是观感面，欠压降载可切（同 ui.face.spi）"
 
 # —— P1 审计件四（2026-11-12，基-39 转执法收口）：四格能力面角色进场。

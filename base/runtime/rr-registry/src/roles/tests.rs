@@ -123,6 +123,33 @@ fn ui_sensor_role_shape(t: &Rr3RoleTable) {
         Some(vec!["spi_device".to_string()])
     );
     assert_eq!(t.rr3_role_direction("ui.face.spi").as_deref(), Some("out"));
+    // W5-3：同格 I2C OLED 进场；两角色同组（校验②按组判"至少一路绑定"）
+    assert_eq!(t.rr3_role_slot("ui.face.i2c").as_deref(), Some("ui.face"));
+    assert_eq!(
+        t.rr3_role_requires("ui.face.i2c"),
+        Some(vec![
+            "controller".to_string(),
+            "addr".to_string(),
+            "device".to_string()
+        ])
+    );
+    assert_eq!(
+        t.rr3_role_derives("ui.face.i2c"),
+        Some(vec!["i2c_bus".to_string(), "oled_addr".to_string()])
+    );
+    assert_eq!(
+        t.rr3_role_group("ui.face.spi").as_deref(),
+        Some("ui.face.phys")
+    );
+    assert_eq!(
+        t.rr3_role_group("ui.face.i2c").as_deref(),
+        Some("ui.face.phys")
+    );
+    assert_eq!(
+        t.rr3_role_group("act.axis.pwm").as_deref(),
+        Some("act.axis.pwm"),
+        "group 缺省 = 角色名本身（各自成组）"
+    );
     assert_eq!(
         t.rr3_role_slot("sensor.env.meter").as_deref(),
         Some("sensor.env")

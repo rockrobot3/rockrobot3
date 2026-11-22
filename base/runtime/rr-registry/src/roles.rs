@@ -5,6 +5,10 @@
 //! `derives` 派生键集（rrd 派生器的一致性对账面）都在这张表上裁定。
 //! 空角色表是契约事故，不是放行许可证。
 //!
+//! `group`（W5-3 增补）：同 (slot, group) 的角色是同一物理位置的**可替代实现**
+//! （ui.face 的 SPI 点阵与 I2C OLED），缺省 = 角色名本身 = 各自成组；校验②
+//! 按组判"至少一条 [pins] 绑定"，组语义归 rrd 消费（[`rr3_role_group`] 只供数）。
+//!
 //! 六表对账（门 a，§8 待建）的真值源之一：`roles.slot ⊆ slots.toml` 与
 //! `roles.iface ⊆ RR3_ASSEMBLE_HANDLE_TRAITS` 两条**在装载侧由调用方携带
 //! 对方真值判定**（rrd 装载链两张表都在手）；本 crate 只判自身形状，
@@ -32,6 +36,10 @@ pub struct Rr3RoleEntry {
     droppable: bool,
     input_only_ok: bool,
     per_instance: bool,
+    /// 绑定组（roles.toml `group` 键；缺省 = 角色名本身 = 各自成组）：
+    /// 同一 (slot, group) 内是**同一物理位置的可替代实现**（如 ui.face 的
+    /// SPI 点阵与 I2C OLED），装载期只需组内至少一条 [pins] 绑定。
+    group: String,
 }
 
 /// 一册角色表（不可变快照）：role 名 → 登记面
@@ -64,7 +72,9 @@ fn rr3_role_row(table: &mut Rr3RoleTable, r: &toml::Table) {
     let Some(name) = r.get("name").and_then(Value::as_str) else {
         return;
     };
-    table.roles.insert(name.to_string(), rr3_role_entry(r));
+    table
+        .roles
+        .insert(name.to_string(), rr3_role_entry(name, r));
 }
 
 /// 角色表字段读取（缺键/错型回落空串）。
@@ -91,7 +101,7 @@ fn rr3_role_bool(r: &toml::Table, key: &str) -> bool {
 }
 
 /// 单条 `[[role]]` 的登记面：缺键按空串/false 收（逐字段次序同旧内联构造）。
-fn rr3_role_entry(r: &toml::Table) -> Rr3RoleEntry {
+fn rr3_role_entry(name: &str, r: &toml::Table) -> Rr3RoleEntry {
     Rr3RoleEntry {
         slot: rr3_role_field(r, "slot"),
         kind: rr3_role_field(r, "kind"),
@@ -102,6 +112,17 @@ fn rr3_role_entry(r: &toml::Table) -> Rr3RoleEntry {
         droppable: rr3_role_bool(r, "droppable"),
         input_only_ok: rr3_role_bool(r, "input_only_ok"),
         per_instance: rr3_role_bool(r, "per_instance"),
+        group: rr3_role_group_field(r, name),
+    }
+}
+
+/// 绑定组缺省语义：`group` 缺键/空串 = 角色名本身（各自成组，既有角色零波及）。
+fn rr3_role_group_field(r: &toml::Table, name: &str) -> String {
+    let g = rr3_role_field(r, "group");
+    if g.is_empty() {
+        name.to_string()
+    } else {
+        g
     }
 }
 
@@ -154,6 +175,12 @@ impl Rr3RoleTable {
     /// false ⇒ 禁填 instance（填即红，校验①-b）
     pub fn rr3_role_per_inst(&self, role: &str) -> Option<bool> {
         self.roles.get(role).map(|e| e.per_instance)
+    }
+
+    /// 绑定组名（`group` 缺省 = 角色名本身）：同 (slot, group) 的角色是同一
+    /// 物理位置的可替代实现，校验② 按组判"至少一条 [pins] 绑定"。
+    pub fn rr3_role_group(&self, role: &str) -> Option<String> {
+        self.roles.get(role).map(|e| e.group.clone())
     }
 
     pub fn rr3_role_names(&self) -> Vec<String> {
