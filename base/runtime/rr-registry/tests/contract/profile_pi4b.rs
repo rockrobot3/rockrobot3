@@ -2,27 +2,19 @@
 
 use super::*;
 
-/// Pi 4B 宿主 × classic 板（W2/T1）：`profiles/pi4b-host-esp32-classic.toml` 钉**差异面**
-/// （host 档 / chip / 宿主两键 + 板侧十一键同源 / 十一格绑定 / 恰一条 [[pin]] = MAX7219）。
-/// 完整形状由 default/distro 测试与 rrd 装载门共同覆盖；线束与档位漂移即红。
-#[test]
-fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
-    let root = repo_root();
-    let text = std::fs::read_to_string(root.join("profiles/pi4b-host-esp32-classic.toml"))
-        .expect("profiles/pi4b-host-esp32-classic.toml 必须存在（W2/T1）");
-    let v: toml::Value = toml::from_str(&text).expect("pi4b-host-esp32-classic.toml 必须可解析");
-
+/// classic 档基线：schema 5 / host 档 / Pi 4 板 / distro 快路轨。
+fn classic_basics(v: &toml::Value) {
     assert_eq!(
         v.get("schema_version").and_then(toml::Value::as_integer),
         Some(5),
         "pi4b-host-esp32-classic schema_version 漂移"
     );
     assert_tier(
-        &v,
+        v,
         "host",
         "pi4b-host-esp32-classic 档位漂移（T1 = Pi 宿主档）",
     );
-    assert_chip(&v, "raspberry-pi-4", "pi4b-host-esp32-classic");
+    assert_chip(v, "raspberry-pi-4", "pi4b-host-esp32-classic");
     assert_eq!(
         v.get("os")
             .and_then(|o| o.get("route"))
@@ -30,7 +22,10 @@ fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
         Some("distro"),
         "pi4b-host-esp32-classic route 漂移（Raspberry Pi OS 属发行版快路轨）"
     );
+}
 
+/// [hardware]：宿主两键真机实测值 + 板侧十一键与 classic 线束同源。
+fn classic_hardware(v: &toml::Value) {
     let hardware = v
         .get("hardware")
         .and_then(toml::Value::as_table)
@@ -66,8 +61,10 @@ fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
             "pi4b-host-esp32-classic hardware.{k} 漂移（应与 classic 线束同源）"
         );
     }
+}
 
-    // 形态面：十格绑定 + 十格在位（2026-10-31 实机取证收窄；net.bt 是 placeholder 不进生产装配面）。
+/// 形态面：十格绑定 + 十格在位（2026-10-31 实机取证收窄；net.bt 是 placeholder 不进生产装配面）。
+fn classic_shape(v: &toml::Value) {
     let bindings = v
         .get("bindings")
         .and_then(toml::Value::as_table)
@@ -96,10 +93,12 @@ fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
         10,
         "pi4b-host-esp32-classic 在位声明应恰十格"
     );
+}
 
-    // [[pin]] 恰一条：Pi 本机唯一的本地外设 = MAX7219 点阵（ui.face.spi，spidev0/ch0，
-    // 装载期派生 spi_device）。其余格（act.servo 等）无本地 pin → 校验② role_missing 降级，
-    // 板侧真值走 [hardware] 桥注入。
+/// [[pin]] 恰一条：Pi 本机唯一的本地外设 = MAX7219 点阵（ui.face.spi，spidev0/ch0，
+/// 装载期派生 spi_device）。其余格（act.servo 等）无本地 pin → 校验② role_missing 降级，
+/// 板侧真值走 [hardware] 桥注入。
+fn classic_pins(v: &toml::Value) {
     let pins = v
         .get("pin")
         .and_then(toml::Value::as_array)
@@ -127,22 +126,33 @@ fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
     );
 }
 
+/// Pi 4B 宿主 × classic 板（W2/T1）：`profiles/pi4b-host-esp32-classic.toml` 钉**差异面**
+/// （host 档 / chip / 宿主两键 + 板侧十一键同源 / 十一格绑定 / 恰一条 [[pin]] = MAX7219）。
+/// 完整形状由 default/distro 测试与 rrd 装载门共同覆盖；线束与档位漂移即红。
+#[test]
+fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
+    let root = repo_root();
+    let text = std::fs::read_to_string(root.join("profiles/pi4b-host-esp32-classic.toml"))
+        .expect("profiles/pi4b-host-esp32-classic.toml 必须存在（W2/T1）");
+    let v: toml::Value = toml::from_str(&text).expect("pi4b-host-esp32-classic.toml 必须可解析");
+
+    classic_basics(&v);
+    classic_hardware(&v);
+    classic_shape(&v);
+    classic_pins(&v);
+}
+
 /// Pi 4B 宿主 × ESP32-S3 N16R8 板（W2/T2）：`profiles/pi4b-host-esp32s3.toml` 钉
 /// **差异面**（板侧十一键为 S3 真值；宿主侧与 classic 档同源；十一格绑定/在位；
 /// 恰一条 [[pin]] = MAX7219）。与 classic 档的差异只允许发生在 [hardware] 板侧键。
-#[test]
-fn pi4b_host_esp32s3_profile_pins_t2_harness() {
-    let root = repo_root();
-    let text = std::fs::read_to_string(root.join("profiles/pi4b-host-esp32s3.toml"))
-        .expect("profiles/pi4b-host-esp32s3.toml 必须存在（W2/T2）");
-    let v: toml::Value = toml::from_str(&text).expect("pi4b-host-esp32s3.toml 必须可解析");
-
+/// T2 基线：schema 5 / host 档 / Pi 4 板 / distro 快路轨。
+fn t2_basics(v: &toml::Value) {
     assert_eq!(
         v.get("schema_version").and_then(toml::Value::as_integer),
         Some(5),
         "pi4b-host-esp32s3 schema_version 漂移"
     );
-    assert_tier(&v, "host", "pi4b-host-esp32s3 档位漂移（T2 = Pi 宿主档）");
+    assert_tier(v, "host", "pi4b-host-esp32s3 档位漂移（T2 = Pi 宿主档）");
     assert_eq!(
         v.get("platform")
             .and_then(|p| p.get("chip"))
@@ -157,7 +167,10 @@ fn pi4b_host_esp32s3_profile_pins_t2_harness() {
         Some("distro"),
         "pi4b-host-esp32s3 route 漂移"
     );
+}
 
+/// T2 [hardware]：宿主两键 + 板侧十一键为 S3 N16R8 真值（与 esp32s3-mini 同源）。
+fn t2_hardware(v: &toml::Value) {
     let hardware = v
         .get("hardware")
         .and_then(toml::Value::as_table)
@@ -172,9 +185,11 @@ fn pi4b_host_esp32s3_profile_pins_t2_harness() {
         Some("wlan0"),
         "pi4b-host-esp32s3 link_ifname 漂移"
     );
-    // 板侧十一键：S3 N16R8 真值（与 profiles/esp32s3-mini.toml 逐值对齐）。
     s3_hardware_keys(hardware, "pi4b-host-esp32s3", "应与 S3 线束同源");
+}
 
+/// T2 形态面：十格绑定/在位 + 恰一条 [[pin]]（ui.face.spi）。
+fn t2_shape(v: &toml::Value) {
     let bindings = v
         .get("bindings")
         .and_then(toml::Value::as_table)
@@ -203,24 +218,25 @@ fn pi4b_host_esp32s3_profile_pins_t2_harness() {
     );
 }
 
-/// Pi 4B 独立 host-only（N44）：`profiles/pi4b-host.toml` 钉**差异面**——host 档、
-/// 无外部板（[hardware] 零板侧键）、本地末梢只有 MAX7219（[[pin]] ui.face.spi）
-/// 与 USB 声卡回放；act/sense 无末梢，bindings/enabled/present 三源一致为七格
-/// 三模块（connect/interact/brain）。net.bt 是 placeholder 不进生产装配面。
-/// 完整装载链由 rrd 的 boot drill 覆盖。
 #[test]
-fn pi4b_host_profile_shape_n44_harness() {
+fn pi4b_host_esp32s3_profile_pins_t2_harness() {
     let root = repo_root();
-    let text = std::fs::read_to_string(root.join("profiles/pi4b-host.toml"))
-        .expect("profiles/pi4b-host.toml 必须存在（N44）");
-    let v: toml::Value = toml::from_str(&text).expect("pi4b-host.toml 必须可解析");
+    let text = std::fs::read_to_string(root.join("profiles/pi4b-host-esp32s3.toml"))
+        .expect("profiles/pi4b-host-esp32s3.toml 必须存在（W2/T2）");
+    let v: toml::Value = toml::from_str(&text).expect("pi4b-host-esp32s3.toml 必须可解析");
+    t2_basics(&v);
+    t2_hardware(&v);
+    t2_shape(&v);
+}
 
+/// N44 基线：schema 5 / host 档 / Pi 4 板 / distro 快路轨。
+fn n44_basics(v: &toml::Value) {
     assert_eq!(
         v.get("schema_version").and_then(toml::Value::as_integer),
         Some(5),
         "pi4b-host schema_version 漂移"
     );
-    assert_tier(&v, "host", "pi4b-host 档位漂移（N44 = Pi 本机 host-only）");
+    assert_tier(v, "host", "pi4b-host 档位漂移（N44 = Pi 本机 host-only）");
     assert_eq!(
         v.get("platform")
             .and_then(|p| p.get("chip"))
@@ -235,7 +251,10 @@ fn pi4b_host_profile_shape_n44_harness() {
         Some("distro"),
         "pi4b-host route 漂移"
     );
+}
 
+/// [hardware]：宿主两键在册，无外部板故不得出现板侧十一键。
+fn n44_hardware(v: &toml::Value) {
     let hardware = v
         .get("hardware")
         .and_then(toml::Value::as_table)
@@ -268,7 +287,10 @@ fn pi4b_host_profile_shape_n44_harness() {
             "pi4b-host 无外部板，[hardware] 不得出现板侧键 {k}"
         );
     }
+}
 
+/// 形态面：bindings/enabled_slots/present 三源一致为七格三模块。
+fn n44_shape(v: &toml::Value) {
     let bindings = v
         .get("bindings")
         .and_then(toml::Value::as_table)
@@ -302,7 +324,10 @@ fn pi4b_host_profile_shape_n44_harness() {
         .and_then(toml::Value::as_array)
         .expect("pi4b-host 缺 [slots].present");
     assert_eq!(present.len(), 7, "pi4b-host 在位声明应恰七格");
+}
 
+/// [[pin]] 恰一条：ui.face.spi / spidev0 / CE0（MAX7219 点阵）。
+fn n44_pins(v: &toml::Value) {
     let pins = v
         .get("pin")
         .and_then(toml::Value::as_array)
@@ -323,4 +348,22 @@ fn pi4b_host_profile_shape_n44_harness() {
         Some(0),
         "pi4b-host [[pin]] channel 漂移（CE0）"
     );
+}
+
+/// Pi 4B 独立 host-only（N44）：`profiles/pi4b-host.toml` 钉**差异面**——host 档、
+/// 无外部板（[hardware] 零板侧键）、本地末梢只有 MAX7219（[[pin]] ui.face.spi）
+/// 与 USB 声卡回放；act/sense 无末梢，bindings/enabled/present 三源一致为七格
+/// 三模块（connect/interact/brain）。net.bt 是 placeholder 不进生产装配面。
+/// 完整装载链由 rrd 的 boot drill 覆盖。
+#[test]
+fn pi4b_host_profile_shape_n44_harness() {
+    let root = repo_root();
+    let text = std::fs::read_to_string(root.join("profiles/pi4b-host.toml"))
+        .expect("profiles/pi4b-host.toml 必须存在（N44）");
+    let v: toml::Value = toml::from_str(&text).expect("pi4b-host.toml 必须可解析");
+
+    n44_basics(&v);
+    n44_hardware(&v);
+    n44_shape(&v);
+    n44_pins(&v);
 }
