@@ -236,7 +236,10 @@ impl Rr3SenseDispatcher {
             // 宿主 Linux 档没有 ESP32 桥的命令旁路：走总线点名 rr3-act 的
             // `rr3-act/servo/command`（W5-3 Pi 单板 DoA 转头）。短超时——反射
             // 动作不能把采集拍拖长；失败如实点名，下一轮判向自然重试。
-            let args = serde_json::json!({ "pan": target });
+            // act 的 servo/command 契约参数是 `angle_deg`（`rr3_servo_parse_args`）；
+            // 旧实现发 `{"pan": target}` 会被 act 以“缺 angle_deg”拒收，Pi 宿主
+            // 档 DoA→pan 因此静默失效（ESP32 桥走板侧旁路，不暴露此错配）。
+            let args = serde_json::json!({ "axis": "pan", "angle_deg": target });
             if let Err(e) = bus.call(
                 "rr3-act/servo/command",
                 &args,
