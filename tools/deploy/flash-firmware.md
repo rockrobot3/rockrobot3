@@ -49,6 +49,12 @@ espflash flash --chip esp32 \
 
 ## 验收（串口 115200）
 
-- boot 横幅点名芯片与 PSRAM；`[mem]` 给堆账，`[mic]` 给采样率，
-  full 档另有 `[spool]` 行。
+- **采集方式**：仓内 `tools/deploy/console-log.py`（raw 8N1，打开后**显式清
+  DTR/RTS**）。不要用裸 `cat`/`stty`——打开 CH340 时 DTR/RTS 常停在置位态，
+  芯片被按在复位/下载态，表现为"ROM 日志可读、随后全是噪声"，极易误判成
+  固件控制台配错。自实现时同样必须先清两线再收流。
+- boot 横幅前两行自证：`surface=...` 与 `console=uart0@<baud> secondary=none`
+  ——能读到这两行，说明日志口与终端波特率都正确。
+- 其余：boot 横幅点名芯片与 PSRAM；`[mem]` 给堆账，`[mic]` 给采样率（周期
+  诊断行 10s 一行），full 档另有 `[spool]` 行。
 - safe 档不连云；full 档需 NVS 已有 WiFi 与 API key，缺则显式点名。
