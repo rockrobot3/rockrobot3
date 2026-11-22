@@ -35,6 +35,9 @@ fn assemble_registry_tables_are_pinned() {
             "ina219_addr",
             "link_ifname",
             "spi_device",
+            // W5-3：SSD1306 OLED 从地址键（与 i2c_bus 齐备即显示面 OLED 档；
+            // [pins] 派生轨，角色的 addr → oled_addr）
+            "oled_addr",
             // P0-3/P0-4：ESP32 外设桥 UART 设备路径（组合档宿主侧真值，描述符 [hardware].periph_uart）
             "periph_uart",
             // 批N4 件七(b) 基-24 桥上配置腿：板侧配置三键（板侧裸寄存器自愈路径

@@ -7,12 +7,13 @@ use super::*;
 // include_str! 以本文件所在目录为基准：roles → src → rr-registry → runtime → base → 仓库根
 const CONTRACT: &str = include_str!("../../../../../contracts/roles.toml");
 
-/// 契约解析成 14 条角色，名字面顺序稳定（P1 件四四格能力面角色进场后十四条）。
+/// 契约解析成 15 条角色，名字面顺序稳定（P1 件四四格能力面角色 + W5-3
+/// ui.face.i2c 后十五条）。
 fn role_names_shape(t: &Rr3RoleTable) {
     assert_eq!(
         t.roles.len(),
-        14,
-        "契约角色数（P1 件四四格能力面角色进场后十四条）"
+        15,
+        "契约角色数（P1 件四四格能力面角色 + W5-3 OLED 角色后十五条）"
     );
     assert_eq!(
         t.rr3_role_names(),
@@ -30,6 +31,7 @@ fn role_names_shape(t: &Rr3RoleTable) {
             "power.rail.sense",
             "sensor.env.meter",
             "sensor.imu.meter",
+            "ui.face.i2c",
             "ui.face.spi",
         ]
     );

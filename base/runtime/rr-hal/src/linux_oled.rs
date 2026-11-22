@@ -269,7 +269,10 @@ impl Rr3Display for Rr3Ssd1306I2cDisplay {
         let path = self.bus_dev_path();
         let mut guard = self.dev.lock().unwrap_or_else(|p| p.into_inner());
         self.ensure(&mut guard)?;
-        let fd = std::os::fd::AsRawFd::as_raw_fd(guard.as_ref().expect("ensure 成功后 dev 必在位"));
+        let Some(dev) = guard.as_ref() else {
+            return Err(rr3_oled_text(&path, "总线 fd 未 open（ensure 未执行）"));
+        };
+        let fd = std::os::fd::AsRawFd::as_raw_fd(dev);
         rr3_oled_cmd(fd, &RR3_SSD1306_WINDOW, &path)?;
         rr3_oled_data(fd, &fb, &path)?;
         drop(guard);
@@ -339,9 +342,10 @@ mod tests {
         let mut frame = [0u8; 8];
         frame[0] = 0x80;
         let fb = rr3_oled_fb(&frame);
-        for x in 32..40 {
-            assert_eq!(fb[x], 0xFF, "page0 col{x} 应亮");
-        }
+        assert!(
+            fb[32..40].iter().all(|b| *b == 0xFF),
+            "page0 [32,40) 应全亮"
+        );
         assert_eq!(fb[31], 0x00);
         assert_eq!(fb[40], 0x00);
         for page in 1..RR3_OLED_PAGES {
