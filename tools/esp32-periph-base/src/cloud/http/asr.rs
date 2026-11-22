@@ -5,8 +5,8 @@
 //! 与 flash spool（无 PSRAM 路径）——与传输完全解耦；源必须可 `rr3_reset`
 //! 重读，满足重试契约。
 //!
-//! 弱网策略（S3 余量③）：单跳 9 s（< dialog 心跳窗 10 s，阻塞读期间无法续拍）、
-//! 最多 3 次、退避 500/1500 ms——韧性来自"多一次尝试"而不是放宽单跳。
+//! 弱网策略（S3 余量③）：单跳 8 s 不放宽（< dialog 心跳窗 10 s，阻塞读期间
+//! 无法续拍），最多 3 次、退避 500/1500 ms——韧性来自"多一次尝试"。
 //!
 //! 失败语义：源短读/超长都拒发并点名（绝不把半段 PCM 送给云端）；重试判据与
 //! 其他云接口同源（`rr_cloud_proto::rr3_cloud_retryable`，含传输层负状态码）。
@@ -18,7 +18,7 @@ use esp_idf_sys::{esp_http_client_cleanup, esp_http_client_handle_t};
 
 use super::{
     rr3_client, rr3_cstrs, rr3_head, rr3_http_read, rr3_open, rr3_write, ASR_ATTEMPTS,
-    ASR_RETRY_DELAY_MS, ASR_TIMEOUT_MS,
+    ASR_RETRY_DELAY_MS, HTTP_TIMEOUT_MS,
 };
 
 /// ASR 请求体的 PCM 源：按 4 KB 窗搬 s16le，不要求整段驻留内存。
@@ -142,7 +142,7 @@ fn rr3_asr_once(
 ) -> Result<Vec<u8>, String> {
     src.rr3_reset();
     let (url_c, auth, ctype) = rr3_cstrs(url, key, content_type)?;
-    let client = rr3_client(&url_c, auth.as_deref(), &ctype, ASR_TIMEOUT_MS)?;
+    let client = rr3_client(&url_c, auth.as_deref(), &ctype, HTTP_TIMEOUT_MS)?;
     crate::mem::rr3_heap_mark(interface, "http-open");
     let rc = rr3_asr_do(client, plan, src, interface, max_body);
     crate::mem::rr3_heap_mark(interface, "http-done");

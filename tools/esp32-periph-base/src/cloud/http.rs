@@ -26,14 +26,11 @@ mod asr;
 
 pub(crate) use asr::{rr3_post_asr, Rr3PcmSrc, Rr3SliceSrc, Rr3SpoolSrc};
 
-/// 单跳超时（缺省 8 s）：LLM / TTS 用。必须 **< dialog 心跳窗 10 s**——
-/// 阻塞读期间无法续拍，单跳超过心跳窗会让监督壳把正在等云的 dialog 判死。
+/// 单跳超时（8 s）：三跳同源。必须 **< dialog 心跳窗 10 s**——阻塞读期间无法
+/// 续拍，单跳超过心跳窗会让监督壳把正在等云的 dialog 判死。
 const HTTP_TIMEOUT_MS: i32 = 8_000;
-/// ASR 单跳超时（S3 余量③，0015 §6-1）：上行 + 识别推理比 LLM/TTS 长，但同样
-/// 必须 < 10 s 心跳窗——弱网韧性靠**多一次尝试**而不是放宽单跳（9 s × 3 次
-/// + 退避 = 有界 28.5 s，每跳之间续拍）。
-const ASR_TIMEOUT_MS: i32 = 9_000;
-/// ASR 尝试次数与退避（弱网：首退 0.5 s、次退 1.5 s）。
+/// ASR 弱网策略（S3 余量③，0015 §6-1）：单跳 8 s 不放宽（心跳安全边际），
+/// 韧性靠**多一次尝试**：3 次 + 退避 500/1500 ms = 有界 26 s，每跳之间续拍。
 const ASR_ATTEMPTS: usize = 3;
 const ASR_RETRY_DELAY_MS: [u64; 2] = [500, 1_500];
 const RETRY_DELAY_MS: u64 = 500;
@@ -77,7 +74,7 @@ fn rr3_cstrs(
 }
 
 /// 初始化客户端并挂头（URL/auth/ctype 的 C 串由调用方保活到 cleanup；
-/// `timeout_ms` 按接口档给，见 [`HTTP_TIMEOUT_MS`] / [`ASR_TIMEOUT_MS`]）。
+/// `timeout_ms` 统一为 [`HTTP_TIMEOUT_MS`]，不按接口放宽）。
 fn rr3_client(
     url_c: &CStr,
     auth: Option<&CStr>,
