@@ -343,15 +343,16 @@ fn bindings_walk<'a>(
 /// 层同判）：[[pin]] 的 role 外键查册、direction 与角色一致、instance 有无与
 /// per_instance 相符；[hardware] 不得出现八物理键（门 n 稳态判据的 CI 侧 pin——
 /// 运行期判在 rrd 装载，两轴缺一即带病；spi_device 批N3 件六随 SPI 词形进表）。
-fn assert_profile_pins_schema3(v: &toml::Value, root: &std::path::Path, expect_pin_roles: &[&str]) {
-    let roles = rr_registry::rr3_role_parse(
+/// 读 contracts/roles.toml（角色册真值）。
+fn load_roles(root: &std::path::Path) -> rr_registry::Rr3RoleTable {
+    rr_registry::rr3_role_parse(
         &std::fs::read_to_string(root.join("contracts/roles.toml"))
             .expect("读 contracts/roles.toml"),
-    );
-    let pins = v
-        .get("pin")
-        .and_then(toml::Value::as_array)
-        .expect("缺 [[pin]]（schema 3 物理绑定真值点，§4.2）");
+    )
+}
+
+/// [[pin]] 角色全集的排序对账。
+fn pin_roles_of(pins: &[toml::Value], expect_pin_roles: &[&str]) {
     let mut pin_roles: Vec<String> = pins
         .iter()
         .map(|p| {
@@ -367,28 +368,34 @@ fn assert_profile_pins_schema3(v: &toml::Value, root: &std::path::Path, expect_p
         expect_pin_roles,
         "[[pin]] 角色集漂移"
     );
-    for p in pins {
-        let role = p.get("role").and_then(toml::Value::as_str).unwrap();
-        assert!(
-            roles.rr3_role_contains(role),
-            "[[pin]] 角色 {role} 未在 roles.toml 在册（校验①-a）"
-        );
-        if let (Some(pd), Some(rd)) = (
-            p.get("direction").and_then(toml::Value::as_str),
-            roles.rr3_role_direction(role),
-        ) {
-            assert_eq!(pd, rd, "pin {role} direction 与角色不一致（校验①）");
-        }
-        let per = roles.rr3_role_per_inst(role).unwrap_or(false);
-        let has_inst = p
-            .get("instance")
-            .and_then(toml::Value::as_str)
-            .is_some_and(|s| !s.is_empty());
-        assert_eq!(
-            has_inst, per,
-            "pin {role} instance 有无与 per_instance = {per} 不符（校验①-b）"
-        );
+}
+
+/// 单枚 pin：角色在册、direction 与角色一致、instance 有无与 per_instance 相符。
+fn assert_pin_role(p: &toml::Value, roles: &rr_registry::Rr3RoleTable) {
+    let role = p.get("role").and_then(toml::Value::as_str).unwrap();
+    assert!(
+        roles.rr3_role_contains(role),
+        "[[pin]] 角色 {role} 未在 roles.toml 在册（校验①-a）"
+    );
+    if let (Some(pd), Some(rd)) = (
+        p.get("direction").and_then(toml::Value::as_str),
+        roles.rr3_role_direction(role),
+    ) {
+        assert_eq!(pd, rd, "pin {role} direction 与角色不一致（校验①）");
     }
+    let per = roles.rr3_role_per_inst(role).unwrap_or(false);
+    let has_inst = p
+        .get("instance")
+        .and_then(toml::Value::as_str)
+        .is_some_and(|s| !s.is_empty());
+    assert_eq!(
+        has_inst, per,
+        "pin {role} instance 有无与 per_instance = {per} 不符（校验①-b）"
+    );
+}
+
+/// [hardware] 不得出现八物理键（门 n：schema 3 起唯一来源 = [pins] 派生）。
+fn assert_hardware_derived(v: &toml::Value) {
     if let Some(hardware) = v.get("hardware").and_then(toml::Value::as_table) {
         for k in [
             "pwm_chip",
@@ -406,8 +413,10 @@ fn assert_profile_pins_schema3(v: &toml::Value, root: &std::path::Path, expect_p
             );
         }
     }
-    // 域 pin（校验⑥ CI 侧静态面）：[[supplies.domain]] 域名非空不重复；
-    // [pins].rail ∈ 域名集 ∪ {"none"}（⑥-a 在册 + ⑥-b 功率面挂真轨的名单面）
+}
+
+/// 域 pin（校验⑥ CI 侧静态面）：域名非空不重复；[pins].rail ∈ 域名集 ∪ {"none"}。
+fn assert_domain_rails(v: &toml::Value, pins: &[toml::Value]) {
     let mut domains: Vec<String> = Vec::new();
     for d in v
         .get("supplies")
@@ -434,4 +443,19 @@ fn assert_profile_pins_schema3(v: &toml::Value, root: &std::path::Path, expect_p
             }
         }
     }
+}
+
+/// schema 3 [pins] 与 roles.toml 的对账 pin（解析面）：角色集、方向、instance、域轨。
+fn assert_profile_pins_schema3(v: &toml::Value, root: &std::path::Path, expect_pin_roles: &[&str]) {
+    let roles = load_roles(root);
+    let pins = v
+        .get("pin")
+        .and_then(toml::Value::as_array)
+        .expect("缺 [[pin]]（schema 3 物理绑定真值点，§4.2）");
+    pin_roles_of(pins, expect_pin_roles);
+    for p in pins {
+        assert_pin_role(p, &roles);
+    }
+    assert_hardware_derived(v);
+    assert_domain_rails(v, pins);
 }
