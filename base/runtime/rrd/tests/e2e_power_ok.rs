@@ -42,8 +42,19 @@ fn is_power_frame(f: &rr_ipc::Rr3Frame, reason: &str) -> bool {
 #[test]
 fn battery_ok_clears_low_power_flag_and_names_the_recovery_once() {
     let mut rrd = RrdTest::rr3_start("power-ok");
-
     // ---------- 化身连接 + 旁观者 ----------
+    let (mut obs, mut p, power_task) = actors_connect(&mut rrd);
+    // ---------- ① low：置旗 + reason=battery-low 点名 ----------
+    low_sets_flag(&mut rrd, &mut p, &mut obs, power_task);
+    // ---------- ② ok：清旗 + reason=battery-ok 解除点名 ----------
+    ok_clears_flag(&mut rrd, &mut p, &mut obs, power_task);
+    // ---------- ③ 重复 ok：旗未置位，不重复广播 ----------
+    dup_ok_silent(&mut rrd, &mut p, &mut obs, power_task);
+}
+
+/// 旁观者与 rr3-power 化身各一连接；返回 (旁观者, 化身, 化身的分配 task)。
+/// 注册值必须互异：归属三层检查按 src_task 判，同值会让归属退化。
+fn actors_connect(rrd: &mut RrdTest) -> (RrdClient, RrdClient, u64) {
     let mut obs = rrd.rr3_connect();
     rr3_send(
         &mut obs,
@@ -62,10 +73,13 @@ fn battery_ok_clears_low_power_flag_and_names_the_recovery_once() {
         .as_u64()
         .expect("rr3-power 化身注册应答");
     assert_ne!(power_task, obs_task);
+    (obs, p, power_task)
+}
 
-    // ---------- ① low：置旗 + reason=battery-low 点名 ----------
+/// ① low：置旗日志 + reason=battery-low 点名帧形状。
+fn low_sets_flag(rrd: &mut RrdTest, p: &mut RrdClient, obs: &mut RrdClient, power_task: u64) {
     rr3_send(
-        &mut p,
+        p,
         &rr3_json_frame(
             Rr3PayloadType::Event,
             &json!({"topic": "rr3-power/battery/low", "seq": 1, "percent": 5, "voltage_mv": 3250}),
@@ -78,14 +92,16 @@ fn battery_ok_clears_low_power_flag_and_names_the_recovery_once() {
         trigger.contains("置全局低电旗"),
         "触发行必须点名置旗动作: {trigger}"
     );
-    let low_frame = rr3_read_where(&mut obs, " system/power 置旗点名", |f| {
+    let low_frame = rr3_read_where(obs, " system/power 置旗点名", |f| {
         is_power_frame(f, "battery-low")
     });
     assert_power_frame_shape(&low_frame, "battery-low", 5, 3250);
+}
 
-    // ---------- ② ok：清旗 + reason=battery-ok 解除点名 ----------
+/// ② ok：清旗与放行两个动作的日志 + reason=battery-ok 点名帧形状。
+fn ok_clears_flag(rrd: &mut RrdTest, p: &mut RrdClient, obs: &mut RrdClient, power_task: u64) {
     rr3_send(
-        &mut p,
+        p,
         &rr3_json_frame(
             Rr3PayloadType::Event,
             &json!({"topic": "rr3-power/battery/ok", "seq": 1, "percent": 80, "voltage_mv": 3900}),
@@ -98,14 +114,16 @@ fn battery_ok_clears_low_power_flag_and_names_the_recovery_once() {
         clear.contains("清全局低电旗") && clear.contains("恢复新 spawn"),
         "解除行必须点名清旗与放行两个动作: {clear}"
     );
-    let ok_frame = rr3_read_where(&mut obs, " system/power 解除点名", |f| {
+    let ok_frame = rr3_read_where(obs, " system/power 解除点名", |f| {
         is_power_frame(f, "battery-ok")
     });
     assert_power_frame_shape(&ok_frame, "battery-ok", 80, 3900);
+}
 
-    // ---------- ③ 重复 ok：旗未置位，不重复广播 ----------
+/// ③ 重复 ok：旗未置位，不重复广播（转发面照常，点名面必须安静）。
+fn dup_ok_silent(rrd: &mut RrdTest, p: &mut RrdClient, obs: &mut RrdClient, power_task: u64) {
     rr3_send(
-        &mut p,
+        p,
         &rr3_json_frame(
             Rr3PayloadType::Event,
             &json!({"topic": "rr3-power/battery/ok", "seq": 2, "percent": 81, "voltage_mv": 3901}),
@@ -116,7 +134,7 @@ fn battery_ok_clears_low_power_flag_and_names_the_recovery_once() {
     rrd.rr3_wait_log("低电兜底本未触发：重复 battery/ok 不重复广播");
     // 转发面照常（battery/ok seq=2 会到旁观者），点名面必须安静——collect 窗口内
     // 不得再出现任何 system/power 帧（前后两条已各被 ①② 读走，队列里不会攒着它）
-    let tail = rr3_collect_within(&mut obs, Duration::from_millis(400));
+    let tail = rr3_collect_within(obs, Duration::from_millis(400));
     let powers: Vec<Value> = tail
         .iter()
         .filter(|f| rr3_json_of(f)["topic"] == "rr3-runtime/system/power")
