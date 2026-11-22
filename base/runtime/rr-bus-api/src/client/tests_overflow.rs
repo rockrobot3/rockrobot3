@@ -1,6 +1,6 @@
 //! 满箱饥饿路径回归（2026-11-22 Pi 真机实证）。
 
-use super::super::conn::RR3_COUNTER_INBOX_STREAM_DROP;
+use super::super::conn::RR3_COUNTER_INBOX_BACKLOG_DROP;
 use super::super::{rr3_manifest_ident, Rr3BusClient};
 use super::{frame_send, tmp_bus_path, MANIFEST};
 use rr_ipc::{rr3_body_encode, rr3_body_split, rr3_frame_read, rr3_frame_write, Rr3PayloadType};
@@ -9,11 +9,11 @@ use std::os::unix::net::UnixListener;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-/// 主循环被长云调用（ASR 超时重试）占住、inbox 被音频流帧填满时，reader 不能
-/// 卡在 send 上——否则心跳应答读不到，模块被自己的心跳宽限判死。流帧满箱丢弃
-/// 要计数，心跳必须继续通。
+/// 主循环被长动作（ASR 超时重试、整段 TTS 播放）占住、inbox 被广播帧填满时，
+/// reader 不能卡在 send 上——否则心跳应答读不到，模块被自己的心跳宽限判死。
+/// 满箱只丢 Event/Stream 并计数，心跳必须继续通。
 #[test]
-fn full_inbox_drops_stream_frames_and_keeps_heartbeat_alive() {
+fn full_inbox_drops_backlog_frames_and_keeps_heartbeat_alive() {
     let path = tmp_bus_path("stream-drop");
     let listener = UnixListener::bind(&path).unwrap();
     let (hb_tx, hb_rx) = mpsc::channel::<Value>();
@@ -44,11 +44,12 @@ fn full_inbox_drops_stream_frames_and_keeps_heartbeat_alive() {
                 if rr3_frame_write(&mut stream, &frame_send(payload)).is_err() {
                     return;
                 }
-                // 灌 >256 帧流：客户端不 poll，旧实现 reader 会卡在第 257 帧
+                // 灌 >256 帧广播（当前线上全是 Event）：客户端不 poll，
+                // 旧实现 reader 会卡在第 257 帧
                 for i in 0..320u32 {
                     let body = json!({"topic":"rr3-fake/pcm","seq":i,"pcm_b64":"AA=="});
                     let payload =
-                        rr3_body_encode(Rr3PayloadType::Stream, body.to_string().as_bytes());
+                        rr3_body_encode(Rr3PayloadType::Event, body.to_string().as_bytes());
                     if rr3_frame_write(&mut stream, &frame_send(payload)).is_err() {
                         return;
                     }
@@ -76,7 +77,7 @@ fn full_inbox_drops_stream_frames_and_keeps_heartbeat_alive() {
         let Ok(params) = hb_rx.recv_timeout(Duration::from_millis(500)) else {
             continue;
         };
-        drops = params["counters"][RR3_COUNTER_INBOX_STREAM_DROP]
+        drops = params["counters"][RR3_COUNTER_INBOX_BACKLOG_DROP]
             .as_u64()
             .unwrap_or(0);
         if drops > 0 {
@@ -85,11 +86,11 @@ fn full_inbox_drops_stream_frames_and_keeps_heartbeat_alive() {
     }
     assert!(
         drops >= 64,
-        "320 帧灌入 256 上限后应至少丢 64 帧流帧，实得 {drops}"
+        "320 帧灌入 256 上限后应至少丢 64 帧事件面广播，实得 {drops}"
     );
     assert!(
         client.rr3_connected(),
-        "满箱丢流帧期间心跳必须继续可应答，模块不得自杀"
+        "满箱丢事件面广播期间心跳必须继续可应答，模块不得自杀"
     );
     drop(client);
     let _ = std::fs::remove_file(&path);

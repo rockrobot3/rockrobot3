@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::os::unix::net::UnixStream;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// 原子计数器型（task 序号 / JSON-RPC id 两处单调计数器的承载型，批N8 件三）：
 /// 64 位平台走 AtomicU64；32 位目标（xtensa esp32 的 espidf 档 std 无 64 位原子）
@@ -42,18 +42,24 @@ const RR3_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// restart_policy 接管。
 const RR3_HEARTBEAT_MAX_MISSES: u32 = 3;
 
-/// 收件箱（非应答帧）队列上界（帧数，0.0.8b 审计 B-6）。有界化把"主循环停摆的
-/// 模块 OOM"折成"背压沿链上浮"；但**流帧**（audio/pcm 这类连续实时面）满箱时
-/// 由 reader 直接丢弃并记 [`RR3_COUNTER_INBOX_STREAM_DROP`]，事件/请求帧维持
-/// 阻塞背压——reader 若在流帧上卡死，心跳应答也读不到，一次合法的长云调用
-/// （ASR 8s×2 重试 = 16.8s）会被放大成"心跳连续 3 拍失败 → 模块自杀"
-/// （2026-11-22 Pi 真机实测：brain 整轮被杀）。正常主循环每拍 `rr3_poll` 排空；
-/// 最坏驻留 256×~11KB ≈ 2.8MB/模块，可承受。
+/// 收件箱（非应答帧）队列上界（帧数，0.0.8b 审计 B-6 立规，2026-11-22 修满侧策略）。
+///
+/// 旧策略"满箱 → reader 阻塞在 send"有两个致命后果：① reader 连心跳应答也读不到，
+/// 一次合法的长动作（Pi 实测 brain ASR 超时重试 16.8s；interact 播放整段 TTS 同理）
+/// 被放大成"心跳连续 3 拍失败 → 模块自杀"；② rrd 侧 writer 被回压拖住，广播队列
+/// 连带积压丢帧（同一故障被记两遍）。总线对 Event 的契约本来就是**尽力投递**
+/// （rrd 的 fanout 满队列同样只丢帧不拖连接），客户端没有理由把尽力投递升级成
+/// 阻塞回压。
+///
+/// 现策略：inbox 走无界通道 + 显式 `inbox_len` 水位——满箱时 **Event/Stream 帧
+/// 丢弃并记 [`RR3_COUNTER_INBOX_BACKLOG_DROP`]**，Request/Notification 一律入箱
+/// （控制面不丢），reader 永不停在 send 上。最坏驻留 ≈ 256 帧（~2.8MB），事件
+/// 缺口由计数显式可见，模块主循环恢复后按序排空积压帧。
 const RR3_INBOX_CAP: usize = 256;
 
-/// 流帧满箱丢弃计数键（随心跳 counters 上行，`rr3-ctl counters` 可见）。
-/// 非零 = 主循环曾被长操作占住、实时流出现缺口——显式记账，不静默。
-pub(super) const RR3_COUNTER_INBOX_STREAM_DROP: &str = "inbox_stream_drop";
+/// 满箱丢弃计数键（随心跳 counters 上行，`rr3-ctl counters` 可见）。
+/// 非零 = 主循环曾被长动作占住、事件面出现缺口——显式记账，不静默。
+pub(super) const RR3_COUNTER_INBOX_BACKLOG_DROP: &str = "inbox_backlog_drop";
 
 /// 单调时基（0.0.5 批I A-2）：ADR-0018 裁定 3"单调时基"的 **std 驱动器侧供给**
 /// ——`Instant` 锚点起的相对毫秒，墙钟回拨/跳变不影响拍点判定。旧实现用
@@ -88,6 +94,9 @@ pub(super) struct Rr3Inner {
     pub(super) pending: Mutex<HashMap<u64, SyncSender<Result<Value, String>>>>,
     /// 非应答帧（Event / Notification / 点名 Request）的去处；`Arc` 使 poll 取 &self
     pub(super) inbox: Mutex<Receiver<Rr3Frame>>,
+    /// inbox 水位（reader 入箱 +1 / `rr3_poll*` 取走 −1）：满箱判定只读这个原子
+    /// 值，reader 不在锁上等消费侧——见 [`RR3_INBOX_CAP`] 的满侧策略。
+    pub(super) inbox_len: AtomicUsize,
     /// 运维计数表（0.0.4 批B，Q1 裁定）：模块业务线程经 [`Rr3BusClient::rr3_counter_bump`]
     /// 自愿累加，心跳线程每拍发「自上一拍以来」的**增量**（b3c 2026-10-21 语义钉死：
     /// rrd 归并侧按增量累加，聚合表 = 生命周期累计——旧实现每拍发全量快照被 rrd
@@ -270,13 +279,14 @@ impl Rr3BusClient {
         let writer = stream
             .try_clone()
             .map_err(|e| format!("try_clone 失败: {e}"))?;
-        let (tx, rx) = mpsc::sync_channel::<Rr3Frame>(RR3_INBOX_CAP);
+        let (tx, rx) = mpsc::channel::<Rr3Frame>();
         let inner = Arc::new(Rr3Inner {
             task: AtomicCounter::new(0),
             name: identity.name,
             sock: Mutex::new(writer),
             pending: Mutex::new(HashMap::new()),
             inbox: Mutex::new(rx),
+            inbox_len: AtomicUsize::new(0),
             counters: Mutex::new(BTreeMap::new()),
             counters_sent: Mutex::new(BTreeMap::new()),
             rt: Mutex::new(Rr3ModuleRuntime::rr3_runtime_new(identity.heartbeat_ms)),
@@ -341,7 +351,7 @@ impl Rr3ReaderGuard {
     fn rr3_start(
         stream: UnixStream,
         inner: &Arc<Rr3Inner>,
-        tx: mpsc::SyncSender<Rr3Frame>,
+        tx: mpsc::Sender<Rr3Frame>,
     ) -> Result<Self, String> {
         let inner_c = inner.clone();
         let mut sock = stream;

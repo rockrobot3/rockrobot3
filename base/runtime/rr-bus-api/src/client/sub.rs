@@ -12,7 +12,7 @@ use rr_ipc::{
 };
 use serde_json::Value;
 
-use super::conn::{Rr3BusClient, Rr3Inner, RR3_COUNTER_INBOX_STREAM_DROP};
+use super::conn::{Rr3BusClient, Rr3Inner, RR3_COUNTER_INBOX_BACKLOG_DROP, RR3_INBOX_CAP};
 
 impl Rr3BusClient {
     /// 总线还活着吗（reader 线程在 = 活；reader 断开 = 死）。轮询型主循环的死亡探针：
@@ -35,6 +35,7 @@ impl Rr3BusClient {
         while let Ok(frame) = rx.try_recv() {
             out.push(frame);
         }
+        rr3_inbox_consume(&self.inner, out.len());
         out
     }
 
@@ -51,7 +52,15 @@ impl Rr3BusClient {
         while let Ok(frame) = rx.try_recv() {
             out.push(frame);
         }
+        rr3_inbox_consume(&self.inner, out.len());
         out
+    }
+}
+
+/// 消费侧水位回退：取走多少帧就减多少（reader 入箱前先加，故不会欠账）。
+fn rr3_inbox_consume(inner: &Arc<Rr3Inner>, n: usize) {
+    if n > 0 {
+        inner.inbox_len.fetch_sub(n, Ordering::Relaxed);
     }
 }
 
@@ -59,7 +68,7 @@ impl Rr3BusClient {
 pub(super) fn rr3_reader_loop(
     sock: &mut UnixStream,
     inner: Arc<Rr3Inner>,
-    inbox_tx: mpsc::SyncSender<Rr3Frame>,
+    inbox_tx: mpsc::Sender<Rr3Frame>,
 ) {
     // EOF / 超时 / 坏帧：统一按断开处理。策略帽 1MB（0.0.8b 审计 B-7）：
     // 坏 plen 在分配前拒收，撕裂流/对端 bug 不能按 64MB 协议上界撑爆本进程。
@@ -78,7 +87,7 @@ pub(super) fn rr3_reader_loop(
 fn rr3_reader_frame(
     frame: Rr3Frame,
     inner: &Arc<Rr3Inner>,
-    inbox_tx: &mpsc::SyncSender<Rr3Frame>,
+    inbox_tx: &mpsc::Sender<Rr3Frame>,
 ) -> bool {
     let (ty, body) = match rr3_body_split(&frame.payload) {
         Ok(v) => v,
@@ -91,28 +100,28 @@ fn rr3_reader_frame(
     }
 }
 
-/// 非应答帧入箱：满箱时**只丢流帧**并计数——reader 不能被音频流卡在 send 上，
-/// 卡住就连心跳应答也读不到，一次合法的长云调用（ASR 超时重试）会被放大成
-/// "心跳连续失败 → 模块自杀"。事件/请求帧维持原阻塞背压语义，一帧不丢。
-/// `false` = inbox 已关（客户端已死）。
+/// 非应答帧入箱：满箱时 Event/Stream **只丢帧并计数**（总线对事件本来就是尽力
+/// 投递，rrd 的 fanout 满队列同策略），Request/Notification 一律入箱——控制面
+/// 不丢。reader 永不停在 send 上：长动作（ASR 超时重试、整段 TTS 播放）不再
+/// 被放大成"心跳应答读不到 → 模块自杀"。`false` = inbox 已关（客户端已死）。
 fn rr3_inbox_push(
     frame: Rr3Frame,
     ty: Rr3PayloadType,
     inner: &Arc<Rr3Inner>,
-    inbox_tx: &mpsc::SyncSender<Rr3Frame>,
+    inbox_tx: &mpsc::Sender<Rr3Frame>,
 ) -> bool {
-    match inbox_tx.try_send(frame) {
-        Ok(()) => true,
-        Err(mpsc::TrySendError::Disconnected(_)) => false,
-        Err(mpsc::TrySendError::Full(frame)) => {
-            if ty == Rr3PayloadType::Stream {
-                inner.rr3_counter_bump_inner(RR3_COUNTER_INBOX_STREAM_DROP, 1);
-                true
-            } else {
-                inbox_tx.send(frame).is_ok()
-            }
-        }
+    let droppable = matches!(ty, Rr3PayloadType::Event | Rr3PayloadType::Stream);
+    if droppable && inner.inbox_len.load(Ordering::Relaxed) >= RR3_INBOX_CAP {
+        inner.rr3_counter_bump_inner(RR3_COUNTER_INBOX_BACKLOG_DROP, 1);
+        return true;
     }
+    // 先记水位再入箱：消费侧收到帧时一定已计过账，fetch_sub 不会欠账。
+    inner.inbox_len.fetch_add(1, Ordering::Relaxed);
+    if inbox_tx.send(frame).is_err() {
+        inner.inbox_len.fetch_sub(1, Ordering::Relaxed);
+        return false;
+    }
+    true
 }
 
 /// 应答投邮箱：按 id 取等待者，命中则投 result / 拒因；无主应答静默丢弃
