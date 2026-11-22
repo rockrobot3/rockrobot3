@@ -6,7 +6,6 @@ use super::*;
 /// 两表真值源 = rr-hal-api（trait 面）/ rr-hal descriptor.rs（[hardware] 键集）；
 /// 本测试钉的是装配校验在 rr-registry 的这份副本——扩 trait/扩键都走契约级评审，
 /// 届时两处同批改，单改一处此测试当场红。
-#[test]
 /// 句柄 trait 词表 pin（九族）。
 fn assemble_handles_pinned() {
     assert_eq!(
@@ -132,7 +131,6 @@ fn repo_assemble_manifests_validate_and_injection_complete() {
 /// 平台登记表三份真文件可解析 + 关键形状钉死（基-22：校验 ④⑤⑧ 的判据前件；
 /// 细 pin 在 rr-registry/src/platform.rs mod tests，此层做 CI ②③ 的同源复核——
 /// 任一侧漂移即红）。演练两份的"空集显式"是裁定②的形状，不是缺段。
-#[test]
 /// esp32 平台表：控制器/ADC/输入专用/冲突组/具名构造。
 fn esp_platform_shape() {
     let esp = rr_registry::rr3_plat_parse(
@@ -228,7 +226,6 @@ fn platform_tables_parse_and_shape_is_pinned() {
 /// 2026-10-19 批N4 件五对表：rr3-interact 组合件级 ops 七槽首启用（表情节拍＋自检
 /// 期望表情＋面板五限额，消费点在组合件面），不再是零注入面——单独具名 pin 槽集；
 /// 其余五份维持零注入面断言不变。
-#[test]
 /// 组合件申报面 pin：模块 → atoms 链（增删原子件须走 ADR 并同批改本 pin）。
 const COMPOSITE_EXPECTED: &[(&str, &[&str])] = &[
     ("rr3-act", &["servo", "led", "relay"]),
