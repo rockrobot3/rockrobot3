@@ -41,14 +41,27 @@ fn sha256_matches_nist_vectors() {
 /// 未在册的 available:false 形由 --manifest e2e 路径覆盖（e2e_profile）。
 #[test]
 fn contracts_audit_judges_full_drift_missing_and_renders() {
-    // fixture = 最小真值集环境（capture 只定位不解析，装配单/接线档内容随意）：
-    // profiles/<stem>.toml + 契约四册 + contracts/platform/<chip>.toml +
-    // hardware/<stem>/wiring.toml，布局与装载消费真值集成员判据同名同位。
     let root = std::env::temp_dir().join(format!("rrd-contracts-audit-{}", std::process::id()));
-    let contracts = root.join("contracts");
-    std::fs::create_dir_all(contracts.join("platform")).expect("建临时契约目录");
     let stem = "audit-robot";
     let chip = "rk3566";
+    let (profile_path, contracts, wiring_path) = audit_fixture(&root, stem, chip);
+    let miss_dir = audit_booked(&profile_path, &contracts, &wiring_path, stem, chip);
+    audit_drift_missing(&contracts);
+    audit_render(chip);
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&miss_dir);
+}
+
+/// fixture = 最小真值集环境（capture 只定位不解析，装配单/接线档内容随意）：
+/// profiles/<stem>.toml + 契约四册 + contracts/platform/<chip>.toml +
+/// hardware/<stem>/wiring.toml，布局与装载消费真值集成员判据同名同位。
+fn audit_fixture(
+    root: &std::path::Path,
+    stem: &str,
+    chip: &str,
+) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let contracts = root.join("contracts");
+    std::fs::create_dir_all(contracts.join("platform")).expect("建临时契约目录");
     let profile_path = root.join("profiles").join(format!("{stem}.toml"));
     std::fs::create_dir_all(profile_path.parent().unwrap()).expect("建 profiles 目录");
     std::fs::write(&profile_path, "# audit fixture\n").expect("写装配单");
@@ -68,16 +81,26 @@ fn contracts_audit_judges_full_drift_missing_and_renders() {
     let wiring_path = root.join("hardware").join(stem).join("wiring.toml");
     std::fs::create_dir_all(wiring_path.parent().unwrap()).expect("建 hardware 目录");
     std::fs::write(&wiring_path, "# w1\n").expect("写接线档");
+    (profile_path, contracts, wiring_path)
+}
 
+/// 记账与齐全/未漂判定：缺成员 fail-closed → 七成员记账断言 → 定格 → 五条判果。
+fn audit_booked(
+    profile_path: &std::path::Path,
+    contracts: &std::path::Path,
+    wiring_path: &std::path::Path,
+    stem: &str,
+    chip: &str,
+) -> std::path::PathBuf {
     // 记账 fail-closed：真值集成员缺席拒记账（boot 定格点据此带因拒 boot）——
     // 四册齐而平台事实表缺席，第二段记账照样红（基-40 成员完整性是记账前提）
     let miss_dir = std::env::temp_dir().join(format!("rrd-contracts-miss-{}", std::process::id()));
     std::fs::create_dir_all(&miss_dir).expect("建缺册目录");
-    let e = rr3_contracts_scan(&profile_path, &miss_dir, &wiring_path, chip)
+    let e = rr3_contracts_scan(profile_path, &miss_dir, wiring_path, chip)
         .expect_err("缺真值集成员必须拒记账");
     assert!(e.contains("记账读失败") && e.contains("topics.toml"), "{e}");
 
-    let snap = rr3_contracts_scan(&profile_path, &contracts, &wiring_path, chip)
+    let snap = rr3_contracts_scan(profile_path, contracts, wiring_path, chip)
         .expect("真值集七成员齐全应记账成功");
     assert_eq!(snap.entries.len(), 4);
     assert_eq!(snap.entries[0].file, "topics.toml");
@@ -104,7 +127,11 @@ fn contracts_audit_judges_full_drift_missing_and_renders() {
     );
     assert_eq!(checks[0].item, "contract:topics.toml");
     assert_eq!(checks[4].item, "truth_set");
+    miss_dir
+}
 
+/// sha 对破（改册 → 还原）与齐全破（删册）两形判果。
+fn audit_drift_missing(contracts: &std::path::Path) {
     // sha 对破：boot 后内容被改（四册账与真值集账同抓一病，truth_set 逐枚点名）
     std::fs::write(contracts.join("topics.toml"), "# t2\n").expect("改册");
     let checks = rr3_contracts_checks();
@@ -144,8 +171,10 @@ fn contracts_audit_judges_full_drift_missing_and_renders() {
         "{}",
         ts.reason
     );
+}
 
-    // 渲染（快照在册形）：available:true + 四行四册账 + 七行真值集账 + 五条判果
+/// 渲染（快照在册形）：available:true + 四行四册账 + 七行真值集账 + 五条判果。
+fn audit_render(chip: &str) {
     let v = rr3_contracts_json();
     assert_eq!(v["available"], true, "{v}");
     assert_eq!(v["contracts"].as_array().map(Vec::len), Some(4));
@@ -155,7 +184,4 @@ fn contracts_audit_judges_full_drift_missing_and_renders() {
         format!("contracts/platform/{chip}.toml")
     );
     assert_eq!(v["checks"].as_array().map(Vec::len), Some(5));
-
-    let _ = std::fs::remove_dir_all(&root);
-    let _ = std::fs::remove_dir_all(&miss_dir);
 }
