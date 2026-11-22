@@ -21,7 +21,10 @@
 //! - LEDC  = GPIO32 水平轴（pan）/ GPIO33 俯仰轴（tilt）——避开 strapping 面
 //!   （0/2/5/12/15）、UART2（16/17）、I2C（21/22）、I2S 候选（25/26/27，批D）、
 //!   VSPI 缺省组（18/19/23，点阵预留不占用不使能）
-//! - UART0 = 控制台（monitor 观测面，板载 USB cu.usbserial-1410）
+//! - UART0 = 控制台（经板载 USB-UART 桥输出；classic 缺省 GPIO1/3、S3 GPIO43/44）。
+//!   观测走 `tools/deploy/console-log.py`（raw 8N1 + 清 DTR/RTS）——设备节点随
+//!   系统枚举变化，不在源码写死。S3 档显式关闭 USB-Serial/JTAG 副通道，日志只
+//!   走本口（boot 横幅 `console=uart0@<baud>` 自证）。
 //!
 //! 供电铁律（全案 §5）：舵机由 UBEC 独立 5V 轨供电（堵转 ~700mA/只，禁接板载
 //! 5V），UBEC/板/舵机单点共地；信号线 3.3V 逻辑直驱 SG90 级兼容。
