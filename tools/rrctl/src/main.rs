@@ -22,10 +22,7 @@ fn usage() -> ! {
         "      tail <topic> [--count N] [--secs S]（注册为观察者订阅事件，\
          N 条或超时退出；JSONL 走 stdout）"
     );
-    eprintln!(
-        "      logs --unit <name> [--lines N]（直读 <socket>.log/<name>.log 尾部，\
-         缺省 50 行；不发总线）"
-    );
+    eprintln!("      logs --unit <name>（直读 <socket>.log/<name>.log 最近 50 行；不发总线）");
     std::process::exit(2)
 }
 

@@ -6,41 +6,21 @@
 //! 拆分动因：`commands/mod.rs` 已被 ⑯ 行数门（≥500 硬线）逼近，本面独立成文件；
 //! 参数/名字门/尾部截取三层各自可测。
 
-/// `logs --unit <name> [--lines N]`：读日志尾部。模块名 fail-closed 只认
-/// `rr3-<小写字母>`（路径穿越防御）；行数缺省 50、上限 2000——append 面可能
-/// 很大，逐行环形截取，绝不全量读进内存再切。
+/// `logs --unit <name>`：读日志尾部（固定最近 50 行）。模块名 fail-closed 只认
+/// `rr3-<小写字母>`（路径穿越防御）。
 pub fn rr3_unit_log_tail(bus: &str, args: &[String]) -> Result<String, String> {
-    let (unit, lines) = rr3_unit_args(args)?;
-    let path = std::path::Path::new(&format!("{bus}.log")).join(format!("{unit}.log"));
-    rr3_tail_file(&path, lines)
-}
-
-/// 参数：`--unit <name>` 必给、`--lines N` 可选（缺省 50，收敛到 1..=2000）。
-fn rr3_unit_args(args: &[String]) -> Result<(String, usize), String> {
-    let mut unit = None;
-    let mut lines = 50usize;
-    let mut it = args.iter();
-    while let Some(a) = it.next() {
-        match a.as_str() {
-            "--unit" => unit = it.next().cloned(),
-            "--lines" => {
-                lines = it
-                    .next()
-                    .and_then(|v| v.parse().ok())
-                    .ok_or("--lines 需正整数")?;
-            }
-            other => {
-                return Err(format!(
-                    "未知参数 {other}（logs --unit <name> [--lines N]）"
-                ))
-            }
-        }
-    }
-    let unit = unit.ok_or("logs --unit <name>：缺模块名")?;
-    if !rr3_unit_name_ok(&unit) {
+    let unit = rr3_arg(args, "--unit").ok_or("logs --unit <name>：缺模块名")?;
+    if !rr3_unit_name_ok(unit) {
         return Err(format!("模块名非法 {unit}（只认 rr3-<小写字母>）"));
     }
-    Ok((unit, lines.clamp(1, 2000)))
+    let path = std::path::Path::new(&format!("{bus}.log")).join(format!("{unit}.log"));
+    rr3_tail_file(&path)
+}
+
+/// `--flag` 后面的值（缺 flag 或缺值 = None）。
+fn rr3_arg<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+    let i = args.iter().position(|a| a == flag)?;
+    args.get(i + 1).map(String::as_str)
 }
 
 /// 模块名规则（与 rrd 注册门 `^rr3-[a-z]+$` 同源）：拼路径前 fail-closed。
@@ -49,28 +29,20 @@ fn rr3_unit_name_ok(name: &str) -> bool {
         .is_some_and(|r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_lowercase()))
 }
 
-/// 读文件尾部 N 行（环形缓冲；打不开点名"模块未起过/实例路径不对"）。
-fn rr3_tail_file(path: &std::path::Path, lines: usize) -> Result<String, String> {
-    use std::io::{BufRead, BufReader};
-    let f = std::fs::File::open(path).map_err(|e| {
+/// 读文件尾部 50 行：一次读入后按行切片（per-unit 文件有轮转上界，量级 MB）。
+fn rr3_tail_file(path: &std::path::Path) -> Result<String, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| {
         format!(
             "读 {} 失败: {e}（模块未起过 / --bus-path 指向的实例不对）",
             path.display()
         )
     })?;
-    let mut ring: std::collections::VecDeque<String> =
-        std::collections::VecDeque::with_capacity(lines);
-    for line in BufReader::new(f).lines() {
-        let line = line.map_err(|e| format!("读 {} 失败: {e}", path.display()))?;
-        if ring.len() == lines {
-            ring.pop_front();
-        }
-        ring.push_back(line);
-    }
-    if ring.is_empty() {
+    let all: Vec<&str> = text.lines().collect();
+    let tail = all[all.len().saturating_sub(50)..].join("\n");
+    if tail.is_empty() {
         return Ok(format!("（{} 无内容）", path.display()));
     }
-    Ok(ring.into_iter().collect::<Vec<_>>().join("\n"))
+    Ok(tail)
 }
 
 #[cfg(test)]
@@ -95,24 +67,16 @@ mod tests {
     }
 
     #[test]
-    fn unit_args_reject_bad_shapes() {
-        assert!(rr3_unit_args(&[]).is_err(), "缺 --unit 应拒");
+    fn unit_arg_missing_or_unknown_is_rejected() {
+        assert!(
+            rr3_unit_log_tail("/tmp/x.sock", &[]).is_err(),
+            "缺 --unit 应拒"
+        );
         let bad = vec!["--unit".to_string(), "../x".to_string()];
-        assert!(rr3_unit_args(&bad).is_err(), "非法名应拒");
-        let ok = vec![
-            "--unit".to_string(),
-            "rr3-sense".to_string(),
-            "--lines".to_string(),
-            "3".to_string(),
-        ];
-        assert_eq!(rr3_unit_args(&ok).unwrap(), ("rr3-sense".to_string(), 3));
-        let big = vec![
-            "--unit".to_string(),
-            "rr3-sense".to_string(),
-            "--lines".to_string(),
-            "99999".to_string(),
-        ];
-        assert_eq!(rr3_unit_args(&big).unwrap().1, 2000, "行数应收敛到上限");
+        assert!(
+            rr3_unit_log_tail("/tmp/x.sock", &bad).is_err(),
+            "非法名应拒"
+        );
     }
 
     #[test]
@@ -121,9 +85,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("rr3-sense.log");
         std::fs::write(&path, "a\nb\nc\nd\ne\n").unwrap();
-        assert_eq!(rr3_tail_file(&path, 2).unwrap(), "d\ne");
-        assert_eq!(rr3_tail_file(&path, 50).unwrap(), "a\nb\nc\nd\ne");
-        assert!(rr3_tail_file(&dir.join("rr3-absent.log"), 5).is_err());
+        assert_eq!(rr3_tail_file(&path).unwrap(), "a\nb\nc\nd\ne");
+        assert!(rr3_tail_file(&dir.join("rr3-absent.log")).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
