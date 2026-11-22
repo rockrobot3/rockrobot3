@@ -7,7 +7,8 @@ use super::*;
 /// 本测试钉的是装配校验在 rr-registry 的这份副本——扩 trait/扩键都走契约级评审，
 /// 届时两处同批改，单改一处此测试当场红。
 #[test]
-fn assemble_registry_tables_are_pinned() {
+/// 句柄 trait 词表 pin（九族）。
+fn assemble_handles_pinned() {
     assert_eq!(
         rr_registry::RR3_ASSEMBLE_HANDLE_TRAITS,
         &[
@@ -22,6 +23,10 @@ fn assemble_registry_tables_are_pinned() {
             "Rr3DigitalIn",
         ]
     );
+}
+
+/// 描述符键集 pin（宿主/板侧/凭据/INA219 校准全量）。
+fn assemble_desc_pinned() {
     assert_eq!(
         rr_registry::RR3_ASSEMBLE_DESC_KEYS,
         &[
@@ -63,6 +68,12 @@ fn assemble_registry_tables_are_pinned() {
             "ina219_ilsb_ua",
         ]
     );
+}
+
+#[test]
+fn assemble_registry_tables_are_pinned() {
+    assemble_handles_pinned();
+    assemble_desc_pinned();
 }
 
 /// G4 仓扫描（ADR-0019 修订 1 ③，批J）：modules/ 下每个 atoms/*/assemble.toml
@@ -122,7 +133,8 @@ fn repo_assemble_manifests_validate_and_injection_complete() {
 /// 细 pin 在 rr-registry/src/platform.rs mod tests，此层做 CI ②③ 的同源复核——
 /// 任一侧漂移即红）。演练两份的"空集显式"是裁定②的形状，不是缺段。
 #[test]
-fn platform_tables_parse_and_shape_is_pinned() {
+/// esp32 平台表：控制器/ADC/输入专用/冲突组/具名构造。
+fn esp_platform_shape() {
     let esp = rr_registry::rr3_plat_parse(
         &std::fs::read_to_string(repo_root().join("contracts/platform/esp32.toml"))
             .expect("contracts/platform/esp32.toml 必须存在（批N1 基-22 产物）"),
@@ -140,7 +152,10 @@ fn platform_tables_parse_and_shape_is_pinned() {
         .iter()
         .any(|c| c.rr3_conflict_group() == "i2c0"));
     assert!(esp.rr3_ctor_contains("ledc0", "act.axis.pwm", "pan"));
+}
 
+/// esp32s3 平台表：控制器通道数/ADC/冲突组（两条）/双轴构造/空词形映射。
+fn s3_platform_shape() {
     let s3 = rr_registry::rr3_plat_parse(
         &std::fs::read_to_string(repo_root().join("contracts/platform/esp32s3.toml"))
             .expect("contracts/platform/esp32s3.toml 必须存在（W1/T2）"),
@@ -166,7 +181,10 @@ fn platform_tables_parse_and_shape_is_pinned() {
     assert!(s3.rr3_ctor_contains("ledc0", "act.axis.pwm", "pan"));
     assert!(s3.rr3_ctor_contains("ledc0", "act.axis.pwm", "tilt"));
     assert!(s3.rr3_wordform_map().is_empty());
+}
 
+/// rk3566 平台表：无 ADC/无冲突、具名构造两枚（舵机与电池）。
+fn rk_platform_shape() {
     let rk = rr_registry::rr3_plat_parse(
         &std::fs::read_to_string(repo_root().join("contracts/platform/rk3566.toml"))
             .expect("contracts/platform/rk3566.toml 必须存在（演练实例，取值待器件核对）"),
@@ -177,7 +195,10 @@ fn platform_tables_parse_and_shape_is_pinned() {
     assert!(rk.rr3_conflicts().is_empty());
     assert!(rk.rr3_ctor_contains("pwm0", "act.axis.pwm", "pan"));
     assert!(rk.rr3_ctor_contains("i2c1", "power.battery.meter", ""));
+}
 
+/// raspberry-pi-4 平台表：双轴舵机具名构造、pwm0 双通道。
+fn rpi_platform_shape() {
     let rpi = rr_registry::rr3_plat_parse(
         &std::fs::read_to_string(repo_root().join("contracts/platform/raspberry-pi-4.toml"))
             .expect("contracts/platform/raspberry-pi-4.toml 必须存在（演练实例，待真板对账）"),
@@ -193,6 +214,14 @@ fn platform_tables_parse_and_shape_is_pinned() {
     assert_eq!(rpi.rr3_ctl_channels("pwm0"), Some(2));
 }
 
+#[test]
+fn platform_tables_parse_and_shape_is_pinned() {
+    esp_platform_shape();
+    s3_platform_shape();
+    rk_platform_shape();
+    rpi_platform_shape();
+}
+
 /// 六份组合件清单真文件：申报面定形 pin（N-11，§8 门 j 前件）——schema 位（组合件
 /// 面版本域 = 1，与件级 2 同名不同域）、name 与目录名同源、atoms ⊗ 链集合、空面
 /// 明写 no_injection；外加三枚合成反例钉死判据本身。
@@ -200,71 +229,77 @@ fn platform_tables_parse_and_shape_is_pinned() {
 /// 期望表情＋面板五限额，消费点在组合件面），不再是零注入面——单独具名 pin 槽集；
 /// 其余五份维持零注入面断言不变。
 #[test]
-fn composite_declaration_face_is_pinned() {
-    let expected: &[(&str, &[&str])] = &[
-        ("rr3-act", &["servo", "led", "relay"]),
-        ("rr3-brain", &["dialog", "asr", "llm", "tts"]),
-        ("rr3-connect", &["wifi", "bt"]),
-        ("rr3-interact", &["face", "player"]),
-        ("rr3-power", &["battery", "charger"]),
-        ("rr3-sense", &["capture", "vad", "env", "imu"]),
-    ];
-    for (name, atoms) in expected {
-        let path = repo_root().join(format!("modules/{name}/composite.toml"));
-        let text = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("{} 读不到: {e}", path.display()));
-        let facts = rr_registry::rr3_composite_parse(&text)
-            .unwrap_or_else(|errs| panic!("{} 坏形: {errs:?}", path.display()));
-        assert_eq!(facts.name, *name, "{}: name 与目录名不同源", path.display());
-        assert_eq!(facts.unit, "process");
-        assert_eq!(
-            facts.atoms,
-            *atoms,
-            "{}: atoms ⊗ 链漂移（增删原子件须走 ADR 并同批改本 pin）",
-            path.display()
-        );
-        if *name == "rr3-interact" {
-            // 批N4 件五：组合件级 ops 七槽首启用（I-17/I-18②），句柄仍零、
-            // no_injection 不再写——增删槽须同批改本 pin 与门 d 分母基线。
-            assert!(
-                facts.handles.is_empty() && !facts.no_injection,
-                "{}: 组合件申报面漂移（rr3-interact 非零注入面：七 ops 槽在册）",
-                path.display()
-            );
-            let slots: Vec<&str> = facts.ops.iter().map(|o| o.slot.as_str()).collect();
-            assert_eq!(
-                slots,
-                [
-                    "face_tick_ms",
-                    "selftest_face_expect",
-                    "panel_max_conns",
-                    "panel_read_timeout_ms",
-                    "panel_header_limit",
-                    "panel_body_limit",
-                    "panel_call_timeout_ms",
-                ],
-                "{}: 组合件级 ops 七槽漂移（批N4 件五 I-17/I-18②，增删须同批改本 pin）",
-                path.display()
-            );
-            continue;
-        }
+/// 组合件申报面 pin：模块 → atoms 链（增删原子件须走 ADR 并同批改本 pin）。
+const COMPOSITE_EXPECTED: &[(&str, &[&str])] = &[
+    ("rr3-act", &["servo", "led", "relay"]),
+    ("rr3-brain", &["dialog", "asr", "llm", "tts"]),
+    ("rr3-connect", &["wifi", "bt"]),
+    ("rr3-interact", &["face", "player"]),
+    ("rr3-power", &["battery", "charger"]),
+    ("rr3-sense", &["capture", "vad", "env", "imu"]),
+];
+
+/// rr3-interact 组合件级 ops 七槽 pin（批N4 件五 I-17/I-18②）；句柄仍零、
+/// no_injection 不再写——增删槽须同批改本 pin 与门 d 分母基线。
+fn interact_ops_slots(facts: &rr_registry::Rr3CompositeFacts, path: &std::path::Path) {
+    assert!(
+        facts.handles.is_empty() && !facts.no_injection,
+        "{}: 组合件申报面漂移（rr3-interact 非零注入面：七 ops 槽在册）",
+        path.display()
+    );
+    let slots: Vec<&str> = facts.ops.iter().map(|o| o.slot.as_str()).collect();
+    assert_eq!(
+        slots,
+        [
+            "face_tick_ms",
+            "selftest_face_expect",
+            "panel_max_conns",
+            "panel_read_timeout_ms",
+            "panel_header_limit",
+            "panel_body_limit",
+            "panel_call_timeout_ms",
+        ],
+        "{}: 组合件级 ops 七槽漂移（批N4 件五 I-17/I-18②，增删须同批改本 pin）",
+        path.display()
+    );
+}
+
+/// 单模块 composite.toml：名字同源、unit、atoms 链与非零/零注入面。
+fn assert_composite(name: &str, atoms: &[&str]) {
+    let path = repo_root().join(format!("modules/{name}/composite.toml"));
+    let text =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{} 读不到: {e}", path.display()));
+    let facts = rr_registry::rr3_composite_parse(&text)
+        .unwrap_or_else(|errs| panic!("{} 坏形: {errs:?}", path.display()));
+    assert_eq!(facts.name, name, "{}: name 与目录名不同源", path.display());
+    assert_eq!(facts.unit, "process");
+    assert_eq!(
+        facts.atoms,
+        atoms,
+        "{}: atoms ⊗ 链漂移（增删原子件须走 ADR 并同批改本 pin）",
+        path.display()
+    );
+    if name == "rr3-interact" {
+        interact_ops_slots(&facts, &path);
+    } else {
         assert!(
             facts.handles.is_empty() && facts.ops.is_empty() && facts.no_injection,
             "{}: 组合件申报面漂移（N-11：零注入面组合件必须显式申报）",
             path.display()
         );
     }
+}
 
+/// 反例组：空面漏写 no_injection / unit 出域 / 件级版本值 2（同名不同域）。
+fn composite_rejects() {
     let prologue =
         "schema_version = 1\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\n";
-    // 反例 1：两数组均空却漏写 no_injection → L-5 红
     let errs = rr_registry::rr3_composite_parse(&format!("{prologue}handles = []\nops = []\n"))
         .expect_err("空面漏写声明必须红");
     assert!(
         errs.iter().any(|e| e.contains("未明写 no_injection")),
         "{errs:?}"
     );
-    // 反例 2：unit 出域 → 红
     let errs = rr_registry::rr3_composite_parse(
         &prologue.replace("unit = \"process\"", "unit = \"thread\""),
     )
@@ -274,13 +309,20 @@ fn composite_declaration_face_is_pinned() {
             .any(|e| e.contains("unit") && e.contains("thread")),
         "{errs:?}"
     );
-    // 反例 3：写件级域的版本值 2 → 红，且点名"同名不同域"（schema 位裁定）
     assert_eq!(rr_registry::RR3_COMPOSITE_SCHEMA_VERSION, 1);
     let errs = rr_registry::rr3_composite_parse(
         "schema_version = 2\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\nhandles = []\nops = []\nno_injection = true\n",
     )
     .expect_err("组合件面写件级版本值必须红");
     assert!(errs.iter().any(|e| e.contains("同名不同域")), "{errs:?}");
+}
+
+#[test]
+fn composite_declaration_face_is_pinned() {
+    for (name, atoms) in COMPOSITE_EXPECTED {
+        assert_composite(name, atoms);
+    }
+    composite_rejects();
 }
 
 /// descriptor.rs 键集与 rr-registry 在册表"两处同批"机判（C4 撤销后的改判收口，
