@@ -6,45 +6,56 @@
 
 use super::*;
 
-/// 校验⑨ 判据实体反例组（批N2 首件基-36 立，门 c ⑨-c 补并发口径，判据进 ①b）：
-/// 正例（servo 五键申报形状 Σ700 ≤ cap 2000 ⇒ 绿）＋反例——同域加总超 cap ⇒ 红、
-/// rail 不在 domains ⇒ 红、critical=false 不进 Σ；并发口径三态——显式空组 =
-/// 全体同时（最坏缺省）、恰一组归属 = 组内互斥取 max（收窄须是数据，F-12）、
-/// 多组归属 = 不收窄（宁超算不漏算）。
-#[test]
-fn demand_budget_check_nine() {
-    let rail5v = || Rr3Domain {
+/// 夹具域：rail5v cap 2000 mA。
+fn rail5v() -> Rr3Domain {
+    Rr3Domain {
         name: "rail5v".into(),
         current_cap_ma: 2000,
         ..Default::default()
-    };
-    let d = |rail: &str, peak: i64, critical: bool, groups: &[&str]| Rr3AssembleDemand {
+    }
+}
+
+/// 夹具申报：peak 即 sustained 上限按 clamp(1,120) 派生（与旧闭包同式）。
+fn demand(rail: &str, peak: i64, critical: bool, groups: &[&str]) -> Rr3AssembleDemand {
+    Rr3AssembleDemand {
         rail: rail.into(),
         peak_ma: peak,
         sustained_ma: peak.clamp(1, 120),
         critical,
         concurrency_group: groups.iter().map(|g| g.to_string()).collect(),
-    };
+    }
+}
 
-    // 正例：servo 五键申报形状（rail5v peak 700 sustained 120 critical，空组）⇒ 无红
+/// 正例与非 critical：Σ700 ≤ cap 绿；critical=false 不进 Σ（5000 也绿）。
+fn db_positive() {
     let ok = vec![(
         "rr3-act/servo".to_string(),
-        vec![d("rail5v", 700, true, &[])],
+        vec![demand("rail5v", 700, true, &[])],
     )];
     assert!(
         rr3_demand_budget(&ok, &[rail5v()]).is_empty(),
         "Σ700 ≤ cap 2000 必须绿"
     );
+    let noncrit = vec![(
+        "rr3-x/dummy".to_string(),
+        vec![demand("rail5v", 5000, false, &[])],
+    )];
+    assert!(
+        rr3_demand_budget(&noncrit, &[rail5v()]).is_empty(),
+        "critical=false 不得进加总"
+    );
+}
 
-    // 反例①：两件同域加总超 cap（Σ2400 > 2000）⇒ 红点名域 + 最坏值 + cap + 申报者
+/// 反例①：两件同域加总超 cap（Σ2400 > 2000）⇒ 红点名域 + 最坏值 + cap + 申报者。
+fn db_over_cap() {
     let over = vec![
         (
             "rr3-act/servo".to_string(),
-            vec![d("rail5v", 700, true, &[])],
+            vec![demand("rail5v", 700, true, &[])],
         ),
         (
             "rr3-x/dummy".to_string(),
-            vec![d("rail5v", 1700, true, &[])],
+            vec![demand("rail5v", 1700, true, &[])],
         ),
     ];
     let errs = rr3_demand_budget(&over, &[rail5v()]);
@@ -57,60 +68,75 @@ fn demand_budget_check_nine() {
             && e.contains("rr3-x/dummy")),
         "{errs:?}"
     );
+}
 
-    // 反例②：rail 不在 domains ⇒ 红（域缺即 cap 缺，预算无分母）
-    let ghost = vec![("rr3-x/dummy".to_string(), vec![d("rail9v", 1, true, &[])])];
+/// 反例②：rail 不在 domains ⇒ 红（域缺即 cap 缺，预算无分母）。
+fn db_ghost_rail() {
+    let ghost = vec![(
+        "rr3-x/dummy".to_string(),
+        vec![demand("rail9v", 1, true, &[])],
+    )];
     let errs = rr3_demand_budget(&ghost, &[rail5v()]);
     assert!(
         errs.iter()
             .any(|e| e.contains("rail9v") && e.contains("不在 [[supplies.domain]]")),
         "{errs:?}"
     );
+}
 
-    // 反例③：critical=false 不进 Σ（判据只算 critical=true）——5000 mA 也绿
-    let noncrit = vec![(
-        "rr3-x/dummy".to_string(),
-        vec![d("rail5v", 5000, false, &[])],
-    )];
-    assert!(
-        rr3_demand_budget(&noncrit, &[rail5v()]).is_empty(),
-        "critical=false 不得进加总"
-    );
-
-    // 并发口径（F-12：不重叠必须是数据）——恰一组归属 = 组内互斥取 max：
-    // 三件各 700 同挂 "axis" 组 ⇒ 最坏 = max(700) = 700 ≤ 2000 绿（不加总 2100）
+/// 并发口径（F-12：不重叠必须是数据）：恰一组归属 = 组内互斥取 max；
+/// 多组归属 = 不收窄（宁超算不漏算）。
+fn db_concurrency() {
     let grouped = vec![
         (
             "rr3-a/servo".to_string(),
-            vec![d("rail5v", 700, true, &["axis"])],
+            vec![demand("rail5v", 700, true, &["axis"])],
         ),
         (
             "rr3-b/servo".to_string(),
-            vec![d("rail5v", 700, true, &["axis"])],
+            vec![demand("rail5v", 700, true, &["axis"])],
         ),
         (
             "rr3-c/servo".to_string(),
-            vec![d("rail5v", 700, true, &["axis"])],
+            vec![demand("rail5v", 700, true, &["axis"])],
         ),
     ];
     assert!(
         rr3_demand_budget(&grouped, &[rail5v()]).is_empty(),
         "同组互斥按 max 计（700 ≤ 2000）必须绿"
     );
-    // 多组归属 = 不收窄（宁超算不漏算）：条目同时挂两组 ⇒ 全额进 Σ
     let multi = vec![
         (
             "rr3-a/x".to_string(),
-            vec![d("rail5v", 700, true, &["g1", "g2"])],
+            vec![demand("rail5v", 700, true, &["g1", "g2"])],
         ),
-        ("rr3-b/y".to_string(), vec![d("rail5v", 700, true, &["g1"])]),
-        ("rr3-c/z".to_string(), vec![d("rail5v", 700, true, &["g2"])]),
+        (
+            "rr3-b/y".to_string(),
+            vec![demand("rail5v", 700, true, &["g1"])],
+        ),
+        (
+            "rr3-c/z".to_string(),
+            vec![demand("rail5v", 700, true, &["g2"])],
+        ),
     ];
     let errs = rr3_demand_budget(&multi, &[rail5v()]);
     assert!(
         errs.iter().any(|e| e.contains("2100")),
         "多组归属不收窄，全额加总 2100 > 2000 ⇒ 红 {errs:?}"
     );
+}
+
+/// 校验⑨ 判据实体反例组（批N2 首件基-36 立，门 c ⑨-c 补并发口径，判据进 ①b）：
+/// 正例（servo 五键申报形状 Σ700 ≤ cap 2000 ⇒ 绿）＋反例——同域加总超 cap ⇒ 红、
+/// rail 不在 domains ⇒ 红、critical=false 不进 Σ；并发口径三态——显式空组 =
+/// 全体同时（最坏缺省）、恰一组归属 = 组内互斥取 max（收窄须是数据，F-12）、
+/// 多组归属 = 不收窄（宁超算不漏算）。
+#[test]
+fn demand_budget_check_nine() {
+    db_positive();
+    db_over_cap();
+    db_ghost_rail();
+    db_concurrency();
 }
 
 /// 门 c 装载拒链·红例①（§5 ⑨ 后果 = 拒：扩算后 Σ critical > cap ⇒ boot Err）：
@@ -210,12 +236,8 @@ fn memory_budget_check_entity_green_and_red() {
     assert_eq!(e.len(), 2, "{e:?}");
 }
 
-/// [supplies.budget] 分档自洽反例组（parse 层，ADR-0021 修订 3 / F-6 留空反例）：
-/// host 档 not_applicable 缺失或写 false ⇒ 红；host 档并存数字键 ⇒ 红；
-/// rtos 档 not_applicable = true ⇒ 红；rtos 档缺三数键 ⇒ 红；段缺 ⇒ 红
-/// （DoD 3：每个缺失语义有留空反例）。
-#[test]
-fn budget_tier_consistency_errors_are_named() {
+/// host 档反例：not_applicable 写 false 或并存数字键。
+fn tier_host_errors() {
     // host 档 not_applicable 写 false（合法不适用不显式写 = 留空即红）
     let bad = GOOD.replace("not_applicable = true", "not_applicable = false");
     let errs = rr3_profile_parse(&bad).expect_err("host 档不写不适用必须红");
@@ -236,7 +258,10 @@ fn budget_tier_consistency_errors_are_named() {
             .any(|e| e.contains("并存数字预算键") && e.contains("task_stack_budget_bytes")),
         "{errs:?}"
     );
+}
 
+/// rtos 档反例：写不适用、缺三数键、total ≤ reserved。
+fn tier_rtos_errors() {
     // rtos 档 not_applicable = true（有真栈/堆预算却写不适用）
     let bad = ESP32_GOOD.replace("not_applicable = false", "not_applicable = true");
     let errs = rr3_profile_parse(&bad).expect_err("rtos 档写不适用必须红");
@@ -258,7 +283,21 @@ fn budget_tier_consistency_errors_are_named() {
     );
     assert!(errs.iter().any(|e| e.contains("heap_total_bytes 缺失")));
     assert!(errs.iter().any(|e| e.contains("heap_reserved_bytes 缺失")));
+}
 
+/// rtos 档物理矛盾：total ≤ reserved（可用堆 ≤ 0，⑩-b 无分母）。
+fn tier_physics_error() {
+    let bad = ESP32_GOOD.replace("heap_total_bytes = 327680", "heap_total_bytes = 8192");
+    let errs = rr3_profile_parse(&bad).expect_err("total ≤ reserved 必须红");
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("可用堆 = total − reserved ≤ 0")),
+        "{errs:?}"
+    );
+}
+
+/// 段缺与未知键反例（schema 4 起段必填，词表封闭）。
+fn tier_section_errors() {
     // 段缺（schema 4 起必填，不许整个子段留空）
     let bad = GOOD.replace("[supplies.budget]\nnot_applicable = true\n\n", "");
     let errs = rr3_profile_parse(&bad).expect_err("缺 [supplies.budget] 必须红");
@@ -278,15 +317,18 @@ fn budget_tier_consistency_errors_are_named() {
             .any(|e| e.contains("[supplies.budget] 未知键 stack_budget")),
         "{errs:?}"
     );
+}
 
-    // rtos 档物理矛盾：total ≤ reserved（可用堆 ≤ 0，⑩-b 无分母）
-    let bad = ESP32_GOOD.replace("heap_total_bytes = 327680", "heap_total_bytes = 8192");
-    let errs = rr3_profile_parse(&bad).expect_err("total ≤ reserved 必须红");
-    assert!(
-        errs.iter()
-            .any(|e| e.contains("可用堆 = total − reserved ≤ 0")),
-        "{errs:?}"
-    );
+/// [supplies.budget] 分档自洽反例组（parse 层，ADR-0021 修订 3 / F-6 留空反例）：
+/// host 档 not_applicable 缺失或写 false ⇒ 红；host 档并存数字键 ⇒ 红；
+/// rtos 档 not_applicable = true ⇒ 红；rtos 档缺三数键 ⇒ 红；段缺 ⇒ 红
+/// （DoD 3：每个缺失语义有留空反例）。
+#[test]
+fn budget_tier_consistency_errors_are_named() {
+    tier_host_errors();
+    tier_rtos_errors();
+    tier_section_errors();
+    tier_physics_error();
 }
 
 /// 门 c 装载拒链·校验⑩ 红例①（§5 ⑩-a 后果 = 拒）：ESP32_GOOD（rtos 档，
