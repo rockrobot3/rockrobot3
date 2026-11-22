@@ -380,12 +380,12 @@ mod tests {
     fn ensure_on_non_chardev_fails_loudly() {
         let root = std::env::temp_dir().join(format!("rr3-hal-pwr-{}-err", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(root.join("i2c1"), "").unwrap();
+        std::fs::write(root.join("i2c-1"), "").unwrap();
         let dev = Rr3LinuxIna219::rr3_linux_power_new(&root, 1, 0x40, None);
         let err = dev.battery().unwrap_err();
         assert!(
             matches!(err, Rr3HalError::InvalidParam(ref m)
-                if m.rr3_err_text_as_str().contains("i2c1")),
+                if m.rr3_err_text_as_str().contains("i2c-1")),
             "错误要点名总线路径: {err}"
         );
         let _ = std::fs::remove_dir_all(&root);
