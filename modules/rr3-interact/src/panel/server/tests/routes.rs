@@ -22,9 +22,8 @@ fn bus_reply_status_splits_business_error_from_success() {
     );
 }
 
-#[test]
-fn route_covers_all_table_entries() {
-    // 端点逐一点名（全集 = RR3_PANEL_ROUTES，表↔分派漂移由下一条门钉）：
+/// 读端点（首页/状态/数据/日志）的分派面。
+fn routes_read_shape() {
     assert_eq!(rr3_panel_route("GET", "/", b""), Rr3PanelDispatch::Html);
     assert_eq!(
         rr3_panel_route("GET", "/api/status", b""),
@@ -38,6 +37,10 @@ fn route_covers_all_table_entries() {
         rr3_panel_route("GET", "/api/logs", b""),
         Rr3PanelDispatch::LogsQuery
     );
+}
+
+/// act 面写端点：relay/beep/face/selftest/reboot。
+fn routes_act_post() {
     assert_eq!(
         rr3_panel_route("POST", "/api/relay", br#"{"on":true}"#),
         Rr3PanelDispatch::BusCall {
@@ -63,7 +66,10 @@ fn route_covers_all_table_entries() {
         rr3_panel_route("POST", "/api/reboot", b""),
         Rr3PanelDispatch::Reboot
     );
-    // 配网三端点（0.0.4 批D）：scan/forget 无参 BusCall，connect body 透传
+}
+
+/// 配网三端点（0.0.4 批D）：scan/forget 无参 BusCall，connect body 透传。
+fn routes_wifi_shape() {
     assert_eq!(
         rr3_panel_route("GET", "/api/wifi/scan", b""),
         Rr3PanelDispatch::BusCall {
@@ -89,7 +95,10 @@ fn route_covers_all_table_entries() {
             args: json!({})
         }
     );
-    // 五模块 ops 读口（批N4 件九二）：无参 BusCall 透传，各点名 owner 模块
+}
+
+/// 五模块 ops 读口 + brain 配置写口（group/slot/value body 原样透传）。
+fn routes_ops_shape() {
     assert_eq!(
         rr3_panel_route("GET", "/api/brain/ops", b""),
         Rr3PanelDispatch::BusCall {
@@ -97,7 +106,6 @@ fn route_covers_all_table_entries() {
             args: json!({})
         }
     );
-    // 配置面写口（件九三）：group/slot/value body 原样透传，点名 owner 写臂
     assert_eq!(
         rr3_panel_route(
             "POST",
@@ -109,66 +117,57 @@ fn route_covers_all_table_entries() {
             args: json!({ "group": "asr", "slot": "asr_model", "value": "m2" })
         }
     );
-    assert_eq!(
-        rr3_panel_route("GET", "/api/act/ops", b""),
-        Rr3PanelDispatch::BusCall {
-            topic: "rr3-act/ops/list".into(),
-            args: json!({})
-        }
-    );
-    assert_eq!(
-        rr3_panel_route("GET", "/api/connect/ops", b""),
-        Rr3PanelDispatch::BusCall {
-            topic: "rr3-connect/ops/list".into(),
-            args: json!({})
-        }
-    );
-    assert_eq!(
-        rr3_panel_route("GET", "/api/interact/ops", b""),
-        Rr3PanelDispatch::BusCall {
-            topic: "rr3-interact/ops/list".into(),
-            args: json!({})
-        }
-    );
-    assert_eq!(
-        rr3_panel_route("GET", "/api/power/ops", b""),
-        Rr3PanelDispatch::BusCall {
-            topic: "rr3-power/ops/list".into(),
-            args: json!({})
-        }
-    );
-    assert_eq!(
-        rr3_panel_route("GET", "/api/sense/ops", b""),
-        Rr3PanelDispatch::BusCall {
-            topic: "rr3-sense/ops/list".into(),
-            args: json!({})
-        }
-    );
-    // 装配快照读口（批N4 件九笔4）：GET /api/wiring → ctl 七号方法透传
+    for (path, topic) in [
+        ("/api/act/ops", "rr3-act/ops/list"),
+        ("/api/connect/ops", "rr3-connect/ops/list"),
+        ("/api/interact/ops", "rr3-interact/ops/list"),
+        ("/api/power/ops", "rr3-power/ops/list"),
+        ("/api/sense/ops", "rr3-sense/ops/list"),
+    ] {
+        assert_eq!(
+            rr3_panel_route("GET", path, b""),
+            Rr3PanelDispatch::BusCall {
+                topic: topic.into(),
+                args: json!({})
+            },
+            "{path} 必须透传 {topic}"
+        );
+    }
+}
+
+/// 装配读/写口：wiring 七号方法、profile/domain 透传与写口非 POST = 405。
+fn routes_assembly() {
     assert_eq!(
         rr3_panel_route("GET", "/api/wiring", b""),
         Rr3PanelDispatch::WiringQuery
     );
-    // 装配侧写口（批N22 件一）：POST /api/profile/domain → ctl.domain.set
-    // 透传，body 原样进分派参数（门序裁决在 rrd 单点）
     assert_eq!(
-            rr3_panel_route(
-                "POST",
-                "/api/profile/domain",
-                r#"{"target":"domain","name":"rail5v","key":"armed","value":true,"confirm":true,"evidence":"实测/0001"}"#.as_bytes()
-            ),
-            Rr3PanelDispatch::ProfileDomainSet {
-                params: json!({
-                    "target": "domain", "name": "rail5v", "key": "armed",
-                    "value": true, "confirm": true, "evidence": "实测/0001"
-                })
-            }
-        );
-    // 写口非 POST = 405（方法面收窄，与 relay/face 同口径）
+        rr3_panel_route(
+            "POST",
+            "/api/profile/domain",
+            r#"{"target":"domain","name":"rail5v","key":"armed","value":true,"confirm":true,"evidence":"实测/0001"}"#.as_bytes()
+        ),
+        Rr3PanelDispatch::ProfileDomainSet {
+            params: json!({
+                "target": "domain", "name": "rail5v", "key": "armed",
+                "value": true, "confirm": true, "evidence": "实测/0001"
+            })
+        }
+    );
     assert!(matches!(
         rr3_panel_route("GET", "/api/profile/domain", b""),
         Rr3PanelDispatch::MethodNotAllowed
     ));
+}
+
+#[test]
+fn route_covers_all_table_entries() {
+    // 端点逐一点名（全集 = RR3_PANEL_ROUTES，表↔分派漂移由下一条门钉）：
+    routes_read_shape();
+    routes_act_post();
+    routes_wifi_shape();
+    routes_ops_shape();
+    routes_assembly();
 }
 
 /// 端点表 ↔ 路由分派漂移门（MC-8③/I-9）：表内每条必须分派成功（不是
@@ -238,12 +237,8 @@ fn covers_use_declared_vocabulary_only() {
     }
 }
 
-/// applies 申报词表门（I-20，批N4 件四，全案 §19.3 判据 1）：第四列非空
-/// 必须在 [`RR3_PANEL_APPLY_MODES`] 三态内；写口（非 GET）动了可配置集
-/// （covers 非空）则 applies 必填——缺失即红。今日 covers 全空 ⇒ 判据
-/// 后半 vacuous，但门先建：件九三面扩端点写 covers 的当场被兜住。
-#[test]
-fn applies_use_declared_vocabulary_only() {
+/// applies 申报词表形制与写口必填门（写口动了可配置集则 applies 必填）。
+fn applies_vocab_shape() {
     for (method, path, covers, applies) in RR3_PANEL_ROUTES {
         if !applies.is_empty() {
             assert!(
@@ -258,10 +253,10 @@ fn applies_use_declared_vocabulary_only() {
             );
         }
     }
-    // 今日申报实况 pin：三条 applies = model-key 写口（live——secrets 落盘
-    // 后 brain 每次现读，无需重启/重烧）＋ brain ops 写口（件九三，live 内存
-    // 生效不落盘）＋ profile/domain 写口（批N22 件一，reboot——装配单落盘
-    // 下次 rrd 装载投影）。改申报 = 同批改本 pin 与设计册 I-20。
+}
+
+/// 今日申报实况 pin：三条 live 写口 + profile/domain 的 reboot 写口。
+fn applies_declared_pin() {
     let declared: Vec<_> = RR3_PANEL_ROUTES
         .iter()
         .filter(|(_, _, _, a)| !a.is_empty())
@@ -298,6 +293,16 @@ fn applies_use_declared_vocabulary_only() {
         ],
         "applies 申报面漂移：新增写口申报须同批改本 pin"
     );
+}
+
+/// applies 申报词表门（I-20，批N4 件四，全案 §19.3 判据 1）：第四列非空
+/// 必须在 [`RR3_PANEL_APPLY_MODES`] 三态内；写口（非 GET）动了可配置集
+/// （covers 非空）则 applies 必填——缺失即红。今日 covers 全空 ⇒ 判据
+/// 后半 vacuous，但门先建：件九三面扩端点写 covers 的当场被兜住。
+#[test]
+fn applies_use_declared_vocabulary_only() {
+    applies_vocab_shape();
+    applies_declared_pin();
 }
 
 /// 越权拒的静态形态：路由器里没有"发布"这种产物——relay 只能以
