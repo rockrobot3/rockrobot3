@@ -109,13 +109,8 @@ fn cfg_of(payload: &Path, repo: &Path) -> (Rr3PackConfig, PathBuf) {
 }
 
 #[test]
-fn stage_tree_lays_out_deb_layout_and_rewrites_entry_only() {
-    let (payload, repo) = fixture();
-    let (cfg, out) = cfg_of(&payload, &repo);
-    let stage = rr3_stage(&cfg).unwrap();
-    assert_eq!(stage, out.with_file_name("rockrobot3.deb.stage"));
-    let root = stage.join("usr/lib/rockrobot3");
-    // 二进制注入位
+/// 三枚二进制注入位（usr/bin）。
+fn assert_bins(stage: &std::path::Path) {
     assert_eq!(
         fs::read_to_string(stage.join("usr/bin/rrd")).unwrap(),
         "rrd-bin-bytes"
@@ -128,7 +123,10 @@ fn stage_tree_lays_out_deb_layout_and_rewrites_entry_only() {
         fs::read_to_string(stage.join("usr/bin/rr3-ota-ctl")).unwrap(),
         "ota-ctl-bin-bytes"
     );
-    // 数据真值位：零改写
+}
+
+/// 数据真值位零改写：装配单/契约、平台事实表按 chip 选册、接线档落装机位。
+fn assert_truth(root: &std::path::Path) {
     assert_eq!(
         fs::read_to_string(root.join("profiles/distro.toml")).unwrap(),
         DISTRO_PROFILE
@@ -137,8 +135,6 @@ fn stage_tree_lays_out_deb_layout_and_rewrites_entry_only() {
         fs::read_to_string(root.join("contracts/slots.toml")).unwrap(),
         "# slots\n"
     );
-    // boot 真值集随包（基-25 清单 files 成员）：roles/devices 契约 + chip 选册的
-    // 平台事实表 + 机型接线档；轴档案目录缺席（distro 无 axis）不造假数据
     assert_eq!(
         fs::read_to_string(root.join("contracts/roles.toml")).unwrap(),
         "# roles\n"
@@ -158,11 +154,14 @@ fn stage_tree_lays_out_deb_layout_and_rewrites_entry_only() {
         "接线档落装机位 hardware/<机型>/wiring.toml（装载推导同布局）"
     );
     assert!(!root.join("hardware/distro/axis").exists());
+}
+
+/// systemd 单元 + control + postinst（数据目录与 ctl 属组幂等建组）。
+fn assert_service(stage: &std::path::Path) {
     assert_eq!(
         fs::read_to_string(stage.join("usr/lib/systemd/system/rrd.service")).unwrap(),
         RR3_SERVICE_UNIT
     );
-    // control / postinst
     let control = fs::read_to_string(stage.join("DEBIAN/control")).unwrap();
     assert!(control.contains("Package: rockrobot3"));
     assert!(control.contains("Version: 0.0.12"));
@@ -176,7 +175,10 @@ fn stage_tree_lays_out_deb_layout_and_rewrites_entry_only() {
     // ctl socket 属主组（0.0.6 批F5b R12）：幂等建组（组在位不报错），与
     // rrd daemon 的 chgrp 组名同字面
     assert!(postinst.contains("addgroup --system rockrobot3 2>/dev/null || true"));
-    // 模块位：entry 改写为装机绝对路径，其余字节零差异；bin 按 entry 落位；config 随包
+}
+
+/// 模块位：entry 改写为装机绝对路径，其余字节零差异；bin 按 entry 落位；config 随包。
+fn assert_modules(root: &std::path::Path, payload: &std::path::Path) {
     let staged_manifest = fs::read_to_string(root.join("modules/rr3-act/module.toml")).unwrap();
     let facts = rr3_manifest_parse(&staged_manifest).unwrap();
     assert_eq!(facts.entry, "/usr/lib/rockrobot3/modules/rr3-act/rr3-act");
@@ -192,6 +194,19 @@ fn stage_tree_lays_out_deb_layout_and_rewrites_entry_only() {
     );
     assert!(root.join("modules/rr3-act/config.toml").is_file());
     assert!(root.join("modules/rr3-connect/rr3-connect").is_file());
+}
+
+#[test]
+fn stage_tree_lays_out_deb_layout_and_rewrites_entry_only() {
+    let (payload, repo) = fixture();
+    let (cfg, out) = cfg_of(&payload, &repo);
+    let stage = rr3_stage(&cfg).unwrap();
+    assert_eq!(stage, out.with_file_name("rockrobot3.deb.stage"));
+    let root = stage.join("usr/lib/rockrobot3");
+    assert_bins(&stage);
+    assert_truth(&root);
+    assert_service(&stage);
+    assert_modules(&root, &payload);
 }
 
 /// staging 复用必须先清空：上一次遗留的模块/配置不得进入本次包。
