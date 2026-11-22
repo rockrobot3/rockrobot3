@@ -37,6 +37,12 @@ const MAX_REPLY: usize = 180;
 /// 播放等待轮询步长与余量。
 const PLAY_POLL_MS: u64 = 200;
 const PLAY_SLACK_MS: u64 = 3_000;
+/// 对话轮内部 SRAM 准入预算（S3 余量②，0015 §6-5）：mbedTLS 握手/收发只走内部
+/// SRAM（PSRAM 不计），0015 实测轮内 `int_min ≈ 6.2 KB` 时 `create_ssl_handle`
+/// 失败。准入 = 24 KB，短等 1.5 s 让播放面缓冲退出；不足即弃轮并点名——
+/// 不把"堆不够"拖到 TLS 内部变成一句没有上下文的 SDK 错误。
+const DIALOG_INT_BUDGET_BYTES: usize = 24 * 1024;
+const DIALOG_INT_WAIT_MS: u64 = 1_500;
 /// 云端失败时的降级播报（契约 §4：不得静默弃轮；TTS 也失败则只留串口点名）。
 const RR3_DEGRADE_TEXT: &str = "网络不太通畅，请稍后再试。";
 /// S3 唤醒配置：与 classic `modules/rr3-brain/config.toml` 的 `[rr3-brain.wake]`
@@ -78,7 +84,9 @@ pub(crate) fn rr3_dialog_body(body: &[u8]) -> Result<Vec<i16>, String> {
 /// 一整轮（内存段）：ASR → 意图执行 → LLM → TTS → 播放等待 → 表情回落。
 /// 由 cloud worker 在收 `Rr3CloudJob::Turn` 时调用（线程与 TLS 栈同 TTS）。
 pub(crate) fn rr3_turn(bus: &Arc<Mutex<Bus>>, pcm: Vec<i16>) {
-    let t0 = rr3_turn_open(bus);
+    let Some(t0) = rr3_turn_open(bus) else {
+        return;
+    };
     let asr = rr3_asr_stage(&pcm);
     rr3_turn_text(bus, t0, asr);
 }
@@ -86,7 +94,10 @@ pub(crate) fn rr3_turn(bus: &Arc<Mutex<Bus>>, pcm: Vec<i16>) {
 /// 一整轮（spool 段，无 PSRAM 路径）：从 flash 分块读并流式 ASR，随后释放记录。
 /// 无论识别成败都释放——段已消费，`Done` 拒新段会让后续语音全部丢弃。
 pub(crate) fn rr3_turn_spool(bus: &Arc<Mutex<Bus>>, info: rr_audio_mech::Rr3SegInfo) {
-    let t0 = rr3_turn_open(bus);
+    let Some(t0) = rr3_turn_open(bus) else {
+        let _ = crate::spool::rr3_spool_clear();
+        return;
+    };
     println!(
         "[dialog] spool 段 seq={} len={}B crc={:#010x} 上传",
         info.seq, info.len, info.crc32
@@ -110,13 +121,26 @@ fn rr3_spool_gate() -> Result<(), String> {
     Err("spool 段 CRC 不符，弃轮（记录已清理）".into())
 }
 
-/// 轮首公共段：计时起点、堆账、心跳、思考表情。
-fn rr3_turn_open(bus: &Arc<Mutex<Bus>>) -> u64 {
+/// 轮首公共段：计时起点、堆账、心跳、内部堆准入、思考表情。
+///
+/// 返回 `None` = 内部堆预算不足，本轮不进入云链（已点名并回落 idle）——
+/// 与"能力缺失显式回错"同一条纪律，不静默降级。
+fn rr3_turn_open(bus: &Arc<Mutex<Bus>>) -> Option<u64> {
     let t0 = now_ms();
     crate::mem::rr3_heap_mark("dialog", "start");
     rr3_beat_dialog();
+    let int_free = crate::mem::rr3_int_wait(DIALOG_INT_BUDGET_BYTES, DIALOG_INT_WAIT_MS);
+    if int_free < DIALOG_INT_BUDGET_BYTES {
+        rr3_turn_end(
+            bus,
+            &format!(
+                "内部堆预算不足 int_free={int_free}B < {DIALOG_INT_BUDGET_BYTES}B（等待 {DIALOG_INT_WAIT_MS}ms 后仍不足，弃轮；TLS 前置）"
+            ),
+        );
+        return None;
+    }
     rr3_face(bus, "think");
-    t0
+    Some(t0)
 }
 
 /// ASR 之后的共用链（识别文本 → 唤醒门 → 意图 → LLM → TTS）。

@@ -23,6 +23,26 @@ pub(crate) fn rr3_heap_largest() -> usize {
     unsafe { heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT) as usize }
 }
 
+/// 内部 SRAM 当前空闲（字节）：TLS/云调用的真实约束面（PSRAM 不计入 mbedTLS）。
+pub(crate) fn rr3_int_free() -> usize {
+    // SAFETY：无参只读的 IDF 堆账查询。
+    unsafe { heap_caps_get_free_size(MALLOC_CAP_INTERNAL) as usize }
+}
+
+/// 有界等内部堆达到 `need`（50 ms 轮询，最多 `max_ms`；返回最后一次读数）。
+/// 云调用前的准入闸：播放面缓冲退出常是毫秒级瞬态，短等优于当场弃轮；
+/// 等不满即由调用方显式拒绝，绝不赌 TLS 分配成功。
+pub(crate) fn rr3_int_wait(need: usize, max_ms: u64) -> usize {
+    let mut free = rr3_int_free();
+    let mut waited = 0u64;
+    while free < need && waited < max_ms {
+        thread::sleep(Duration::from_millis(50));
+        waited += 50;
+        free = rr3_int_free();
+    }
+    free
+}
+
 /// 等一块 ≥ `need` 的连续堆（启动期 WiFi/httpd 线程与音频起栈并发，碎片会让
 /// 线程栈分配偶发失败；线程退出后大块会合并）。轮询 50 ms，最多 `max_ms`；
 /// 返回最后一次最大块，超时是否仍尝试由调用方决定。
