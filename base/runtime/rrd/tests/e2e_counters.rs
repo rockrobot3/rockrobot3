@@ -13,12 +13,69 @@
 
 mod support;
 
+use std::path::{Path, PathBuf};
+
 use support::{
-    register_sima_task, rr3_ask_ctl, rr3_assert_ctl_closed, rr3_manifest, rr3_read_rpc,
-    rr3_register_frame, rr3_rpc_frame, rr3_send, RrdTest,
+    register_sima_task, rr3_ask_ctl, rr3_assert_ctl_closed, rr3_read_rpc, rr3_rpc_frame, rr3_send,
+    RrdClient, RrdTest,
 };
 
 use serde_json::Value;
+
+/// 落盘夹具目录（pid + 纳秒唯一）；返回目录与 counters.json 路径。
+fn scratch_dir(tag: &str) -> (PathBuf, PathBuf) {
+    let dir = std::env::temp_dir().join(format!(
+        "{tag}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("counters.json");
+    (dir, path)
+}
+
+/// 起到"持久化已启用 + boots 自增已回写"的同一行日志（daemon 单点落环）。
+fn boot_persist(tag: &str, envs: &[(&str, &str)]) -> RrdTest {
+    let mut t = RrdTest::rr3_start_env(tag, envs);
+    // 启用与回写在同一行日志里（daemon 单点落环），一次等掉全语义
+    let line = t.rr3_wait_log("counters 持久化已启用");
+    assert!(line.contains("boots 自增已回写"), "{line}");
+    t
+}
+
+/// 一拍带 counters 的心跳：应答收到即代表本拍已进表（顺序契约）。
+fn heartbeat_counters(a: &mut RrdClient, id: u64, counters: serde_json::Value, task: u64) {
+    rr3_send(
+        a,
+        &rr3_rpc_frame(
+            "rr3.heartbeat",
+            id,
+            serde_json::json!({"counters": counters}),
+            task,
+        ),
+    );
+    rr3_read_rpc(a);
+}
+
+/// 有界轮询盘上 JSON 直到判据成立；超时以给定文案失败（不猜时刻）。
+fn wait_json(path: &Path, msg: &str, ok: impl Fn(&serde_json::Value) -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let hit = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .map(|v| ok(&v))
+            .unwrap_or(false);
+        if hit {
+            return;
+        }
+        assert!(std::time::Instant::now() < deadline, "{msg}");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
 
 /// 运维计数聚合（0.0.4 批B，Q1 裁定）：心跳可选 `counters` 字段 → rrd 按
 /// `模块名/键` 归并 → `rr3.ctl.counters` 读回。兼容面同批钉住：不带 counters
@@ -29,14 +86,7 @@ use serde_json::Value;
 #[test]
 fn ctl_counters_aggregates_heartbeat_counters() {
     let t = RrdTest::rr3_start_no_overlay("ctl-counters");
-    let mut a = t.rr3_connect();
-    rr3_send(
-        &mut a,
-        &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
-    );
-    let task = rr3_read_rpc(&mut a)["result"]["src_task"]
-        .as_u64()
-        .expect("注册应答带 src_task");
+    let (mut a, task) = register_sima_task(&t);
 
     // 不带 counters 的心跳：accepted（可选字段缺省 = 旧线上形状）
     rr3_send(
@@ -50,12 +100,18 @@ fn ctl_counters_aggregates_heartbeat_counters() {
     );
 
     // 带 counters 的两拍心跳：同键累加、异键并存
+    heartbeat_rounds(&mut a, task);
+    check_counters(&t);
+}
+
+/// 带 counters 的两拍心跳：同键累加、异键并存。
+fn heartbeat_rounds(a: &mut RrdClient, task: u64) {
     for (id, counters) in [
         (3, serde_json::json!({"asr_ok": 2, "relay_on": 1})),
         (4, serde_json::json!({"asr_ok": 3})),
     ] {
         rr3_send(
-            &mut a,
+            a,
             &rr3_rpc_frame(
                 "rr3.heartbeat",
                 id,
@@ -63,10 +119,13 @@ fn ctl_counters_aggregates_heartbeat_counters() {
                 task,
             ),
         );
-        let v = rr3_read_rpc(&mut a);
+        let v = rr3_read_rpc(a);
         assert!(v["result"].is_object(), "带 counters 的心跳 accepted: {v}");
     }
+}
 
+/// 读回 `rr3.ctl.counters`：同键跨拍累加（模块前缀归并）、异键并存；应答后 ctl 即关。
+fn check_counters(t: &RrdTest) {
     let mut ctl = t.rr3_connect();
     let v = rr3_ask_ctl(&mut ctl, "rr3.ctl.counters", 1);
     let counters = v["result"]["counters"]
@@ -89,101 +148,52 @@ fn ctl_counters_aggregates_heartbeat_counters() {
 /// tmp 残留断言在 counters.rs 单测里（load/store 的单元面），这里钉线上闭环。
 #[test]
 fn counters_persist_across_restart_and_boots_accumulate() {
-    let dir = std::env::temp_dir().join(format!(
-        "rrd-counters-e2e-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .subsec_nanos()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("counters.json");
+    let (dir, path) = scratch_dir("rrd-counters-e2e");
     let envs = [("RR3_DATA_DIR", dir.to_str().unwrap())];
-
-    // 第一世：启动自增 boots（=1）并回写；模块一拍带 counters 的心跳落盘
-    {
-        let mut t = RrdTest::rr3_start_env("counters-gen1", &envs);
-        // 启用与回写在同一行日志里（daemon 单点落环），一次等掉全语义
-        let line = t.rr3_wait_log("counters 持久化已启用");
-        assert!(line.contains("boots 自增已回写"), "{line}");
-        let mut a = t.rr3_connect();
-        rr3_send(
-            &mut a,
-            &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
-        );
-        let task = rr3_read_rpc(&mut a)["result"]["src_task"]
-            .as_u64()
-            .expect("注册应答带 src_task");
-        rr3_send(
-            &mut a,
-            &rr3_rpc_frame(
-                "rr3.heartbeat",
-                2,
-                serde_json::json!({"counters": {"chat_rounds": 4}}),
-                task,
-            ),
-        );
-        rr3_read_rpc(&mut a);
-        // 首拍即刷（R26 闸门 last=None）：读到盘上出现模块键为止，不猜时刻
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        loop {
-            let text = std::fs::read_to_string(&path).unwrap_or_default();
-            if text.contains("rr3-sima/chat_rounds") {
-                break;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "心跳计数应 write-through 落盘，盘上始终没有: {path:?}"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        let stored: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
-                .expect("counters.json 必须是合法 JSON");
-        assert_eq!(stored["boots"], 1, "第一世 boots 自增到 1: {stored}");
-        assert_eq!(stored["rr3-sima/chat_rounds"], 4, "{stored}");
-        assert!(
-            !dir.join("counters.json.tmp").exists(),
-            "原子写序走完不得留 tmp 残留"
-        );
-        // 显式退场不动计数账；进程随 drop 收尾（counters.json 留在盘上 = "断电"）
-    }
-
-    // 第二世：重启加载第一世的账 → boots 自增到 2 → 模块计数从 4 起继续累加
-    {
-        let mut t = RrdTest::rr3_start_env("counters-gen2", &envs);
-        let line = t.rr3_wait_log("counters 持久化已启用");
-        assert!(line.contains("boots 自增已回写"), "{line}");
-        let (mut a, task) = register_sima_task(&t);
-        rr3_send(
-            &mut a,
-            &rr3_rpc_frame(
-                "rr3.heartbeat",
-                2,
-                serde_json::json!({"counters": {"chat_rounds": 2}}),
-                task,
-            ),
-        );
-        rr3_read_rpc(&mut a);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        loop {
-            let ok = std::fs::read_to_string(&path)
-                .ok()
-                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-                .map(|v| v["rr3-sima/chat_rounds"] == 6 && v["boots"] == 2)
-                .unwrap_or(false);
-            if ok {
-                break;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "重启加载 + boots=2 + 4+2=6 的闭环没走通"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-    }
+    first_life(&dir, &path, &envs);
+    second_life(&path, &envs);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 第一世：启动自增 boots（=1）并回写；模块一拍带 counters 的心跳落盘。
+fn first_life(dir: &Path, path: &Path, envs: &[(&str, &str)]) {
+    let t = boot_persist("counters-gen1", envs);
+    let (mut a, task) = register_sima_task(&t);
+    heartbeat_counters(&mut a, 2, serde_json::json!({"chat_rounds": 4}), task);
+    // 首拍即刷（R26 闸门 last=None）：读到盘上出现模块键为止，不猜时刻
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let text = std::fs::read_to_string(path).unwrap_or_default();
+        if text.contains("rr3-sima/chat_rounds") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "心跳计数应 write-through 落盘，盘上始终没有: {path:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let stored: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap())
+        .expect("counters.json 必须是合法 JSON");
+    assert_eq!(stored["boots"], 1, "第一世 boots 自增到 1: {stored}");
+    assert_eq!(stored["rr3-sima/chat_rounds"], 4, "{stored}");
+    assert!(
+        !dir.join("counters.json.tmp").exists(),
+        "原子写序走完不得留 tmp 残留"
+    );
+    // 显式退场不动计数账；进程随 drop 收尾（counters.json 留在盘上 = "断电"）
+}
+
+/// 第二世：重启加载第一世的账 → boots 自增到 2 → 模块计数从 4 起继续累加。
+fn second_life(path: &Path, envs: &[(&str, &str)]) {
+    let t = boot_persist("counters-gen2", envs);
+    let (mut a, task) = register_sima_task(&t);
+    heartbeat_counters(&mut a, 2, serde_json::json!({"chat_rounds": 2}), task);
+    wait_json(
+        path,
+        "重启加载 + boots=2 + 4+2=6 的闭环没走通",
+        |v| v["rr3-sima/chat_rounds"] == 6 && v["boots"] == 2,
+    );
 }
 
 /// R26 心跳合并写 + 关停强制 flush（0.0.5 增补轮四 批W3）。两个判据一条用例钉死：
@@ -193,88 +203,51 @@ fn counters_persist_across_restart_and_boots_accumulate() {
 /// 一次性写全），且进程以 0 退出（处理器已装、flush 完自己退，信号死=没装上）。
 #[test]
 fn sigterm_forces_flush_of_pending_counters() {
-    let dir = std::env::temp_dir().join(format!(
-        "rrd-counters-term-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .subsec_nanos()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("counters.json");
+    let (dir, path) = scratch_dir("rrd-counters-term");
     let envs = [
         ("RR3_DATA_DIR", dir.to_str().unwrap()),
         ("RR3_COUNTERS_FLUSH_MS", "600000"),
     ];
 
-    let mut t = RrdTest::rr3_start_env("counters-term", &envs);
-    let line = t.rr3_wait_log("counters 持久化已启用");
-    assert!(line.contains("boots 自增已回写"), "{line}");
-
-    let mut a = t.rr3_connect();
-    rr3_send(
-        &mut a,
-        &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
-    );
-    let task = rr3_read_rpc(&mut a)["result"]["src_task"]
-        .as_u64()
-        .expect("注册应答带 src_task");
+    let mut t = boot_persist("counters-term", &envs);
+    let (mut a, task) = register_sima_task(&t);
 
     // 第一拍（首拍即刷）：盘上出现 term_flush=9
-    rr3_send(
-        &mut a,
-        &rr3_rpc_frame(
-            "rr3.heartbeat",
-            2,
-            serde_json::json!({"counters": {"term_flush": 9}}),
-            task,
-        ),
+    heartbeat_counters(&mut a, 2, serde_json::json!({"term_flush": 9}), task);
+    wait_json(
+        &path,
+        &format!("首拍即刷（last=None）落盘没发生: {path:?}"),
+        |v| v["rr3-sima/term_flush"] == 9,
     );
-    rr3_read_rpc(&mut a);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        let ok = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .map(|v| v["rr3-sima/term_flush"] == 9)
-            .unwrap_or(false);
-        if ok {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "首拍即刷（last=None）落盘没发生: {path:?}"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
 
     // 第二拍（窗口内）：应答回来 = 账已进内存（顺序契约），但盘必须仍是 9
-    rr3_send(
-        &mut a,
-        &rr3_rpc_frame(
-            "rr3.heartbeat",
-            3,
-            serde_json::json!({"counters": {"term_flush": 1}}),
-            task,
-        ),
-    );
-    rr3_read_rpc(&mut a);
+    assert_throttled(&mut a, task, &path);
+
+    // SIGTERM：关停强制 flush 补上尾部 → 盘 == 内存（10），进程退 0
+    sigterm_flush(&mut t, &dir, &path);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 窗口内第二拍：应答即入内存，但节流不得提前落盘。
+fn assert_throttled(a: &mut RrdClient, task: u64, path: &Path) {
+    heartbeat_counters(a, 3, serde_json::json!({"term_flush": 1}), task);
     std::thread::sleep(std::time::Duration::from_millis(300));
-    let stored: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
+    let stored: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap())
         .expect("counters.json 必须仍是合法 JSON");
     assert_eq!(
         stored["rr3-sima/term_flush"], 9,
         "窗口 M=600s 内第二拍变化不得提前落盘（节流失效）: {stored}"
     );
+}
 
-    // SIGTERM：关停强制 flush 补上尾部 → 盘 == 内存（10），进程退 0
+/// SIGTERM：关停强制 flush 补上尾部 → 盘 == 内存（10），进程退 0。
+fn sigterm_flush(t: &mut RrdTest, dir: &Path, path: &Path) {
     let status = t.rr3_sigterm_and_wait();
     assert!(
         status.success(),
         "SIGTERM 后必须以 0 退出（flush 完自己退）；信号死 = 处理器没装上: {status}"
     );
-    let stored: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
+    let stored: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap())
         .expect("关停 flush 后 counters.json 必须可解析");
     assert_eq!(stored["boots"], 1, "{stored}");
     assert_eq!(
@@ -285,5 +258,4 @@ fn sigterm_forces_flush_of_pending_counters() {
         !dir.join("counters.json.tmp").exists(),
         "原子写序走完不得留 tmp 残留"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
