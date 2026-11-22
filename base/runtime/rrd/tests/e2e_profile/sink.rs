@@ -1,6 +1,6 @@
 //! P5 rrd 自身日志落盘与重启回填用例（自 e2e_profile.rs 抽出，判据不变）。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -26,6 +26,17 @@ use crate::support::*;
 #[test]
 fn rrd_reboot_recovers_previous_run_lines_from_disk() {
     let root = Root::new("sink");
+    let profile = stage_sink(&root);
+    // —— 第一世：boot → rr3-pb running → kill -9 → 收尸行 → kill rrd ——
+    first_life(&profile);
+    // —— 第二世：同 tag = 同 socket；ctl.logs 应含第一世崩溃前的行 ——
+    let (rrd2, mut ctl) = second_life(&profile);
+    let joined = await_rejoin(&rrd2, &mut ctl);
+    assert_recall(&joined);
+}
+
+/// 落 sink 夹具：三件模块 + 清落盘目录残根 + 环容量 256 的装配单变形。
+fn stage_sink(root: &Root) -> PathBuf {
     for name in ["rr3-pa", "rr3-pb", "rr3-pc"] {
         root.write_module(name);
     }
@@ -40,11 +51,13 @@ fn rrd_reboot_recovers_previous_run_lines_from_disk() {
     // 环容量 256 而不是 64：本用例靠"回填行仍在环里"取证，慢 runner 上
     // 第二世启动行多打几行就会把 64 格里的收尸行挤掉（CI 2026-11-17 实测
     // 一次红）；256 不改变断言，只去掉这类容量竞态。
-    let profile = root.write_profile(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = 256"));
+    root.write_profile(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = 256"))
+}
 
-    // —— 第一世：boot → rr3-pb running → kill -9 → 收尸行 → kill rrd ——
+/// 第一世：boot → rr3-pb running → kill -9 → 收尸行 → kill rrd；rrd1 于末尾 drop。
+fn first_life(profile: &Path) {
     let mut rrd1 =
-        RrdTest::rr3_start_profile_env("prof-sink", &profile, E2E_TICK_MS, &[("RR3_PROBE", "sim")]);
+        RrdTest::rr3_start_profile_env("prof-sink", profile, E2E_TICK_MS, &[("RR3_PROBE", "sim")]);
     let spawn_pb = rrd1.rr3_wait_log("spawn rr3-pb pid=");
     let pb_running = rr3_wait_until(
         || {
@@ -68,22 +81,29 @@ fn rrd_reboot_recovers_previous_run_lines_from_disk() {
     rrd1.rr3_wait_log("rr3-pb 子进程退出");
     rrd1.rr3_sigterm_and_wait(); // 杀掉第一世；同步 append 下崩溃前行已全在文件里
     drop(rrd1);
+}
 
-    // —— 第二世：同 tag = 同 socket；ctl.logs 应含第一世崩溃前的行 ——
+/// 第二世：同 tag = 同 socket；等 rr3-pa spawn 行回显并建立 ctl 连接。
+fn second_life(profile: &Path) -> (RrdTest, RrdClient) {
     let mut rrd2 =
-        RrdTest::rr3_start_profile_env("prof-sink", &profile, E2E_TICK_MS, &[("RR3_PROBE", "sim")]);
+        RrdTest::rr3_start_profile_env("prof-sink", profile, E2E_TICK_MS, &[("RR3_PROBE", "sim")]);
     rrd2.rr3_wait_log("spawn rr3-pa pid=");
-    let mut ctl = rrd2.rr3_connect();
+    let ctl = rrd2.rr3_connect();
+    (rrd2, ctl)
+}
+
+/// 等第二世 spawn 行按环内位置入环（位于第二世监听行之后），返回行快照。
+fn await_rejoin(rrd: &RrdTest, ctl: &mut RrdClient) -> Vec<String> {
     // 第二世的 spawn 行在 stdout 可见时刻未必已入环（`rr3_log` 的落盘 append 在
     // stdout 与入环之间）。按环内位置等可观测信号：只有出现"位于第二世监听行之后"
     // 的 spawn 行，才说明第二世行确实已入环——直接查询会偶发读到仅含回填块的旧环，
     // 把第一世的 spawn 行误当比较基线。
-    let listen = format!("监听 {}", rrd2.socket.display());
+    let listen = format!("监听 {}", rrd.socket.display());
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut joined: Vec<String>;
     loop {
-        rr3_send(&mut ctl, &rr3_rpc_frame("rr3.ctl.logs", 2, json!({}), 0));
-        let f = rr3_read_where(&mut ctl, "ctl.logs 应答", |fr| {
+        rr3_send(ctl, &rr3_rpc_frame("rr3.ctl.logs", 2, json!({}), 0));
+        let f = rr3_read_where(ctl, "ctl.logs 应答", |fr| {
             rr3_body_split(&fr.payload)
                 .map(|(ty, _)| ty == Rr3PayloadType::Response)
                 .unwrap_or(false)
@@ -106,6 +126,11 @@ fn rrd_reboot_recovers_previous_run_lines_from_disk() {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+    joined
+}
+
+/// 第一世收尸行必须在场，且整体次序位于第二世行之前（回填行置环头）。
+fn assert_recall(joined: &[String]) {
     assert!(
         joined.iter().any(|l| l.contains("rr3-pb 子进程退出")),
         "第二世 ctl.logs 必须取到第一世崩溃前的收尸行（rrd 自身日志落盘＋启动回填）: {joined:?}"
