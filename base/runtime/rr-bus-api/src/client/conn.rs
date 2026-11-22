@@ -55,7 +55,7 @@ const RR3_HEARTBEAT_MAX_MISSES: u32 = 3;
 /// 丢弃并记 [`RR3_COUNTER_INBOX_BACKLOG_DROP`]**，Request/Notification 一律入箱
 /// （控制面不丢），reader 永不停在 send 上。最坏驻留 ≈ 256 帧（~2.8MB），事件
 /// 缺口由计数显式可见，模块主循环恢复后按序排空积压帧。
-const RR3_INBOX_CAP: usize = 256;
+pub(super) const RR3_INBOX_CAP: usize = 256;
 
 /// 满箱丢弃计数键（随心跳 counters 上行，`rr3-ctl counters` 可见）。
 /// 非零 = 主循环曾被长动作占住、事件面出现缺口——显式记账，不静默。
