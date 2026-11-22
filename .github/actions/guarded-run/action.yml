@@ -4,7 +4,7 @@
 # 改六处，漏改就让失败退化成 GitHub 上只有一句 "exit code 1"（根因不可见）。
 # 本 action 是判据单点；调用方只给 title / prelude / command（策略面）。
 name: guarded-run
-description: 执行一条命令，失败时把日志里的错误行压成一条可归因的 GitHub 注解
+description: 执行一条命令，失败时把日志里的错误行压成一条可归因的 GitHub 注解；仅网络镜像失败（502/504/下载失败）时原命令重试一次，代码/构建错误不重试
 inputs:
   title:
     description: 注解标题（失败归因的锚，如 esp32-periph-base）
@@ -34,7 +34,18 @@ runs:
           # shellcheck disable=SC1090
           . "${pre}"
         fi
-        if ! bash -c "${GUARDED_CMD}" 2>&1 | tee "${log}"; then
+        run_guarded() {
+          bash -c "${GUARDED_CMD}" 2>&1 | tee "${log}"
+        }
+        if ! run_guarded; then
+          # 网络镜像抖动（rsproxy 502/504）与代码错误分开处置：仅当日志命中网络
+          # 标记时重试一次；代码/构建错误照旧当场红，不掩盖根因。
+          if grep -qiE 'spurious network error|Gateway Time-out|Bad Gateway|failed to download' "${log}"; then
+            echo "::warning title=${GUARDED_TITLE}::网络镜像失败，原命令重试一次"
+            if run_guarded; then
+              exit 0
+            fi
+          fi
           # 取错误行连同后 3 行上下文（rustc 的 `-->` 位置与 expected/found 在
           # 后两行；只抓 error 行会退化成"mismatched types 盲猜"，2026-11-19 实测）。
           errs="$(grep -A3 -iE 'error(\[|:)|^FAIL|错误|failed' "${log}" | head -60 | tr '\n' ' ' | tr -s ' ')"
