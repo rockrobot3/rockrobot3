@@ -70,6 +70,11 @@ impl Rr3WifiSup {
     }
 
     /// 发起一次重连（错误码不致命：已连接/连接中由 IDF 返回）。
+    ///
+    /// # Safety
+    ///
+    /// 只可在 STA 模式已起栈后调用（wifi-sup 线程内）；`esp_wifi_connect` 线程
+    /// 安全，本函数不持有 Rust 引用。
     unsafe fn rr3_attempt(&mut self) -> i32 {
         let r = esp_wifi_connect();
         self.idx = (self.idx + 1).min(STA_RETRY_MS.len() - 1);
