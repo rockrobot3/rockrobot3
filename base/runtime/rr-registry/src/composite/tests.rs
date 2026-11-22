@@ -35,48 +35,54 @@ fn schema_version_domain_is_named() {
     assert!(errs.iter().any(|e| e.contains("同名不同域")), "{errs:?}");
 }
 
-/// 形状坏逐条点名：unit 出域 / atoms 空·重复·空串·非串 / 顶层与段级未知键 /
-/// 缺 [composite] / 缺 [assemble] / L-5 漏写与并存
-#[test]
-fn bad_shapes_are_all_named() {
-    let base = "schema_version = 1\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\nhandles = []\nops = []\nno_injection = true\n";
+/// 合法底稿：unit=process、单 atom、空 handles/ops、显式 no_injection。
+const BAD_BASE: &str = "schema_version = 1\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\nhandles = []\nops = []\nno_injection = true\n";
 
-    let errs = rr3_composite_parse(&base.replace("unit = \"process\"", "unit = \"thread\""))
+/// unit 出域。
+fn bad_unit_shape() {
+    let errs = rr3_composite_parse(&BAD_BASE.replace("unit = \"process\"", "unit = \"thread\""))
         .expect_err("unit 出域须红");
     assert!(
         errs.iter()
             .any(|e| e.contains("unit") && e.contains("thread")),
         "{errs:?}"
     );
+}
 
-    let errs = rr3_composite_parse(&base.replace("atoms = [\"a\"]", "atoms = []"))
+/// atoms 空/重复/空串/非串四形逐条点名。
+fn bad_atoms_shape() {
+    let errs = rr3_composite_parse(&BAD_BASE.replace("atoms = [\"a\"]", "atoms = []"))
         .expect_err("atoms 空须红");
     assert!(
         errs.iter().any(|e| e.contains("atoms 不得为空")),
         "{errs:?}"
     );
 
-    let errs = rr3_composite_parse(&base.replace("atoms = [\"a\"]", "atoms = [\"a\", \"a\"]"))
+    let errs = rr3_composite_parse(&BAD_BASE.replace("atoms = [\"a\"]", "atoms = [\"a\", \"a\"]"))
         .expect_err("atoms 重复须红");
     assert!(errs.iter().any(|e| e.contains("重复")), "{errs:?}");
 
-    let errs = rr3_composite_parse(&base.replace("atoms = [\"a\"]", "atoms = [\"\"]"))
+    let errs = rr3_composite_parse(&BAD_BASE.replace("atoms = [\"a\"]", "atoms = [\"\"]"))
         .expect_err("atoms 空串须红");
     assert!(
         errs.iter().any(|e| e.contains("atoms[0] 不得为空串")),
         "{errs:?}"
     );
 
-    let errs = rr3_composite_parse(&base.replace("atoms = [\"a\"]", "atoms = [1]"))
+    let errs = rr3_composite_parse(&BAD_BASE.replace("atoms = [\"a\"]", "atoms = [1]"))
         .expect_err("atoms 非串须红");
     assert!(
         errs.iter().any(|e| e.contains("atoms[0] 应为字符串")),
         "{errs:?}"
     );
+}
 
-    let errs =
-        rr3_composite_parse(&base.replace("no_injection = true", "no_injection = true\nextra = 1"))
-            .expect_err("[assemble] 未知键须红");
+/// 未知键（assemble 段/顶层）与缺段三形。
+fn bad_sections_shape() {
+    let errs = rr3_composite_parse(
+        &BAD_BASE.replace("no_injection = true", "no_injection = true\nextra = 1"),
+    )
+    .expect_err("[assemble] 未知键须红");
     assert!(
         errs.iter().any(|e| e.contains("[assemble] 未知键 extra")),
         "{errs:?}"
@@ -97,8 +103,10 @@ fn bad_shapes_are_all_named() {
         errs.iter().any(|e| e.contains("缺 [assemble] 表")),
         "{errs:?}"
     );
+}
 
-    // L-5 漏写（与件级同一判据）
+/// L-5 注入声明：空面漏写与 helper 并存两形。
+fn bad_injection_shape() {
     let errs = rr3_composite_parse(
         "schema_version = 1\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\nhandles = []\nops = []\n",
     )
@@ -108,8 +116,7 @@ fn bad_shapes_are_all_named() {
         "{errs:?}"
     );
 
-    // L-5 并存红
-    let errs = rr3_composite_parse(&base.replace(
+    let errs = rr3_composite_parse(&BAD_BASE.replace(
         "handles = []",
         "handles = [ { trait = \"Rr3Nope\", desc_key = \"nope_key\" } ]",
     ))
@@ -123,6 +130,16 @@ fn bad_shapes_are_all_named() {
             .any(|e| e.contains("只允许与空的 handles/ops 并存")),
         "{errs:?}"
     );
+}
+
+/// 形状坏逐条点名：unit 出域 / atoms 空·重复·空串·非串 / 顶层与段级未知键 /
+/// 缺 [composite] / 缺 [assemble] / L-5 漏写与并存
+#[test]
+fn bad_shapes_are_all_named() {
+    bad_unit_shape();
+    bad_atoms_shape();
+    bad_sections_shape();
+    bad_injection_shape();
 }
 
 /// 内存申报键是件级专用（校验⑩ 分子面，批N2 n2c-v10）：组合件级 [assemble]
