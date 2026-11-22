@@ -93,7 +93,7 @@ fn start_panel(
     bus_path: String,
     tcp: TcpListener,
     live: Arc<AtomicUsize>,
-) -> std::thread::JoinHandle<()> {
+) -> std::thread::JoinHandle<Result<(), String>> {
     let (actions_tx, _rx) = mpsc::channel();
     let shared = panel_shared(bus, bus_path, actions_tx);
     let calls = Arc::new(AtomicUsize::new(0));
