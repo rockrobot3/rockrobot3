@@ -212,23 +212,18 @@ fn rr3_stage_opt(cfg: &Rr3PackConfig, staged: &Path, name: &str) -> Result<(), S
     )
 }
 
+/// 模块可选随装单文件清单（形态档与编排声明）。
+const RR3_OPT_FILES: [&str; 3] = ["config-esp32.toml", "config-pi4b.toml", "composite.toml"];
+
 /// 三件可选单文件（config-esp32 / config-pi4b / composite）随装，缺席合法跳过。
 fn rr3_stage_opt_files(repo_mod: &Path, staged: &Path, name: &str) -> Result<(), String> {
-    rr3_stage_opt_file(
-        &repo_mod.join("config-esp32.toml"),
-        &staged.join("config-esp32.toml"),
-        &format!("复制 {name} config-esp32.toml 失败"),
-    )?;
-    rr3_stage_opt_file(
-        &repo_mod.join("config-pi4b.toml"),
-        &staged.join("config-pi4b.toml"),
-        &format!("复制 {name} config-pi4b.toml 失败"),
-    )?;
-    rr3_stage_opt_file(
-        &repo_mod.join("composite.toml"),
-        &staged.join("composite.toml"),
-        &format!("复制 {name} composite.toml 失败"),
-    )
+    RR3_OPT_FILES.into_iter().try_for_each(|f| {
+        rr3_stage_opt_file(
+            &repo_mod.join(f),
+            &staged.join(f),
+            &format!("复制 {name} {f} 失败"),
+        )
+    })
 }
 
 /// 单件可选随装：来源在位即原样复制，缺席合法跳过。
