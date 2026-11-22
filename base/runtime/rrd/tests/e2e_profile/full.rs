@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use rr_ipc::{rr3_body_split, Rr3PayloadType};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use super::{rr3_status, Root, GOOD};
 use crate::support::*;
