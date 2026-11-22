@@ -166,7 +166,10 @@ impl Rr3LinuxIna219 {
     }
 
     fn bus_dev_path(&self) -> PathBuf {
-        self.dev_root.join(format!("i2c{}", self.bus))
+        // i2c-dev 的 UAPI 设备名带连字符（/dev/i2c-<bus>，i2c-dev.h：`/dev/i2c-%d`）——
+        // 漏掉连字符会打开不存在的 `/dev/i2c1`（真机实测：OLED 换装首启即暴露本路径
+        // 缺陷；INA219 档同源同修）。
+        self.dev_root.join(format!("i2c-{}", self.bus))
     }
 
     /// 首次使用：打开总线 + `I2C_SLAVE` 定从地址 + 器件校验/校准。`slot` 由
@@ -327,6 +330,14 @@ mod tests {
         assert_eq!(I2C_SLAVE_IOCTL, 0x0703);
         // _IO 编码自洽：无方向无 size，type=0x07 nr=0x03
         assert_eq!(I2C_SLAVE_IOCTL, (0x07 << 8) | 0x03);
+    }
+
+    /// 设备名形状（i2c-dev.h `i2c-%d`）：漏连字符会打开不存在的路径——真机
+    /// OLED 换装首启暴露本缺陷，INA219 档同源同修，纯函数钉死命名。
+    #[test]
+    fn bus_path_uses_i2c_dash_bus_naming() {
+        let p = Rr3LinuxIna219::rr3_linux_power_new(Path::new("/dev"), 1, 0x40, None);
+        assert_eq!(p.bus_dev_path(), PathBuf::from("/dev/i2c-1"));
     }
 
     /// INA219 bus voltage 换算钉死：13-bit [15:3] + LSB 4mV——真件档 i2cget

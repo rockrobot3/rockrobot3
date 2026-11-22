@@ -224,9 +224,9 @@ impl Rr3Ssd1306I2cDisplay {
         }
     }
 
-    /// 总线设备路径（`/dev/i2c{N}`）
+    /// 总线设备路径（i2c-dev UAPI 名 = `/dev/i2c-<bus>`，连字符不可省）
     fn bus_dev_path(&self) -> PathBuf {
-        self.dev_root.join(format!("i2c{}", self.bus))
+        self.dev_root.join(format!("i2c-{}", self.bus))
     }
 
     /// 首次使用：RDWR 开总线 + 定从地址 + init 序列。`slot` 由调用方在持锁
@@ -358,6 +358,14 @@ mod tests {
         }
     }
 
+    /// 设备名形状（i2c-dev.h `i2c-%d`）：漏连字符会打开不存在的路径，真机首启即
+    /// 以"总线不在位"暴露——纯函数钉死命名，不靠现场猜。
+    #[test]
+    fn bus_path_uses_i2c_dash_bus_naming() {
+        let dev = Rr3Ssd1306I2cDisplay::rr3_ssd1306_new(Path::new("/dev"), 1, 0x3C);
+        assert_eq!(dev.bus_dev_path(), PathBuf::from("/dev/i2c-1"));
+    }
+
     /// 错误传播路径（确定性，不触真硬件）：temp 树放普通文件冒充 i2c 总线——
     /// open 成功但 I2C_SLAVE 非字符设备必 ENOTTY，ensure 显式回 InvalidParam
     /// 并点名总线路径；draw 同路径复核
@@ -365,12 +373,12 @@ mod tests {
     fn ensure_on_non_chardev_fails_loudly() {
         let root = std::env::temp_dir().join(format!("rr3-hal-oled-{}-err", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(root.join("i2c1"), "").unwrap();
+        std::fs::write(root.join("i2c-1"), "").unwrap();
         let mut out = Rr3Ssd1306I2cDisplay::rr3_ssd1306_new(&root, 1, 0x3C);
         let err = out.frame().unwrap_err();
         assert!(
             matches!(err, Rr3HalError::InvalidParam(ref m)
-                if m.rr3_err_text_as_str().contains("i2c1")),
+                if m.rr3_err_text_as_str().contains("i2c-1")),
             "错误要点名总线路径: {err}"
         );
         let err = out.draw(&[0; 8]).unwrap_err();
