@@ -148,7 +148,7 @@ fn rr3_play(pcm: &[u8]) {
 /// 朗读一条：云端 TTS 4 KB 流式收包 → 16 KB 播放环（半双工门由播放面收尾）。
 fn tts_say(text: &str) {
     let chars = text.chars().count();
-    match rr3_tts_stream(text) {
+    match rr3_tts_stream(text, None) {
         Ok((pcm, want_ms)) => {
             println!("[cloud] TTS流 ok chars={chars} pcm={pcm}B 应播={want_ms}ms（16KB 环）")
         }

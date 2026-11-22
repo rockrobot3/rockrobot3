@@ -265,7 +265,7 @@ fn rr3_speak_stage(bus: &Arc<Mutex<Bus>>, reply: &str) -> String {
         (b.st.tts_played, b.st.tts_fail)
     };
     rr3_face(bus, "talk");
-    let (pcm, want_ms) = match crate::cloud::rr3_tts_stream(reply) {
+    let (pcm, want_ms) = match crate::cloud::rr3_tts_stream(reply, Some(rr3_beat_dialog)) {
         Ok(v) => v,
         Err(e) => {
             rr3_face(bus, "idle");

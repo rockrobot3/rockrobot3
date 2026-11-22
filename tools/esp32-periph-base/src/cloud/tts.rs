@@ -37,10 +37,13 @@ struct Rr3TtsSink {
     /// WAV 声明总长（Some = 收尾时必须收满；裸流按 HTTP 长度对账）。
     expect: Option<usize>,
     started: bool,
+    /// 每收一块续一次任务心跳（仅 dialog 调用方注入；`/say` 传 None——云 worker
+    /// 不是受监督任务，代它续心跳会掩盖 dialog 真死）。
+    beat: Option<fn()>,
 }
 
 impl Rr3TtsSink {
-    fn new() -> Self {
+    fn new(beat: Option<fn()>) -> Self {
         Self {
             head: Vec::with_capacity(HEAD_CAP),
             out: Vec::with_capacity(OUT_CAP),
@@ -50,6 +53,7 @@ impl Rr3TtsSink {
             left: 0,
             expect: None,
             started: false,
+            beat,
         }
     }
 
@@ -195,6 +199,11 @@ impl Rr3StreamSink for Rr3TtsSink {
     }
 
     fn rr3_chunk(&mut self, data: &[u8]) -> Result<(), String> {
+        // 长回包（数百 KB、弱网数十秒）逐块续心跳：dialog 窗 10 s，只在每次
+        // HTTP 尝试前后 beats 不够——回包期间会被监督壳误判 dead 并整机复位。
+        if let Some(beat) = self.beat {
+            beat();
+        }
         if self.stream.is_some() {
             return self.feed(data);
         }
@@ -216,10 +225,10 @@ impl Rr3StreamSink for Rr3TtsSink {
 /// TTS 一条：流式收包并播放；返回 `(PCM 字节, 应播毫秒)`。
 ///
 /// 由 `cloud` / `dialog` 共用；失败已点名（含阶段），调用方只做策略降级。
-pub(crate) fn rr3_tts_stream(text: &str) -> Result<(usize, u64), String> {
+pub(crate) fn rr3_tts_stream(text: &str, beat: Option<fn()>) -> Result<(usize, u64), String> {
     let cfg = rr3_cloud_cfg().map_err(|e| format!("云配置缺席: {e}"))?;
     let body = rr_cloud_proto::rr3_tts_body(&cfg.model, text, &cfg.voice, TTS_RATE);
-    let mut sink = Rr3TtsSink::new();
+    let mut sink = Rr3TtsSink::new(beat);
     let sent = rr3_http_post_stream(
         "TTS接口",
         &cfg.url(),
