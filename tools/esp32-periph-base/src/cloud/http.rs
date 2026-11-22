@@ -26,8 +26,16 @@ mod asr;
 
 pub(crate) use asr::{rr3_post_asr, Rr3PcmSrc, Rr3SliceSrc, Rr3SpoolSrc};
 
-/// 单轮耗时/重试口径（契约 §4：8 s、最多 2 次、500 ms 间隔）。
+/// 单跳超时（缺省 8 s）：LLM / TTS 用。必须 **< dialog 心跳窗 10 s**——
+/// 阻塞读期间无法续拍，单跳超过心跳窗会让监督壳把正在等云的 dialog 判死。
 const HTTP_TIMEOUT_MS: i32 = 8_000;
+/// ASR 单跳超时（S3 余量③，0015 §6-1）：上行 + 识别推理比 LLM/TTS 长，但同样
+/// 必须 < 10 s 心跳窗——弱网韧性靠**多一次尝试**而不是放宽单跳（9 s × 3 次
+/// + 退避 = 有界 28.5 s，每跳之间续拍）。
+const ASR_TIMEOUT_MS: i32 = 9_000;
+/// ASR 尝试次数与退避（弱网：首退 0.5 s、次退 1.5 s）。
+const ASR_ATTEMPTS: usize = 3;
+const ASR_RETRY_DELAY_MS: [u64; 2] = [500, 1_500];
 const RETRY_DELAY_MS: u64 = 500;
 /// ASR/LLM JSON 应答上限（64 KB；识别长文本与补全回复的合理上界）。
 pub(crate) const MAX_JSON: usize = 65_536;
@@ -68,16 +76,18 @@ fn rr3_cstrs(
     Ok((url_c, auth, ctype))
 }
 
-/// 初始化客户端并挂头（URL/auth/ctype 的 C 串由调用方保活到 cleanup）。
+/// 初始化客户端并挂头（URL/auth/ctype 的 C 串由调用方保活到 cleanup；
+/// `timeout_ms` 按接口档给，见 [`HTTP_TIMEOUT_MS`] / [`ASR_TIMEOUT_MS`]）。
 fn rr3_client(
     url_c: &CStr,
     auth: Option<&CStr>,
     ctype: &CStr,
+    timeout_ms: i32,
 ) -> Result<esp_http_client_handle_t, String> {
     let cfg = esp_http_client_config_t {
         url: url_c.as_ptr(),
         method: esp_http_client_method_t_HTTP_METHOD_POST,
-        timeout_ms: HTTP_TIMEOUT_MS,
+        timeout_ms,
         crt_bundle_attach: Some(esp_crt_bundle_attach),
         ..Default::default()
     };
@@ -162,7 +172,7 @@ pub(crate) fn rr3_http_post(
     max_body: usize,
 ) -> Result<Vec<u8>, String> {
     let (url_c, auth, ctype) = rr3_cstrs(url, key, content_type)?;
-    let client = rr3_client(&url_c, auth.as_deref(), &ctype)?;
+    let client = rr3_client(&url_c, auth.as_deref(), &ctype, HTTP_TIMEOUT_MS)?;
     crate::mem::rr3_heap_mark(interface, "http-open");
     let rc =
         rr3_send(client, body, interface).and_then(|()| rr3_http_read(client, interface, max_body));
@@ -297,7 +307,7 @@ fn rr3_stream_try(
     max_body: usize,
     sink: &mut dyn Rr3StreamSink,
 ) -> Result<usize, String> {
-    let client = rr3_client(url_c, auth, ctype)?;
+    let client = rr3_client(url_c, auth, ctype, HTTP_TIMEOUT_MS)?;
     crate::mem::rr3_heap_mark(interface, "http-open");
     let rc = rr3_stream_read(client, body, interface, max_body, sink);
     crate::mem::rr3_heap_mark(interface, "http-done");

@@ -3,17 +3,23 @@
 //! 机制缝是 [`Rr3PcmSrc`]：调用方给"能按 4 KB 窗重复产出 s16le 字节"的源，
 //! 传输面负责头/尾、长度对账与有限重试。两条源实现——内存切片（PSRAM 路径）
 //! 与 flash spool（无 PSRAM 路径）——与传输完全解耦；源必须可 `rr3_reset`
-//! 重读，满足契约的两次尝试。
+//! 重读，满足重试契约。
+//!
+//! 弱网策略（S3 余量③）：单跳 9 s（< dialog 心跳窗 10 s，阻塞读期间无法续拍）、
+//! 最多 3 次、退避 500/1500 ms——韧性来自"多一次尝试"而不是放宽单跳。
 //!
 //! 失败语义：源短读/超长都拒发并点名（绝不把半段 PCM 送给云端）；重试判据与
-//! 其他云接口同源（`rr_cloud_proto::rr3_cloud_retryable`）。
+//! 其他云接口同源（`rr_cloud_proto::rr3_cloud_retryable`，含传输层负状态码）。
 
 use std::thread;
 use std::time::Duration;
 
 use esp_idf_sys::{esp_http_client_cleanup, esp_http_client_handle_t};
 
-use super::{rr3_client, rr3_cstrs, rr3_head, rr3_http_read, rr3_open, rr3_write, RETRY_DELAY_MS};
+use super::{
+    rr3_client, rr3_cstrs, rr3_head, rr3_http_read, rr3_open, rr3_write, ASR_ATTEMPTS,
+    ASR_RETRY_DELAY_MS, ASR_TIMEOUT_MS,
+};
 
 /// ASR 请求体的 PCM 源：按 4 KB 窗搬 s16le，不要求整段驻留内存。
 ///
@@ -99,11 +105,11 @@ pub(crate) fn rr3_post_asr(
     max_body: usize,
 ) -> Result<Vec<u8>, String> {
     let mut last = String::new();
-    for _ in 0..2 {
+    for attempt in 0..ASR_ATTEMPTS {
         crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
-        let attempt = rr3_asr_once(interface, url, key, content_type, plan, src, max_body);
+        let attempt_rc = rr3_asr_once(interface, url, key, content_type, plan, src, max_body);
         crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
-        match attempt {
+        match attempt_rc {
             Ok(v) => return Ok(v),
             Err(e) => {
                 if !rr_cloud_proto::rr3_cloud_retryable(interface, &e) {
@@ -112,7 +118,14 @@ pub(crate) fn rr3_post_asr(
                 last = e;
             }
         }
-        thread::sleep(Duration::from_millis(RETRY_DELAY_MS));
+        if attempt + 1 < ASR_ATTEMPTS {
+            let delay = ASR_RETRY_DELAY_MS[attempt.min(ASR_RETRY_DELAY_MS.len() - 1)];
+            println!(
+                "[cloud] {interface} 第 {} 次失败（{last}），{delay}ms 后重试",
+                attempt + 1
+            );
+            thread::sleep(Duration::from_millis(delay));
+        }
     }
     Err(last)
 }
@@ -129,7 +142,7 @@ fn rr3_asr_once(
 ) -> Result<Vec<u8>, String> {
     src.rr3_reset();
     let (url_c, auth, ctype) = rr3_cstrs(url, key, content_type)?;
-    let client = rr3_client(&url_c, auth.as_deref(), &ctype)?;
+    let client = rr3_client(&url_c, auth.as_deref(), &ctype, ASR_TIMEOUT_MS)?;
     crate::mem::rr3_heap_mark(interface, "http-open");
     let rc = rr3_asr_do(client, plan, src, interface, max_body);
     crate::mem::rr3_heap_mark(interface, "http-done");
@@ -167,8 +180,8 @@ fn rr3_write_src(
     let mut buf = [0u8; 4_096];
     let mut total = 0usize;
     loop {
-        // 大语音段（数秒/上百 KB）在弱网上传可跨过 dialog 心跳窗 10 s：
-        // 逐 4 KB 续一拍，避免监督壳把正在上传的轮次判死。
+        // 大语音段（数秒/上百 KB）上行时逐 4 KB 续一拍：单跳虽已收在 9 s，
+        // 持续续拍让监督壳看到 dialog 仍在推进（不靠单跳窗口赌心跳）。
         crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
         let n = src.rr3_fill(&mut buf)?;
         if n == 0 {

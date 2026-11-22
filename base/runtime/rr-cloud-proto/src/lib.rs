@@ -161,16 +161,19 @@ pub fn rr3_cloud_retryable(interface: &str, err: &str) -> bool {
     rr3_http_code_of(interface, err).is_some_and(rr3_retry_code)
 }
 
-/// 从 `"{interface} HTTP {code}"` 解析状态码（形状不符即 None）。
-fn rr3_http_code_of(interface: &str, err: &str) -> Option<u16> {
+/// 从 `"{interface} HTTP {code}"` 解析状态码（形状不符即 None；`-1` 等负值是
+/// 传输层无响应，保留符号——按传输失败判可重试）。
+fn rr3_http_code_of(interface: &str, err: &str) -> Option<i32> {
     let prefix = format!("{interface} HTTP ");
     err.strip_prefix(&prefix)
-        .and_then(|s| s.parse::<u16>().ok())
+        .and_then(|s| s.parse::<i32>().ok())
 }
 
-/// 可重试状态码：限流（429）与服务端（5xx）。
-fn rr3_retry_code(code: u16) -> bool {
-    code == 429 || (500..=599).contains(&code)
+/// 可重试状态码：传输层无响应（`code <= 0`）、限流（429）与服务端（5xx）。
+/// 旧判据只认 429/5xx，`HTTP -1`（连接/读超时）被当成不可重试——弱网下
+/// 明明可重试却直接弃轮（0015 实测 30 次）。
+fn rr3_retry_code(code: i32) -> bool {
+    code <= 0 || code == 429 || (500..=599).contains(&code)
 }
 
 #[cfg(test)]
@@ -254,6 +257,8 @@ mod tests {
         assert!(rr3_cloud_retryable("识别接口", "云端不可达 x: timeout"));
         assert!(rr3_cloud_retryable("识别接口", "识别接口 HTTP 429"));
         assert!(rr3_cloud_retryable("识别接口", "识别接口 HTTP 503"));
+        // 传输层无响应（esp_http_client 状态 -1）= 可重试（旧判据漏掉，弱网弃轮 30 次）
+        assert!(rr3_cloud_retryable("识别接口", "识别接口 HTTP -1"));
         assert!(!rr3_cloud_retryable("识别接口", "识别接口 HTTP 401"));
         assert!(!rr3_cloud_retryable("识别接口", "识别接口 HTTP 400"));
         assert!(!rr3_cloud_retryable("识别接口", "缺 key"));
