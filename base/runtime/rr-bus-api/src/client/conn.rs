@@ -43,11 +43,17 @@ const RR3_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const RR3_HEARTBEAT_MAX_MISSES: u32 = 3;
 
 /// 收件箱（非应答帧）队列上界（帧数，0.0.8b 审计 B-6）。有界化把"主循环停摆的
-/// 模块 OOM"折成"背压沿链上浮"：inbox 满 → reader 线程阻塞在 send → 不再读
-/// socket → 内核缓冲满 → rrd 侧 writer 写超时（5s）→ B-5 慢消费者断投 →
-/// supervisor 重启该模块。正常主循环每拍 `rr3_poll` 排空，256 帧对 125 帧/秒的
-/// 音频流是 ~2s 余量；最坏驻留 256×~11KB ≈ 2.8MB/模块，可承受。
+/// 模块 OOM"折成"背压沿链上浮"；但**流帧**（audio/pcm 这类连续实时面）满箱时
+/// 由 reader 直接丢弃并记 [`RR3_COUNTER_INBOX_STREAM_DROP`]，事件/请求帧维持
+/// 阻塞背压——reader 若在流帧上卡死，心跳应答也读不到，一次合法的长云调用
+/// （ASR 8s×2 重试 = 16.8s）会被放大成"心跳连续 3 拍失败 → 模块自杀"
+/// （2026-11-22 Pi 真机实测：brain 整轮被杀）。正常主循环每拍 `rr3_poll` 排空；
+/// 最坏驻留 256×~11KB ≈ 2.8MB/模块，可承受。
 const RR3_INBOX_CAP: usize = 256;
+
+/// 流帧满箱丢弃计数键（随心跳 counters 上行，`rr3-ctl counters` 可见）。
+/// 非零 = 主循环曾被长操作占住、实时流出现缺口——显式记账，不静默。
+pub(super) const RR3_COUNTER_INBOX_STREAM_DROP: &str = "inbox_stream_drop";
 
 /// 单调时基（0.0.5 批I A-2）：ADR-0018 裁定 3"单调时基"的 **std 驱动器侧供给**
 /// ——`Instant` 锚点起的相对毫秒，墙钟回拨/跳变不影响拍点判定。旧实现用
@@ -119,6 +125,13 @@ impl Rr3Inner {
             &frame,
         )
         .map_err(|e| format!("写帧失败: {e:?}"))
+    }
+
+    /// 运维计数自增（reader 线程满箱丢流帧时记账；业务侧仍走
+    /// [`Rr3BusClient::rr3_counter_bump`]，同一张 counters 表、同一条心跳增量）。
+    pub(super) fn rr3_counter_bump_inner(&self, key: &str, by: u64) {
+        let mut t = self.counters.lock().unwrap_or_else(|p| p.into_inner());
+        *t.entry(key.to_string()).or_insert(0) += by;
     }
 
     /// 上行 Request 一次一答。先占邮箱再发帧：应答不可能落在邮箱就位前。

@@ -7,10 +7,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rr_core::runtime::{rr3_dispatch_class, Rr3Dispatch};
-use rr_ipc::{rr3_body_split, rr3_frame_read_cap, Rr3Frame, RR3_FRAMING_PLEN_CAP_DEFAULT};
+use rr_ipc::{
+    rr3_body_split, rr3_frame_read_cap, Rr3Frame, Rr3PayloadType, RR3_FRAMING_PLEN_CAP_DEFAULT,
+};
 use serde_json::Value;
 
-use super::conn::{Rr3BusClient, Rr3Inner};
+use super::conn::{Rr3BusClient, Rr3Inner, RR3_COUNTER_INBOX_STREAM_DROP};
 
 impl Rr3BusClient {
     /// 总线还活着吗（reader 线程在 = 活；reader 断开 = 死）。轮询型主循环的死亡探针：
@@ -85,7 +87,31 @@ fn rr3_reader_frame(
     match rr3_dispatch_class(ty) {
         // 按 JSON-RPC id 挑自己的应答（序不可依赖的同一条事实，读侧的答案）
         Rr3Dispatch::Pending => rr3_pending_reply(inner, &body),
-        Rr3Dispatch::Inbox => inbox_tx.send(frame).is_ok(), // inbox 没了 = 客户端已死
+        Rr3Dispatch::Inbox => rr3_inbox_push(frame, ty, inner, inbox_tx),
+    }
+}
+
+/// 非应答帧入箱：满箱时**只丢流帧**并计数——reader 不能被音频流卡在 send 上，
+/// 卡住就连心跳应答也读不到，一次合法的长云调用（ASR 超时重试）会被放大成
+/// "心跳连续失败 → 模块自杀"。事件/请求帧维持原阻塞背压语义，一帧不丢。
+/// `false` = inbox 已关（客户端已死）。
+fn rr3_inbox_push(
+    frame: Rr3Frame,
+    ty: Rr3PayloadType,
+    inner: &Arc<Rr3Inner>,
+    inbox_tx: &mpsc::SyncSender<Rr3Frame>,
+) -> bool {
+    match inbox_tx.try_send(frame) {
+        Ok(()) => true,
+        Err(mpsc::TrySendError::Disconnected(_)) => false,
+        Err(mpsc::TrySendError::Full(frame)) => {
+            if ty == Rr3PayloadType::Stream {
+                inner.rr3_counter_bump_inner(RR3_COUNTER_INBOX_STREAM_DROP, 1);
+                true
+            } else {
+                inbox_tx.send(frame).is_ok()
+            }
+        }
     }
 }
 

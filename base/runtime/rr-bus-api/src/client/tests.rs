@@ -415,3 +415,6 @@ fn disconnect_flips_connected_false_and_poll_wait_returns_promptly() {
     );
     let _ = std::fs::remove_file(&path);
 }
+
+#[path = "tests_overflow.rs"]
+mod overflow;
