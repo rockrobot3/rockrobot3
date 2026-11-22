@@ -60,9 +60,10 @@ const MIC_THREAD_STACK: usize = 16384;
 const MIC_I2C_TIMEOUT: TickType_t = u32::MAX;
 /// 单次 read 缓冲：4096B = 512 帧 × 2ch × 4B（≈32ms @16kHz；栈上安全）。
 const MIC_BUF: usize = 4096;
-/// 统计打印窗：64 次 read ≈ 2s 一行（16 次≈512ms 时日志在 1.5M 上与音频上行抢
-/// 带宽、且人眼来不及看；2s 一行足够判"有没有数据/速率对不对"）。
-const MIC_WINDOW_READS: usize = 64;
+/// 统计打印窗：320 次 read ≈ 10s 一行（W7 收口：原 64 次≈2s 一行，实测 12s 抓取
+/// 光 `[mic]` 就 15 行、淹没启动/联网关键行；10s 一行仍够判"有没有数据/速率对不对"，
+/// 且显著减少 UART 阻塞写对采集节拍的扰动）。
+const MIC_WINDOW_READS: usize = 320;
 /// 诊断位图窗口：每 200 次 read（≈6.4s）看一次前 16B 原始字节。
 const MIC_DUMP_READS: u32 = 200;
 

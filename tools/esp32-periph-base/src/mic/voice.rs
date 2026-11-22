@@ -221,15 +221,16 @@ impl VoiceRun {
         }
     }
 
-    /// VAD 域诊断窗（100 块 = 2 s 一行）：mono RMS 均值与播放门状态，供现场
-    /// 标定 rms_start / 排查"麦克风有没有进 VAD"。
+    /// VAD 域诊断窗（500 块 = 10 s 一行）：mono RMS 均值与播放门状态，供现场
+    /// 标定 rms_start / 排查"麦克风有没有进 VAD"。W7 收口原为 100 块/2s——与
+    /// 采集统计行叠加后 12s 出 15 行，压掉关键启动行；10s 窗均值更稳且够用。
     fn voice_stats(&mut self, mono: &[i16]) {
         self.blocks = self.blocks.wrapping_add(1);
         self.rms_acc += rr3_frame_rms(mono).max(0) as u64;
-        if self.blocks % 100 != 0 {
+        if self.blocks % 500 != 0 {
             return;
         }
-        let avg = self.rms_acc / 100;
+        let avg = self.rms_acc / 500;
         self.rms_acc = 0;
         println!(
             "[mic] voice mono_rms={avg} gate={} blocks={}",
