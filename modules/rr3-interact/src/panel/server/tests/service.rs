@@ -1,5 +1,7 @@
 //! 服务面：ctl 短连、槽位 RAII、派生失败不退循环、回环判定。
 
+use std::path::Path;
+
 use super::*;
 
 #[test]
@@ -70,28 +72,10 @@ fn conn_slot_guard_releases_on_panic_unwind() {
     );
 }
 
-/// 工单回归判据：起不来一个连接后面板仍可访问。spawn 必败注入
-/// （stack_size(usize::MAX)）打头一条连接，后续连接照常 200；槽位账平；
-/// 失败进 counters（panel_spawn_fail 随心跳自报）。
-#[test]
-fn panel_survives_spawn_failure_and_bumps_counter() {
-    // 前置自证：stack_size(usize::MAX) 的 spawn 在本平台确定性失败
-    //（attr_setstacksize EINVAL；实测小值如 1 会被 macOS 静默 clamp，
-    // 不可作注入，故取上溢值）
-    assert!(
-        std::thread::Builder::new()
-            .stack_size(usize::MAX)
-            .spawn(|| {})
-            .is_err(),
-        "stack_size(usize::MAX) 必须起不来线程（注入有效性自证）"
-    );
-
-    // 假 rrd + 真总线客户端（RR3_BUS_PATH 注入，连上即撤 env）
-    let dir = std::env::temp_dir().join(format!("panel-i4-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+/// 假 rrd + 真总线客户端（RR3_BUS_PATH 注入，连上即撤 env）。
+fn fake_bus(dir: &Path) -> (BusHandle, Arc<Mutex<Vec<Value>>>, String) {
     let bus_path = dir.join("i4.sock");
-    let beats: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let beats = Arc::new(Mutex::new(Vec::new()));
     let listener = std::os::unix::net::UnixListener::bind(&bus_path).unwrap();
     {
         let beats = beats.clone();
@@ -100,18 +84,23 @@ fn panel_survives_spawn_failure_and_bumps_counter() {
     std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
     let bus = BusHandle::wrap(Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功"));
     std::env::remove_var(rr_ipc::RR3_BUS_PATH_ENV);
+    (bus, beats, bus_path.to_string_lossy().into_owned())
+}
 
+/// 起 accept 循环：第 1 条连接的 spawn 必败注入，其余走正常 builder。
+fn start_panel(
+    bus: BusHandle,
+    bus_path: String,
+    tcp: TcpListener,
+    live: Arc<AtomicUsize>,
+) -> std::thread::JoinHandle<()> {
     let (actions_tx, _rx) = mpsc::channel();
-    let shared = panel_shared(bus, bus_path.to_string_lossy().into_owned(), actions_tx);
-
-    let live = Arc::new(AtomicUsize::new(0));
-    let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = tcp.local_addr().unwrap();
+    let shared = panel_shared(bus, bus_path, actions_tx);
     let calls = Arc::new(AtomicUsize::new(0));
     let calls2 = calls.clone();
     let shared2 = shared.clone();
     let live2 = live.clone();
-    let loop_jh = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         rr3_accept_loop(tcp, shared2, live2, move || {
             if calls2.fetch_add(1, Ordering::Relaxed) == 0 {
                 std::thread::Builder::new().stack_size(usize::MAX) // 第 1 次：必败注入
@@ -119,36 +108,39 @@ fn panel_survives_spawn_failure_and_bumps_counter() {
                 std::thread::Builder::new().name("rr3-panel-conn".into())
             }
         })
-    });
+    })
+}
 
-    // 第 1 条连接：spawn 失败 → 连接被弃置（无应答；服务端未读请求即关，
-    // 客户端按平台收到 RST 或 FIN——两态共同点是**没有任何应答字节**）
-    let mut c1 = TcpStream::connect(addr).unwrap();
-    c1.write_all(b"GET / HTTP/1.1\r\nHost: t\r\n\r\n").unwrap();
-    let _ = c1.shutdown(std::net::Shutdown::Write);
+/// 第 1 条连接：spawn 失败 → 连接被弃置（无应答；平台差异只影响 RST/FIN）。
+fn first_conn_dropped(addr: std::net::SocketAddr) {
+    let mut c = TcpStream::connect(addr).unwrap();
+    c.write_all(b"GET / HTTP/1.1\r\nHost: t\r\n\r\n").unwrap();
+    let _ = c.shutdown(std::net::Shutdown::Write);
     let mut dropped = Vec::new();
-    let _ = c1.read_to_end(&mut dropped);
+    let _ = c.read_to_end(&mut dropped);
     assert!(
         dropped.is_empty(),
         "spawn 失败的连接必须被弃置（无应答）: {dropped:?}"
     );
+}
 
-    // 第 2 条连接：正常 builder → 200 OK（工单判据：面板仍可访问）
-    let mut c2 = TcpStream::connect(addr).unwrap();
-    let _ = c2.set_read_timeout(Some(Duration::from_secs(5)));
-    c2.write_all(b"GET / HTTP/1.1\r\nHost: t\r\n\r\n").unwrap();
+/// 第 2 条连接：正常 builder → 200 OK（工单判据：面板仍可访问）。
+fn second_conn_200(addr: std::net::SocketAddr) {
+    let mut c = TcpStream::connect(addr).unwrap();
+    let _ = c.set_read_timeout(Some(Duration::from_secs(5)));
+    c.write_all(b"GET / HTTP/1.1\r\nHost: t\r\n\r\n").unwrap();
     let mut rbuf = [0u8; 64];
-    let n = c2.read(&mut rbuf).expect("spawn 失败后面板必须仍有应答");
+    let n = c.read(&mut rbuf).expect("spawn 失败后面板必须仍有应答");
     let head = String::from_utf8_lossy(&rbuf[..n]).to_string();
     assert!(
         head.starts_with("HTTP/1.1 200"),
         "spawn 失败后面板必须仍可访问: {head:?}"
     );
+}
 
-    // 槽位账平：失败连接（闭包连守卫被丢）与正常连接（守卫 Drop）都归还。
-    // c2 的 handler 线程写完应答到 Drop 归还槽位之间无同步点——读到 200
-    // 不等于线程已退出（门禁全量并行下撞过一回调度窗），故有界等待账平
-    // （1s 上界；RAII 保证终会归还，此处不等调度器）。
+/// 槽位账平：失败连接（闭包连守卫被丢）与正常连接（守卫 Drop）都归还。
+/// 读到 200 不等于 handler 线程已退出，故有界等待（1s 上界）。
+fn wait_slots_released(live: &Arc<AtomicUsize>) {
     let settled = (0..100).any(|_| {
         if live.load(Ordering::Relaxed) == 0 {
             true
@@ -162,9 +154,10 @@ fn panel_survives_spawn_failure_and_bumps_counter() {
         "失败与正常连接都必须归还槽位（RAII 账平）: live={}",
         live.load(Ordering::Relaxed)
     );
+}
 
-    // counters 记账：假 rrd 收到的心跳 params.counters 带上 panel_spawn_fail
-    //（心跳快照是累计值，多拍取 max；心跳周期 50ms，4s 窗口足量）
+/// counters 记账：心跳快照是累计值，多拍取 max（心跳周期 50ms，4s 窗口足量）。
+fn wait_spawn_counter(beats: &Arc<Mutex<Vec<Value>>>) {
     let mut seen = 0u64;
     for _ in 0..40 {
         seen = beats
@@ -185,6 +178,36 @@ fn panel_survives_spawn_failure_and_bumps_counter() {
         seen >= 1,
         "spawn 失败必须进 counters 心跳自报（panel_spawn_fail）: {seen}"
     );
+}
+
+/// 工单回归判据：起不来一个连接后面板仍可访问。spawn 必败注入
+/// （stack_size(usize::MAX)）打头一条连接，后续连接照常 200；槽位账平；
+/// 失败进 counters（panel_spawn_fail 随心跳自报）。
+#[test]
+fn panel_survives_spawn_failure_and_bumps_counter() {
+    // 前置自证：stack_size(usize::MAX) 的 spawn 在本平台确定性失败
+    //（attr_setstacksize EINVAL；实测小值如 1 会被 macOS 静默 clamp，
+    // 不可作注入，故取上溢值）
+    assert!(
+        std::thread::Builder::new()
+            .stack_size(usize::MAX)
+            .spawn(|| {})
+            .is_err(),
+        "stack_size(usize::MAX) 必须起不来线程（注入有效性自证）"
+    );
+
+    let dir = std::env::temp_dir().join(format!("panel-i4-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (bus, beats, bus_path) = fake_bus(&dir);
+    let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = tcp.local_addr().unwrap();
+    let live = Arc::new(AtomicUsize::new(0));
+    let loop_jh = start_panel(bus, bus_path, tcp, live.clone());
+    first_conn_dropped(addr);
+    second_conn_200(addr);
+    wait_slots_released(&live);
+    wait_spawn_counter(&beats);
     drop(loop_jh); // accept 循环不退出（判据本身），随测试进程收尾
 }
 
