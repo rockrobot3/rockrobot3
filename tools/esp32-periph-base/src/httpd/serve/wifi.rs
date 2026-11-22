@@ -8,7 +8,9 @@
 //!
 //! 拆分动因：`serve.rs` 583 行，WiFi 面与 HTTP 面分属两簇；本文件不碰请求对象。
 
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use super::*;
 
@@ -18,6 +20,32 @@ static STA_NETIF: OnceLock<usize> = OnceLock::new();
 
 /// AP netif 句柄（起栈时写一次）：AP-only 档"网络面在位"判据（W3-3 net 心跳）。
 static AP_NETIF: OnceLock<usize> = OnceLock::new();
+
+/// 配网事务闸（W7 现场根修）：写口 apply/revert 期间为 true，wifi-sup 让路，
+/// 避免监督线程在事务窗口用旧凭据重连、污染"新凭据是否连上"的判据。
+static WIFI_TXN: AtomicBool = AtomicBool::new(false);
+
+/// wifi-sup 单例闸：boot 或首次配网成功时任一路启动，之后不再重复起线程。
+static WIFI_SUP: AtomicBool = AtomicBool::new(false);
+
+/// STA 重连退避（毫秒）：首次 2s，逐级到 30s 封顶。
+const STA_RETRY_MS: [u64; 5] = [2_000, 4_000, 8_000, 15_000, 30_000];
+
+/// 配网事务守卫：进入置位、离开（含提前 return）复位。
+struct Rr3WifiTxn;
+
+impl Rr3WifiTxn {
+    fn rr3_begin() -> Self {
+        WIFI_TXN.store(true, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for Rr3WifiTxn {
+    fn drop(&mut self) {
+        WIFI_TXN.store(false, Ordering::SeqCst);
+    }
+}
 
 /// v5.2.2 `WIFI_INIT_CONFIG_DEFAULT()` 宏展开手抄（[`wifi_init_config_t`]）——
 /// 宏不进绑定，裸 sys 必须手抄；字段真值逐项对表**本项目生成 sdkconfig**
@@ -151,6 +179,8 @@ pub(super) unsafe fn wifi_sta_wait_conn() -> bool {
 /// 只能由 httpd 任务串行调用（两写口天然互斥），不得与 `wifi_bringup` 并发；
 /// 事务期间不持 bus 锁，不跨线程共享 Rust 引用。
 pub(super) unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWriteResult {
+    // W7 现场根修：事务期间让 wifi-sup 让路（否则旧凭据重连会污染等连判据）。
+    let _txn = Rr3WifiTxn::rr3_begin();
     let old = crate::cred::rr3_cred_read(); // None＝原空态（回退目标＝erase）
                                             // 写 NVS（cred 模块内复验形制——毒不双入；败＝NVS 未动无需回退）
     let true = crate::cred::rr3_cred_write(ssid, pass).is_ok() else {
@@ -162,6 +192,8 @@ pub(super) unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWrit
     let mut apply_ok = wifi_sta_set_cred(ssid.as_bytes(), pass.as_bytes()) == ESP_OK;
     apply_ok = apply_ok && esp_wifi_connect() == ESP_OK;
     if apply_ok && wifi_sta_wait_conn() {
+        // AP-only 档在本次配网前没有监督线程：连上后补起，后续掉线可自愈。
+        wifi_sta_supervise(true);
         return Rr3WifiWriteResult {
             ok: true,
             connected: true,
@@ -250,11 +282,73 @@ pub(super) unsafe fn wifi_bringup(ssid: &[u8], pass: &[u8]) -> Result<&'static s
     // STA 关联发起（批N15 件二真板取证实锤的缺陷修复：esp_wifi_start 只起驱动
     // 不自动连 AP——缺此步板永不关联、无 got ip；写口 apply/回退两路本就有
     // connect，唯 boot 路漏）。ap-only 档无 STA 目标，跳过。
+    //
+    // W7 现场根修：首次 connect 失败不再让整条配置腿失败——wifi-sup 接管重连。
     if !ssid.is_empty() {
         let r = esp_wifi_connect();
-        let true = r == ESP_OK else { return Err(r) };
+        if r != ESP_OK {
+            println!("[periph] STA 首次 connect esp_err={r}（wifi-sup 接管重连退避）");
+        }
     }
+    wifi_sta_supervise(!ssid.is_empty());
     Ok(ap_ssid)
+}
+
+/// STA 连接监督（W7 现场根修）：APSTA 下 AP 常开会掩盖 STA 掉线（net 判据是
+/// "STA 或 AP 有 IP"），而旧代码只在 boot/配网时 connect 一次——软重启后首次
+/// 关联失败即永久停在 SoftAP。本线程 1s 轮询 STA netif IP：掉线/未连按
+/// [`STA_RETRY_MS`] 退避重连；配网事务（[`WIFI_TXN`]）期间让路。
+///
+/// # Safety
+///
+/// 只读 netif 状态并调 `esp_wifi_connect`；STA netif 在 [`wifi_bringup`] 中已
+/// 建立。线程常驻（进程生命周期），失败只点名不 panic。
+pub(super) unsafe fn wifi_sta_supervise(configured: bool) {
+    if !configured || WIFI_SUP.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let spawned = thread::Builder::new()
+        .name("wifi-sup".into())
+        .stack_size(6_144)
+        .spawn(move || unsafe {
+            let mut idx = 0usize;
+            let mut was_up = false;
+            let mut last = Instant::now();
+            loop {
+                thread::sleep(Duration::from_millis(1_000));
+                // SAFETY：STA_NETIF 是起栈期写一次的进程级单例；未写即 false。
+                let up = netif_has_ip(STA_NETIF.get());
+                if up {
+                    if !was_up {
+                        println!("[periph] wifi-sup: STA 在线（DHCP 已得 IP）");
+                    }
+                    was_up = true;
+                    idx = 0;
+                    last = Instant::now();
+                    continue;
+                }
+                if was_up {
+                    println!("[periph] wifi-sup: STA 掉线，进入重连退避");
+                    was_up = false;
+                }
+                if WIFI_TXN.load(Ordering::Relaxed) {
+                    continue;
+                }
+                let wait = STA_RETRY_MS[idx.min(STA_RETRY_MS.len() - 1)];
+                if last.elapsed() < Duration::from_millis(wait) {
+                    continue;
+                }
+                // SAFETY：esp_wifi_connect 线程安全；已连接/连接中返回错误码不致命。
+                let r = esp_wifi_connect();
+                println!("[periph] wifi-sup: 重连 attempt={} esp_err={r}", idx + 1);
+                idx = (idx + 1).min(STA_RETRY_MS.len() - 1);
+                last = Instant::now();
+            }
+        });
+    if let Err(e) = spawned {
+        WIFI_SUP.store(false, Ordering::SeqCst);
+        println!("[periph] wifi-sup 线程起失败: {e:?}（STA 掉线将不再自动重连）");
+    }
 }
 
 /// 网络面在位判据（W3-3 net 任务心跳真值）：STA 已得 IP（DHCP 完成）**或**
@@ -273,7 +367,6 @@ pub(super) unsafe fn rr3_net_up() -> bool {
 }
 
 /// # Safety: 同 [`rr3_net_up`]；`esp_netif_get_ip_info` 只读传入 netif。
-#[cfg(feature = "autonomy")]
 unsafe fn netif_has_ip(h: Option<&usize>) -> bool {
     let Some(p) = h else {
         return false;
