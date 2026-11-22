@@ -12,7 +12,7 @@ use super::cfg::{
     RR3_TTS_BACKEND_MAC_SAY,
 };
 use super::payload::{rr3_asr_text, rr3_chat_body, rr3_mock_text, rr3_ping_body, rr3_reply_text};
-use super::retry::{rr3_http_try, rr3_ok_resp};
+use super::retry::{rr3_http_try, rr3_ok_resp, rr3_retry_budget};
 
 /// 云端应答体策略帽（32 MiB）：ASR/LLM 应答 KB 级，TTS PCM 30s@48k 双声道约
 /// 5.7MB；32 MiB 给足长语音余量，同时任何单次调用都不允许把板子内存顶穿。
@@ -148,9 +148,11 @@ impl Rr3AsrClient {
         let key = rr3_cloud_api_key()?;
         let (url, body, content_type) = self.rr3_asr_wire(pcm, sample_rate);
         // 有界重试（见 [`rr3_http_try`]）：multipart 体一次装配、多轮复用；
-        // 只对瞬时失败续打，非瞬时/耗尽即按原形状回错。
-        rr3_http_try("识别接口", "ASR", || {
-            rr3_http_post(&url, &key, &body, &content_type, self.timeout_s)
+        // 只对瞬时失败续打，非瞬时/耗尽即按原形状回错。单次预算按尝试序号取
+        // （首调全额、重试减半），见 [`rr3_retry_budget`]。
+        rr3_http_try("识别接口", "ASR", |attempt| {
+            let budget = rr3_retry_budget(self.timeout_s, attempt);
+            rr3_http_post(&url, &key, &body, &content_type, budget)
                 .and_then(|(status, resp)| rr3_ok_resp("识别接口", status, resp))
         })
     }
@@ -278,8 +280,9 @@ impl Rr3LlmClient {
     /// 同轮可能被云端处理两次（OpenAI 兼容面无幂等键）；会话语义只采纳一次应答、
     /// 历史只入账一次，换来"问了不回"这一生产不可接受结局的收敛。
     fn rr3_llm_post(&self, url: &str, key: &str, body: &[u8]) -> Result<Vec<u8>, String> {
-        rr3_http_try("大模型接口", "LLM", || {
-            rr3_http_post(url, key, body, "application/json", self.timeout_s)
+        rr3_http_try("大模型接口", "LLM", |attempt| {
+            let budget = rr3_retry_budget(self.timeout_s, attempt);
+            rr3_http_post(url, key, body, "application/json", budget)
                 .and_then(|(status, resp)| rr3_ok_resp("大模型接口", status, resp))
         })
     }
@@ -341,8 +344,9 @@ impl Rr3TtsClient {
         let url = format!("{}/v1/audio/speech", self.base_url);
         // 有界重试（与 ASR/LLM 同轨，见 [`rr3_http_try`]）：CosyVoice 读响应超时
         // 是瞬时态，一次即弃会让唤醒 Ack 静默（用户喊了没应答）。
-        rr3_http_try("合成接口", "TTS", || {
-            rr3_http_post(&url, &key, &body, "application/json", self.timeout_s)
+        rr3_http_try("合成接口", "TTS", |attempt| {
+            let budget = rr3_retry_budget(self.timeout_s, attempt);
+            rr3_http_post(&url, &key, &body, "application/json", budget)
                 .and_then(|(status, resp)| rr3_ok_resp("合成接口", status, resp))
         })
     }
