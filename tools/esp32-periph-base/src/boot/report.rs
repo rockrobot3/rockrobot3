@@ -32,6 +32,13 @@ pub(super) fn boot_banner() {
     println!(
         "[periph] surface=esp-rs-std crate=esp32-periph-base oled=i2c0 servo=ledc rail=adc1 cmd=uart2@{UART2_BAUD_HZ} line+frame planes=ctrl+runtime serial-servo n20-live"
     );
+    // 控制台自证（W7 现场收口）：本行本身经 UART0 输出——能读到即证明"日志口 =
+    // UART0"且终端 baud 与固件一致；波特率取自 sdkconfig defaults（build.rs 注入），
+    // 不手抄常量，改配置时本行随动。副通道恒 none（S3 在目标档显式关闭）。
+    println!(
+        "[periph] console=uart0@{} secondary=none（读到本行即日志口正确）",
+        env!("RR3_CONSOLE_BAUD")
+    );
     #[cfg(feature = "esp32")]
     println!("[periph] chip=esp32 pins=classic");
     #[cfg(feature = "esp32s3")]
