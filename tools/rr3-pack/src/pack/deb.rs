@@ -24,15 +24,31 @@ pub(super) fn rr3_control_text(arch: &str) -> String {
 
 /// postinst：systemd 在位才 enable——容器冒烟里 dpkg -i 时没有 systemd，不得因此失败。
 /// enable 不带 --now：启动时机归 systemd 策略，装机脚本不擅自拉起守护。
-pub(super) fn rr3_postinst_text() -> &'static str {
-    "#!/bin/sh\n# RockRobot3 deb 后置脚本（rr3-pack 生成）\n\
-     # 运维计数持久化目录（RR3_DATA_DIR，0.0.6 批E' R3：unit 注入同名环境变量，\n\
-     # 缺目录时 rrd 回写建 tmp 失败、boots 每次开机重置）\n\
-     mkdir -p /var/lib/rockrobot3\nchmod 755 /var/lib/rockrobot3\nchown root:root /var/lib/rockrobot3\n\
-     # ctl socket 属主组（0.0.6 批F5b R12，ADR-0010 权限模型增补）：rrd bind 后\n\
-     # chmod 0o660 + chgrp 到本组，运维用户装机现场入组（deb 不动用户）\n\
-     addgroup --system rockrobot3 2>/dev/null || true\n\
-     if [ -d /run/systemd/system ]; then\n    systemctl enable rrd.service\nfi\n"
+///
+/// 板级资产（`base/os/distro/boards/<profile>/etc/**` 随包）在这里落 /etc：
+/// `etc/systemd/**` 归包管、每次覆盖；其余件只铺缺失，绝不覆盖现场配置
+/// （/etc/asound.conf 这类全局配置可能与用户既有音轨共存）。
+pub(super) fn rr3_postinst_text(profile: &str) -> String {
+    format!(
+        "#!/bin/sh\n# RockRobot3 deb 后置脚本（rr3-pack 生成，profile={profile}）\n\
+         # 运维计数持久化目录（RR3_DATA_DIR，0.0.6 批E' R3：unit 注入同名环境变量，\n\
+         # 缺目录时 rrd 回写建 tmp 失败、boots 每次开机重置）\n\
+         mkdir -p /var/lib/rockrobot3\nchmod 755 /var/lib/rockrobot3\nchown root:root /var/lib/rockrobot3\n\
+         # ctl socket 属主组（0.0.6 批F5b R12，ADR-0010 权限模型增补）：rrd bind 后\n\
+         # chmod 0o660 + chgrp 到本组，运维用户装机现场入组（deb 不动用户）\n\
+         addgroup --system rockrobot3 2>/dev/null || true\n\
+         # 板级资产：systemd 段归包管覆盖，其余 /etc 件只铺缺失件\n\
+         B=/usr/lib/rockrobot3/boards/{profile}\n\
+         if [ -d \"$B/etc\" ]; then\n\
+         (cd \"$B\" && find etc -type f) | while IFS= read -r f; do\n\
+         rel=${{f#etc/}}; t=/etc/$rel\n\
+         case \"$f\" in etc/systemd/*) install -D -m 644 \"$B/$f\" \"$t\" ;;\n\
+         *) [ -e \"$t\" ] || install -D -m 644 \"$B/$f\" \"$t\" ;;\n\
+         esac\n\
+         done\n\
+         fi\n\
+         if [ -d /run/systemd/system ]; then\n    systemctl daemon-reload 2>/dev/null || true\n    systemctl enable rrd.service\nfi\n"
+    )
 }
 
 /// postinst 必须可执行否则 dpkg 不跑它。staging 在 Unix 上落，权限语义也只对 Unix 有意义。

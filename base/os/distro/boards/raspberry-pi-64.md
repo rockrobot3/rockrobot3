@@ -220,14 +220,25 @@ act: intent: trace=1 servo angle=45，state#1 已发
 - 为什么加：sense `config-esp32.toml` 曾在仓内重标（10-31 深夜 500/400/500）而板上
   装机副本仍是 10-21 旧档（650/700/650），模块启动只打印"来源路径"不比内容 ⇒ 旧档
   静默生效，症状是"怎么喊都不回应"，排查代价极高。本步把该面变成**可机械判定**。
-- 操作步骤：`bash tools/deploy/verify-board-config.sh --repo . --remote pi@<板地址>`
-  （仓根执行；装机根缺省 `/usr/lib/rockrobot3`，与两轨安装位一致）。
+- 操作步骤：`bash tools/deploy/verify-board-config.sh --repo . --remote pi@<板地址> --profile pi4b-solo`
+  （仓根执行；装机根缺省 `/usr/lib/rockrobot3`，与两轨安装位一致；`--profile`
+  只比该机型装配单与板级资产——deb 按机型只装一份 `profiles/<name>.toml`）。
 - 预期输出：每模块每 config 文件一行 `PASS <模块>/<文件> sha=<12 位>`，末行
-  `结论：装机面 config 与仓内逐字节一致`。
+  `结论：装机面（模块 config / 装配单 / systemd unit / 板级资产）与仓内一致`。
 - 判定标准：退出码 0（全 PASS）。任一行 `DRIFT`/`MISS` 即未过。
 - 失败处置：重装包（`dpkg -i` 新 deb）或重铺镜像后再跑；仍漂移 → 查装机根实际路径
   与 `--root` 参数是否一致，如实登记差异（不许手改板上 config 凑绿——那会造出
   第二真值点）。
+
+**⑤ 板级资产收编**（2026-11-22，W5-3；`/etc` 不再手改）：
+
+- 真值：`base/os/distro/boards/pi4b-solo/etc/asound.conf`、
+  `.../etc/systemd/system/rrd.service.d/pi4b-solo.conf` 与
+  `modules/rr3-sense/config-pi4b.toml` 全部入仓。
+- 打包：`rr3-pack` 按 `--profile` 把 `boards/<profile>/` 装到
+  `/usr/lib/rockrobot3/boards/<profile>/`；postinst 把 `etc/systemd/**` 覆盖到
+  `/etc/systemd/**`，其余 `/etc` 件**只在缺失时铺**（不覆盖现场既有配置）。
+- 校验：同 ④ 的 `--profile` 口径；2026-11-22 实测 12 件 0 漂移（含上述三件）。
 
 ## 11. 实测回填：§10 板上三项欠账收官 + 链④真件档 MAX7219（2026-10-15）
 

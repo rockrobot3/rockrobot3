@@ -40,7 +40,7 @@ fn rr3_stage_root(cfg: &Rr3PackConfig) -> Result<(PathBuf, PathBuf), String> {
     Ok((stage, root))
 }
 
-/// deb 骨架：目录/入口产物 + systemd 单元 + 数据真值。
+/// deb 骨架：目录/入口产物 + systemd 单元 + 数据真值 + 板级资产。
 fn rr3_stage_skeleton(
     cfg: &Rr3PackConfig,
     stage: &Path,
@@ -50,7 +50,23 @@ fn rr3_stage_skeleton(
 ) -> Result<(), String> {
     rr3_stage_layout(cfg, stage)?;
     rr3_stage_unit(stage, profile_name)?;
-    rr3_stage_truth(cfg, root, truth)
+    rr3_stage_truth(cfg, root, truth)?;
+    rr3_stage_board(cfg, root)
+}
+
+/// 板级资产（发行版快路档）：`base/os/distro/boards/<profile>/` 存在即整树随装，
+/// 缺席合法跳过（distro 等无板级文件的档零扰动）。`<profile>` 用 cfg.profile 的
+/// **裸机型名**（与 postinst 同源；`profile_name` 形参是 `distro.toml`，只供
+/// 单元路径改写）。布局约定 `etc/**` 是装机 `/etc/**` 的源：postinst 按
+/// "etc/systemd 归包管、其余只铺缺失件"落盘——板上不再手改 /etc/asound.conf
+/// 与 drop-in，仓内是唯一真值。
+fn rr3_stage_board(cfg: &Rr3PackConfig, root: &Path) -> Result<(), String> {
+    let src = cfg.repo.join("base/os/distro/boards").join(&cfg.profile);
+    if !src.is_dir() {
+        return Ok(());
+    }
+    rr3_copy_dir(&src, &root.join("boards").join(&cfg.profile))
+        .map_err(|e| format!("复制板级资产 {} 失败: {e}", cfg.profile))
 }
 
 /// 逐模块：manifest（entry 改写）+ 产物 + config。
@@ -144,7 +160,8 @@ fn rr3_stage_debian(cfg: &Rr3PackConfig, stage: &Path) -> Result<(), String> {
     fs::write(stage.join("DEBIAN/control"), rr3_control_text(&cfg.arch))
         .map_err(|e| format!("写 control 失败: {e}"))?;
     let postinst = stage.join("DEBIAN/postinst");
-    fs::write(&postinst, rr3_postinst_text()).map_err(|e| format!("写 postinst 失败: {e}"))?;
+    fs::write(&postinst, rr3_postinst_text(&cfg.profile))
+        .map_err(|e| format!("写 postinst 失败: {e}"))?;
     rr3_make_executable(&postinst);
     Ok(())
 }

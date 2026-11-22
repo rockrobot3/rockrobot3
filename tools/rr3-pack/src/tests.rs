@@ -209,6 +209,34 @@ fn stage_reset_removes_stale_files() {
     assert!(stage.join("usr/bin/rrd").is_file(), "清空后必须重新装配");
 }
 
+/// 板级资产：boards/<profile>/ 存在即整树随装，postinst 按 profile 落 /etc
+/// （systemd 段覆盖、其余只铺缺失件）。
+#[test]
+fn stage_copies_board_assets_and_postinst() {
+    let (payload, repo) = fixture();
+    let etc = repo.join("base/os/distro/boards/distro/etc");
+    fs::create_dir_all(etc.join("systemd/system/rrd.service.d")).unwrap();
+    fs::write(etc.join("asound.conf"), "pcm.x {}\n").unwrap();
+    fs::write(
+        etc.join("systemd/system/rrd.service.d/distro.conf"),
+        "[Service]\nEnvironment=X=1\n",
+    )
+    .unwrap();
+    let (cfg, _) = cfg_of(&payload, &repo);
+    let stage = rr3_stage(&cfg).unwrap();
+    let root = stage.join("usr/lib/rockrobot3");
+    assert_eq!(
+        fs::read_to_string(root.join("boards/distro/etc/asound.conf")).unwrap(),
+        "pcm.x {}\n"
+    );
+    assert!(root
+        .join("boards/distro/etc/systemd/system/rrd.service.d/distro.conf")
+        .is_file());
+    let post = fs::read_to_string(stage.join("DEBIAN/postinst")).unwrap();
+    assert!(post.contains("/usr/lib/rockrobot3/boards/distro"), "{post}");
+    assert!(post.contains("etc/systemd/*) install -D -m 644"), "{post}");
+}
+
 #[test]
 fn stage_copies_whole_declaration_tree_for_g4() {
     let (payload, repo) = fixture();

@@ -1,0 +1,36 @@
+# rr3-sense Pi 4B 单板双麦档（W5-3）：USB YD2076 原始双通道 16k/20ms。
+# 采集/回放分流在 /etc/asound.conf 的 asym PCM "rr3"（capture=YD2076，
+# 回放=C-Media），本档只描述 sense 侧参数；通道顺序由 asound 的 route 交换，
+# 使 DoA 的负角对应物理左侧。
+#
+# 装载方式：rrd drop-in 注入 RR3_SENSE_CONFIG=<装机绝对路径>（pi4b-solo 档为
+# /usr/lib/rockrobot3/modules/rr3-sense/config-pi4b.toml）；不动默认 config.toml。
+# channels=2 是 DoA 必需；VAD/DoA 门限按 YD2076 现场实测标定。
+
+[rr3-sense.audio]
+sample_rate = 16000
+channels = 2
+frame_ms = 20
+
+[rr3-sense.vad]
+# 2026-11-22 现场标定：安静段底噪低，120 为起音门；window_rms_min 同口径。
+rms_start = 120
+silence_tail_ms = 700   # 判停尾静音（句内换气不切段）
+min_speech_ms = 200
+
+[rr3-sense.doa]
+bin_threshold_deg = 30  # DoA 三档边界
+window_ms = 1000        # onset 时 ring 回看窗整窗互相关
+window_rms_min = 120
+# 双麦间距（现场实测路径差 ≈93 mm；16k 下 lag_max=round(16000×100/343000)=5，
+# 覆盖真实时延 4.34 样本。旧值 70 → lag_max=3，窗截断导致左右混判）
+mic_baseline_mm = 100
+
+[rr3-sense.reflex]
+enable = true
+deadband_deg = 10       # 正前方 ±10° 内不转头
+gate_tail_ms = 1000     # TTS 帧流停后门保持开的尾窗
+gate_gap_ms = 500       # tts_pcm 帧间隔超过此值判新一轮播放
+nod_deg = 8             # pan 到位后点头手势幅度
+nod_delay_ms = 500
+nod_hold_ms = 200

@@ -92,6 +92,13 @@ done
 # 板麦双通道档配置随包（2026-10-31，组合形态音频上行）：部署侧 RR3_SENSE_CONFIG
 # 指到该装机路径；缺件则 sense 退回单麦默认档（视频道=1，DoA 无从判向）。
 test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-sense/config-esp32.toml"
+# Pi 4B 单板档（W5-3 收编）：双麦形态 config、/etc/asound.conf 与 rrd drop-in
+# 随包（stage 于 boards/pi4b-solo/etc，postinst 落 /etc），缺件即拒出包。
+if [ "$PROFILE" = pi4b-solo ]; then
+  test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-sense/config-pi4b.toml"
+  test -f "$STAGE/usr/lib/rockrobot3/boards/pi4b-solo/etc/asound.conf"
+  test -f "$STAGE/usr/lib/rockrobot3/boards/pi4b-solo/etc/systemd/system/rrd.service.d/pi4b-solo.conf"
+fi
 file "$STAGE/usr/bin/rrd" | grep -q "ELF 64-bit.*ARM aarch64.*statically linked" # 真板产物体检
 
 echo "staging 树就绪: $STAGE"

@@ -6,18 +6,19 @@
 # 10-31 的重标只进了仓，从没铺到部署面；而模块启动只打印"来源路径"，不比内容，
 # 所以旧档静默生效、症状表现为"怎么喊都没反应"。
 #
-# 比对面（部署面三类，见 rr3_deploy_manifest）：模块 config（含 esp32 档）、
-# 装配单 profiles/*.toml、systemd unit（口径忽略 ExecStart= 行——rr3-pack 出包
-# 按 --profile 改写该行）。2026-11-16 扩面前只比 7 件 config，而当天两起现场事故
-# 恰好落在另两类上：装配单 alsa_device 指向未接入声卡、unit 的 ExecStartPre 未铺。
+# 比对面（部署面四类，见 rr3_deploy_manifest）：模块 config（含 esp32/pi4b 形态档）、
+# 装配单 profiles/*.toml、systemd unit（口径忽略 ExecStart= 行）、板级资产
+# （base/os/distro/boards/<profile>/etc/** → 装机 /etc/**，2026-11-22 收编后新增）。
+# 2026-11-16 扩面前只比 7 件 config，而当天两起现场事故恰好落在另两类上：装配单
+# alsa_device 指向未接入声卡、unit 的 ExecStartPre 未铺。
 #
 # 本脚本把"仓内真值 ↔ 装机副本"的比对收敛成**唯一实现**（机制面单点）：
 # 逐文件 sha256 判等，缺件即漂移；调用方（build-onboard 报告段 / 板上线 runbook）
 # 只决定"漂移之后怎么办"（策略面）——脚本不自动改任何文件。
 #
 # 用法:
-#   verify-board-config.sh --repo <仓根> --remote <user@host> [--root <装机根>] [--unit-dir <unit 目录>]
-#   verify-board-config.sh --repo <仓根> --local <装机根> [--unit-dir <unit 目录>]
+#   verify-board-config.sh --repo <仓根> --remote <user@host> [--root <装机根>] [--unit-dir <unit 目录>] [--etc-dir <etc 目录>] [--profile <机型>]
+#   verify-board-config.sh --repo <仓根> --local <装机根> [--unit-dir <unit 目录>] [--etc-dir <etc 目录>] [--profile <机型>]
 #   verify-board-config.sh --self-test
 #
 # 判据:
@@ -27,11 +28,14 @@
 #   退出码: 0 全等 / 1 有漂移或缺件 / 2 用法错误 / 3 self-test 失败
 #
 # 装机根缺省 /usr/lib/rockrobot3（两轨同根：deb 与 buildroot 安装位一致的纪律），
-# unit 目录缺省 /lib/systemd/system。
+# unit 目录缺省 /lib/systemd/system，etc 目录缺省 /etc。
+# --profile 只比该机型装配单与其板级资产（deb 按机型只装一份 profiles/<name>.toml）；
+# 不传则扫全部装配单（legacy/多档镜像自测）。
 set -euo pipefail
 
 DEFAULT_ROOT=/usr/lib/rockrobot3
 DEFAULT_UNIT_DIR=/lib/systemd/system
+DEFAULT_ETC_DIR=/etc
 
 usage() {
 	sed -n '3,36p' "$0" | sed 's/^# \{0,1\}//'
@@ -54,27 +58,47 @@ fi
 # 口径 full = 逐字节；unit = 忽略 `ExecStart=` 行（rr3-pack 出包按 --profile 名改写
 # 该行，逐字节比必然假红——口径差异是契约，不是例外）。
 rr3_deploy_manifest() {
-	local repo="$1" d f p u name
+	local repo="$1" profile="${2:-}" d f p u name board_root
 	for d in "$repo"/modules/*/; do
 		[ -f "$d/config.toml" ] || continue
 		name="$(basename "$d")"
-		for f in config.toml config-esp32.toml; do
+		for f in config.toml config-esp32.toml config-pi4b.toml; do
 			[ -f "$d$f" ] && printf 'modules/%s/%s|modules/%s/%s|full\n' "$name" "$f" "$name" "$f"
 		done
 	done
-	for p in "$repo"/profiles/*.toml; do
-		[ -f "$p" ] && printf 'profiles/%s|profiles/%s|full\n' "$(basename "$p")" "$(basename "$p")"
-	done
+	# 板级资产：boards/<profile>/etc/** 是装机 /etc/** 的源（仓内唯一真值）。
+	# 指定 --profile 时只扫该档；未指定（legacy/self-test）扫全部。夹具没有
+	# boards/ 时 find 打空，合法跳过。
+	board_root="$repo/base/os/distro/boards"
+	[ -n "$profile" ] && board_root="$board_root/$profile"
+	if [ -d "$board_root" ]; then
+		find "$board_root" -type f -path '*/etc/*' 2>/dev/null |
+			while IFS= read -r f; do
+				rel="${f#"$repo"/base/os/distro/boards/}"
+				printf 'base/os/distro/boards/%s|%s|full\n' "$rel" "${rel#*/}"
+			done
+	fi
+	if [ -n "$profile" ]; then
+		p="$repo/profiles/$profile.toml"
+		[ -f "$p" ] && printf 'profiles/%s.toml|profiles/%s.toml|full\n' "$profile" "$profile"
+	else
+		for p in "$repo"/profiles/*.toml; do
+			[ -f "$p" ] && printf 'profiles/%s|profiles/%s|full\n' "$(basename "$p")" "$(basename "$p")"
+		done
+	fi
 	for u in "$repo"/base/os/distro/units/*.service; do
 		[ -f "$u" ] && printf 'base/os/distro/units/%s|units/%s|unit\n' "$(basename "$u")" "$(basename "$u")"
 	done
 }
 
-# 装机侧路径：unit 住系统目录（非装机根下），其余按装机根拼接。
+# 装机侧路径：unit 住系统目录（非装机根下），板级资产住 /etc 目录（--etc-dir
+# 可重定位，供 self-test/staging 用），其余按装机根拼接。
 rr3_inst_path() {
 	local root="$1" rel="$2"
 	case "$rel" in
 	units/*) printf '%s/%s\n' "$UNIT_DIR" "${rel#units/}" ;;
+	etc/*) printf '%s/%s\n' "$ETC_DIR" "${rel#etc/}" ;;
+	/*) printf '%s\n' "$rel" ;;
 	*) printf '%s/%s\n' "$root" "$rel" ;;
 	esac
 }
@@ -85,22 +109,36 @@ rr3_hash_local() {
 }
 
 rr3_hash_remote() {
-	local target="$1" path="$2" kou="$3"
+	local target="$1" path="$2" kou="$3" tmp rc=0
 	# -n：绝不能读 stdin——调用方在 here-doc 里逐行喂清单，ssh 吃掉剩余行会让
 	# "比对 16 件"静默变成"比对 2 件"（2026-11-16 实测，门绿而面漏）。
+	# 落临时文件再本地哈希：命令替换会吃掉尾随换行，逐字节口径必须保留原文。
+	tmp="$(mktemp)" || {
+		printf ''
+		return 0
+	}
 	if [ "$kou" = unit ]; then
-		ssh -n "$target" "sed -e '/^ExecStart=/d' '$path'" 2>/dev/null | hash_stdin
+		ssh -n "$target" "sed -e '/^ExecStart=/d' '$path'" >"$tmp" 2>/dev/null || rc=$?
 	else
-		ssh -n "$target" "cat '$path'" 2>/dev/null | hash_stdin
+		ssh -n "$target" "cat '$path'" >"$tmp" 2>/dev/null || rc=$?
 	fi
+	if [ "$rc" -ne 0 ] || [ ! -s "$tmp" ]; then
+		rm -f "$tmp"
+		printf ''
+		return 0
+	fi
+	hash_stdin <"$tmp"
+	rc=$?
+	rm -f "$tmp"
+	return "$rc"
 }
 
 # 逐件比对（实现单点；调用方只管结果）
 verify() {
-	local repo="$1" mode="$2" target="$3" root="$4"
+	local repo="$1" mode="$2" target="$3" root="$4" profile="${5:-}"
 	local drift=0 checked=0 list repo_rel inst_rel kou repo_p inst_p a b
 
-	list="$(rr3_deploy_manifest "$repo")"
+	list="$(rr3_deploy_manifest "$repo" "$profile")"
 	while IFS='|' read -r repo_rel inst_rel kou; do
 		[ -n "$repo_rel" ] || continue
 		repo_p="$repo/$repo_rel"
@@ -134,7 +172,7 @@ EOF
 		echo "结论：装机面与仓内不一致——重装包（dpkg -i）或重新铺镜像后再跑本工具确认"
 		return 1
 	fi
-	echo "结论：装机面（模块 config / 装配单 / systemd unit）与仓内一致"
+	echo "结论：装机面（模块 config / 装配单 / systemd unit / 板级资产）与仓内一致"
 	return 0
 }
 
@@ -150,9 +188,12 @@ self_test() {
 	SELFTEST_TMP="$tmp"
 	trap cleanup_selftest EXIT
 	UNIT_DIR="$tmp/inst-units"
+	ETC_DIR="$tmp/inst-etc"
 	mkdir -p "$tmp/repo/modules/rr3-a" "$tmp/inst/modules/rr3-a" \
 		"$tmp/repo/profiles" "$tmp/inst/profiles" \
-		"$tmp/repo/base/os/distro/units" "$UNIT_DIR"
+		"$tmp/repo/base/os/distro/units" "$UNIT_DIR" \
+		"$tmp/repo/base/os/distro/boards/p/etc/systemd/system/rrd.service.d" \
+		"$tmp/inst-etc/systemd/system/rrd.service.d"
 	printf 'rms_start = 650\n' >"$tmp/repo/modules/rr3-a/config.toml"
 	cp "$tmp/repo/modules/rr3-a/config.toml" "$tmp/inst/modules/rr3-a/config.toml"
 	printf '[hardware]\nalsa_device = "plughw:CARD=Device"\n' >"$tmp/repo/profiles/p.toml"
@@ -162,10 +203,13 @@ self_test() {
 		>"$tmp/repo/base/os/distro/units/rrd.service"
 	printf '[Service]\nExecStartPre=-/usr/bin/amixer -c Device sset PCM 100%%\nExecStart=/usr/bin/rrd --profile /y\n' \
 		>"$UNIT_DIR/rrd.service"
+	BOARD_REL="base/os/distro/boards/p/etc/systemd/system/rrd.service.d/d.conf"
+	printf '[Service]\nEnvironment=RR3_HAL_ALSA_DEVICE=rr3\n' >"$tmp/repo/$BOARD_REL"
+	cp "$tmp/repo/$BOARD_REL" "$ETC_DIR/systemd/system/rrd.service.d/d.conf"
 
 	run_case() { # 名称 期望码
 		set +e
-		verify "$tmp/repo" local "$tmp/inst" "$tmp/inst" >/dev/null 2>&1
+		verify "$tmp/repo" local "$tmp/inst" "$tmp/inst" "" >/dev/null 2>&1
 		rc=$?
 		set -e
 		if [ "$rc" -eq "$2" ]; then
@@ -190,12 +234,17 @@ self_test() {
 	run_case unit非ExecStart行漂移红 1
 	rm "$UNIT_DIR/rrd.service"
 	run_case unit缺件红 1
+	printf '[Service]\nEnvironment=RR3_HAL_ALSA_DEVICE=hw:9\n' \
+		>"$ETC_DIR/systemd/system/rrd.service.d/d.conf"
+	run_case 板级资产漂移红 1
+	cp "$tmp/repo/$BOARD_REL" "$ETC_DIR/systemd/system/rrd.service.d/d.conf"
 
 	[ "$fail" -eq 0 ] || return 3
 	return 0
 }
 
-MODE="" REPO="" TARGET="" ROOT="$DEFAULT_ROOT" UNIT_DIR="$DEFAULT_UNIT_DIR"
+MODE="" REPO="" TARGET="" ROOT="$DEFAULT_ROOT" UNIT_DIR="$DEFAULT_UNIT_DIR" \
+	ETC_DIR="$DEFAULT_ETC_DIR" PROFILE=""
 while [ "$#" -gt 0 ]; do
 	case "$1" in
 	--repo)
@@ -220,6 +269,14 @@ while [ "$#" -gt 0 ]; do
 		UNIT_DIR="$2"
 		shift 2
 		;;
+	--etc-dir)
+		ETC_DIR="$2"
+		shift 2
+		;;
+	--profile)
+		PROFILE="$2"
+		shift 2
+		;;
 	--self-test)
 		self_test
 		exit $?
@@ -235,7 +292,7 @@ if [ -z "$REPO" ] || [ -z "$MODE" ]; then
 fi
 
 if [ "$MODE" = local ]; then
-	verify "$REPO" local "$TARGET" "$TARGET"
+	verify "$REPO" local "$TARGET" "$TARGET" "$PROFILE"
 else
-	verify "$REPO" remote "$TARGET" "$ROOT"
+	verify "$REPO" remote "$TARGET" "$ROOT" "$PROFILE"
 fi
