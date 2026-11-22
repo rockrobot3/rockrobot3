@@ -165,7 +165,7 @@ fn stage_tree_lays_out_deb_layout_and_rewrites_entry_only() {
     // control / postinst
     let control = fs::read_to_string(stage.join("DEBIAN/control")).unwrap();
     assert!(control.contains("Package: rockrobot3"));
-    assert!(control.contains("Version: 0.0.6"));
+    assert!(control.contains("Version: 0.0.12"));
     assert!(control.contains("Architecture: arm64"));
     let postinst = fs::read_to_string(stage.join("DEBIAN/postinst")).unwrap();
     assert!(postinst.starts_with("#!/bin/sh"));
