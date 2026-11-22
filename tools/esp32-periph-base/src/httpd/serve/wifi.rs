@@ -31,6 +31,53 @@ static WIFI_SUP: AtomicBool = AtomicBool::new(false);
 /// STA 重连退避（毫秒）：首次 2s，逐级到 30s 封顶。
 const STA_RETRY_MS: [u64; 5] = [2_000, 4_000, 8_000, 15_000, 30_000];
 
+/// wifi-sup 状态（独立结构：把判断/退避从线程循环拆出，压低圈复杂度）。
+struct Rr3WifiSup {
+    idx: usize,
+    was_up: bool,
+    last: Instant,
+}
+
+impl Rr3WifiSup {
+    fn rr3_new() -> Self {
+        Self {
+            idx: 0,
+            was_up: false,
+            last: Instant::now(),
+        }
+    }
+
+    fn rr3_up(&mut self) {
+        if !self.was_up {
+            println!("[periph] wifi-sup: STA 在线（DHCP 已得 IP）");
+        }
+        self.was_up = true;
+        self.idx = 0;
+        self.last = Instant::now();
+    }
+
+    /// 掉线侧：返回 true = 本轮应发起重连（退避到期且无配网事务）。
+    fn rr3_ready(&mut self) -> bool {
+        if self.was_up {
+            println!("[periph] wifi-sup: STA 掉线，进入重连退避");
+            self.was_up = false;
+        }
+        if WIFI_TXN.load(Ordering::Relaxed) {
+            return false;
+        }
+        let wait = STA_RETRY_MS[self.idx.min(STA_RETRY_MS.len() - 1)];
+        self.last.elapsed() >= Duration::from_millis(wait)
+    }
+
+    /// 发起一次重连（错误码不致命：已连接/连接中由 IDF 返回）。
+    unsafe fn rr3_attempt(&mut self) -> i32 {
+        let r = esp_wifi_connect();
+        self.idx = (self.idx + 1).min(STA_RETRY_MS.len() - 1);
+        self.last = Instant::now();
+        r
+    }
+}
+
 /// 配网事务守卫：进入置位、离开（含提前 return）复位。
 struct Rr3WifiTxn;
 
@@ -311,38 +358,19 @@ pub(super) unsafe fn wifi_sta_supervise(configured: bool) {
         .name("wifi-sup".into())
         .stack_size(6_144)
         .spawn(move || unsafe {
-            let mut idx = 0usize;
-            let mut was_up = false;
-            let mut last = Instant::now();
+            let mut st = Rr3WifiSup::rr3_new();
             loop {
                 thread::sleep(Duration::from_millis(1_000));
                 // SAFETY：STA_NETIF 是起栈期写一次的进程级单例；未写即 false。
-                let up = netif_has_ip(STA_NETIF.get());
-                if up {
-                    if !was_up {
-                        println!("[periph] wifi-sup: STA 在线（DHCP 已得 IP）");
-                    }
-                    was_up = true;
-                    idx = 0;
-                    last = Instant::now();
+                if netif_has_ip(STA_NETIF.get()) {
+                    st.rr3_up();
                     continue;
                 }
-                if was_up {
-                    println!("[periph] wifi-sup: STA 掉线，进入重连退避");
-                    was_up = false;
-                }
-                if WIFI_TXN.load(Ordering::Relaxed) {
+                if !st.rr3_ready() {
                     continue;
                 }
-                let wait = STA_RETRY_MS[idx.min(STA_RETRY_MS.len() - 1)];
-                if last.elapsed() < Duration::from_millis(wait) {
-                    continue;
-                }
-                // SAFETY：esp_wifi_connect 线程安全；已连接/连接中返回错误码不致命。
-                let r = esp_wifi_connect();
-                println!("[periph] wifi-sup: 重连 attempt={} esp_err={r}", idx + 1);
-                idx = (idx + 1).min(STA_RETRY_MS.len() - 1);
-                last = Instant::now();
+                let r = st.rr3_attempt();
+                println!("[periph] wifi-sup: 重连 attempt={} esp_err={r}", st.idx);
             }
         });
     if let Err(e) = spawned {
