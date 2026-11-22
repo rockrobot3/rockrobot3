@@ -244,6 +244,98 @@ fn unknown_fields_assert_flags_typo_keys() {
     assert!(crate::validate::rr3_no_unknown_keys(&ok, &specs, "atom manifest").is_empty());
 }
 
+/// 仓根：rr-registry 位于 base/runtime/ 下三级
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .expect("rr-registry 位于 base/runtime/ 下三级")
+        .to_path_buf()
+}
+
+/// 单份 atom.toml：过契约+查册门+板无关、目录名与 atom.name 同一，回传所占格
+fn chk_one_atom(manifest: &Path, slots: &Rr3SlotTable) -> String {
+    let text = std::fs::read_to_string(manifest).expect("atom.toml 可读");
+    let errs = rr3_atom_chk(&text, slots);
+    assert!(errs.is_empty(), "{} 漂移: {errs:?}", manifest.display());
+    let v: Value = toml::from_str(&text).expect("atom.toml 已过 TOML 解析");
+    // 批E'：目录名 = atom.name 唯一对应——⑦-b/⑦-c 门按目录名执法、
+    // 契约按 atom.name，两名漂移即"合同与户口本不符"（件名两个真源）
+    let dir_name = manifest
+        .parent()
+        .and_then(|p| p.file_name())
+        .expect("atom.toml 必有父目录名")
+        .to_string_lossy();
+    let atom_name = v["atom"]["name"].as_str().expect("atom.name 已过必填校验");
+    assert_eq!(
+        atom_name, dir_name,
+        "{dir_name}：atom.name 与目录名不一致（件名两个真源）"
+    );
+    v["provides"]["slots"][0]
+        .as_str()
+        .expect("provides.slots 恰一项且为字符串（validate 已断）")
+        .to_string()
+}
+
+/// ① 仓扫描：逐份全量校验 + 收格主（每格一件的唯一性在此建立）
+fn scan_atom_owners(
+    root: &Path,
+    slots: &Rr3SlotTable,
+) -> (std::collections::BTreeMap<String, String>, usize) {
+    let mut owner: std::collections::BTreeMap<String, String> = Default::default();
+    let mut scanned = 0usize;
+    for m in std::fs::read_dir(root.join("modules")).expect("modules/ 必须存在") {
+        let atoms = m.expect("modules 项可读").path().join("atoms");
+        if !atoms.is_dir() {
+            continue;
+        }
+        for a in std::fs::read_dir(&atoms).expect("atoms/ 必须可读") {
+            let manifest = a.expect("atom 项可读").path().join("atom.toml");
+            if !manifest.is_file() {
+                continue;
+            }
+            scanned += 1;
+            let slot = chk_one_atom(&manifest, slots);
+            if let Some(prev) = owner.insert(slot.clone(), manifest.display().to_string()) {
+                panic!(
+                    "格 {slot} 被两件抢占（每格一件，ADR-0019 裁定 1）: {prev} 与 {}",
+                    manifest.display()
+                );
+            }
+        }
+    }
+    (owner, scanned)
+}
+
+/// ② 不留空格 + 内建格不立件：23 格逐格反查，末尾覆盖账必须轧平
+fn assert_slots_covered(
+    slots: &Rr3SlotTable,
+    owner: &std::collections::BTreeMap<String, String>,
+    builtin: &[&str],
+) {
+    let names = slots.rr3_slot_names();
+    for slot in &names {
+        let provided = owner.get(slot);
+        if builtin.contains(&slot.as_str()) {
+            assert!(
+                provided.is_none(),
+                "内建格 {slot} 不立件（基座内建/机制核切片承载），却被 {} 提供",
+                provided.unwrap()
+            );
+        } else {
+            assert!(
+                provided.is_some(),
+                "格 {slot} 无 atom 承担（不留空格）——立件或经契约级评审改格"
+            );
+        }
+    }
+    assert_eq!(
+        owner.len() + builtin.len(),
+        names.len(),
+        "覆盖账不平：atom 承担格数 + 内建豁免数 ≠ slots 表全数"
+    );
+}
+
 /// 批E 门禁接线（architecture §13"每格一件·不留空格"反向断言，查册真值处执法）：
 /// 仓扫描全部 `modules/*/atoms/*/atom.toml`——①每份过契约+查册门+板无关
 /// （新增件**不钉即红**，堵住上面 include_str! 逐份钉法"漏钉不红"的缺口）；
@@ -251,11 +343,7 @@ fn unknown_fields_assert_flags_typo_keys() {
 /// 新格无件当场红），内建格不立件。
 #[test]
 fn repo_atoms_compliant_and_every_slot_uniquely_covered() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .expect("rr-registry 位于 base/runtime/ 下三级")
-        .to_path_buf();
+    let root = repo_root();
     // 基座内建豁免集（0.0.5 方案 §12.1 终裁：boot 即在位、无独立原子目录——
     // rr-bus/rrd 承载或机制核切片承载；power.battery 虽 base 层但由 battery
     // 原子承担，不在豁免集。此常量漂移 = 覆盖账不平断言当场红）
@@ -272,73 +360,11 @@ fn repo_atoms_compliant_and_every_slot_uniquely_covered() {
     ];
     let slots = slots();
 
-    // ① 仓扫描：逐份全量校验 + 收格主（每格一件的唯一性在此建立）
-    let mut owner: std::collections::BTreeMap<String, String> = Default::default();
-    let mut scanned = 0usize;
-    for m in std::fs::read_dir(root.join("modules")).expect("modules/ 必须存在") {
-        let atoms = m.expect("modules 项可读").path().join("atoms");
-        if !atoms.is_dir() {
-            continue;
-        }
-        for a in std::fs::read_dir(&atoms).expect("atoms/ 必须可读") {
-            let manifest = a.expect("atom 项可读").path().join("atom.toml");
-            if !manifest.is_file() {
-                continue;
-            }
-            scanned += 1;
-            let text = std::fs::read_to_string(&manifest).expect("atom.toml 可读");
-            let errs = rr3_atom_chk(&text, &slots);
-            assert!(errs.is_empty(), "{} 漂移: {errs:?}", manifest.display());
-            let v: Value = toml::from_str(&text).expect("atom.toml 已过 TOML 解析");
-            // 批E'：目录名 = atom.name 唯一对应——⑦-b/⑦-c 门按目录名执法、
-            // 契约按 atom.name，两名漂移即"合同与户口本不符"（件名两个真源）
-            let dir_name = manifest
-                .parent()
-                .and_then(|p| p.file_name())
-                .expect("atom.toml 必有父目录名")
-                .to_string_lossy();
-            let atom_name = v["atom"]["name"].as_str().expect("atom.name 已过必填校验");
-            assert_eq!(
-                atom_name, dir_name,
-                "{dir_name}：atom.name 与目录名不一致（件名两个真源）"
-            );
-            let slot = v["provides"]["slots"][0]
-                .as_str()
-                .expect("provides.slots 恰一项且为字符串（validate 已断）")
-                .to_string();
-            if let Some(prev) = owner.insert(slot.clone(), manifest.display().to_string()) {
-                panic!(
-                    "格 {slot} 被两件抢占（每格一件，ADR-0019 裁定 1）: {prev} 与 {}",
-                    manifest.display()
-                );
-            }
-        }
-    }
+    let (owner, scanned) = scan_atom_owners(&root, &slots);
     assert!(
         scanned >= 17,
         "仓扫描仅见 {scanned} 份 atom.toml（打空/缺件属门禁失效，不放行）"
     );
 
-    // ② 不留空格 + 内建格不立件：23 格逐格反查，末尾覆盖账必须轧平
-    let names = slots.rr3_slot_names();
-    for slot in &names {
-        let provided = owner.get(slot);
-        if BUILTIN_NO_ATOM.contains(&slot.as_str()) {
-            assert!(
-                provided.is_none(),
-                "内建格 {slot} 不立件（基座内建/机制核切片承载），却被 {} 提供",
-                provided.unwrap()
-            );
-        } else {
-            assert!(
-                provided.is_some(),
-                "格 {slot} 无 atom 承担（不留空格）——立件或经契约级评审改格"
-            );
-        }
-    }
-    assert_eq!(
-        owner.len() + BUILTIN_NO_ATOM.len(),
-        names.len(),
-        "覆盖账不平：atom 承担格数 + 内建豁免数 ≠ slots 表全数"
-    );
+    assert_slots_covered(&slots, &owner, BUILTIN_NO_ATOM);
 }
