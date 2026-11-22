@@ -43,6 +43,10 @@ pub(crate) use log::{rr3_log_dir_ensure, rr3_log_rotate};
 
 use std::sync::{Mutex, MutexGuard};
 
+/// 运维组名单一真值：socket 与日志目录的组访问模型（ADR-0010 修订 1）都取这里，
+/// 两处各写一份字符串迟早分叉。组由 postinst 创建，不在位时各自留痕跳过。
+pub(crate) const RR3_OPS_GROUP: &str = "rockrobot3";
+
 /// 锁中毒的唯一处理口径：中毒只可能来自 panic 的持锁者，继续用比弃连接/比整个守护停摆好。
 /// **单点**原因：`conn.rs`（应答与收尾）、`daemon.rs`（watchdog 扫描与广播）与 `supervisor.rs`
 /// （收尸与重启）共用同一本在册表锁，三处各写一份"怎么处理中毒"迟早分叉——与 Task 9 抽

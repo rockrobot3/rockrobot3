@@ -11,7 +11,7 @@ use crate::{rr3_lock, rr3_log};
 /// ctl socket 的属主组（0.0.6 批F5b R12）：postinst 建系统组，运维用户由
 /// 装机现场入组（deb 不该动用户）——socket 权限位因此成为 ADR-0010 裁定 2
 /// "套接字文件权限就是访问控制"的落地值。
-const RR3_CTL_SOCKET_GROUP: &str = "rockrobot3";
+const RR3_CTL_SOCKET_GROUP: &str = crate::RR3_OPS_GROUP;
 
 // ── R26 关停强制 flush（0.0.5 增补轮四 批W3）────────────────────────────────
 //

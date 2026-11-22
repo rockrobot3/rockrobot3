@@ -43,7 +43,50 @@ pub(crate) fn rr3_log_dir_ensure(bus_path: &Path) -> std::io::Result<PathBuf> {
     if let Err(e) = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o750)) {
         eprintln!("rrd 日志目录收紧 0750 失败（继续，{}）: {e}", dir.display());
     }
+    rr3_log_dir_group(&dir);
     Ok(dir)
+}
+
+/// 运维组 gid：首解析一次后进程内复用。`getgrnam` 走静态存储、多线程并发不安全，
+/// 故用 OnceLock 定格——首次调用在 daemon 起工作线程前（socket ACL 同段），每次
+/// spawn 的 ensure 都吃缓存。组不在位 = `None`（目录保持 root:root，留痕一次）。
+#[cfg(unix)]
+fn rr3_log_gid() -> Option<libc::gid_t> {
+    static GID: OnceLock<Option<libc::gid_t>> = OnceLock::new();
+    *GID.get_or_init(|| {
+        let c = std::ffi::CString::new(crate::RR3_OPS_GROUP).ok()?;
+        // SAFETY：c 活到调用结束；getgrnam 返回值指向静态存储，本处只读 gr_gid，
+        // 且 OnceLock 保证全程只执行一次（启动段无并发 getgrnam）。
+        let gr = unsafe { libc::getgrnam(c.as_ptr()) };
+        if gr.is_null() {
+            eprintln!(
+                "rrd 日志目录属组 {} 不在位（跳过 chgrp，保持 root:root；组内用户需 sudo 读日志）",
+                crate::RR3_OPS_GROUP
+            );
+            return None;
+        }
+        // SAFETY：gr 已判非空，只读一个字段。
+        Some(unsafe { (*gr).gr_gid })
+    })
+}
+
+/// 日志目录属组对齐运维组（与 socket ACL 同款机制）：失败只留痕，不挡起跑。
+#[cfg(unix)]
+fn rr3_log_dir_group(dir: &Path) {
+    use std::os::unix::ffi::OsStrExt;
+    let Some(gid) = rr3_log_gid() else { return };
+    let Ok(cpath) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else {
+        return;
+    };
+    // SAFETY：cpath 活到调用结束；uid=MAX 按 POSIX 表示"不改属主"，chown 只读路径串。
+    let rc = unsafe { libc::chown(cpath.as_ptr(), libc::uid_t::MAX, gid) };
+    if rc != 0 {
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        eprintln!(
+            "rrd 日志目录 chgrp 失败（errno {errno}，保持 0750 root:root）: {}",
+            dir.display()
+        );
+    }
 }
 
 /// rrd 自身日志的落盘文件路径（批N5 件二笔2，§17 运维留痕）：OnceLock 首份胜出，
