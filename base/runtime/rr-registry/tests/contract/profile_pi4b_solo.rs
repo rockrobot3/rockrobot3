@@ -5,20 +5,15 @@
 
 use super::*;
 
-#[test]
-fn pi4b_solo_profile_is_complete_single_board_chain() {
-    let root = repo_root();
-    let text = std::fs::read_to_string(root.join("profiles/pi4b-solo.toml"))
-        .expect("profiles/pi4b-solo.toml 必须存在（W5-1）");
-    let v: toml::Value = toml::from_str(&text).expect("pi4b-solo.toml 必须可解析");
-
+/// 档基线：schema 5 / host 全承载 / Pi 4 / distro 快路轨。
+fn solo_basics(v: &toml::Value) {
     assert_eq!(
         v.get("schema_version").and_then(toml::Value::as_integer),
         Some(5),
         "pi4b-solo schema_version 漂移"
     );
-    assert_tier(&v, "host", "pi4b-solo 档位漂移（Pi 单板 = host 全承载）");
-    assert_chip(&v, "raspberry-pi-4", "pi4b-solo");
+    assert_tier(v, "host", "pi4b-solo 档位漂移（Pi 单板 = host 全承载）");
+    assert_chip(v, "raspberry-pi-4", "pi4b-solo");
     assert_eq!(
         v.get("os")
             .and_then(|o| o.get("route"))
@@ -26,8 +21,10 @@ fn pi4b_solo_profile_is_complete_single_board_chain() {
         Some("distro"),
         "pi4b-solo route 漂移（Raspberry Pi OS 属发行版快路轨）"
     );
+}
 
-    // 宿主两键：USB 声卡 CARD 名 + 网口；不得出现板侧十一键（单板无桥）。
+/// 宿主两键（USB 声卡 CARD 名 + 网口）；不得出现板侧十一键（单板无桥）。
+fn solo_hardware(v: &toml::Value) {
     let hardware = v
         .get("hardware")
         .and_then(toml::Value::as_table)
@@ -54,8 +51,10 @@ fn pi4b_solo_profile_is_complete_single_board_chain() {
             "pi4b-solo 不得出现板侧键 {k}（单板无桥）"
         );
     }
+}
 
-    // 十格全链绑定，逐格对表。
+/// 十格全链绑定，逐格对表。
+fn solo_bindings(v: &toml::Value) {
     let bindings = v
         .get("bindings")
         .and_then(toml::Value::as_table)
@@ -79,8 +78,10 @@ fn pi4b_solo_profile_is_complete_single_board_chain() {
             "pi4b-solo bindings.{slot} 漂移"
         );
     }
+}
 
-    // 两条 [[pin]]：pan 单轴 + OLED I2C 显示；不得登记 tilt。
+/// 两条 [[pin]]：pan 单轴 + OLED I2C 显示；不得登记 tilt。
+fn solo_pins(v: &toml::Value) {
     let pins = v
         .get("pin")
         .and_then(toml::Value::as_array)
@@ -122,8 +123,10 @@ fn pi4b_solo_profile_is_complete_single_board_chain() {
         Some("SSD1306"),
         "显示器件型号词漂移（devices.toml 在册行）"
     );
+}
 
-    // enabled_slots 与 present 三处一致。
+/// enabled_slots / present / bindings 三处一致。
+fn solo_consistency(v: &toml::Value) {
     let enabled = v
         .get("enabled_slots")
         .and_then(toml::Value::as_table)
@@ -144,7 +147,24 @@ fn pi4b_solo_profile_is_complete_single_board_chain() {
         .collect();
     present.sort();
     assert_eq!(from_enabled, present, "enabled_slots 与 present 不一致");
+    let bindings = v
+        .get("bindings")
+        .and_then(toml::Value::as_table)
+        .expect("pi4b-solo 缺 [bindings]");
     let mut bound: Vec<String> = bindings.keys().cloned().collect();
     bound.sort();
     assert_eq!(bound, present, "bindings 与 present 不一致");
+}
+
+#[test]
+fn pi4b_solo_profile_is_complete_single_board_chain() {
+    let root = repo_root();
+    let text = std::fs::read_to_string(root.join("profiles/pi4b-solo.toml"))
+        .expect("profiles/pi4b-solo.toml 必须存在（W5-1）");
+    let v: toml::Value = toml::from_str(&text).expect("pi4b-solo.toml 必须可解析");
+    solo_basics(&v);
+    solo_hardware(&v);
+    solo_bindings(&v);
+    solo_pins(&v);
+    solo_consistency(&v);
 }
