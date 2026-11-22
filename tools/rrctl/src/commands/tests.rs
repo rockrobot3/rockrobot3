@@ -425,3 +425,53 @@ mod unix_tests {
         );
     }
 }
+
+#[test]
+fn unit_name_gate_is_fail_closed() {
+    assert!(rr3_unit_name_ok("rr3-sense"));
+    assert!(rr3_unit_name_ok("rr3-brain"));
+    for bad in [
+        "",
+        "rr3-",
+        "rr3-Sense",
+        "rr3-a1",
+        "../etc/passwd",
+        "rr3-sense/x",
+        "rrd",
+    ] {
+        assert!(!rr3_unit_name_ok(bad), "{bad} 应被拒");
+    }
+}
+
+#[test]
+fn unit_args_reject_bad_shapes() {
+    assert!(rr3_unit_args(&[]).is_err(), "缺 --unit 应拒");
+    let bad = vec!["--unit".to_string(), "../x".to_string()];
+    assert!(rr3_unit_args(&bad).is_err(), "非法名应拒");
+    let ok = vec![
+        "--unit".to_string(),
+        "rr3-sense".to_string(),
+        "--lines".to_string(),
+        "3".to_string(),
+    ];
+    assert_eq!(rr3_unit_args(&ok).unwrap(), ("rr3-sense".to_string(), 3));
+    let big = vec![
+        "--unit".to_string(),
+        "rr3-sense".to_string(),
+        "--lines".to_string(),
+        "99999".to_string(),
+    ];
+    assert_eq!(rr3_unit_args(&big).unwrap().1, 2000, "行数应收敛到上限");
+}
+
+#[test]
+fn unit_tail_reads_last_lines_only() {
+    let dir = std::env::temp_dir().join(format!("rr3-ctl-unitlog-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("rr3-sense.log");
+    std::fs::write(&path, "a\nb\nc\nd\ne\n").unwrap();
+    assert_eq!(rr3_tail_file(&path, 2).unwrap(), "d\ne");
+    assert_eq!(rr3_tail_file(&path, 50).unwrap(), "a\nb\nc\nd\ne");
+    assert!(rr3_tail_file(&dir.join("rr3-absent.log"), 5).is_err());
+    std::fs::remove_dir_all(&dir).unwrap();
+}

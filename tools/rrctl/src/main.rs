@@ -22,6 +22,10 @@ fn usage() -> ! {
         "      tail <topic> [--count N] [--secs S]（注册为观察者订阅事件，\
          N 条或超时退出；JSONL 走 stdout）"
     );
+    eprintln!(
+        "      logs --unit <name> [--lines N]（直读 <socket>.log/<name>.log 尾部，\
+         缺省 50 行；不发总线）"
+    );
     std::process::exit(2)
 }
 
@@ -106,11 +110,15 @@ fn main() {
     );
 }
 
-/// 命令分派：`tail` 是注册型观察者（持续收帧），其余八个走一次性 ctl 连接，
-/// 不接受余参（多传即错，避免脚本里的参数被静默吞掉）。
+/// 命令分派：`tail` 是注册型观察者（持续收帧）；`logs --unit` 直读 per-unit
+/// 日志文件（不走总线）；其余八个走一次性 ctl 连接，不接受余参（多传即错，
+/// 避免脚本里的参数被静默吞掉）。
 fn rr3_dispatch(cmd: &str, bus: &str, rest: &[String]) -> Result<String, String> {
     if cmd == "tail" {
         return commands::tail::rr3_tail_run(bus, rest);
+    }
+    if cmd == "logs" && !rest.is_empty() {
+        return commands::rr3_unit_log_tail(bus, rest);
     }
     if !rest.is_empty() {
         return Err(format!("{cmd} 不接受参数：{}", rest.join(" ")));
