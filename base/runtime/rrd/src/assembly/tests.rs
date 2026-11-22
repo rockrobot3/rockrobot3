@@ -6,59 +6,75 @@ use super::*;
 use rr_hal_api::{Rr3ActHardStop, Rr3ActHold, Rr3ActProfile, Rr3ActSource};
 use rr_registry::rr3_role_parse;
 
-/// 最小快照：一 pin（有落点）+ 一 pin（零引用）+ 一域 + 一线组 + 一轴 + 一角色
-fn snapshot() -> Rr3AssemblySnapshot {
-    let profile = Rr3Profile {
+/// 最小域：rail5v 5V/2A，无感测/开关。
+fn snap_domain() -> crate::profile::Rr3Domain {
+    crate::profile::Rr3Domain {
+        name: "rail5v".into(),
+        nominal_mv: 5000,
+        mild_mv: 4600,
+        severe_mv: 4400,
+        current_cap_ma: 2000,
+        sense: "none".into(),
+        current_sense: "none".into(),
+        switch: "none".into(),
+        switchable: false,
+        armed: false,
+        max_age_ms: 0,
+        evidence: "none".into(),
+    }
+}
+
+/// pan 轴 pin：pwm0 ch0 / GPIO32。
+fn snap_pin_pan() -> crate::profile::Rr3PinEntry {
+    crate::profile::Rr3PinEntry {
+        role: "act.axis.pwm".into(),
+        instance: "pan".into(),
+        controller: "pwm0".into(),
+        channel: Some(0),
+        physical: vec![32],
+        direction: "out".into(),
+        rail: "rail5v".into(),
+        addr: "none".into(),
+        device: String::new(),
+        failsafe: "release".into(),
+        mux_group: vec![],
+    }
+}
+
+/// 显示 pin：spidev0 ch0（零导体引用）。
+fn snap_pin_face() -> crate::profile::Rr3PinEntry {
+    crate::profile::Rr3PinEntry {
+        role: "ui.face.spi".into(),
+        instance: String::new(),
+        controller: "spidev0".into(),
+        channel: Some(0),
+        physical: vec![],
+        direction: "out".into(),
+        rail: "none".into(),
+        addr: "none".into(),
+        device: String::new(),
+        failsafe: "release".into(),
+        mux_group: vec![],
+    }
+}
+
+/// 最小 profile：host/rk3566 + 一域两 pin。
+fn snap_profile() -> Rr3Profile {
+    Rr3Profile {
         platform_tier: "host".into(),
         platform_chip: "rk3566".into(),
         supplies: crate::profile::Rr3Supplies {
-            domains: vec![crate::profile::Rr3Domain {
-                name: "rail5v".into(),
-                nominal_mv: 5000,
-                mild_mv: 4600,
-                severe_mv: 4400,
-                current_cap_ma: 2000,
-                sense: "none".into(),
-                current_sense: "none".into(),
-                switch: "none".into(),
-                switchable: false,
-                armed: false,
-                max_age_ms: 0,
-                evidence: "none".into(),
-            }],
+            domains: vec![snap_domain()],
             ..Default::default()
         },
-        pins: vec![
-            crate::profile::Rr3PinEntry {
-                role: "act.axis.pwm".into(),
-                instance: "pan".into(),
-                controller: "pwm0".into(),
-                channel: Some(0),
-                physical: vec![32],
-                direction: "out".into(),
-                rail: "rail5v".into(),
-                addr: "none".into(),
-                device: String::new(),
-                failsafe: "release".into(),
-                mux_group: vec![],
-            },
-            crate::profile::Rr3PinEntry {
-                role: "ui.face.spi".into(),
-                instance: String::new(),
-                controller: "spidev0".into(),
-                channel: Some(0),
-                physical: vec![],
-                direction: "out".into(),
-                rail: "none".into(),
-                addr: "none".into(),
-                device: String::new(),
-                failsafe: "release".into(),
-                mux_group: vec![],
-            },
-        ],
+        pins: vec![snap_pin_pan(), snap_pin_face()],
         ..Default::default()
-    };
-    let wiring = crate::wiring::Rr3Wiring {
+    }
+}
+
+/// 一线组：J3 vcc/pan/gnd 走 rail5v。
+fn snap_wiring() -> crate::wiring::Rr3Wiring {
+    crate::wiring::Rr3Wiring {
         wires: vec![crate::wiring::Rr3Wire {
             connector: "J3".into(),
             hdr_pin: vec![2, 3, 4],
@@ -70,8 +86,12 @@ fn snapshot() -> Rr3AssemblySnapshot {
             rated_a: 1.0,
             gnd_common: "star-1".into(),
         }],
-    };
-    let axis = vec![Rr3AxisFile {
+    }
+}
+
+/// 一轴档案：pan 已标定 + 硬挡。
+fn snap_axis() -> Vec<Rr3AxisFile> {
+    vec![Rr3AxisFile {
         pin: "act.axis.pwm.pan".into(),
         profile: Rr3ActProfile {
             center_deg: 90,
@@ -87,17 +107,20 @@ fn snapshot() -> Rr3AssemblySnapshot {
             calibrated: true,
             source: Rr3ActSource::Manual,
         },
-    }];
-    let roles = rr3_role_parse(
-            "[[role]]\nname = \"act.axis.pwm\"\nslot = \"act.servo\"\nrequires = [\"controller\", \"channel\"]\nderives = [\"pwm_chip\"]\n",
-        );
+    }]
+}
+
+/// 最小快照：一 pin（有落点）+ 一 pin（零引用）+ 一域 + 一线组 + 一轴 + 一角色
+fn snapshot() -> Rr3AssemblySnapshot {
     Rr3AssemblySnapshot {
         profile_name: "test形态".into(),
-        profile,
-        wiring,
+        profile: snap_profile(),
+        wiring: snap_wiring(),
         peak_by_mate: BTreeMap::from([("SG90-3P".to_string(), 700)]),
-        axis,
-        roles,
+        axis: snap_axis(),
+        roles: rr3_role_parse(
+            "[[role]]\nname = \"act.axis.pwm\"\nslot = \"act.servo\"\nrequires = [\"controller\", \"channel\"]\nderives = [\"pwm_chip\"]\n",
+        ),
     }
 }
 
@@ -161,13 +184,9 @@ fn cross_checks_cover_four_families_with_three_states() {
     assert!(bad[2].reason.contains("⑦-c1"), "{:?}", bad[2].reason);
 }
 
-/// 额定加总族（校验⑦-c1·自检时点判）四态：F-10 红例形状（主供线额定不足）、
-/// 菱形分叉只收账一次、feeds 一般环 fail（装载期闭合面只拒自环，环即漂移）、
-/// 自反口径钉门（本线对端负载计入"该线承载之和"）。
-#[test]
-fn rated_sum_family_judges_f10_topology_sum() {
-    let s = snapshot(); // peak_by_mate：SG90-3P → 700mA
-    let mk = |connector: &str, feeds: Vec<&str>, rated: f64| crate::wiring::Rr3Wire {
+/// 额定加总夹具：两导体线组走 rail5v、挂 SG90-3P、给定额定电流。
+fn wire_mk(connector: &str, feeds: Vec<&str>, rated: f64) -> crate::wiring::Rr3Wire {
+    crate::wiring::Rr3Wire {
         connector: connector.into(),
         hdr_pin: vec![1, 2],
         signal: vec!["vcc".into(), "gnd".into()],
@@ -177,19 +196,24 @@ fn rated_sum_family_judges_f10_topology_sum() {
         keyed: true,
         rated_a: rated,
         gnd_common: "star-1".into(),
-    };
-    fn c<'a>(checks: &'a [Rr3AssemblyCheck], item: &str) -> &'a Rr3AssemblyCheck {
-        checks
-            .iter()
-            .find(|x| x.item == item)
-            .unwrap_or_else(|| panic!("点名位 {item} 必在: {checks:?}"))
     }
-    // F-10 红例形状：主供线 1.0A 自挂 + 下馈两条 1.0A 舵机线 ⇒ 700×3 = 2100 > 1000 红
+}
+
+/// 按点名位取判果（缺失即 panic）。
+fn check_of<'a>(checks: &'a [Rr3AssemblyCheck], item: &str) -> &'a Rr3AssemblyCheck {
+    checks
+        .iter()
+        .find(|x| x.item == item)
+        .unwrap_or_else(|| panic!("点名位 {item} 必在: {checks:?}"))
+}
+
+/// F-10 红例形状：主供线 1.0A 自挂 + 下馈两条 1.0A 舵机线 ⇒ 700×3 = 2100 > 1000 红。
+fn rated_f10_case(s: &Rr3AssemblySnapshot) {
     let wiring = crate::wiring::Rr3Wiring {
         wires: vec![
-            mk("J1", vec!["J2", "J3"], 1.0),
-            mk("J2", vec![], 1.0),
-            mk("J3", vec![], 1.0),
+            wire_mk("J1", vec!["J2", "J3"], 1.0),
+            wire_mk("J2", vec![], 1.0),
+            wire_mk("J3", vec![], 1.0),
             crate::wiring::Rr3Wire {
                 connector: "J9".into(),
                 hdr_pin: vec![1],
@@ -204,58 +228,79 @@ fn rated_sum_family_judges_f10_topology_sum() {
         ],
     };
     let checks = rr3_cross_checks(&s.profile, &wiring, &s.peak_by_mate);
-    assert_eq!(c(&checks, "rated:J1").pass, RR3_CHECK_FAIL);
+    assert_eq!(check_of(&checks, "rated:J1").pass, RR3_CHECK_FAIL);
     assert!(
-        c(&checks, "rated:J1").reason.contains("2100"),
+        check_of(&checks, "rated:J1").reason.contains("2100"),
         "{:?}",
-        c(&checks, "rated:J1").reason
+        check_of(&checks, "rated:J1").reason
     );
-    assert_eq!(c(&checks, "rated:J2").pass, RR3_CHECK_PASS);
-    assert_eq!(c(&checks, "rated:J3").pass, RR3_CHECK_PASS);
+    assert_eq!(check_of(&checks, "rated:J2").pass, RR3_CHECK_PASS);
+    assert_eq!(check_of(&checks, "rated:J3").pass, RR3_CHECK_PASS);
     // net = none 纯信号/地线组：⑦-c1 无判据面，not-applicable
-    assert_eq!(c(&checks, "rated:J9").pass, RR3_CHECK_NA);
+    assert_eq!(check_of(&checks, "rated:J9").pass, RR3_CHECK_NA);
+}
 
-    // 自反口径：单线 0.5A 自挂 700mA 舵机 ⇒ 本线承载之和含自身对端，红
+/// 自反口径：单线 0.5A 自挂 700mA 舵机 ⇒ 本线承载之和含自身对端，红。
+fn rated_solo_case(s: &Rr3AssemblySnapshot) {
     let solo = crate::wiring::Rr3Wiring {
-        wires: vec![mk("J7", vec![], 0.5)],
+        wires: vec![wire_mk("J7", vec![], 0.5)],
     };
     let checks = rr3_cross_checks(&s.profile, &solo, &s.peak_by_mate);
-    assert_eq!(c(&checks, "rated:J7").pass, RR3_CHECK_FAIL);
+    assert_eq!(check_of(&checks, "rated:J7").pass, RR3_CHECK_FAIL);
     assert!(
-        c(&checks, "rated:J7").reason.contains("700"),
+        check_of(&checks, "rated:J7").reason.contains("700"),
         "{:?}",
-        c(&checks, "rated:J7").reason
+        check_of(&checks, "rated:J7").reason
     );
+}
 
-    // 菱形分叉不是环：J1→{J2,J3}、J2→J4、J3→J4 ⇒ J4 只收账一次，Σ = 700×4 = 2800
+/// 菱形分叉不是环：J1→{J2,J3}、J2→J4、J3→J4 ⇒ J4 只收账一次，Σ = 700×4 = 2800。
+fn rated_diamond_case(s: &Rr3AssemblySnapshot) {
     let diamond = crate::wiring::Rr3Wiring {
         wires: vec![
-            mk("J1", vec!["J2", "J3"], 4.0),
-            mk("J2", vec!["J4"], 1.0),
-            mk("J3", vec!["J4"], 1.0),
-            mk("J4", vec![], 1.0),
+            wire_mk("J1", vec!["J2", "J3"], 4.0),
+            wire_mk("J2", vec!["J4"], 1.0),
+            wire_mk("J3", vec!["J4"], 1.0),
+            wire_mk("J4", vec![], 1.0),
         ],
     };
     let checks = rr3_cross_checks(&s.profile, &diamond, &s.peak_by_mate);
-    assert_eq!(c(&checks, "rated:J1").pass, RR3_CHECK_PASS);
+    assert_eq!(check_of(&checks, "rated:J1").pass, RR3_CHECK_PASS);
     assert!(
-        c(&checks, "rated:J1").reason.contains("2800"),
+        check_of(&checks, "rated:J1").reason.contains("2800"),
         "{:?}",
-        c(&checks, "rated:J1").reason
+        check_of(&checks, "rated:J1").reason
     );
+}
 
-    // feeds 一般环：J5→J6→J5（装载期闭合面只拒自环，环漏进快照即漂移）——双红
+/// feeds 一般环：J5→J6→J5（装载期闭合面只拒自环，环漏进快照即漂移）——双红。
+fn rated_cycle_case(s: &Rr3AssemblySnapshot) {
     let cycle = crate::wiring::Rr3Wiring {
-        wires: vec![mk("J5", vec!["J6"], 3.0), mk("J6", vec!["J5"], 1.0)],
+        wires: vec![
+            wire_mk("J5", vec!["J6"], 3.0),
+            wire_mk("J6", vec!["J5"], 1.0),
+        ],
     };
     let checks = rr3_cross_checks(&s.profile, &cycle, &s.peak_by_mate);
-    assert_eq!(c(&checks, "rated:J5").pass, RR3_CHECK_FAIL);
+    assert_eq!(check_of(&checks, "rated:J5").pass, RR3_CHECK_FAIL);
     assert!(
-        c(&checks, "rated:J5").reason.contains("环"),
+        check_of(&checks, "rated:J5").reason.contains("环"),
         "{:?}",
-        c(&checks, "rated:J5").reason
+        check_of(&checks, "rated:J5").reason
     );
-    assert_eq!(c(&checks, "rated:J6").pass, RR3_CHECK_FAIL);
+    assert_eq!(check_of(&checks, "rated:J6").pass, RR3_CHECK_FAIL);
+}
+
+/// 额定加总族（校验⑦-c1·自检时点判）四态：F-10 红例形状（主供线额定不足）、
+/// 菱形分叉只收账一次、feeds 一般环 fail（装载期闭合面只拒自环，环即漂移）、
+/// 自反口径钉门（本线对端负载计入"该线承载之和"）。
+#[test]
+fn rated_sum_family_judges_f10_topology_sum() {
+    let s = snapshot(); // peak_by_mate：SG90-3P → 700mA
+    rated_f10_case(&s);
+    rated_solo_case(&s);
+    rated_diamond_case(&s);
+    rated_cycle_case(&s);
 }
 
 #[test]
