@@ -167,6 +167,9 @@ fn rr3_write_src(
     let mut buf = [0u8; 4_096];
     let mut total = 0usize;
     loop {
+        // 大语音段（数秒/上百 KB）在弱网上传可跨过 dialog 心跳窗 10 s：
+        // 逐 4 KB 续一拍，避免监督壳把正在上传的轮次判死。
+        crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
         let n = src.rr3_fill(&mut buf)?;
         if n == 0 {
             break;

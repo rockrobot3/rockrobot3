@@ -182,6 +182,9 @@ fn rr3_http_read(
     let mut buf = [0u8; 4096];
     let mut first = true;
     loop {
+        // 应答分块读同样可能跨过 dialog 心跳窗（服务端慢/弱网）：逐块续一拍。
+        // 本读路只服务 dialog 的 ASR/LLM 小 JSON，不涉及 `/say` 云 worker。
+        crate::autonomy::rr3_beat(rr_autonomy::Rr3Task::Dialog);
         // SAFETY：client 有效；缓冲 4 KB 可写；长度按缓冲大小给。
         let n =
             unsafe { esp_http_client_read(client, buf.as_mut_ptr() as *mut _, buf.len() as i32) };
