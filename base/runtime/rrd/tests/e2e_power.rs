@@ -15,6 +15,7 @@
 
 mod support;
 
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
@@ -82,36 +83,21 @@ fn frame_topic(f: &Rr3Frame) -> Option<(Rr3PayloadType, String)> {
     Some((ty, v.get("topic")?.as_str()?.to_string()))
 }
 
-#[test]
-fn power_module_low_battery_fallback_end_to_end() {
-    // ---------- 夹具：真二进制 + 真 manifest + config 同树 ----------
-    let bin = rr3_build_module_bin("rr3-power");
-    let root = E2eRoot::rr3_new("power", "power");
+/// 夹具：真二进制 + 真 manifest（entry 绝对化）+ config 同树；返回装配单路径。
+fn stage_profile(root: &E2eRoot, bin: &Path) -> PathBuf {
     let mod_dir = root.dir.join("modules").join("rr3-power");
     std::fs::create_dir_all(&mod_dir).expect("建模块目录");
     std::fs::write(
         mod_dir.join("module.toml"),
-        rr3_module_manifest_text("rr3-power", &bin),
+        rr3_module_manifest_text("rr3-power", bin),
     )
     .expect("写模块 manifest");
     std::fs::write(mod_dir.join("config.toml"), CONFIG).expect("写模块 config");
-    let profile = root.rr3_write_profile(PROFILE);
+    root.rr3_write_profile(PROFILE)
+}
 
-    // ---------- ① 正门 boot：spawn → 注册 → running → 兜底触发 ----------
-    // env 显式钉 sim 后端（不赌平台默认）+ sim 探针（MC-4：非 test 面不再默认 sim，
-    // power.charger 归 I2C 面、开发机/CI 无该设备，必须显式选 sim 才不被判缺格）+
-    // 5% 起表。tick 必传小值（E2E_TICK_MS）：supervisor 扫尸节拍复用同一旋钮，
-    // 安静 tick 会让 ③ 的拒绝永不发生。
-    let mut rrd = RrdTest::rr3_start_profile_env(
-        "e2e-power",
-        &profile,
-        E2E_TICK_MS,
-        &[
-            ("RR3_HAL_BACKEND", "sim"),
-            ("RR3_PROBE", "sim"),
-            ("RR3_HAL_SIM_BATTERY_PERCENT", "5"),
-        ],
-    );
+/// ① 正门 boot：spawn → 注册 → running → 兜底触发；返回 (spawn 行, power 的分配 task)。
+fn boot_power(rrd: &mut RrdTest, bin: &Path) -> (String, u64) {
     rrd.rr3_wait_log("rrd: 装配单已加载: ");
     let spawn = rrd.rr3_wait_log("spawn rr3-power pid=");
     assert!(
@@ -130,10 +116,12 @@ fn power_module_low_battery_fallback_end_to_end() {
         trigger.contains("广播 rr3-runtime/system/power"),
         "触发行必须点名广播主题: {trigger}"
     );
+    (spawn, power_task)
+}
 
-    // ---------- ② 旁观者：周期流（首拍 low 错过，正是时序前提的分工） ----------
-    let (mut obs, _obs_task) = rr3_connect_observer(&mut rrd);
-    let st1 = rr3_read_where(&mut obs, " battery/state 周期流", |f| {
+/// ② battery/state 周期流：首帧形状与 seq 推进（首拍 low 错过，正是时序前提的分工）。
+fn periodic_battery(obs: &mut RrdClient, power_task: u64) {
+    let st1 = rr3_read_where(obs, " battery/state 周期流", |f| {
         matches!(
             frame_topic(f),
             Some((Rr3PayloadType::Event, t)) if t == "rr3-power/battery/state"
@@ -152,7 +140,7 @@ fn power_module_low_battery_fallback_end_to_end() {
     let seq1 = v["seq"]
         .as_u64()
         .unwrap_or_else(|| panic!("state 带 seq: {v}"));
-    let st2 = rr3_read_where(&mut obs, " battery/state 序列推进", |f| {
+    let st2 = rr3_read_where(obs, " battery/state 序列推进", |f| {
         matches!(
             frame_topic(f),
             Some((Rr3PayloadType::Event, t)) if t == "rr3-power/battery/state"
@@ -162,8 +150,11 @@ fn power_module_low_battery_fallback_end_to_end() {
         rr3_json_of(&st2)["seq"].as_u64().unwrap() > seq1,
         "周期流必须推进（seq 严格递增）"
     );
+}
 
-    let ch = rr3_read_where(&mut obs, " charger/state", |f| {
+/// ② charger/state 周期流：未注入充电键即默认未充电。
+fn periodic_charger(obs: &mut RrdClient, power_task: u64) {
+    let ch = rr3_read_where(obs, " charger/state", |f| {
         matches!(
             frame_topic(f),
             Some((Rr3PayloadType::Event, t)) if t == "rr3-power/charger/state"
@@ -175,14 +166,17 @@ fn power_module_low_battery_fallback_end_to_end() {
         false,
         "未注入充电键，默认未充电（backend.rs 的缺省语义）"
     );
+}
 
-    // ---------- ③ 杀模块 → spawn 漏斗必须拒绝重启（Q4 的"停止新 spawn"） ----------
-    // SIGTERM 后 supervisor 扫尸 → plan 重启 → rr3_boot_spawn 撞上低电旗 → 拒绝日志。
-    // 定点杀：从 supervisor 的 spawn 行取 pid 直接 kill——不用 pkill -f：macOS 上它
-    // 扫全进程表做 regex 匹配，撞上无关进程的非法字节串会整批报 "illegal byte
-    // sequence" 而失配（0.0.8e 审计实锤的夹具脆弱点）；pid 定点同时把"模块必须
-    // 仍是首实例"变成显式断言。
-    let pid_s = rr3_field_from_log(&spawn, "pid=").to_string();
+/// ③ 杀模块 → spawn 漏斗必须拒绝重启（Q4 的"停止新 spawn"）。
+///
+/// SIGTERM 后 supervisor 扫尸 → plan 重启 → rr3_boot_spawn 撞上低电旗 → 拒绝日志。
+/// 定点杀：从 supervisor 的 spawn 行取 pid 直接 kill——不用 pkill -f：macOS 上它
+/// 扫全进程表做 regex 匹配，撞上无关进程的非法字节串会整批报 "illegal byte
+/// sequence" 而失配（0.0.8e 审计实锤的夹具脆弱点）；pid 定点同时把"模块必须
+/// 仍是首实例"变成显式断言。
+fn kill_and_reject(rrd: &mut RrdTest, spawn: &str) {
+    let pid_s = rr3_field_from_log(spawn, "pid=").to_string();
     let status = Command::new("kill")
         .args(["-TERM", &pid_s])
         .status()
@@ -192,13 +186,16 @@ fn power_module_low_battery_fallback_end_to_end() {
     // 否定断言窗口：不得出现**真的** spawn 行。拒绝行是"拒绝 spawn rr3-power（全局…"，
     // 不含 " pid="，不会误触；真重启了必在这里现形。
     rrd.rr3_assert_no_log("spawn rr3-power pid=", Duration::from_millis(1500));
+}
 
-    // ---------- ④ 末尾破坏性收尾：段内 battery/low 恰一次、system/power 不重发 ----------
-    // 模块死后帧流安静，collect 快速终止。收尾窗口不得再有 battery/low（模块侧边沿机
-    // 同段恰一次；若真重启了，新实例首拍还会再发——与 ③ 双保险），也不得再有
-    // system/power（rrd 侧上升沿恰一次；解除沿归 battery/ok，本用例窗口内不会有——
-    // 模块已死、sim 电量定格 5%，低电段没有出口）。
-    let tail = rr3_collect_within(&mut obs, Duration::from_millis(500));
+/// ④ 末尾破坏性收尾：段内 battery/low 恰一次、system/power 不重发。
+///
+/// 模块死后帧流安静，collect 快速终止。收尾窗口不得再有 battery/low（模块侧边沿机
+/// 同段恰一次；若真重启了，新实例首拍还会再发——与 ③ 双保险），也不得再有
+/// system/power（rrd 侧上升沿恰一次；解除沿归 battery/ok，本用例窗口内不会有——
+/// 模块已死、sim 电量定格 5%，低电段没有出口）。
+fn tail_no_resend(obs: &mut RrdClient) {
+    let tail = rr3_collect_within(obs, Duration::from_millis(500));
     let lows = tail
         .iter()
         .filter(|f| matches!(frame_topic(f), Some((_, ref t)) if t == "rr3-power/battery/low"))
@@ -212,4 +209,36 @@ fn power_module_low_battery_fallback_end_to_end() {
         .filter(|f| matches!(frame_topic(f), Some((_, ref t)) if t == "rr3-runtime/system/power"))
         .count();
     assert_eq!(powers, 0, "rrd 侧上升沿恰一次，system/power 不得重复点名");
+}
+
+#[test]
+fn power_module_low_battery_fallback_end_to_end() {
+    // ---------- 夹具：真二进制 + 真 manifest + config 同树 ----------
+    let bin = rr3_build_module_bin("rr3-power");
+    let root = E2eRoot::rr3_new("power", "power");
+    let profile = stage_profile(&root, &bin);
+    // ---------- ① 正门 boot：spawn → 注册 → running → 兜底触发 ----------
+    // env 显式钉 sim 后端（不赌平台默认）+ sim 探针（MC-4：非 test 面不再默认 sim，
+    // power.charger 归 I2C 面、开发机/CI 无该设备，必须显式选 sim 才不被判缺格）+
+    // 5% 起表。tick 必传小值（E2E_TICK_MS）：supervisor 扫尸节拍复用同一旋钮，
+    // 安静 tick 会让 ③ 的拒绝永不发生。
+    let mut rrd = RrdTest::rr3_start_profile_env(
+        "e2e-power",
+        &profile,
+        E2E_TICK_MS,
+        &[
+            ("RR3_HAL_BACKEND", "sim"),
+            ("RR3_PROBE", "sim"),
+            ("RR3_HAL_SIM_BATTERY_PERCENT", "5"),
+        ],
+    );
+    let (spawn, power_task) = boot_power(&mut rrd, &bin);
+    // ---------- ② 旁观者：周期流（首拍 low 错过，正是时序前提的分工） ----------
+    let (mut obs, _obs_task) = rr3_connect_observer(&mut rrd);
+    periodic_battery(&mut obs, power_task);
+    periodic_charger(&mut obs, power_task);
+    // ---------- ③ 杀模块 → spawn 漏斗必须拒绝重启（Q4 的"停止新 spawn"） ----------
+    kill_and_reject(&mut rrd, &spawn);
+    // ---------- ④ 末尾破坏性收尾：段内 battery/low 恰一次、system/power 不重发 ----------
+    tail_no_resend(&mut obs);
 }
