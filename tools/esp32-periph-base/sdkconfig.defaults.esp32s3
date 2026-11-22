@@ -3,6 +3,14 @@
 #
 # 注意：Octal PSRAM 占用 GPIO33–37；本板引脚表已整体避开 26–37（见
 # src/board/pins_s3.rs），与 classic 的 26/27/32/33/34 不通用。
+# 控制台：S3 的 CHOICE 缺省会挂 USB-Serial/JTAG 副通道（见 sdkconfig.defaults
+# 根注）。目标专属文件再显式钉一遍——S3 构建叠加顺序在后，防止被 CHOICE 缺省
+# 覆盖（W7 现场：CH340 只见 ROM 日志的根因）。
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+# CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG is not set
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240=y
 CONFIG_SPIRAM=y
