@@ -259,15 +259,8 @@ fn unknown_topic_has_no_owner() {
     );
 }
 
-/// 复验必须连 **kind** 一起比（Task 5 评审 M-15）：`rr3_topic_check` 只问 kind
-/// 在不在白名单里，不问它是不是契约原值——把契约某条 topic 的 kind 从 `stream` 改成
-/// 另一个合法值 `event`，形状自检照样过，owner 也比得出"没变"，两条分支都抓不到。
-/// 本用例刻意不走 `rr3_topics_load`（正确的 merge 造不出 kind 被改写的表），而是手写
-/// 一对 base/merged 代表"merge 退化后的产物"，直接打复验函数；同一对输入里的合法新增
-/// 对照组证明这条规则不会把"只加新 topic"一起否掉。
-#[test]
-fn contract_topic_kind_rewritten_by_the_merge_is_rejected() {
-    let base = rr3_topic_parse(
+fn base_topic_set() -> Rr3TopicSet {
+    rr3_topic_parse(
         r#"schema_version = 1
 [[owner]]
 name = "rr3-sense"
@@ -276,9 +269,11 @@ name = "rr3-sense/audio/pcm"
 kind = "stream"
 owner = "rr3-sense"
 "#,
-    );
-    // 退化 merge 的产物：名字与 owner 都没动，只把 kind 换成另一个白名单值
-    let tampered = rr3_topic_parse(
+    )
+}
+
+fn tampered_topic_set() -> Rr3TopicSet {
+    rr3_topic_parse(
         r#"schema_version = 1
 [[owner]]
 name = "rr3-sense"
@@ -287,7 +282,39 @@ name = "rr3-sense/audio/pcm"
 kind = "event"
 owner = "rr3-sense"
 "#,
-    );
+    )
+}
+
+fn legit_topic_set() -> Rr3TopicSet {
+    rr3_topic_parse(
+        r#"schema_version = 1
+[[owner]]
+name = "rr3-sense"
+[[owner]]
+name = "rr3-sima"
+[[topic]]
+name = "rr3-sense/audio/pcm"
+kind = "stream"
+owner = "rr3-sense"
+[[topic]]
+name = "rr3-sima/ping/state"
+kind = "event"
+owner = "rr3-sima"
+"#,
+    )
+}
+
+/// 复验必须连 **kind** 一起比（Task 5 评审 M-15）：`rr3_topic_check` 只问 kind
+/// 在不在白名单里，不问它是不是契约原值——把契约某条 topic 的 kind 从 `stream` 改成
+/// 另一个合法值 `event`，形状自检照样过，owner 也比得出"没变"，两条分支都抓不到。
+/// 本用例刻意不走 `rr3_topics_load`（正确的 merge 造不出 kind 被改写的表），而是手写
+/// 一对 base/merged 代表"merge 退化后的产物"，直接打复验函数；同一对输入里的合法新增
+/// 对照组证明这条规则不会把"只加新 topic"一起否掉。
+#[test]
+fn contract_topic_kind_rewritten_by_the_merge_is_rejected() {
+    let base = base_topic_set();
+    // 退化 merge 的产物：名字与 owner 都没动，只把 kind 换成另一个白名单值
+    let tampered = tampered_topic_set();
     assert!(
         tampered.rr3_topic_check().is_empty(),
         "用例前提：kind 换成 event 仍是合法值，形状自检抓不到（{:?}），只能靠复验抓",
@@ -303,22 +330,7 @@ owner = "rr3-sense"
             （Debug 打在 Option 上，所以是 Some(...) 而不是裸引号串）"
         );
     // 对照组：只新增 topic、契约条目一字未动 —— 合法叠加层不得被误拒
-    let legit = rr3_topic_parse(
-        r#"schema_version = 1
-[[owner]]
-name = "rr3-sense"
-[[owner]]
-name = "rr3-sima"
-[[topic]]
-name = "rr3-sense/audio/pcm"
-kind = "stream"
-owner = "rr3-sense"
-[[topic]]
-name = "rr3-sima/ping/state"
-kind = "event"
-owner = "rr3-sima"
-"#,
-    );
+    let legit = legit_topic_set();
     assert!(
         reject_bad_merge(&base, &legit).is_ok(),
         "合法新增不得被 kind 复验误拒: {:?}",
