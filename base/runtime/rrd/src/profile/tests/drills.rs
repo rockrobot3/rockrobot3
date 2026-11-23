@@ -196,17 +196,8 @@ fn pi4b_host_profile_boot_inputs_drill() {
     );
 }
 
-/// Pi 4B 单板全链装配演练（W5-1）：`profiles/pi4b-solo.toml` + 真契约走完整
-/// boot 输入装配——host 档五模块（act/brain/connect/interact/sense，升序）、
-/// 十格在位、[[pin]] 两条（pan PWM + OLED I2C）；[hardware] 两键 + 派生键
-/// （pwm_chip/pwm_channel/i2c_bus/oled_addr）进注入文本。
-#[test]
-fn pi4b_solo_profile_boot_inputs_drill() {
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-    let p = repo.join("profiles/pi4b-solo.toml");
-    let boot = boot_inputs(&p).expect("pi4b-solo 装配单必须过完整装载门（host 档）");
-    let mods: Vec<String> = boot
-        .manifests
+fn mod_names(boot: &Rr3ProfileBoot) -> Vec<String> {
+    boot.manifests
         .iter()
         .map(|m| {
             m.parent()
@@ -215,9 +206,18 @@ fn pi4b_solo_profile_boot_inputs_drill() {
                 .unwrap_or_default()
                 .to_string()
         })
-        .collect();
+        .collect()
+}
+
+fn solo_boot() -> Rr3ProfileBoot {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let p = repo.join("profiles/pi4b-solo.toml");
+    boot_inputs(&p).expect("pi4b-solo 装配单必须过完整装载门（host 档）")
+}
+
+fn solo_queue_is_five(boot: &Rr3ProfileBoot) {
     assert_eq!(
-        mods,
+        mod_names(boot),
         vec![
             "rr3-act",
             "rr3-brain",
@@ -227,21 +227,33 @@ fn pi4b_solo_profile_boot_inputs_drill() {
         ],
         "solo boot 队列应恰五模块（enabled_slots 升序）"
     );
+}
+
+fn solo_sources_agree(boot: &Rr3ProfileBoot) {
     assert!(
         boot.missing.is_empty(),
         "present/bindings/enabled_slots 三源一致（十格）: {:?}",
         boot.missing
     );
+}
+
+fn solo_assembly_closed(boot: &Rr3ProfileBoot) {
     assert!(
         boot.assemble_broken.is_empty(),
         "五模块真件装配段扫描零缺口: {:?}",
         boot.assemble_broken
     );
+}
+
+fn solo_roles_present(boot: &Rr3ProfileBoot) {
     assert!(
         boot.role_missing.is_empty(),
         "pan 与 ui.face.i2c 的 [[pin]] 真值点在位（校验②无缺角色）: {:?}",
         boot.role_missing
     );
+}
+
+fn solo_hal_injected(boot: &Rr3ProfileBoot) {
     assert!(
         boot.hal_bindings
             .contains("alsa_device = \"plughw:CARD=Device\"")
@@ -253,4 +265,18 @@ fn pi4b_solo_profile_boot_inputs_drill() {
         "pi4b-solo [hardware] 两键与派生四键必须进注入文本: {:?}",
         boot.hal_bindings
     );
+}
+
+/// Pi 4B 单板全链装配演练（W5-1）：`profiles/pi4b-solo.toml` + 真契约走完整
+/// boot 输入装配——host 档五模块（act/brain/connect/interact/sense，升序）、
+/// 十格在位、[[pin]] 两条（pan PWM + OLED I2C）；[hardware] 两键 + 派生键
+/// （pwm_chip/pwm_channel/i2c_bus/oled_addr）进注入文本。
+#[test]
+fn pi4b_solo_profile_boot_inputs_drill() {
+    let boot = solo_boot();
+    solo_queue_is_five(&boot);
+    solo_sources_agree(&boot);
+    solo_assembly_closed(&boot);
+    solo_roles_present(&boot);
+    solo_hal_injected(&boot);
 }
