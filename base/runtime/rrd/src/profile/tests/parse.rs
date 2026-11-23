@@ -113,19 +113,18 @@ fn missing_sections_and_empty_enabled_slots_are_errors() {
     );
 }
 
-/// [runtime].log_ring_cap 判据（批N5 件二 F-30"装载期缺即红"）：键缺/段缺/零/负/
-/// 类型错逐条点名；合法值如实收进结构体（换成 64 仍解析成功——证明容量是
-/// 装配单数据不是解析器写死）。
-#[test]
-fn runtime_log_ring_cap_missing_or_nonpositive_is_red_and_value_flows() {
-    // 段缺（GOOD 定点删除）
+// 段缺（GOOD 定点删除）
+fn cap_seg_missing() {
     let errs = rr3_profile_parse(&GOOD.replace("[runtime]\nlog_ring_cap = 512\n", ""))
         .expect_err("缺 [runtime] 必须报错");
     assert!(
         errs.iter().any(|e| e.contains("缺少 [runtime]")),
         "{errs:?}"
     );
-    // 键缺
+}
+
+// 键缺
+fn cap_key_missing() {
     let errs = rr3_profile_parse(&GOOD.replace("log_ring_cap = 512", ""))
         .expect_err("缺 log_ring_cap 必须报错");
     assert!(
@@ -133,7 +132,10 @@ fn runtime_log_ring_cap_missing_or_nonpositive_is_red_and_value_flows() {
             .any(|e| e.contains("runtime.log_ring_cap 缺失或不是整数")),
         "{errs:?}"
     );
-    // 0 与负数（正整数判据）
+}
+
+// 0 与负数（正整数判据）
+fn cap_nonpositive() {
     for bad in ["log_ring_cap = 0", "log_ring_cap = -8"] {
         let errs = rr3_profile_parse(&GOOD.replace("log_ring_cap = 512", bad))
             .expect_err("非正容量必须报错");
@@ -142,14 +144,20 @@ fn runtime_log_ring_cap_missing_or_nonpositive_is_red_and_value_flows() {
             "{bad} 必须点名正整数判据: {errs:?}"
         );
     }
-    // 上界（本轮静态审计）：超界即装配单值域错误，上界本身合法
+}
+
+// 上界（本轮静态审计）：超界即装配单值域错误，上界本身合法
+fn cap_upper_bound() {
     let errs = rr3_profile_parse(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = 65537"))
         .expect_err("超上界必须报错");
     assert!(errs.iter().any(|e| e.contains("超上界 65536")), "{errs:?}");
     let p = rr3_profile_parse(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = 65536"))
         .expect("上界本身合法");
     assert_eq!(p.log_ring_cap, 65_536);
-    // 类型错（字符串不是整数）
+}
+
+// 类型错（字符串不是整数）
+fn cap_type_error() {
     let errs = rr3_profile_parse(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = \"many\""))
         .expect_err("字符串容量必须报错");
     assert!(
@@ -157,7 +165,10 @@ fn runtime_log_ring_cap_missing_or_nonpositive_is_red_and_value_flows() {
             .any(|e| e.contains("runtime.log_ring_cap 缺失或不是整数")),
         "{errs:?}"
     );
-    // 未知键点名
+}
+
+// 未知键点名
+fn cap_unknown_key() {
     let errs = rr3_profile_parse(&GOOD.replace("[runtime]", "[runtime]\nlog_level = \"debug\""))
         .expect_err("未知键必须报错");
     assert!(
@@ -165,7 +176,10 @@ fn runtime_log_ring_cap_missing_or_nonpositive_is_red_and_value_flows() {
             .any(|e| e.contains("[runtime] 未知键 log_level")),
         "{errs:?}"
     );
-    // 合法值如实收进结构体（64 ≠ 编译期兜底 512——数据流证明）
+}
+
+// 合法值如实收进结构体（64 ≠ 编译期兜底 512——数据流证明）
+fn cap_value_flows() {
     let p = rr3_profile_parse(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = 64"))
         .expect("64 是合法容量");
     assert_eq!(p.log_ring_cap, 64, "容量必须来自装配单数据");
@@ -173,6 +187,20 @@ fn runtime_log_ring_cap_missing_or_nonpositive_is_red_and_value_flows() {
         rr3_profile_parse(GOOD).expect("GOOD 合法").log_ring_cap,
         512
     );
+}
+
+/// [runtime].log_ring_cap 判据（批N5 件二 F-30"装载期缺即红"）：键缺/段缺/零/负/
+/// 类型错逐条点名；合法值如实收进结构体（换成 64 仍解析成功——证明容量是
+/// 装配单数据不是解析器写死）。
+#[test]
+fn runtime_log_ring_cap_missing_or_nonpositive_is_red_and_value_flows() {
+    cap_seg_missing();
+    cap_key_missing();
+    cap_nonpositive();
+    cap_upper_bound();
+    cap_type_error();
+    cap_unknown_key();
+    cap_value_flows();
 }
 
 #[test]
