@@ -109,7 +109,8 @@ fn power_role_shape(t: &Rr3RoleTable) {
 }
 
 /// ui/sensor 角色面：SPI 显示词形与 I2C 读数两器件（iface/direction 逐项）。
-fn ui_sensor_role_shape(t: &Rr3RoleTable) {
+/// ui 显示面：SPI 与 I2C OLED 同组，group 缺省 = 角色名本身。
+fn ui_face_shape(t: &Rr3RoleTable) {
     // 批N3 件六：slot=ui.face，iface=Rr3Display，requires=controller+channel
     assert_eq!(t.rr3_role_slot("ui.face.spi").as_deref(), Some("ui.face"));
     assert_eq!(t.rr3_role_per_inst("ui.face.spi"), Some(false));
@@ -123,7 +124,7 @@ fn ui_sensor_role_shape(t: &Rr3RoleTable) {
         Some(vec!["spi_device".to_string()])
     );
     assert_eq!(t.rr3_role_direction("ui.face.spi").as_deref(), Some("out"));
-    // W5-3：同格 I2C OLED 进场；两角色同组（校验②按组判"至少一路绑定"）
+    // W5-3：同格 I2C OLED 进场；两角色同组（校验②按组判“至少一路绑定”）
     assert_eq!(t.rr3_role_slot("ui.face.i2c").as_deref(), Some("ui.face"));
     assert_eq!(
         t.rr3_role_requires("ui.face.i2c"),
@@ -150,6 +151,10 @@ fn ui_sensor_role_shape(t: &Rr3RoleTable) {
         Some("act.axis.pwm"),
         "group 缺省 = 角色名本身（各自成组）"
     );
+}
+
+/// sensor 两器件：同 iface Rr3Sensor、各自 slot、imu derives 显式空。
+fn sensor_role_shape(t: &Rr3RoleTable) {
     assert_eq!(
         t.rr3_role_slot("sensor.env.meter").as_deref(),
         Some("sensor.env")
@@ -203,7 +208,8 @@ fn contract_text_parses_into_expected_shape() {
     role_names_shape(&table);
     act_role_shape(&table);
     power_role_shape(&table);
-    ui_sensor_role_shape(&table);
+    ui_face_shape(&table);
+    sensor_role_shape(&table);
     capability_role_shape(&table);
     assert!(
         table.rr3_role_check().is_empty(),
