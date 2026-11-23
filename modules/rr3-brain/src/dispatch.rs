@@ -113,6 +113,7 @@ pub(crate) const RR3_TTS_SAMPLE_RATE: u32 = 16_000;
 pub(crate) const RR3_TTS_PCM_FRAME_BYTES: usize = 640;
 
 mod arms;
+mod cloud_clients;
 #[cfg(test)]
 mod tests;
 mod tts;
@@ -120,6 +121,7 @@ mod turn;
 mod wake;
 
 use arms::*;
+use cloud_clients::*;
 use tts::*;
 use turn::*;
 use wake::*;
