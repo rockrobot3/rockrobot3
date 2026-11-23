@@ -74,10 +74,23 @@ jobs:
   # 目标根（TARGET_DIR），不需要 Docker 或 Buildroot 全量构建。
   buildroot-assembly:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
-      - name: 保底轨装配冒烟（post-build.sh）
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+          cache-all-crates: "true"
+      - name: 构建宿主 rr3-pack（两轨同一装配程序）
+        env:
+          CARGO_TARGET_DIR: /tmp/rr3-build
+        run: cargo build -q --locked --release --manifest-path tools/rr3-pack/Cargo.toml
+      - name: 保底轨装配冒烟（post-build.sh → rr3-pack）
+        env:
+          RR3_PACK_BIN: /tmp/rr3-build/release/rr3-pack
         run: bash tools/ci/buildroot-assembly-smoke.sh
 
   # D9 装配演练（0.0.2 T6）：装配单驱动 boot + 六 Rust 模块真进程（批N32 件四起

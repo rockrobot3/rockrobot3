@@ -2,30 +2,39 @@
 # SPDX-License-Identifier: Apache-2.0
 # buildroot-assembly-smoke.sh —— 保底轨装配冒烟（本机可跑，无 Docker / 无 Buildroot）。
 # 构造最小 TARGET_DIR / BINARIES_DIR，以仓内真实 manifest 与 config 为源跑 post-build.sh，
-# 断言 0.0.2 保底轨修复的四点：manifest 归位 modules/<name>/module.toml、entry 装机绝对化
-# （除 entry 行外字节零差异）、bin 按 entry 落位、config 从仓源随装；另断言坏模块
-# （缺 bin / 无 entry 行）只警告不阻断、旧平铺安装位不再存在、S99rrd glob 跟上。
+# 断言两轨共用装配程序 rr3-pack 的落位：manifest 归位 modules/<name>/module.toml、
+# entry 装机绝对化（除 entry 行外字节零差异）、bin 按 entry 落位、config/atoms 随装、
+# 装载真值集三目录落位；坏模块（缺 bin / 无 entry 行）**整镜像构建失败**（fail-closed，
+# 不再警告跳过——rrd 会 spawn 必退出模块形成重启环）。
+#
+# 前置：宿主原生 rr3-pack。CI 由 integration 的 buildroot-assembly job 构建并
+# 用 RR3_PACK_BIN 指入；本地可先 `cargo build --release --manifest-path
+# tools/rr3-pack/Cargo.toml`，缺省读 /tmp/rr3-build/release/rr3-pack。
 set -eu -o pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 POST_BUILD="$REPO_ROOT/base/os/buildroot/board/radxa-zero3/post-build.sh"
+PACK="${RR3_PACK_BIN:-/tmp/rr3-build/release/rr3-pack}"
+[ -x "$PACK" ] || {
+	echo "缺宿主 rr3-pack: $PACK（先构建 tools/rr3-pack，或用 RR3_PACK_BIN 指定）" >&2
+	exit 2
+}
 
 work="$(mktemp -d /tmp/rr3-assembly-smoke.XXXXXX)"
 trap 'rm -rf "$work"' EXIT
 TARGET="$work/target"
 BINARIES="$work/binaries"
-mkdir -p "$TARGET/etc/init.d" "$BINARIES/rr3-modules/rr3-sense" "$BINARIES/rr3-modules/rr3-ghost" \
-	"$BINARIES/rr3-modules/rr3-noentry"
+mkdir -p "$TARGET/etc/init.d" "$BINARIES/rr3-modules/rr3-sense"
+install -m 0755 "$PACK" "$BINARIES/rr3-pack"
+# 三件入口产物：rr3-pack 的 --payload 完整性门要求在场（内容不参与本次断言）
+for b in rrd rr3-ctl rr3-ota-ctl; do
+	printf '#!/bin/sh\nexit 0\n' > "$BINARIES/$b"
+	chmod +x "$BINARIES/$b"
+done
 
 # 好模块：仓内 rr3-sense 真 manifest + 真 config 源 + 假 bin
 cp "$REPO_ROOT/modules/rr3-sense/module.toml" "$BINARIES/rr3-modules/rr3-sense/manifest.toml"
 printf '#!/bin/sh\nexit 0\n' > "$BINARIES/rr3-modules/rr3-sense/bin"
 chmod +x "$BINARIES/rr3-modules/rr3-sense/bin"
-# 坏模块一：有 manifest 无 bin（警告 + 整模块跳过）
-cp "$REPO_ROOT/modules/rr3-sense/module.toml" "$BINARIES/rr3-modules/rr3-ghost/manifest.toml"
-# 坏模块二：manifest 无 entry 行（警告 + 整模块跳过）
-printf '[manifest]\nname = "rr3-noentry"\n' > "$BINARIES/rr3-modules/rr3-noentry/manifest.toml"
-printf '#!/bin/sh\n' > "$BINARIES/rr3-modules/rr3-noentry/bin"
-chmod +x "$BINARIES/rr3-modules/rr3-noentry/bin"
 
 # 不传 RR3_REPO_ROOT：顺带验证 post-build.sh 的仓根五级上溯缺省路径
 out="$work/out.log"
@@ -45,6 +54,9 @@ echo "断言：装机布局"
 [ -d "$TARGET/usr/bin" ] && [ -d "$TARGET/var/lib/rr3/staging" ] &&
 	[ -d "$TARGET/data" ] && [ -d "$TARGET/extlinux" ] &&
 	ok "目录骨架（usr/bin、staging、data、extlinux）" || bad "目录骨架缺失"
+for b in rrd rr3-ctl rr3-ota-ctl; do
+	[ -x "$TARGET/usr/bin/$b" ] && ok "入口产物 $b 落位" || bad "入口产物 $b 未落位"
+done
 
 echo "断言：entry 绝对化（除 entry 行外字节零差异）"
 src="$REPO_ROOT/modules/rr3-sense/module.toml"
@@ -100,12 +112,25 @@ grep -v '^[[:space:]]*#' "$TARGET/etc/init.d/S99rrd" | grep -q -- '--manifest' &
 	ok "S99rrd 参数面不再传 --manifest（后门不进出厂轨）"
 [ -f "$TARGET/etc/fstab" ] && ok "fstab 落位" || bad "fstab 缺失"
 
-echo "断言：坏模块只警告不阻断"
-grep -q "rr3-ghost 缺 bin" "$out" && [ ! -e "$TARGET/usr/lib/rockrobot3/modules/rr3-ghost" ] &&
-	ok "缺 bin 模块：警告且整模块未装" || bad "缺 bin 模块处置不对"
-grep -q "rr3-noentry 的 manifest 有 0 条 entry 行" "$out" &&
-	[ ! -e "$TARGET/usr/lib/rockrobot3/modules/rr3-noentry" ] &&
-	ok "无 entry 行模块：警告且整模块未装" || bad "无 entry 行模块处置不对"
+echo "断言：坏模块 fail-closed（整镜像构建失败，点名到模块）"
+badwork="$work/bad"
+mkdir -p "$badwork/target/etc/init.d" "$badwork/binaries/rr3-modules/rr3-ghost"
+install -m 0755 "$PACK" "$badwork/binaries/rr3-pack"
+for b in rrd rr3-ctl rr3-ota-ctl; do
+	printf '#!/bin/sh\nexit 0\n' > "$badwork/binaries/$b"
+	chmod +x "$badwork/binaries/$b"
+done
+sed 's/name = "rr3-sense"/name = "rr3-ghost"/' \
+	"$REPO_ROOT/modules/rr3-sense/module.toml" \
+	> "$badwork/binaries/rr3-modules/rr3-ghost/manifest.toml"
+badout="$work/bad.log"
+if TARGET_DIR="$badwork/target" BINARIES_DIR="$badwork/binaries" bash "$POST_BUILD" >"$badout" 2>&1; then
+	bad "缺 bin 模块未被拒（镜像会带重启环出厂）"
+else
+	grep -q 'rr3-ghost' "$badout" && grep -q 'bin' "$badout" &&
+		ok "缺 bin 模块整镜像构建失败且点名 rr3-ghost" ||
+		bad "失败未点名模块/缺件（见 $badout）"
+fi
 
 if [ "$fail" -ne 0 ]; then
 	echo "装配冒烟：红（见上 ✘）"

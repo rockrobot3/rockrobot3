@@ -7,6 +7,35 @@ use super::*;
 mod module;
 use module::*;
 
+/// 目标根装配（Buildroot 保底轨）：`--install-root <TARGET_DIR>` 直落
+/// `usr/bin` 三件 + `usr/lib/rockrobot3/{modules,profiles,contracts,hardware}`，
+/// 不写 DEBIAN/systemd、不调 dpkg-deb。与 deb 轨共用同一套 entry 改写、模块
+/// 完整性门与真值集清单（两轨不互抄装配）。
+pub fn rr3_install_tree(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
+    let target = cfg
+        .install_root
+        .clone()
+        .ok_or("内部错误：install_root 未给出")?;
+    let (names, _profile, truth) = rr3_stage_check(cfg)?;
+    rr3_install_dirs(&target)?;
+    rr3_stage_bins(cfg, &target)?;
+    let root = target.join("usr/lib/rockrobot3");
+    rr3_stage_truth(cfg, &root, &truth)?;
+    rr3_stage_modules(cfg, &root, &names)?;
+    Ok(target)
+}
+
+/// 目标根骨架目录（只建装配需要的三处，不碰 /etc 与 systemd）。
+fn rr3_install_dirs(target: &Path) -> Result<(), String> {
+    for d in [
+        target.join("usr/bin"),
+        target.join("usr/lib/rockrobot3/modules"),
+    ] {
+        fs::create_dir_all(&d).map_err(|e| format!("建目录 {} 失败: {e}", d.display()))?;
+    }
+    Ok(())
+}
+
 /// staging 装配（纯 Rust）：把两份真值落成 deb 布局树，返回 staging 目录路径。
 /// 路径 = `--out` 值加 `.stage` 后缀（与产物相邻，清掉即重来，不污染别处）。
 pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {

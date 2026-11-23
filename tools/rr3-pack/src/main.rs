@@ -92,6 +92,10 @@ pub struct Rr3PackConfig {
     /// rrd.service ExecStart 的装机位随名同步改写（缺省 distro 恒等，见模块头注②）。
     profile: String,
     stage_only: bool,
+    /// 直接落到一棵已存在的目标根（Buildroot TARGET_DIR）：只装 usr/bin 三件 +
+    /// 模块树 + 装载真值集，不写 DEBIAN/systemd、不调 dpkg-deb。保底轨
+    /// post-build.sh 与快路轨共用同一套 entry 改写/真值集裁定。
+    install_root: Option<PathBuf>,
 }
 
 // 入口是 crate root：子模块按 src/ 解析，故显式给路径（模块体在 pack/ 下）。
@@ -140,7 +144,12 @@ fn rr3_pack_deb(cfg: &Rr3PackConfig, stage: &Path) -> Result<String, String> {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cfg = rr3_pack_cfg(&args);
-    match rr3_pack(&cfg) {
+    let res = if cfg.install_root.is_some() {
+        rr3_install_tree(&cfg).map(|root| format!("目标根装配就绪: {}", root.display()))
+    } else {
+        rr3_pack(&cfg)
+    };
+    match res {
         Ok(msg) => println!("{msg}"),
         Err(e) => {
             eprintln!("rr3-pack: {e}");

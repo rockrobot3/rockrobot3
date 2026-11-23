@@ -104,6 +104,7 @@ fn cfg_of(payload: &Path, repo: &Path) -> (Rr3PackConfig, PathBuf) {
             arch: "arm64".to_string(),
             profile: "distro".to_string(),
             stage_only: true,
+            install_root: None,
         },
         out,
     )
@@ -474,4 +475,49 @@ fn parse_knows_stage() {
     assert!(rr3_pack_parse(&v(&["--payload", "p"])).is_err());
     assert!(rr3_pack_parse(&v(&["--payload", "p", "--repo", "r"])).is_err());
     assert!(rr3_pack_parse(&v(&["--bogus"])).is_err());
+    // 目标根出口：--install-root 与 --out 互斥，二者至少一个
+    let cfg = rr3_pack_parse(&v(&[
+        "--payload",
+        "p",
+        "--repo",
+        "r",
+        "--install-root",
+        "t",
+    ]))
+    .unwrap();
+    assert_eq!(cfg.install_root.as_deref(), Some(Path::new("t")));
+    assert!(rr3_pack_parse(&v(&[
+        "--payload",
+        "p",
+        "--repo",
+        "r",
+        "--out",
+        "o.deb",
+        "--install-root",
+        "t",
+    ]))
+    .is_err());
+}
+
+/// 目标根装配：三件入口 + 模块树 + 真值集落位，DEBIAN/systemd 不出现。
+#[test]
+fn install_tree_lands_modules() {
+    let (payload, repo) = fixture();
+    let target = payload.parent().unwrap().join("target");
+    let mut cfg = cfg_of(&payload, &repo).0;
+    cfg.install_root = Some(target.clone());
+    rr3_install_tree(&cfg).unwrap();
+    let root = target.join("usr/lib/rockrobot3");
+    assert!(target.join("usr/bin/rrd").is_file());
+    assert!(root.join("modules/rr3-act/module.toml").is_file());
+    assert!(root.join("modules/rr3-act/rr3-act").is_file());
+    assert!(root.join("modules/rr3-act/config.toml").is_file());
+    assert!(root
+        .join("modules/rr3-brain/rr3_brain/__init__.py")
+        .is_file());
+    assert!(root.join("profiles/distro.toml").is_file());
+    assert!(root.join("contracts/topics.toml").is_file());
+    assert!(root.join("hardware/distro/wiring.toml").is_file());
+    assert!(!target.join("DEBIAN").exists());
+    assert!(!target.join("usr/lib/systemd").exists());
 }

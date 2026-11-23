@@ -4,7 +4,7 @@
 use super::*;
 
 fn usage() -> String {
-    "用法: rr3-pack --payload <dir> --repo <dir> --out <file.deb> [--profile <name>] [--arch <arch>] [--stage-only]\n说明: --payload 是两轨同源的注入产物目录（rrd、rr3-ctl、rr3-ota-ctl；rust 模块 rr3-modules/<name>/{bin,manifest.toml}，python 模块 rr3-modules/<name>/{pkg/,manifest.toml}）；--repo 是仓根（读 profiles/<name>.toml、contracts/{topics,slots,roles,devices}.toml、hardware/<name>/wiring.toml、modules/<name>/config.toml）。--profile 选装机装配单（缺省 distro 不破坏既有调用方；H4/C2 批K：出包链不再只认一份装配单，换板只改装配单）。--arch 缺省 arm64（出厂目标），容器冒烟传本机 dpkg 架构。--stage-only 只落 staging 树不调 dpkg-deb（macOS 本机无 dpkg，装配单测/演练用）。".to_string()
+    "用法: rr3-pack --payload <dir> --repo <dir> (--out <file.deb> [--arch <arch>] [--stage-only] | --install-root <dir>) [--profile <name>]\n说明: --install-root 直接把 usr/bin 三件、模块树与装载真值集落到目标根（Buildroot TARGET_DIR），不写 DEBIAN/systemd、不调 dpkg-deb；与 deb 轨共用同一套 entry 改写与真值集裁定。--payload 是两轨同源的注入产物目录 --payload 是两轨同源的注入产物目录（rrd、rr3-ctl、rr3-ota-ctl；rust 模块 rr3-modules/<name>/{bin,manifest.toml}，python 模块 rr3-modules/<name>/{pkg/,manifest.toml}）；--repo 是仓根（读 profiles/<name>.toml、contracts/{topics,slots,roles,devices}.toml、hardware/<name>/wiring.toml、modules/<name>/config.toml）。--profile 选装机装配单（缺省 distro 不破坏既有调用方；H4/C2 批K：出包链不再只认一份装配单，换板只改装配单）。--arch 缺省 arm64（出厂目标），容器冒烟传本机 dpkg 架构。--stage-only 只落 staging 树不调 dpkg-deb（macOS 本机无 dpkg，装配单测/演练用）。".to_string()
 }
 
 fn rr3_need(args: &[String], i: usize, flag: &str) -> Result<String, String> {
@@ -49,6 +49,9 @@ fn pack_arg_path<'a>(cfg: &'a mut Rr3PackConfig, flag: &str) -> Option<&'a mut P
     if flag == "--out" {
         return Some(&mut cfg.out);
     }
+    if flag == "--install-root" {
+        return Some(cfg.install_root.get_or_insert_with(PathBuf::new));
+    }
     None
 }
 
@@ -86,6 +89,7 @@ pub fn rr3_pack_parse(args: &[String]) -> Result<Rr3PackConfig, String> {
         arch: "arm64".to_string(),
         profile: "distro".to_string(),
         stage_only: false,
+        install_root: None,
     };
     let mut i = 0;
     while i < args.len() {
@@ -100,15 +104,24 @@ fn rr3_pack_finish(cfg: Rr3PackConfig) -> Result<Rr3PackConfig, String> {
     Ok(cfg)
 }
 
-/// 三个必给项在场门（fail-closed，缺席带用法）。
+/// 必给项在场门：payload/repo 恒必给；出包出口 `--out` 与 `--install-root` 二选一
+/// （同给是歧义，fail-closed 拒收，不猜调用方意图）。
 fn rr3_pack_required(cfg: &Rr3PackConfig) -> Result<(), String> {
-    let missing = [&cfg.payload, &cfg.repo, &cfg.out]
-        .iter()
-        .any(|p| p.as_os_str().is_empty());
-    if missing {
-        return Err(format!("--payload/--repo/--out 三者必给\n{}", usage()));
+    if cfg.payload.as_os_str().is_empty() || cfg.repo.as_os_str().is_empty() {
+        return Err(format!("--payload/--repo 必给\n{}", usage()));
     }
-    Ok(())
+    let has_out = !cfg.out.as_os_str().is_empty();
+    match (has_out, cfg.install_root.is_some()) {
+        (true, true) => Err(format!(
+            "--out 与 --install-root 互斥（deb 与目标根装配二选一）\n{}",
+            usage()
+        )),
+        (false, false) => Err(format!(
+            "须给 --out <file.deb> 或 --install-root <dir>\n{}",
+            usage()
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// entry 可装机性：必须相对、且每段都是普通名（拒绝对路径与 `..`/`.` 段——
