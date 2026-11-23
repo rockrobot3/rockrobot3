@@ -119,6 +119,14 @@ fn wake_ack_pcm_reused() {
         .iter()
         .map(|(path, _, _)| path.clone())
         .collect();
+    // 归因面：ASR 失败计数与云档一并进断言文案（macOS 连红时只看到 paths 缺 ASR，
+    // 分不清"没走真云"还是"走了但打不出去"）。
+    assert_eq!(
+        bus.bumps_of("asr_fail"),
+        0,
+        "ASR 失败（mode={:?}，paths={paths:?}）",
+        crate::cloud::rr3_cloud_mode()
+    );
     assert_eq!(
         paths,
         vec!["/v1/audio/speech", "/v1/audio/transcriptions"],
