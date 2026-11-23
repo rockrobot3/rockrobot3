@@ -42,7 +42,7 @@
 | 件 | `handles` | `ops` 槽（名 / 类型 / 来源 / 默认） | 非法收敛（目标） |
 |---|---|---|---|
 | capture | `dyn Rr3AudioSource` ← `[hardware].alsa_device` | `sample_rate: u32`=16000；`channels: u8`=1；`frame_ms: u64`=20 | `frame_ms < 1` → 收敛为 20 并留痕（**现状：允许 0**） |
-| vad | 无（吃 capture 输出） | `rms_start: i64`=1500；`silence_tail_ms: u64`=700；`min_speech_ms: u64`=200 | 阈值 ≤0 → 拒 boot |
+| vad | 无（吃 capture 输出） | `rms_start: i64`=1500；`rms_tail: i64`=1500（可选，缺省跟随 `rms_start`）；`silence_tail_ms: u64`=700；`min_speech_ms: u64`=200 | 阈值越界或 `rms_tail > rms_start` → 拒 boot |
 | capture（DoA） | 阵列几何（`channels ≥ 2`） | `doa_bin_threshold_deg: i32` =30（S-5：已从件内常量迁此槽，来源 config `[rr3-sense.doa].bin_threshold_deg`） | 几何不足 → 不发 doa |
 | env / imu | 真件句柄（`[hardware]` 尚无对应键） | 待定（随真件批） | — |
 
