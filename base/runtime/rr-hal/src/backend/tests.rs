@@ -51,6 +51,40 @@ fn descriptor_failure_note_names_facet_and_reason() {
     assert!(note.contains("Unsupported"), "{note}");
 }
 
+fn assert_sim_probes(
+    servo: &dyn crate::Rr3PwmServo,
+    gpio: &dyn crate::Rr3GpioOut,
+    display: &dyn crate::Rr3Display,
+    link: &dyn crate::Rr3Link,
+    servo_backend: &str,
+    display_backend: &str,
+    link_backend: &str,
+) {
+    // sim 档（本机 macOS 默认）下探活必须成功——执行件从断电态起步
+    // （探活全是读面 &self，无需可变绑定；写面 &mut self 的使用在模块侧）
+    if servo_backend == RR3_BACKEND_SIM {
+        assert_eq!(servo.angle().unwrap(), 90, "sim 舵机初始中位");
+        assert!(!gpio.level().unwrap(), "sim 通道初始断电");
+    }
+    if display_backend == RR3_BACKEND_SIM || display_backend == RR3_BACKEND_MAC {
+        assert_eq!(display.frame().unwrap(), [0; 8], "宿主虚拟点阵初始黑屏");
+    }
+    if link_backend == RR3_BACKEND_SIM {
+        let st = link.state().unwrap();
+        if st.up {
+            assert!(
+                st.ssid.is_some() && st.rssi_dbm.is_some(),
+                "sim 在链必带 SSID/RSSI"
+            );
+        } else {
+            assert!(
+                st.ssid.is_none() && st.rssi_dbm.is_none(),
+                "sim 断链必无 SSID/RSSI"
+            );
+        }
+    }
+}
+
 /// 执行面（舵机/数字输出）选择：平台默认下拿到的后端名必须合法，且对象可用
 /// （sim 上探活读回成功；占位件留给使用时的 Unsupported——选择函数本身不触设备）。
 #[test]
@@ -85,29 +119,15 @@ fn act_device_selectors_return_legal_backend_objects() {
         legal.contains(&link_backend),
         "链路后端名合法: {link_backend}"
     );
-    // sim 档（本机 macOS 默认）下探活必须成功——执行件从断电态起步
-    // （探活全是读面 &self，无需可变绑定；写面 &mut self 的使用在模块侧）
-    if servo_backend == RR3_BACKEND_SIM {
-        assert_eq!(servo.angle().unwrap(), 90, "sim 舵机初始中位");
-        assert!(!gpio.level().unwrap(), "sim 通道初始断电");
-    }
-    if display_backend == RR3_BACKEND_SIM || display_backend == RR3_BACKEND_MAC {
-        assert_eq!(display.frame().unwrap(), [0; 8], "宿主虚拟点阵初始黑屏");
-    }
-    if link_backend == RR3_BACKEND_SIM {
-        let st = link.state().unwrap();
-        if st.up {
-            assert!(
-                st.ssid.is_some() && st.rssi_dbm.is_some(),
-                "sim 在链必带 SSID/RSSI"
-            );
-        } else {
-            assert!(
-                st.ssid.is_none() && st.rssi_dbm.is_none(),
-                "sim 断链必无 SSID/RSSI"
-            );
-        }
-    }
+    assert_sim_probes(
+        &*servo,
+        &*gpio,
+        &*display,
+        &*link,
+        servo_backend,
+        display_backend,
+        link_backend,
+    );
 }
 
 /// 音频面选择（A 批 c3）：源/播两选择函数拿到的后端名必须合法；**播面
