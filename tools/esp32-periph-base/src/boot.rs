@@ -468,7 +468,9 @@ pub(crate) fn rr3_boot() {
 
 fn rr3_boot_try() -> Result<(), String> {
     boot_banner();
-    let p = Peripherals::take().ok_or_else(|| {
+    // esp-idf-hal 的 take 返回 Result<Peripherals, Peripherals>（Err 是已取走的单例）：
+    // 只取"是否拿到"，不读 Err 内容。
+    let p = Peripherals::take().map_err(|_| {
         "Peripherals::take 失败：外设已被取走（启动期不应发生，查是否有二次取）".to_string()
     })?;
     let (_timer, ctl, rt, audio) = open_parts(p)?;
