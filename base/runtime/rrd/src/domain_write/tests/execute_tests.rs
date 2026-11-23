@@ -156,7 +156,7 @@ fn params_armed_true() -> Value {
 /// 红一：无确认拒——confirm 缺/false 一律 Permission，零字节落盘
 #[cfg(unix)]
 #[test]
-fn rejects_without_confirm_and_writes_nothing() {
+fn rej_writes_nothing() {
     let fx = fixture();
     let before = std::fs::read_to_string(&fx.paths.profile).unwrap();
     let mut p = rr3_write_parse(&params_armed_true()).unwrap();
@@ -171,7 +171,7 @@ fn rejects_without_confirm_and_writes_nothing() {
 /// 红二：证据引用非法拒写——形制坏/文件缺都拒，零字节落盘
 #[cfg(unix)]
 #[test]
-fn rejects_bad_evidence_and_writes_nothing() {
+fn rej_bad_nothing() {
     let fx = fixture();
     let before = std::fs::read_to_string(&fx.paths.profile).unwrap();
     // 文件缺（形制合法但四道核第二道红）
@@ -202,7 +202,7 @@ fn rejects_bad_evidence_and_writes_nothing() {
 /// armed_domain_evidence_file_check_gate 同一构造（sense 指在册 i2c 测点）。
 #[cfg(unix)]
 #[test]
-fn armed_write_persists_paired_shape_and_answers_boot() {
+fn armed_shape_boot() {
     let fx = fixture();
     write_evidence(&fx.dir, "实测", 1);
     // 武装前提：域 sense 绑在册测点 pin + max_age_ms > 0（⑥-c 两前件）
@@ -226,7 +226,7 @@ fn armed_write_persists_paired_shape_and_answers_boot() {
 /// 绿：severe_mv 过写——只动目标键行，联动 evidence 不入档（仅留痕）
 #[cfg(unix)]
 #[test]
-fn severe_mv_write_touches_target_line_only() {
+fn severe_mv_write_line() {
     let fx = fixture();
     write_evidence(&fx.dir, "实测", 1);
     let mut p = rr3_write_parse(&json!({
@@ -251,7 +251,7 @@ fn severe_mv_write_touches_target_line_only() {
 /// 各读一份文本，偶发丢写）。窗口极窄，本用例是串行化回归钉不是竞态证明。
 #[cfg(unix)]
 #[test]
-fn concurrent_writes_serialize_and_keep_both() {
+fn concurrent_keep() {
     let fx = fixture();
     write_evidence(&fx.dir, "实测", 1);
     let base = std::fs::read_to_string(&fx.paths.profile).unwrap();
@@ -290,7 +290,7 @@ fn concurrent_writes_serialize_and_keep_both() {
 /// 守护线程里，panic = 断连接、丢应答。
 #[cfg(unix)]
 #[test]
-fn plan_rejects_key_value_mismatch_without_panic() {
+fn plan_rej_key_panic() {
     let fx = fixture();
     let dom = crate::profile::Rr3Domain {
         armed: false,
@@ -316,7 +316,7 @@ fn plan_rejects_key_value_mismatch_without_panic() {
 /// 链）——预核红例必须用装载链真判，不许造"判据还不在"的假红例。
 #[cfg(unix)]
 #[test]
-fn rejects_when_preboot_check_fails() {
+fn rej_check_fail() {
     let fx = fixture();
     write_evidence(&fx.dir, "实测", 1);
     let before = std::fs::read_to_string(&fx.paths.profile).unwrap();
@@ -345,7 +345,7 @@ fn rejects_when_preboot_check_fails() {
 /// axis 落点：合法过写复用产线写入面——轴档 current_ceil_ma 变更落盘
 #[cfg(unix)]
 #[test]
-fn axis_write_reuses_production_writer() {
+fn axis_write_writer() {
     let fx = fixture();
     write_evidence(&fx.dir, "对拍", 1);
     // 轴档夹具（十四键，pin 对账装配单 [[pin]]）
@@ -371,7 +371,7 @@ fn axis_write_reuses_production_writer() {
 /// axis 落点红面：轴档不在场拒（立档走产线写入面，写口不立新档）
 #[cfg(unix)]
 #[test]
-fn axis_write_rejects_missing_axis_file() {
+fn axis_rej_miss_file() {
     let fx = fixture();
     write_evidence(&fx.dir, "对拍", 1);
     let mut p = rr3_write_parse(&json!({

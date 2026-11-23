@@ -22,7 +22,7 @@ mod tests {
     /// 低电边沿真值批D₃ 迁 rr-core `control`（越阈/段内/再武装用例随迁）——
     /// 本地只钉"re-export 可用"：同一构造 + 一次注入调用走通 rr-core 面。
     #[test]
-    fn low_edge_is_rr_core_reexport() {
+    fn low_rr_core_reexport() {
         let mut e = Rr3LowEdge::rr3_low_edge_new(3300);
         assert!(e.rr3_low_edge_cross(3290), "越阈触发（rr-core 判定）");
         assert!(!e.rr3_low_edge_cross(3295), "段内不重复报（rr-core 判定）");

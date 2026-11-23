@@ -111,7 +111,7 @@ mod tests {
     /// 状态机主语义：首拍基线必发、翻转必发、同态不发——"翻转必发 + 周期保底"
     /// 的"必发"一半钉在这里（sim 后端状态恒定，e2e 看不见翻转，只有单测能钉）。
     #[test]
-    fn link_edge_fires_on_first_and_flip_only() {
+    fn link_edge_first_flip() {
         let mut e = Rr3LinkEdge::rr3_link_edge_new();
         assert!(e.rr3_link_edge_cross(true), "首拍基线必发");
         assert!(!e.rr3_link_edge_cross(true), "同态不发（周期拍点保底）");
@@ -124,7 +124,7 @@ mod tests {
     /// 配网状态机进出（方案 D4 判据"AP 态可模拟进出"钉在纯函数单测）：
     /// 出厂 ap → connect 转 station → forget 回 ap，凭据只存内存。
     #[test]
-    fn provision_roundtrips_ap_station() {
+    fn provision_ap_station() {
         let mut p = Rr3Provision::rr3_provision_new();
         assert_eq!(p.rr3_provision_mode(), "ap", "出厂无凭据 = 配网热点在开");
         p.rr3_prov_connect("home", "password8");
@@ -141,7 +141,7 @@ mod tests {
     /// 模块只记 SSID 出 mode）。这条钉的是"重启仍在册"里**模块侧**的一半
     /// ——另一半（凭据真落盘承载）在 `rr-hal::provision_store` 的用例钉。
     #[test]
-    fn provision_restored_starts_in_station() {
+    fn provision_station() {
         let p = Rr3Provision::rr3_prov_restored("home");
         assert_eq!(
             p.rr3_provision_mode(),

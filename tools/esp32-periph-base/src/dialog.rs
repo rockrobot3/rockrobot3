@@ -399,14 +399,14 @@ mod tests {
     }
 
     #[test]
-    fn dialog_body_accepts_mono_wav_and_raw() {
+    fn dlg_ok_mono_wav_raw() {
         let pcm = [0x01, 0x00, 0xFE, 0xFF];
         assert_eq!(rr3_dialog_body(&wav_mono(16_000, &pcm)).unwrap(), [1, -2]);
         assert_eq!(rr3_dialog_body(&pcm).unwrap(), [1, -2]);
     }
 
     #[test]
-    fn dialog_body_rejects_wrong_rate_channels_and_odd_bytes() {
+    fn dlg_rej_odd_bytes() {
         assert!(rr3_dialog_body(&wav_mono(8_000, &[0, 0]))
             .unwrap_err()
             .contains("采样率"));
@@ -418,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn cap_text_stops_on_char_boundary() {
+    fn cap_char_boundary() {
         assert_eq!(rr3_cap_text("你好世界", 6), "你好");
         assert_eq!(rr3_cap_text("abc", 3), "abc");
         assert_eq!(rr3_cap_text("你好", 1), "");

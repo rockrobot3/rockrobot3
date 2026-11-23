@@ -51,7 +51,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unit_name_gate_is_fail_closed() {
+    fn unit_fail_closed() {
         assert!(rr3_unit_name_ok("rr3-sense"));
         assert!(rr3_unit_name_ok("rr3-brain"));
         for bad in [
@@ -68,7 +68,7 @@ mod tests {
     }
 
     #[test]
-    fn unit_arg_missing_or_unknown_is_rejected() {
+    fn unit_arg_miss_rej() {
         assert!(
             rr3_unit_log_tail("/tmp/x.sock", &[]).is_err(),
             "缺 --unit 应拒"
@@ -81,7 +81,7 @@ mod tests {
     }
 
     #[test]
-    fn unit_tail_reads_last_lines_only() {
+    fn unit_tail_last_lines() {
         let dir = std::env::temp_dir().join(format!("rr3-ctl-unitlog-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("rr3-sense.log");

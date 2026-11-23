@@ -60,7 +60,7 @@ fn legs_assert_mixed(v: &Value) {
 /// speaker 腿（主循环缺席场景）如实 fail 不折算通过；verdict = 结果集
 /// 与预期集等值（批N5 件五 F-31），不等值即 fail。
 #[test]
-fn selftest_reports_legs_and_honest_speaker_fail() {
+fn selftest_legs_fail() {
     // 假 rrd 不预置 wiring/contracts（available 缺）→ 取数两腿如实 fail；
     // actions 接收者即刻 drop——speaker/face 两腿走"主循环不在"业务 Err。
     let dir = std::env::temp_dir().join(format!("panel-selftest-{}", std::process::id()));
@@ -144,7 +144,7 @@ fn wiring_legs_assert(v: &Value) {
 /// n-a（不拖累不救场）、未知值 fail-closed 折 fail（恒败腿不得折算通过）；
 /// 判果是 rrd 的产出，面板只转述（leg = "wiring/<item>" 逐条摊开）。
 #[test]
-fn selftest_wiring_leg_expands_checks_with_three_states() {
+fn selftest_leg_states() {
     let dir = std::env::temp_dir().join(format!("panel-wlegs-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -273,7 +273,7 @@ fn verdict_edge_cases() {
 /// fail-closed fail；预期可改数据——恒败腿如实申报期望 fail 即等值过
 /// （改数据不改码）。
 #[test]
-fn selftest_verdict_compares_result_set_against_expect_table() {
+fn selftest_set_table() {
     verdict_equal_cases();
     verdict_mismatch_cases();
     verdict_group_cases();
@@ -283,7 +283,7 @@ fn selftest_verdict_compares_result_set_against_expect_table() {
 /// relay 腿能力面（N44 后续）：rr3-act 缺席或配置显式 n-a → n-a；
 /// 在册且未显式 n-a → 沿用预期表（classic 仍 pass/fail 照跑）。
 #[test]
-fn selftest_relay_expect_n_a_when_capability_absent_or_configured() {
+fn selftest_configured() {
     assert_eq!(rr3_relay_expect(false, "pass"), "n-a");
     assert_eq!(rr3_relay_expect(false, "fail"), "n-a");
     assert_eq!(rr3_relay_expect(true, "pass"), "pass");
@@ -330,7 +330,7 @@ fn relay_fail_closed_assert(leg: Value, want: &'static str) {
 /// relay 腿 ctl 取数失败必须 fail-closed（0.0.8c 审计）：腿如实 fail，
 /// 期望态不得记成 fail 抵消等值——能力面不可核验时 verdict 必红。
 #[test]
-fn selftest_relay_ctl_failure_is_fail_closed() {
+fn selftest_fail_closed() {
     let dir = std::env::temp_dir().join(format!("panel-relay-fail-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -345,7 +345,7 @@ fn selftest_relay_ctl_failure_is_fail_closed() {
 
 /// verdict 对 relay=n-a 的 host-only 形态等值即过（n-a 不拖累）。
 #[test]
-fn selftest_verdict_accepts_n_a_relay_for_host_only() {
+fn selftest_ok_n_host() {
     let legs = vec![
         json!({ "leg": "speaker", "pass": "pass" }),
         json!({ "leg": "relay", "pass": "n-a" }),
@@ -362,7 +362,7 @@ fn selftest_verdict_accepts_n_a_relay_for_host_only() {
 /// 接线图 HTTP 透传（批N4 件九笔4）：GET /api/wiring → ctl.wiring 一问一答，
 /// rrd 应答原样 200 回浏览器（available:true 快照在册面）。
 #[test]
-fn wiring_endpoint_passes_through_canned_snapshot() {
+fn wiring_snapshot() {
     let dir = std::env::temp_dir().join(format!("panel-wpass-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -401,7 +401,7 @@ fn wiring_endpoint_passes_through_canned_snapshot() {
 /// 面板侧申报表；domain 12 = 批N21 件二 evidence 键随批N21 件四补申报）；
 /// 增删字段 = 改端点表 + 改本 pin + 过门 d。
 #[test]
-fn wiring_endpoint_declares_full_cross_cover_vocabulary() {
+fn wiring_vocabulary() {
     let entry = RR3_PANEL_ROUTES
         .iter()
         .find(|(_, p, _, _)| *p == "/api/wiring")

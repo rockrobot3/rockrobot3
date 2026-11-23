@@ -126,7 +126,7 @@ fn snapshot() -> Rr3AssemblySnapshot {
 }
 
 #[test]
-fn snapshot_set_is_first_wins_and_readable() {
+fn snapshot_readable() {
     // OnceLock 进程级单点：首份胜出、二份被拒、只读口取首份
     let first = snapshot();
     let mut second = snapshot();
@@ -140,7 +140,7 @@ fn snapshot_set_is_first_wins_and_readable() {
 }
 
 #[test]
-fn cross_checks_cover_four_families_with_three_states() {
+fn cross_four_states() {
     let s = snapshot();
     let checks = rr3_cross_checks(&s.profile, &s.wiring, &s.peak_by_mate);
     // signal 族 3 导体：vcc/gnd 记 not-applicable，pin 导体记 pass
@@ -296,7 +296,7 @@ fn rated_cycle_case(s: &Rr3AssemblySnapshot) {
 /// 菱形分叉只收账一次、feeds 一般环 fail（装载期闭合面只拒自环，环即漂移）、
 /// 自反口径钉门（本线对端负载计入"该线承载之和"）。
 #[test]
-fn rated_sum_family_judges_f10_topology_sum() {
+fn rated_sum_f10_sum() {
     let s = snapshot(); // peak_by_mate：SG90-3P → 700mA
     rated_f10_case(&s);
     rated_solo_case(&s);
@@ -305,7 +305,7 @@ fn rated_sum_family_judges_f10_topology_sum() {
 }
 
 #[test]
-fn wiring_json_renders_every_denominator_field() {
+fn wiring_json_field() {
     // 门 d 分母四路的字段级全集必须逐键出现在应答（covers 申报"真实渲染"
     // 的兑现判据）——词表自门 d 同源常量导出，不抄第二份清单。
     // 测纯函数 + 局部快照：OnceLock 全局态与 cargo test 并行线程有竞态，

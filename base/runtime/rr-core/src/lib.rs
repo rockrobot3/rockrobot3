@@ -174,7 +174,7 @@ mod tests {
 
     /// task 号三段不得重叠：0 广播 / 1 rrd / ≥2 模块（原 rr-bus lib 用例语义随迁）
     #[test]
-    fn task_id_space_is_disjoint() {
+    fn task_id_disjoint() {
         assert_eq!(RR3_BROADCAST_DST_TASK, 0);
         assert_eq!(RR3_TASK_RRD, 1);
         assert_eq!(RR3_TASK_FIRST_MODULE, 2);
@@ -193,7 +193,7 @@ mod tests {
     /// 占位窗口要有内容可言：区间非空（MIN < MAX），且两个值都落在常量文档自己声明的
     /// 0..=139 占位带内（原 rr-bus lib 用例语义随迁）
     #[test]
-    fn priority_window_is_nonempty_placeholder_band() {
+    fn priority_window_band() {
         const BAND: core::ops::RangeInclusive<u32> = 0..=139; // 常量文档声明的占位带
         const {
             assert!(
@@ -210,19 +210,19 @@ mod tests {
     }
 
     #[test]
-    fn contract_version_is_passed_through() {
+    fn contract_through() {
         assert_eq!(RR3_BUS_CONTRACT_VERSION, RR3_CONTRACT_SCHEMA_VERSION);
         assert_eq!(RR3_BUS_CONTRACT_VERSION, 1);
     }
 
     #[test]
-    fn method_call_is_the_wire_name() {
+    fn method_wire_name() {
         assert_eq!(RR3_METHOD_CALL, "rr3.call");
     }
 
     /// trace_id 直连语义：0 = 非代理；且 0 是广播号，不可能与"调用方 task"混淆
     #[test]
-    fn trace_id_direct_is_zero_and_not_a_caller_task() {
+    fn trace_id_not_task() {
         assert_eq!(RR3_TRACE_ID_DIRECT, 0);
         assert_eq!(
             rr3_task_kind(RR3_TRACE_ID_DIRECT),
@@ -233,7 +233,7 @@ mod tests {
 
     /// 帧组装：payload_len 回填 + 全字段注入逐项落位（时钟是参数不是读取）
     #[test]
-    fn frame_compose_fills_every_field_from_arguments() {
+    fn frame_arguments() {
         let f = rr3_frame_compose(
             opcode::SEND,
             0,
@@ -260,7 +260,7 @@ mod tests {
     /// Event 组装形状：SEND / trace_id=直连 / dst=rrd，与 rr-bus 客户端既有线上
     /// 形状逐字段一致（客户端改造后由同一函数产出，此用例钉形状守恒）
     #[test]
-    fn event_compose_matches_client_wire_shape() {
+    fn event_wire_shape() {
         let payload = rr3_body_encode(Rr3PayloadType::Event, b"{\"topic\":\"rr3-t/x\"}");
         let f = rr3_event_compose(77, 9, payload);
         assert_eq!(f.header.opcode, opcode::SEND);
@@ -276,7 +276,7 @@ mod tests {
 
     /// 组装产物可整帧字节化并与 golden 头区对拍（机制核切片的编译期+运行期双面之一）
     #[test]
-    fn composed_frame_is_writable_and_matches_golden_header_size() {
+    fn composed_frame_size() {
         let f = rr3_event_compose(100, 7, rr3_body_encode(Rr3PayloadType::Event, b"{}"));
         let bytes = rr_ipc::rr3_frame_to_bytes(&f).unwrap();
         assert_eq!(bytes.len(), rr_ipc::RR3_IPC_HDR_SIZE + f.payload.len());

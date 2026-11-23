@@ -209,7 +209,7 @@ mod tests {
 
     /// seal 前头区全 0、payload 可写；seal 后头区与 `to_bytes` 逐字节一致（原地编头）
     #[test]
-    fn buf_seal_writes_header_in_place() {
+    fn buf_seal_place() {
         let mut buf = Rr3FrameBuf::rr3_new(hdr(3));
         assert_eq!(buf.bytes.len(), RR3_IPC_HDR_SIZE + 3);
         assert!(!buf.rr3_sealed());
@@ -250,14 +250,14 @@ mod tests {
 
     /// 未 seal 的缓冲拒转值视图
     #[test]
-    fn buf_unsealed_rejects_frame_conversion() {
+    fn buf_rej_frame_conv() {
         let buf = Rr3FrameBuf::rr3_new(hdr(0));
         assert_eq!(Rr3Frame::try_from(buf), Err(Rr3FrameError::Unsealed));
     }
 
     /// 读侧：seal 过的缓冲整块发出，读回同一帧（单块提交，读侧不可能看到两半）
     #[test]
-    fn framebuf_read_round_trip() {
+    fn framebuf_read_trip() {
         let mut buf = Rr3FrameBuf::rr3_new(hdr(4));
         buf.rr3_payload_mut().copy_from_slice(b"wxyz");
         buf.rr3_seal();
@@ -273,7 +273,7 @@ mod tests {
 
     /// 读侧 CRC 单点：载荷被改一个字节 → `CrcMismatch { declared, actual }`，帧不得被消费。
     #[test]
-    fn framebuf_read_rejects_crc_mismatch() {
+    fn framebuf_mismatch() {
         let mut buf = Rr3FrameBuf::rr3_new(hdr(4));
         buf.rr3_payload_mut().copy_from_slice(b"wxyz");
         buf.rr3_seal();
@@ -290,7 +290,7 @@ mod tests {
 
     /// 读侧错误语义与帧层一致：干净关闭 / 半帧头 / 短 payload
     #[test]
-    fn framebuf_read_error_semantics() {
+    fn framebuf_semantics() {
         assert_eq!(
             rr3_framebuf_read(&mut Cursor::new(Vec::new())),
             Err(Rr3FrameError::Closed)
@@ -313,7 +313,7 @@ mod tests {
 
     /// payload_len = 0 合法（心跳/应答形状），读回空 payload
     #[test]
-    fn framebuf_read_empty_payload() {
+    fn framebuf_payload() {
         let mut buf = Rr3FrameBuf::rr3_new(hdr(0));
         buf.rr3_seal();
         let sent = buf.rr3_as_sealed_bytes().unwrap().to_vec();

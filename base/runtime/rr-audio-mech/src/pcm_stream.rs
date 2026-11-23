@@ -132,7 +132,7 @@ mod tests {
     }
 
     #[test]
-    fn whole_feed_matches_buffer_shaping() {
+    fn whole_buf_shaping() {
         let src = bytes(&[1000, -1000, 2000, -2000, 3000, -3000]);
         let mut want = Vec::new();
         rr3_pcm_stereo(&src, 1, 2, 2, &mut want).unwrap();
@@ -145,7 +145,7 @@ mod tests {
     }
 
     #[test]
-    fn bytewise_feed_keeps_frame_and_fade_phase() {
+    fn bytewise_fade_phase() {
         let src = bytes(&[1000, -1000, 2000, -2000, 3000, -3000]);
         let mut want = Vec::new();
         rr3_pcm_stereo(&src, 1, 2, 2, &mut want).unwrap();
@@ -159,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn stereo_passthrough_and_odd_tail_rejected() {
+    fn stereo_odd_tail_rej() {
         let src = bytes(&[1, 2, 3, 4]);
         let mut st = Rr3PcmStream::rr3_new(2, Some(src.len()), 0).unwrap();
         let mut got = Vec::new();
@@ -175,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_total_skips_fade_out() {
+    fn unknown_fade_out() {
         let src = bytes(&[1000, 1000]);
         let mut st = Rr3PcmStream::rr3_new(1, None, 1).unwrap();
         let mut got = Vec::new();

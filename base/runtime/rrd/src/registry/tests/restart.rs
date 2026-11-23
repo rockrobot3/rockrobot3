@@ -4,7 +4,7 @@ use super::*;
 
 /// 运维计数聚合（0.0.4 批B）：模块前缀归并、同键累加、空拍不算变化
 #[test]
-fn counters_merge_prefixes_and_accumulates() {
+fn counters_accumulates() {
     use std::collections::BTreeMap;
     let mut r = RrdRegistry::new(1000);
     let mut beat = BTreeMap::new();
@@ -36,7 +36,7 @@ fn counters_merge_prefixes_and_accumulates() {
 
 /// 计数键数上界（外部输入防护）：满帽后拒新键、既有键照常累加、只点名一次。
 #[test]
-fn counters_key_cap_rejects_new_keys_keeps_old() {
+fn counters_rej_new_old() {
     use std::collections::BTreeMap;
     let mut r = RrdRegistry::new(1000);
     let mut beat = BTreeMap::new();
@@ -61,7 +61,7 @@ fn counters_key_cap_rejects_new_keys_keeps_old() {
 /// 它挡的是有人"顺手"在延迟算术里给 base 补一个 `.max(1)` 之类的下界——
 /// 那会让这里从 0 变成 1，而配置面看起来什么都没改。
 #[test]
-fn zero_restart_base_ms_currently_yields_zero_delay() {
+fn zero_ms_zero_delay() {
     let mut r = RrdRegistry::new(0);
     r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
         .unwrap();
@@ -88,7 +88,7 @@ fn zero_restart_base_ms_currently_yields_zero_delay() {
 /// 退避乘法是纯算术：base 大到会溢出时封顶，绝不 panic（debug 的 `*` 会 panic）
 /// 也绝不回绕（release 的 `*` 会 wrap 成一个小延迟＝"疯狂重启"，正是 spec §5.3 要避免的）
 #[test]
-fn backoff_multiply_saturates_instead_of_wrapping() {
+fn backoff_wrapping() {
     let base = u64::MAX / 2;
     let mut r = RrdRegistry::new(base);
     r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
@@ -128,7 +128,7 @@ fn backoff_multiply_saturates_instead_of_wrapping() {
 
 /// on-failure：干净退出不重启，非零/crash 才重启
 #[test]
-fn on_failure_only_restarts_unclean_exit() {
+fn fail_unclean_exit() {
     let mut r = RrdRegistry::new(1000);
     r.rr3_reg_add(&facts("rr3-sense", 100, 500, "on-failure"), chan().0, 0)
         .unwrap();
@@ -151,7 +151,7 @@ fn on_failure_only_restarts_unclean_exit() {
 
 /// 未知策略值不得 panic、也不得擅自重启（校验在 Task 2 已挡，运行期只保证不猜）
 #[test]
-fn unexpected_policy_string_is_treated_as_never() {
+fn unexpected_as_never() {
     let mut r = RrdRegistry::new(1000);
     let mut f = facts("rr3-sima", 100, 500, "always");
     f.restart_policy = "ALWAYS".into(); // 大小写错 = 非预期值
@@ -166,7 +166,7 @@ fn unexpected_policy_string_is_treated_as_never() {
 
 /// 不在册的名字问死亡：None 且不得凭空造条目
 #[test]
-fn death_of_unknown_name_is_none() {
+fn death_name_none() {
     let mut r = RrdRegistry::new(1000);
     r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
         .unwrap();
@@ -181,7 +181,7 @@ fn death_of_unknown_name_is_none() {
 
 /// 退避表自证：7 档、末档 60、单调不减、无 0
 #[test]
-fn backoff_table_is_monotonic_with_cap() {
+fn backoff_table_cap() {
     assert_eq!(RR3_RESTART_BACKOFF.len(), 7);
     assert_eq!(*RR3_RESTART_BACKOFF.last().unwrap(), 60);
     assert!(RR3_RESTART_BACKOFF.windows(2).all(|w| w[0] <= w[1]));
@@ -190,7 +190,7 @@ fn backoff_table_is_monotonic_with_cap() {
 
 /// failed 后同身份可重注册，但必须换新 task（旧号不复用）
 #[test]
-fn failed_entry_can_be_re_registered_with_new_task() {
+fn fail_be_re_new_task() {
     let mut r = RrdRegistry::new(1000);
     let t = r
         .rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
@@ -217,7 +217,7 @@ fn failed_entry_can_be_re_registered_with_new_task() {
 /// 在册名字必须原样回**入库时那份 facts**（逐字段相等，不是只回个名字），不在册的名字
 /// 回 None——既不能 panic，也不能回一条半数据（空的 start_priority 会让 spawn 序排错位）。
 #[test]
-fn facts_roundtrip_for_known_and_unknown_names() {
+fn facts_known_names() {
     let mut r = RrdRegistry::new(1000);
     let f = facts("rr3-sima", 100, 500, "on-failure");
     r.rr3_reg_add(&f, chan().0, 0).unwrap();

@@ -4,7 +4,7 @@
 use super::*;
 
 #[test]
-fn topics_prefix_accepts_canonical_topic() {
+fn topics_prefix_ok() {
     let owners = rr_registry::rr3_topics_owners(&topics_toml());
     let errs = rr_registry::rr3_topics_chk(
         r#"
@@ -19,7 +19,7 @@ kind = "event"
 }
 
 #[test]
-fn topics_prefix_rejects_foreign_owner() {
+fn topics_prefix_rej() {
     let owners = rr_registry::rr3_topics_owners(&topics_toml());
     let errs = rr_registry::rr3_topics_chk(
         r#"
@@ -34,7 +34,7 @@ kind = "event"
 }
 
 #[test]
-fn topics_prefix_rejects_topic_outside_owner_namespace() {
+fn topics_prefix_rej_ns() {
     let owners = rr_registry::rr3_topics_owners(&topics_toml());
     let errs = rr_registry::rr3_topics_chk(
         r#"
@@ -50,7 +50,7 @@ kind = "event"
 }
 
 #[test]
-fn topics_prefix_rejects_unregistered_owner() {
+fn topics_prefix_b463() {
     let owners = rr_registry::rr3_topics_owners(&topics_toml());
     let errs = rr_registry::rr3_topics_chk(
         r#"
@@ -65,7 +65,7 @@ kind = "event"
 }
 
 #[test]
-fn topics_prefix_contract_self_consistency() {
+fn topics_prefix_self() {
     let owners = rr_registry::rr3_topics_owners(&topics_toml());
     assert_eq!(
         owners.len(),

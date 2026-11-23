@@ -207,7 +207,7 @@ timeout_s = 20
     /// 块替换：块外文本逐字保留、块内按新行表渲染；多行表不误截；重写结果仍能
     /// 被 boot 解析器吃下
     #[test]
-    fn rewrite_replaces_block_and_keeps_outside_text() {
+    fn rewrite_keeps_text() {
         let old = repo_text();
         let rows = vec![
             row(
@@ -255,7 +255,7 @@ timeout_s = 20
 
     /// 无模型表 → EOF 追加（末行无换行也补断行），追加后仍可解析
     #[test]
-    fn rewrite_appends_table_when_absent() {
+    fn rewrite_table_absent() {
         let old = "[rr3-brain.cloud]\nbase_url = \"https://x\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n\n[rr3-brain.dialog]\nmax_utterance_ms = 8000";
         let new = rr3_block_rewrite(
             old,
@@ -277,7 +277,7 @@ timeout_s = 20
 
     /// 空行表（删到零行）→ 块被整段摘除，文件仍合法（boot 走 cloud fallback）
     #[test]
-    fn rewrite_removes_block_when_rows_empty() {
+    fn rewrite_rows_empty() {
         let old = repo_text();
         let new = rr3_block_rewrite(&old, &[]).unwrap();
         assert!(!new.contains("[[rr3-brain.model]]"), "{new}");
@@ -287,7 +287,7 @@ timeout_s = 20
 
     /// 字符串转义交给 toml 库（引号/反斜杠值不破坏 TOML），无表渲染为空串
     #[test]
-    fn render_escapes_strings_and_handles_empty() {
+    fn render_handles_empty() {
         assert_eq!(rr3_block_render(&[]).unwrap(), "");
         let out = rr3_block_render(&[json!({
             "name": "a\"b\\c",
@@ -321,7 +321,7 @@ timeout_s = 20
 
     /// 落盘：写 `.bak` 旧全量 + 正式文件新全量；内容无变化不落盘（不产生 .bak）
     #[test]
-    fn persist_writes_backup_then_new_content() {
+    fn persist_new_content() {
         let dir = std::env::temp_dir().join(format!("rr3-cfgstore-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("config.toml");

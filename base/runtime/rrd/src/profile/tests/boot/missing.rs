@@ -5,7 +5,7 @@ use super::super::*;
 
 /// 缺格：bindings 移除任一格 → (模块, 格位) 进缺格清单，其余不受牵连
 #[test]
-fn removed_binding_is_missing_for_its_module_only() {
+fn removed_miss_module() {
     let root = Root::new("missing");
     let p = root.write_profile(
         "missing.toml",
@@ -27,7 +27,7 @@ fn removed_binding_is_missing_for_its_module_only() {
 /// enabled_slots 声明了格位但 binding 指向别的模块：对点名模块算缺格，同时构成"binding 未被认领"
 /// 的结构不自洽 → 致命（fail-closed，装配单各说一套必须当场听见）
 #[test]
-fn binding_claimed_by_another_module_is_fatal() {
+fn binding_module_fatal() {
     let root = Root::new("cross");
     let text = GOOD.replace(
         "\"power.charger\" = \"rr3-pb\"",
@@ -40,7 +40,7 @@ fn binding_claimed_by_another_module_is_fatal() {
 
 /// 基础层格位进 bindings = 违反"基础层由基座内建承载"（slots.toml 注记）→ 致命
 #[test]
-fn base_layer_binding_is_fatal() {
+fn base_layer_fatal() {
     let root = Root::new("base");
     let text = GOOD.replace("[bindings]\n", "[bindings]\n\"bus.publish\" = \"rr3-pa\"\n");
     let p = root.write_profile("base.toml", &text);
@@ -50,7 +50,7 @@ fn base_layer_binding_is_fatal() {
 
 /// 查册门：enabled_slots/bindings 引用未在册格位 → 致命并点名（真契约上跑）
 #[test]
-fn unknown_slot_is_fatal_and_named() {
+fn unknown_fatal_named() {
     let root = Root::new("unknown");
     let text = GOOD.replace("rr3-pc = [\"cognition.llm\"]", "rr3-pc = [\"sensor.wifi\"]");
     let p = root.write_profile("unknown.toml", &text);
@@ -63,7 +63,7 @@ fn unknown_slot_is_fatal_and_named() {
 
 /// 基础层格位进 enabled_slots 只记账、不算缺格（power.battery 恒在位，default 机同款形状）
 #[test]
-fn base_layer_enabled_slot_is_never_missing() {
+fn base_slot_never_miss() {
     let root = Root::new("baseslot");
     let text = GOOD.replace(
         "rr3-pc = [\"cognition.llm\"]",

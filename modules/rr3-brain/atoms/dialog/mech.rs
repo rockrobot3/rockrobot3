@@ -160,7 +160,7 @@ mod tests {
 
     /// 未开轮的 pcm 不进 utterance（take 交空——上限之内不开轮不积累）
     #[test]
-    fn pcm_dropped_when_not_active() {
+    fn pcm_not_active() {
         let mut d = Rr3Dialog::rr3_new(8000);
         feed_pcm(&mut d, b"\x01\x02", 32);
         assert_eq!(d.rr3_take_utterance(), b"");
@@ -169,7 +169,7 @@ mod tests {
     /// onset 起轮 → 积累 → offset 判停 → take 交出 → 复位；复位后未开轮的
     /// pcm 丢弃，take 再交空
     #[test]
-    fn onset_starts_and_offset_stops() {
+    fn onset_offset_stops() {
         let mut d = Rr3Dialog::rr3_new(8000);
         assert!(!d.rr3_feed_vad("onset", 100));
         assert!(d.active);
@@ -184,7 +184,7 @@ mod tests {
 
     /// offset 先于 onset：不判停不开轮
     #[test]
-    fn offset_before_onset_does_not_stop() {
+    fn offset_not_stop() {
         let mut d = Rr3Dialog::rr3_new(8000);
         assert!(!d.rr3_feed_vad("offset", 0));
         assert!(!d.active);
@@ -192,7 +192,7 @@ mod tests {
 
     /// 未判停的第二次 onset：重新起轮（buf 清零重来）
     #[test]
-    fn onset_resets_previous_buffer() {
+    fn onset_resets_buf() {
         let mut d = Rr3Dialog::rr3_new(8000);
         d.rr3_feed_vad("onset", 0);
         feed_pcm(&mut d, b"\x01\x02", 32);
@@ -212,7 +212,7 @@ mod tests {
 
     /// onset 前的判据语音（min_speech 段）经预滚环拼回采集头，短句不削头
     #[test]
-    fn preroll_prepended_at_onset() {
+    fn preroll_onset() {
         let mut d = Rr3Dialog::rr3_new(8000);
         feed_pcm(&mut d, b"\x01\x02", 200); // onset 前流过的帧（判据段）
         feed_pcm(&mut d, b"\x03\x04", 200);
@@ -226,7 +226,7 @@ mod tests {
     /// 30 × 32ms = 960ms ≫ 400ms 窗；稳态每推一帧弹至 ≤400ms，环内恒保窗长内
     /// 最完整的整帧组（384ms = 12 帧）
     #[test]
-    fn preroll_capped_to_window() {
+    fn preroll_window() {
         let mut d = Rr3Dialog::rr3_new(8000);
         let n_frames = 30;
         for i in 0..n_frames {
@@ -242,7 +242,7 @@ mod tests {
 
     /// 饥饿空帧（b64 解出空载荷）不入预滚不计时——窗长不被空拍虚占
     #[test]
-    fn empty_frames_not_in_preroll() {
+    fn empty_not_preroll() {
         let mut d = Rr3Dialog::rr3_new(8000);
         feed_pcm(&mut d, b"\x01\x02", 200);
         d.rr3_feed_pcm(&rr3_base64_encode(b""), 5000).unwrap(); // 空帧带大 ms：不得挤掉真帧
@@ -274,7 +274,7 @@ mod tests {
 
     /// 历史上界：超窗丢最旧，条数封顶不随话轮数增长（常驻进程不泄漏）。
     #[test]
-    fn record_caps_history_len() {
+    fn record_caps_len() {
         let mut d = Rr3Dialog::rr3_new(8000);
         for i in 0..RR3_DIALOG_HISTORY_CAP * 3 {
             d.rr3_record(Rr3DialogTurn {

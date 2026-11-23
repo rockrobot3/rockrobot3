@@ -228,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn wake_decision_states_and_window() {
+    fn wake_states_window() {
         let c = cfg();
         assert_eq!(rr3_wake_decide("你好洛克", &c, 0, None), Rr3WakeAction::Ack);
         assert_eq!(

@@ -10,7 +10,7 @@ use super::*;
 /// 显式非法值 → Err 点名（fail-closed）。显式取值路径另由模块侧 e2e 以真实
 /// 进程环境覆盖（如 `--audio-backend mac` 起的 rr3-sim 全环）。
 #[test]
-fn default_backend_is_sim_off_linux_alsa() {
+fn def_sim_off_alsa() {
     let env_set = std::env::var_os(RR3_HAL_BACKEND_ENV).is_some();
     match rr3_backend_resolve() {
         Ok(resolved) => {
@@ -41,7 +41,7 @@ fn default_backend_is_sim_off_linux_alsa() {
 /// G5 收口（R3-D3）：描述符失败点名文案含面名与原因原文——"错误当场可见"
 /// 的形状钉死（文案改动此处即红，防止退回无声吞错）。
 #[test]
-fn descriptor_failure_note_names_facet_and_reason() {
+fn descriptor_reason() {
     let note = rr3_desc_fail_note(
         "音频采集",
         "描述符解析失败: 描述符键 gpio_led_line 取值不认: \"four\"",
@@ -89,7 +89,7 @@ fn assert_sim_probes(
 /// 执行面（舵机/数字输出）选择：平台默认下拿到的后端名必须合法，且对象可用
 /// （sim 上探活读回成功；占位件留给使用时的 Unsupported——选择函数本身不触设备）。
 #[test]
-fn act_device_selectors_return_legal_backend_objects() {
+fn act_legal_objects() {
     // linux 平台默认档：无 alsa feature 构建落 sim，带 alsa 构建落 linux
     // （舵机面在 linux 平台也可得 sysfs PWM 后端——构造不触设备，此处不探活）
     let mut legal = vec![RR3_BACKEND_SIM, RR3_BACKEND_PLACEHOLDER];
@@ -135,7 +135,7 @@ fn act_device_selectors_return_legal_backend_objects() {
 /// 永不落 esp32**（板无扬声器，fail-closed 显式档）。构造不触设备
 /// （esp32 源 open 才真开 UART），环境变量缺席时本机缺省档合法即可。
 #[test]
-fn audio_selectors_return_legal_backend_objects() {
+fn audio_legal_objects() {
     let (src, src_backend) = rr3_audio_source();
     assert!(
         [
@@ -171,7 +171,7 @@ fn audio_selectors_return_legal_backend_objects() {
 /// 都拼得出键），**绑定白名单在选择面**（rr3_hal_gpio_out 只认 led/relay，
 /// 白名单外 fail-closed 显式回错）；空串/怪字符不拼键。
 #[test]
-fn gpio_role_env_key_matches_whitelist() {
+fn gpio_key_whitelist() {
     assert_eq!(
         rr3_gpio_line_key("led").as_deref(),
         Some("RR3_HAL_GPIO_LED_LINE")
@@ -193,7 +193,7 @@ fn gpio_role_env_key_matches_whitelist() {
 /// 整数才收，负数/垃圾/空不认（真值 pwmchip0/pwm0 = GPIO12 在 profiles
 /// [hardware]，批D④ 后代码不再持有缺省）。
 #[test]
-fn pwm_index_env_values_parse_or_default() {
+fn pwm_env_parse_def() {
     assert_eq!(rr3_pwm_index_parse("0"), Some(0));
     assert_eq!(rr3_pwm_index_parse("1"), Some(1));
     assert_eq!(rr3_pwm_index_parse(" 2 "), Some(2));
@@ -206,7 +206,7 @@ fn pwm_index_env_values_parse_or_default() {
 /// mac 于非 macOS）、垃圾点名**所查 env 键**——全局键与音频能力面覆盖键
 /// 共用本裁决，防两键各写一套白名单静默分叉。
 #[test]
-fn backend_parse_whitelist_platform_doors_and_key_naming() {
+fn backend_key_naming() {
     assert_eq!(rr3_backend_parse("K", "sim").unwrap(), RR3_BACKEND_SIM);
     assert_eq!(rr3_backend_parse("K", "esp32").unwrap(), RR3_BACKEND_ESP32);
     assert_eq!(
@@ -240,7 +240,7 @@ fn backend_parse_whitelist_platform_doors_and_key_naming() {
 /// 不收），7-bit 可寻址域 0x08..=0x77 外（含 0x00 广播、0x78+ 保留段）与
 /// 垃圾不认。
 #[test]
-fn ina219_addr_parse_accepts_hex_within_7bit() {
+fn ina219_ok_hex_7bit() {
     assert_eq!(rr3_i2c_addr_parse("0x40"), Some(0x40), "BOM #5 定案档");
     assert_eq!(rr3_i2c_addr_parse("0X48"), Some(0x48), "大写前缀");
     assert_eq!(rr3_i2c_addr_parse(" 0x48 "), Some(0x48), "trim");
@@ -252,7 +252,7 @@ fn ina219_addr_parse_accepts_hex_within_7bit() {
 /// sim 电池两个 env 键的取值裁决：合法档、越界/垃圾全点名。e2e 从 rrd 继承
 /// 环境注入低电量的正门靠这两个裁决，取值不认一律落缺省（80% / 未充电）。
 #[test]
-fn sim_battery_env_values_parse_or_default() {
+fn sim_batt_env_def() {
     assert_eq!(rr3_sim_batt_parse("0"), Some(0));
     assert_eq!(rr3_sim_batt_parse("100"), Some(100));
     assert_eq!(rr3_sim_batt_parse(" 5 "), Some(5));
@@ -270,7 +270,7 @@ fn sim_battery_env_values_parse_or_default() {
 /// 0 与正值、越界、垃圾全点名。e2e 注入断链场景（RR3_HAL_SIM_LINK_UP=0）
 /// 的正门靠这两个裁决，取值不认一律落缺省（在线 / -50）。
 #[test]
-fn sim_link_env_values_parse_or_default() {
+fn sim_link_env_def() {
     assert_eq!(rr3_sim_up_parse("1"), Some(true));
     assert_eq!(rr3_sim_up_parse(" 0 "), Some(false));
     for bad in ["", "true", "2", "on"] {
@@ -287,7 +287,7 @@ fn sim_link_env_values_parse_or_default() {
 /// sim 方位角 env 键的取值裁决：±90 闭区间内的有限小数才收，越界/垃圾不认
 /// （落"不注入"）。批F2 判向 e2e（RR3_HAL_SIM_DOA_DEG=-60）的正门靠它。
 #[test]
-fn sim_doa_deg_env_values_parse_or_default() {
+fn sim_doa_deg_env_def() {
     assert_eq!(rr3_sim_doa_parse("-60"), Some(-60.0));
     assert_eq!(rr3_sim_doa_parse(" 45.5 "), Some(45.5));
     assert_eq!(rr3_sim_doa_parse("-90"), Some(-90.0), "下界在域内");

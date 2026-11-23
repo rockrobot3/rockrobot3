@@ -85,7 +85,7 @@ fn wait_json(path: &Path, msg: &str, ok: impl Fn(&serde_json::Value) -> bool) {
 /// 本拍 counters 必已进聚合表；本用例"应答一收到就读 ctl"正是该契约的观测面
 /// （旧序在机器繁忙时会读到上一拍的账，曾以"期望 5 实得 2"实证）。
 #[test]
-fn ctl_counters_aggregates_heartbeat_counters() {
+fn ctl_counters() {
     let t = RrdTest::rr3_start_no_overlay("ctl-counters");
     let (mut a, task) = register_sima_task(&t);
 
@@ -148,7 +148,7 @@ fn check_counters(t: &RrdTest) {
 /// 心跳计数落盘 → 断电（杀进程）→ 重启加载 + boots 再自增。原子写序的
 /// tmp 残留断言在 counters.rs 单测里（load/store 的单元面），这里钉线上闭环。
 #[test]
-fn counters_persist_across_restart_and_boots_accumulate() {
+fn counters_accumulate() {
     let (dir, path) = scratch_dir("rrd-counters-e2e");
     let envs = [("RR3_DATA_DIR", dir.to_str().unwrap())];
     first_life(&dir, &path, &envs);
@@ -203,7 +203,7 @@ fn second_life(path: &Path, envs: &[(&str, &str)]) {
 /// ②**关停完整性**——SIGTERM 后重读计数与内存一致（窗口内的尾部变化由关停路径
 /// 一次性写全），且进程以 0 退出（处理器已装、flush 完自己退，信号死=没装上）。
 #[test]
-fn sigterm_forces_flush_of_pending_counters() {
+fn sigterm_counters() {
     let (dir, path) = scratch_dir("rrd-counters-term");
     let envs = [
         ("RR3_DATA_DIR", dir.to_str().unwrap()),

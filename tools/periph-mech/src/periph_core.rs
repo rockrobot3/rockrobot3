@@ -190,7 +190,7 @@ mod tests {
     const DUTY_MAX: u32 = 2048;
 
     #[test]
-    fn axis_check_rejects_out_of_travel_named() {
+    fn axis_rej_out_named() {
         assert_eq!(
             rr3_axis_check("pan", 60, 120, 90, 200).unwrap_err(),
             "角度超范围 0-180: 200"
@@ -208,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn duty_conversion_endpoints_and_roundtrip() {
+    fn duty_conv_roundtrip() {
         assert_eq!(rr3_deg_to_duty(0, DUTY_MIN, DUTY_MAX), DUTY_MIN);
         assert_eq!(rr3_deg_to_duty(180, DUTY_MIN, DUTY_MAX), DUTY_MAX);
         assert_eq!(rr3_deg_to_duty(90, DUTY_MIN, DUTY_MAX), 1229);
@@ -223,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn slew_steps_approach_target_in_both_directions() {
+    fn slew_directions() {
         // 上行 60 → 65，步进 10：一步贴端点即止
         assert_eq!(rr3_slew_steps(60, 65, 10).collect::<Vec<_>>(), vec![65]);
         // 下行 90 → 84，步进 2：每步 2°，末步贴端点
@@ -238,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn servo_gate_only_trips_when_armed_and_severe() {
+    fn servo_gate_severe() {
         assert_eq!(
             rr3_servo_gate(true, RailTier::Severe, "pan", 95).unwrap_err(),
             "5V 轨重度欠压（tier=severe）执行面拒动：pan 轴 95° 拒收（回阈后请重发）"
@@ -249,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn servo_core_bookkeeping_is_per_channel() {
+    fn servo_per_channel() {
         let mut core = Rr3ServoCore::new(90, 90);
         core.commit(Rr3PwmChannel::Pan, 120);
         assert_eq!(core.deg(Rr3PwmChannel::Pan), 120);
@@ -257,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn oled_ladder_walks_to_floor_and_resets() {
+    fn oled_floor_resets() {
         let mut ladder = Rr3OledLadder::new();
         assert_eq!(ladder.idx(), 0);
         assert_eq!(ladder.degrade(4), Some(1));

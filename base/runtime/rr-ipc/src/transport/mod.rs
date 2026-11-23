@@ -200,7 +200,7 @@ mod tests {
 
     /// send → recv 往返逐字节一致：seal 幂等、128B 头、payload 前缀全走缝面。
     #[test]
-    fn fake_stream_conn_round_trip() {
+    fn fake_conn_round_trip() {
         let f = crate::protocol::wire::Rr3Frame {
             header: hdr(5),
             payload: b"hello"[..].to_vec(),
@@ -228,7 +228,7 @@ mod tests {
 
     /// 未 seal 的缓冲照走"先幂等 seal 再发"路径——rr3_seal 语义不随换底漂移。
     #[test]
-    fn fake_stream_seals_unsealed_buf_before_sending() {
+    fn fake_buf_sending() {
         let mut buf = Rr3FrameBuf::rr3_new(hdr(3));
         buf.rr3_payload_mut().copy_from_slice(b"abc");
         assert!(!buf.rr3_sealed());
@@ -248,7 +248,7 @@ mod tests {
     /// 短写（板侧写出失败的最常见形状）→ Io 点名要/实出，且已写出的部分如实落流
     /// （与旧 write_all 部分写语义一致：缝上错误折进计数）。
     #[test]
-    fn fake_stream_short_write_is_named() {
+    fn fake_write_named() {
         let f = crate::protocol::wire::Rr3Frame {
             header: hdr(8),
             payload: b"12345678"[..].to_vec(),
@@ -267,14 +267,14 @@ mod tests {
 
     /// 对端关闭（读侧恒 0）→ Closed，与帧层错误语义同源。
     #[test]
-    fn fake_stream_eof_is_closed() {
+    fn fake_eof_closed() {
         let mut conn = FakeStream::new(Vec::new());
         assert_eq!(conn.rr3_recv_buf(), Err(Rr3FrameError::Closed));
     }
 
     /// 半帧头 → TornHeader{got}（半帧不得当新帧起始——板侧拒收路径与 uds 同源）。
     #[test]
-    fn fake_stream_torn_header_is_rejected() {
+    fn fake_torn_header_rej() {
         let mut torn = hdr(9).to_bytes().to_vec();
         torn.truncate(64);
         let mut conn = FakeStream::new(torn);

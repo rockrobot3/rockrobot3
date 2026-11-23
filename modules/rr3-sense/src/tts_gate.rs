@@ -63,7 +63,7 @@ mod tests {
 
     /// 门控三拍：帧到开门 → 尾窗外推到期关门 → 帧间隔超 gap 判新一轮重置累计。
     #[test]
-    fn tts_gate_opens_expires_and_re_rounds_on_gap() {
+    fn tts_gate_re_gap() {
         let t0 = Instant::now();
         let mut g = Rr3TtsGate::default();
         assert!(!g.rr3_tts_gate_open(t0), "从未收到帧 = 门关");
@@ -85,7 +85,7 @@ mod tests {
 
     /// 同轮多帧：ms 逐帧直加（brain 侧尾块按实算），deadline 随累计外推。
     #[test]
-    fn tts_gate_accumulates_ms_within_round() {
+    fn tts_gate_ms_round() {
         let t0 = Instant::now();
         let mut g = Rr3TtsGate::default();
         // 同轮三帧各 200ms、间隔 20ms（< gap 500）：deadline = t0 + 600 + 1000

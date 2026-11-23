@@ -183,7 +183,7 @@ mod tests {
     use alloc::vec;
 
     #[test]
-    fn asr_text_parses_and_rejects_bad_shapes() {
+    fn asr_rej_bad_shapes() {
         assert_eq!(
             rr3_asr_text(r#"{"text":"你好"}"#.as_bytes()),
             Ok("你好".to_string())
@@ -195,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn multipart_carries_model_language_file_and_wav() {
+    fn multipart_file_wav() {
         let body = rr3_multipart_body("m", b"\x01\x02", 16000, "bd1", Some("zh"));
         assert!(body.windows(12).any(|w| w == b"name=\"model\""));
         assert!(body.windows(15).any(|w| w == b"name=\"language\""));
@@ -207,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn chat_and_ping_bodies_have_openai_shape() {
+    fn chat_ping_have_shape() {
         let messages = vec![
             ("system".to_string(), "sys".to_string()),
             ("user".to_string(), "hi".to_string()),
@@ -224,7 +224,7 @@ mod tests {
     }
 
     #[test]
-    fn asr_plan_concatenates_to_legacy_body() {
+    fn asr_plan_legacy_body() {
         let pcm = b"\x01\x02\x03\x04";
         for lang in [Some("zh"), None] {
             let plan = rr3_asr_plan("m", pcm.len(), 16000, "bd1", lang);
@@ -239,14 +239,14 @@ mod tests {
     }
 
     #[test]
-    fn reply_text_reads_choice_content() {
+    fn reply_text_content() {
         let body = r#"{"choices":[{"message":{"content":"好"}}]}"#.as_bytes();
         assert_eq!(rr3_reply_text(body), Some("好".to_string()));
         assert_eq!(rr3_reply_text(br#"{"choices":[]}"#), None);
     }
 
     #[test]
-    fn tts_body_requests_pcm_and_sample_rate() {
+    fn tts_body_pcm_rate() {
         let v: Value = serde_json::from_slice(&rr3_tts_body("m", "hi", "m:bella", 16000)).unwrap();
         assert_eq!(v["response_format"], "pcm");
         assert_eq!(v["sample_rate"], 16000);
@@ -254,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn retry_predicate_covers_transient_and_rejects_client_errors() {
+    fn retry_rej_errors() {
         assert!(rr3_cloud_retryable("识别接口", "云端不可达 x: timeout"));
         assert!(rr3_cloud_retryable("识别接口", "识别接口 HTTP 429"));
         assert!(rr3_cloud_retryable("识别接口", "识别接口 HTTP 503"));
@@ -267,7 +267,7 @@ mod tests {
 
     /// W2-2：请求体逐字节冻结——Pi 与 MCU 必须发出同一串字节（含 JSON 键序）。
     #[test]
-    fn request_bytes_match_frozen_golden() {
+    fn req_match_golden() {
         let messages = vec![
             ("system".to_string(), "sys".to_string()),
             ("user".to_string(), "hi".to_string()),

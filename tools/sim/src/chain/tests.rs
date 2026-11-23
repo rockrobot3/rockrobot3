@@ -9,7 +9,7 @@ use serde_json::json;
 use crate::drill::{rr3_sim_args_parse, RR3_SIM_MODULE_A};
 
 #[test]
-fn chain_manifests_have_absolute_entries_and_contract_shapes() {
+fn chain_have_shapes() {
     let ms = rr3_chain_manifests(
         Path::new("/abs/rr3-sense"),
         Path::new("/abs/rr3-interact"),
@@ -50,7 +50,7 @@ fn chain_manifests_have_absolute_entries_and_contract_shapes() {
 }
 
 #[test]
-fn obs_manifest_subscribes_both_evidence_topics() {
+fn obs_mft_topics() {
     let t = rr3_chain_obs(Path::new("/abs/rr3-act"));
     assert!(t.contains("name = \"rr3-obs\""), "{t}");
     assert!(
@@ -63,7 +63,7 @@ fn obs_manifest_subscribes_both_evidence_topics() {
 }
 
 #[test]
-fn configs_carry_stereo_sense_and_act_servo_shape() {
+fn configs_act_shape() {
     let sense = rr3_chain_sense_cfg();
     assert!(sense.contains("channels = 2"), "{sense}");
     assert!(sense.contains("rms_start = 1500"), "{sense}");
@@ -81,7 +81,7 @@ fn configs_carry_stereo_sense_and_act_servo_shape() {
 }
 
 #[test]
-fn obs_feed_takes_doa_on_vad_and_angle_on_servo_only() {
+fn obs_doa_vad_servo() {
     let mut obs = Rr3ChainObs::default();
     // offset 不带 doa：喂了也取不到（批F2 负载纪律）
     rr3_obs_feed(
@@ -109,7 +109,7 @@ fn obs_feed_takes_doa_on_vad_and_angle_on_servo_only() {
 }
 
 #[test]
-fn chain_judge_accepts_left_turn_and_rejects_drift() {
+fn chain_ok_rej_drift() {
     let ok = Rr3ChainObs {
         doa_deg: Some(-59),
         doa_bin: Some("left".into()),
@@ -144,7 +144,7 @@ fn chain_judge_accepts_left_turn_and_rejects_drift() {
 }
 
 #[test]
-fn chain_args_parse_and_mutual_exclusion() {
+fn chain_args_exclusion() {
     let v = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     let a = rr3_sim_args_parse(&v(&["--chain"])).unwrap();
     assert!(a.chain && !a.brain && a.profile.is_none());
@@ -163,7 +163,7 @@ fn chain_args_parse_and_mutual_exclusion() {
 }
 
 #[test]
-fn chain_identities_exist_in_the_real_contract() {
+fn chain_real_contract() {
     // 钉住"演练用的名字/主题必须真实在契约里"——契约改名时这里红，不是演练跑到一半红
     let contract = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../contracts/topics.toml");
     let text = std::fs::read_to_string(&contract)
@@ -182,7 +182,7 @@ fn chain_identities_exist_in_the_real_contract() {
 }
 
 #[test]
-fn boot_ms_parse_keeps_registration_order() {
+fn boot_ms_reg_order() {
     // 噪声行（无 task= 的拒绝行、与启动无关的输出）不得计入基线
     let text = "\
 注册 rr3-sense task=2 hb=500ms wd=1500ms policy=always boot_ms=12
@@ -194,7 +194,7 @@ fn boot_ms_parse_keeps_registration_order() {
 }
 
 #[test]
-fn boot_ms_parse_rejects_missing_or_bad_field() {
+fn boot_rej_bad_field() {
     assert!(
         rr3_boot_ms_parse("注册 rr3-sense task=2 hb=500ms wd=1500ms\n", "").is_err(),
         "没有 boot_ms 的注册行必须报断供"
@@ -206,7 +206,7 @@ fn boot_ms_parse_rejects_missing_or_bad_field() {
 }
 
 #[test]
-fn boot_ms_parse_can_skip_harness_observer() {
+fn boot_ms_can_observer() {
     let text = "\
 注册 rr3-obs task=2 hb=500ms wd=1500ms policy=never boot_ms=25
 注册 rr3-sense task=3 hb=500ms wd=1500ms policy=always boot_ms=783
@@ -224,7 +224,7 @@ fn steady_row(name: &str, phase: &str, hb: u64, wd: u64, since: u64) -> String {
 }
 
 #[test]
-fn steady_feed_takes_peak_and_skips_observer() {
+fn steady_peak_observer() {
     let mut agg = Rr3SteadyAgg::default();
     agg.rr3_steady_feed(&format!(
         "NAME  TASK  PHASE  HB_MS  WD_MS  SINCE_BEAT_MS\n{}{}",
@@ -241,7 +241,7 @@ fn steady_feed_takes_peak_and_skips_observer() {
 }
 
 #[test]
-fn steady_feed_skips_health_footer() {
+fn steady_feed_footer() {
     let mut agg = Rr3SteadyAgg::default();
     agg.rr3_steady_feed(&format!(
         "NAME  TASK  PHASE  HB_MS  WD_MS  SINCE_BEAT_MS\n{}restart_exhausted=0 watchdog_overruns=0\n",
@@ -259,7 +259,7 @@ fn steady_tail_ok(agg: &mut Rr3SteadyAgg) {
 }
 
 #[test]
-fn steady_check_rejects_missing_nonrunning_and_watchdog() {
+fn steady_rej_watchdog() {
     let mut four = String::new();
     for m in RR3_STEADY_MODS {
         four.push_str(&steady_row(m, "running", 200, 1000, 80));
@@ -287,7 +287,7 @@ fn steady_check_rejects_missing_nonrunning_and_watchdog() {
 }
 
 #[test]
-fn steady_tail_requires_zero_and_reads_peak() {
+fn steady_zero_peak() {
     let mut four = String::new();
     for m in RR3_STEADY_MODS {
         four.push_str(&steady_row(m, "running", 200, 1000, 80));
@@ -323,7 +323,7 @@ fn steady_tail_requires_zero_and_reads_peak() {
 }
 
 #[test]
-fn steady_tail_requires_fan_dropped_line() {
+fn steady_tail_fan_line() {
     let mut agg = Rr3SteadyAgg::default();
     let e = agg
         .rr3_steady_tail("fan_write_timeout = 0\nlog_write = max_us=120 slow=0\n")
@@ -332,7 +332,7 @@ fn steady_tail_requires_fan_dropped_line() {
 }
 
 #[test]
-fn steady_check_names_the_dropping_module() {
+fn steady_names_module() {
     let mut four = String::new();
     for m in RR3_STEADY_MODS {
         let row = if m == "rr3-sense" {
@@ -351,7 +351,7 @@ fn steady_check_names_the_dropping_module() {
 }
 
 #[test]
-fn steady_feed_reads_peak_column() {
+fn steady_peak_column() {
     let mut agg = Rr3SteadyAgg::default();
     agg.rr3_steady_feed("rr3-act  2  running  200  1000  150  260  ?  0\n")
         .unwrap();
@@ -372,7 +372,7 @@ fn steady_feed_reads_peak_column() {
 }
 
 #[test]
-fn steady_feed_rejects_bad_columns_and_non_numeric() {
+fn steady_bad_numeric() {
     let mut agg = Rr3SteadyAgg::default();
     assert!(agg.rr3_steady_feed("NAME  TASK\n").is_err(), "打空必须报错");
     assert!(

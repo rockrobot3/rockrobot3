@@ -138,7 +138,7 @@ fn rr3_register_dependent(rrd: &mut RrdTest, name: &str, requires: &[&str]) -> (
 /// D1 — 拓扑主键压过 start_priority：provider prio=50、dependent prio=10，
 /// 旧的全局优先级排序会先起 dependent；仲裁序必须先起 provider。
 #[test]
-fn boot_order_follows_dependency_not_priority() {
+fn boot_not_priority() {
     let prov = rr3_dep_manifest("dep-d1", "rr3-chainp", 50, &["cap.chain"], &[], "never");
     let dep = rr3_dep_manifest("dep-d1", "rr3-chaind", 10, &[], &["cap.chain"], "never");
     let mut rrd = RrdTest::rr3_start_boot(
@@ -265,7 +265,7 @@ fn cycle_assert(status: &ExitStatus, text: &str) {
 /// 直接 `Command` 起 rrd 读 stdout 到 EOF——这条用例里 rrd 的生命结束方式**就是被测行为**，
 /// `RrdTest` 的"等就绪行"框架用不上（永远等不到监听后的正常运行）。
 #[test]
-fn dependency_cycle_rejects_the_whole_boot() {
+fn dependency_rej_boot() {
     let (a, b, socket) = cycle_fixture();
     let (child, lines) = cycle_spawn(&a, &b, &socket);
     let (status, text) = cycle_drain(child, lines);
@@ -346,7 +346,7 @@ fn d3_recover_check(rrd: &mut RrdTest, dep: &mut RrdClient, dep_task: u64, b: &m
 /// always 策略自动重生 → 依赖者解除回 Running。全程 watchdog 静默（wd=60s），
 /// "死亡时刻"由测试的 kill 决定，判据里没有时间赌注。
 #[test]
-fn provider_death_degrades_dependent_and_recovery_undegrades() {
+fn provider_undegrades() {
     let prov = rr3_dep_manifest("dep-d3", "rr3-degp", 50, &["cap.deg"], &[], "always");
     let mut rrd = RrdTest::rr3_start_boot("dep-d3", &[&prov.path], "go_silent", E2E_TICK_MS);
     let mut b = rr3_observer(&mut rrd, "rr3-degobs");

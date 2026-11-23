@@ -300,7 +300,7 @@ mod tests {
     /// 写侧形制门只拦新写入，旧固件/手改的存量值必须同域拒（否则定长数组
     /// `copy_from_slice` 越界即整板 abort）。空串合法（开放网络密码）。
     #[test]
-    fn take_rejects_oversize_and_bad_utf8() {
+    fn take_rej_bad_utf8() {
         assert_eq!(
             rr3_cred_take(b"ap\0", RR3_CRED_SSID_MAX).as_deref(),
             Some("ap")
@@ -332,7 +332,7 @@ mod tests {
     /// namespace/键名单真值（全案 §3.6 `nvs:rr3` 的板侧实现值——键半边进绑定域
     /// 时与本表对账，禁抄第二份）。
     #[test]
-    fn namespace_and_keys_single_truth() {
+    fn ns_keys_single_truth() {
         assert_eq!(RR3_CRED_NAMESPACE, "rr3");
         assert_eq!(RR3_CRED_KEY_SSID, "wifi.ssid");
         assert_eq!(RR3_CRED_KEY_PASS, "wifi.pass");

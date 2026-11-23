@@ -74,7 +74,7 @@ mod tests {
     use rr_hal_api::Rr3GpioOut as _;
 
     #[test]
-    fn effect_parse_covers_whitelist_and_rejects_garbage() {
+    fn effect_rej_garbage() {
         for (s, want) in [
             ("on", Rr3LedEffect::On),
             ("off", Rr3LedEffect::Off),
@@ -91,7 +91,7 @@ mod tests {
     /// apply 的记账面：current 随切换推进，previous 是切换前的值（初始 off 由
     /// 首次 apply 的 previous 断言钉住）；目标电平同步返回（合成时钟，零等待）
     #[test]
-    fn apply_tracks_current_and_previous() {
+    fn apply_cur_previous() {
         let mut led = Rr3Led::rr3_led_new(500);
         assert!(!led.level, "初始安全态=灭");
         let (applied, previous, level) = led.rr3_led_apply(1000, Rr3LedEffect::On);
@@ -106,7 +106,7 @@ mod tests {
     /// 推）；切回 off 后电平归零并稳定（半周期×3 内 tick 不再翻转）。
     /// 行为序列与原真等用例逐字同构，只是时钟由注入给定。
     #[test]
-    fn blink_toggles_level_and_off_stops_it() {
+    fn blink_off_stops() {
         let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
         let mut led = Rr3Led::rr3_led_new(40); // 半周期 20ms
         let (_, _, level) = led.rr3_led_apply(1000, Rr3LedEffect::Blink);
@@ -144,7 +144,7 @@ mod tests {
     /// on/off 落电平：apply 同步返回目标电平，组合件落写后 gpio 即见——
     /// 判据是"成真"，不再是时延（原真等轮询改合成时钟同构）
     #[test]
-    fn on_and_off_take_effect_immediately() {
+    fn off_take_immediately() {
         let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
         let mut led = Rr3Led::rr3_led_new(500);
         let (_, _, level) = led.rr3_led_apply(0, Rr3LedEffect::On);

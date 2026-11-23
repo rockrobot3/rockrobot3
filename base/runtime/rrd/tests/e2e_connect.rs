@@ -165,7 +165,7 @@ fn session_close_err(obs: &mut RrdClient, obs_task: u64) {
 }
 
 #[test]
-fn connect_module_link_up_and_session_open_end_to_end() {
+fn connect_up_end_end() {
     // ---------- 夹具 + boot：sim 缺省在线（不注入 UP 键，钉缺省语义） ----------
     let (mut rrd, mut obs, obs_task, _root) =
         boot_connect("conn-up", &[("RR3_HAL_BACKEND", "sim")]);
@@ -183,7 +183,7 @@ fn connect_module_link_up_and_session_open_end_to_end() {
 }
 
 #[test]
-fn connect_module_link_down_session_refused_end_to_end() {
+fn connect_down_end_end() {
     // ---------- 夹具 + boot：env 注入断链场景 ----------
     let (mut rrd, mut obs, obs_task, _root) = boot_connect(
         "conn-down",

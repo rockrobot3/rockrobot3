@@ -267,7 +267,7 @@ mod tests {
     /// ioctl 号与内核 linux/spi/spidev.h 常量硬编码对齐（aarch64/x86_64
     /// generic-abi）：_IOW(0x6B, 1, 1) 等——编码式写错在此最先暴露
     #[test]
-    fn ioctl_numbers_match_kernel_uapi() {
+    fn ioctl_match_uapi() {
         assert_eq!(SPI_IOC_WR_MODE, 0x4001_6B01);
         assert_eq!(SPI_IOC_WR_BITS_PER_WORD, 0x4001_6B03);
         assert_eq!(SPI_IOC_WR_MAX_SPEED_HZ, 0x4004_6B04);
@@ -275,14 +275,14 @@ mod tests {
 
     /// 级联命令包：每片同值（reg, data）×2——双片同显语义
     #[test]
-    fn cmd_payload_is_per_chip_duplicated() {
+    fn cmd_per_duplicated() {
         assert_eq!(rr3_max7219_cmd(0x0C, 0x01), [0x0C, 0x01, 0x0C, 0x01]);
     }
 
     /// init 序列 golden：五条命令按头注记顺序（ensure 逐条 write，每条一个
     /// 独立 CS 包络——级联锁存纪律见模块头注记）
     #[test]
-    fn init_seq_matches_datasheet_order() {
+    fn init_seq_order() {
         assert_eq!(
             RR3_MAX7219_INIT_SEQ,
             [
@@ -299,7 +299,7 @@ mod tests {
     /// open 成功但 ioctl 非字符设备必 ENOTTY，ensure 显式回 InvalidParam 并
     /// 点名设备路径；设备 fd 随 File drop 关闭（无泄漏面）
     #[test]
-    fn ensure_on_non_chardev_fails_loudly() {
+    fn ensure_fail_loudly() {
         let root = std::env::temp_dir().join(format!("rr3-hal-spi-{}-err", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let dev = root.join("spidev0.0");
@@ -320,7 +320,7 @@ mod tests {
 
     /// 占位实例（从未 ensure）Drop 不碰任何 fd：构造后直接丢弃不炸
     #[test]
-    fn drop_without_ensure_is_noop() {
+    fn drop_ensure_noop() {
         let root = std::env::temp_dir().join(format!("rr3-hal-spi-{}-drop", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let out = Rr3Max7219SpiDisplay::rr3_max7219_new(&root.join("spidev0.0"));

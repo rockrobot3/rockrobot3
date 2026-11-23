@@ -71,7 +71,7 @@ mod tests {
 
     /// 契约值集常量与 parse/as_str 表两处一致（A-9：值不许改，扩值须同批两处）
     #[test]
-    fn effect_value_set_pins_parse_table() {
+    fn effect_set_table() {
         for s in RR3_LED_EFFECT_VALUES {
             let e = Rr3LedEffect::rr3_led_effect_parse(s)
                 .unwrap_or_else(|| panic!("在册值必须可解析: {s}"));
@@ -84,7 +84,7 @@ mod tests {
 
     /// 集合展示串：常规集 / 单元素 / 空集（空集是合法数据选择，非错）
     #[test]
-    fn effects_join_renders_set_and_empty() {
+    fn effects_set_empty() {
         assert_eq!(
             rr3_led_effects_join(&[Rr3LedEffect::On, Rr3LedEffect::Off, Rr3LedEffect::Blink]),
             "on/off/blink"

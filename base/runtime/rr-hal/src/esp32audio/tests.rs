@@ -24,7 +24,7 @@ fn board_cfg() -> Rr3AudioCfg {
 
 /// 重连失败打点节流：首败必打，其后每 100 次一条（板长期不在位不刷屏）。
 #[test]
-fn recon_log_is_rate_limited() {
+fn recon_log_limited() {
     assert!(rr3_recon_log_now(1));
     assert!(!rr3_recon_log_now(2));
     assert!(!rr3_recon_log_now(99));
@@ -58,7 +58,7 @@ fn board_like_frame(seq: u32, pcm: &[u8], dst: u64) -> Rr3Frame {
 }
 
 #[test]
-fn cfg_check_accepts_board_facts_and_rejects_drift() {
+fn cfg_ok_rej_drift() {
     assert!(rr3_esp32_cfg_check(board_cfg()).is_ok());
     // 单声道缺省配置（modules/rr3-sense/config.toml 现值）必须被拒——
     // 误吃 esp32 档在探活期点名，不静默出交织垃圾
@@ -88,7 +88,7 @@ fn cfg_check_accepts_board_facts_and_rejects_drift() {
 }
 
 #[test]
-fn s16le_decode_pairs_and_drops_odd_byte() {
+fn s16le_drops_odd_byte() {
     assert_eq!(rr3_s16le_decode(&[0x00, 0x00]), vec![0i16]);
     assert_eq!(rr3_s16le_decode(&[0x00, 0x80]), vec![i16::MIN]); // LE 负数
     assert_eq!(rr3_s16le_decode(&[0x01, 0x80]), vec![-32767]);
@@ -104,7 +104,7 @@ fn s16le_decode_pairs_and_drops_odd_byte() {
 }
 
 #[test]
-fn ring_push_take_whole_frame_semantics() {
+fn ring_take_semantics() {
     let mut ring = Rr3AudioRing::rr3_ring_new(16);
     // stereo（ch=2）：推 3 帧，整帧弹出
     ring.rr3_ring_push(&[1, 2, 3, 4, 5, 6], 2);
@@ -126,7 +126,7 @@ fn ring_push_take_whole_frame_semantics() {
 }
 
 #[test]
-fn ring_overflow_drops_oldest_frame_aligned_and_counts() {
+fn ring_frame_counts() {
     let mut ring = Rr3AudioRing::rr3_ring_new(8); // 4 帧 @ch=2
     ring.rr3_ring_push(&[1, 2, 3, 4, 5, 6, 7, 8], 2);
     // 溢出 2 采样（1 帧）：丢最旧一帧 [1,2]，环内 [3..8] + 新样 [9,10]
@@ -147,7 +147,7 @@ fn ring_overflow_drops_oldest_frame_aligned_and_counts() {
 }
 
 #[test]
-fn parse_audio_event_roundtrip_and_gates() {
+fn parse_event_gates() {
     let pcm: Vec<u8> = (0..16u8).collect();
     // 整链路：板形帧 → 四道门全过
     let frame = board_like_frame(7, &pcm, RR3_HOST_TASK);
@@ -183,7 +183,7 @@ fn board_reply_frame(id: u64, error: Option<&str>) -> Rr3Frame {
 }
 
 #[test]
-fn cmd_queue_bounded_drops_oldest_and_counts() {
+fn cmd_drops_counts() {
     let (producer, consumer) = rr3_audio_cmd_pair();
     assert_eq!(producer.rr3_cmd_dropped(), 0);
     producer.rr3_cmd_push(Rr3PeriphCmd::ServoPan(60));
@@ -201,7 +201,7 @@ fn cmd_queue_bounded_drops_oldest_and_counts() {
 }
 
 #[test]
-fn cmd_frame_matches_bridge_shape() {
+fn cmd_frame_shape() {
     let frame = rr3_esp32_cmd_frame(7, &Rr3PeriphCmd::ServoPan(105));
     // 帧头：src=宿主 1 / dst=板 2 / direct trace（与舵机/显示桥同形）
     assert_eq!(frame.header.src_task, RR3_HOST_TASK);
@@ -250,7 +250,7 @@ fn cmd_frame_matches_bridge_shape() {
 }
 
 #[test]
-fn classify_routes_reply_and_audio() {
+fn classify_reply_audio() {
     // 音频 Event → Audio（原四道门语义不变）
     let pcm: Vec<u8> = (0..8u8).collect();
     let audio = board_like_frame(3, &pcm, RR3_HOST_TASK);
@@ -287,7 +287,7 @@ fn classify_routes_reply_and_audio() {
 /// 锚点）。关闭态"零落盘"由构造面保证（env 未设不 open，见
 /// [`rr3_tee_open`](super::core::rr3_tee_open)），无路径可断言，不在此冒领。
 #[test]
-fn tee_disabled_noop_and_enabled_mirrors_bytes_in_order() {
+fn tee_noop_bytes_order() {
     // 关闭态：喂两笔零副作用（无 panic 即 no-op；无 fd 无文件可证）
     let mut off: Option<std::fs::File> = None;
     rr3_tee_write(&mut off, b"abc");
@@ -320,7 +320,7 @@ fn tee_disabled_noop_and_enabled_mirrors_bytes_in_order() {
 
 /// 坏帧率告警：严格 >0.1%（千分之一）才置位；空窗不告警。
 #[test]
-fn bad_rate_alert_threshold() {
+fn bad_rate_alert_thr() {
     assert!(!rr3_bad_alert(0, 0));
     assert!(!rr3_bad_alert(1000, 1), "恰 0.1% 不告警");
     assert!(rr3_bad_alert(1000, 2));
@@ -330,7 +330,7 @@ fn bad_rate_alert_threshold() {
 
 /// 坏帧打点：首条必打，其后按累计周期抽样（持续误码不刷屏）。
 #[test]
-fn err_log_first_then_sampled() {
+fn err_log_then_sampled() {
     assert!(rr3_err_log_now(1));
     assert!(!rr3_err_log_now(2));
     assert!(!rr3_err_log_now(RR3_ERR_LOG_EVERY - 1));
@@ -341,7 +341,7 @@ fn err_log_first_then_sampled() {
 
 /// 上限闸：文件到 64MiB 后下一笔停 tee（观测面降级），不 panic 不反噬链路。
 #[test]
-fn tee_stops_at_size_cap() {
+fn tee_stops_size_cap() {
     let path = std::env::temp_dir().join(format!(
         "rr3-tee-cap-test-{}-{}.bin",
         std::process::id(),

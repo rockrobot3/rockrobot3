@@ -205,7 +205,7 @@ mod tests {
 
     /// 拆帧器：分块喂入（头中/载荷中切）→ 整帧逐字节还原。
     #[test]
-    fn assembler_reassembles_split_frames() {
+    fn assembler_frames() {
         let bytes = board_like_frame(7);
         let mut a = FrameAssembler::new();
         a.feed(&bytes[..64]);
@@ -224,7 +224,7 @@ mod tests {
 
     /// 拆帧器：前导垃圾（含半个 magic 前缀）静默弃扫，真帧照常出。
     #[test]
-    fn assembler_skips_garbage_then_yields_frame() {
+    fn assembler_then_frame() {
         let bytes = board_like_frame(9);
         let mut a = FrameAssembler::new();
         let mut noisy = b"junk\x01\x02junk1ER".to_vec(); // 尾部半个 magic 前缀
@@ -239,7 +239,7 @@ mod tests {
     /// 拆帧器：坏帧（reserved 污染——滑移实测签名）计错弃 4B magic，续扫
     /// 收敛到下一真帧。
     #[test]
-    fn assembler_bad_header_drops_magic_and_resumes() {
+    fn assembler_resumes() {
         let mut bad = board_like_frame(1);
         bad[RR3_IPC_HDR_SIZE - 1] = 0xFF; // 头 reserved 尾字节污染
         let bytes2 = board_like_frame(2);
@@ -257,7 +257,7 @@ mod tests {
     /// 拆帧器：载荷被改一个字节（头原样）→ CRC 不符，整帧丢弃并报错；
     /// 丢弃后缓冲不残留，下一真帧照常出。
     #[test]
-    fn assembler_rejects_corrupted_payload_crc() {
+    fn assembler_rej_crc() {
         let good = board_like_frame(3);
         let mut bad = good.clone();
         let plen = u32::from_le_bytes(bad[40..44].try_into().unwrap()) as usize;
@@ -283,7 +283,7 @@ mod tests {
     /// CRC32 门拒收并整帧丢弃。CRC 对单字节差分的映射非零（生成多项式次数
     /// 32 > 差分次数 <8），故逐字节扫描是确定性判据，不是抽样。
     #[test]
-    fn assembler_payload_single_byte_flips_all_rejected() {
+    fn assembler_byte_rej() {
         let good = board_like_frame(21);
         let plen = good.len() - RR3_IPC_HDR_SIZE;
         assert!(plen > 0);
@@ -305,7 +305,7 @@ mod tests {
     /// 误码鲁棒性：全帧逐位翻转不得 panic；坏帧后的缓冲不得越过帧长上界
     /// （拆帧器只认 magic 对齐 + plen 护栏，超出即报错弃帧）。
     #[test]
-    fn assembler_bit_flip_sweep_never_panics() {
+    fn assembler_bit_panics() {
         let good = board_like_frame(22);
         for bit in 0..good.len() * 8 {
             let mut bad = good.clone();
@@ -323,7 +323,7 @@ mod tests {
     /// 拆帧器：头层合法的 64MiB plen 越拆帧护栏——按坏帧弃 magic，不缓冲；
     /// 自定义护栏同径生效。
     #[test]
-    fn assembler_rejects_plen_over_cap() {
+    fn assembler_rej_cap() {
         let hdr_bytes = {
             let mut h = Rr3Header::rr3_hdr_broadcast(opcode::SEND, MAX_PAYLOAD_LEN);
             h.trace_id = 0;

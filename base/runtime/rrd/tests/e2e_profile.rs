@@ -174,7 +174,7 @@ fn rr3_status(rrd: &RrdTest) -> Vec<(String, String)> {
 /// P2 — 缺格：enabled_slots 声明的 power.charger 没有指向 rr3-pb 的 binding → 逐条点名
 /// "拒绝启动"、boot 队列跳过；pa/pc 照常起（缺格≠拒 boot，不连坐）。
 #[test]
-fn missing_slot_module_is_refused_by_name_while_others_still_boot() {
+fn miss_slot_name_boot() {
     let root = Root::new("missing");
     for name in ["rr3-pa", "rr3-pb", "rr3-pc"] {
         root.write_module(name);
@@ -208,7 +208,7 @@ fn missing_slot_module_is_refused_by_name_while_others_still_boot() {
 /// 致命，非 0 退出、套接字无残迹。直接 Command 起 rrd：这一路连监听行都不会有，
 /// `RrdTest` 的就绪等待根本等不到，管道收两端才是对的读法。
 #[test]
-fn unregistered_slot_in_enabled_slots_is_fatal_before_bind_with_no_socket_residue() {
+fn unreg_no_residue() {
     let root = Root::new("unknown");
     // 只往 rr3-pc 的 enabled_slots 里**加**一个未在册格位：bindings 三条仍全部被认领，
     // 致命原因单一（未在册），不混入"binding 未被认领"的第二种错误。
@@ -255,7 +255,7 @@ fn unregistered_slot_in_enabled_slots_is_fatal_before_bind_with_no_socket_residu
 /// 缺角色×3/监听/三条 spawn）保证两截都判得到，等待点钉在第三条 spawn 行——
 /// 缺角色点名在 spawn 之前（bind 之后立即打），到达序无歧义。
 #[test]
-fn log_ring_cap_from_profile_bounds_ctl_logs() {
+fn log_cap_ctl_logs() {
     let root = Root::new("cap");
     for name in ["rr3-pa", "rr3-pb", "rr3-pc"] {
         root.write_module(name);

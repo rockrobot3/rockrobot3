@@ -282,7 +282,7 @@ mod tests {
 
     /// 与仓内 config.toml 同形状的最小配置必须解析成功——漂移当场红
     #[test]
-    fn config_parse_covers_repo_shape() {
+    fn cfg_parse_repo_shape() {
         let text = r#"
 [rr3-power]
 log_level = "info"
@@ -318,7 +318,7 @@ max_age_ms = 0
     }
 
     #[test]
-    fn config_parse_rejects_missing_sections_and_fields() {
+    fn cfg_rej_miss_fields() {
         let e = rr3_power_cfg_parse("[rr3-power]\nlog_level = \"info\"\n").unwrap_err();
         assert!(
             e.contains("[rr3-power.battery]"),
@@ -347,7 +347,7 @@ max_age_ms = 0
     /// battery 两线次序（ADR-0027 裁定 1）：cutoff 必须严格 < low。
     /// 相等与倒挂都红——关断线不低于禁动线时，"先禁动后切轨"的相序前提不成立。
     #[test]
-    fn battery_cutoff_must_stay_below_low() {
+    fn batt_must_stay_low() {
         let text = |low: u16, cutoff: u16| {
             format!(
                 "[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = {low}\ncutoff_voltage_mv = {cutoff}\n[rr3-power.charger]\nstate_period_ms = 2000\n[rr3-power.rail]\nup = false\ndomain = \"rail5v\"\nsample_period_ms = 1000\nmild_mv = 4600\nsevere_mv = 4400\nmax_age_ms = 0\n"
@@ -365,7 +365,7 @@ max_age_ms = 0
     /// 阈值倒挂执法（批N2 件五）：severe >= mild 即红——相等也红（Mild 档不可达）。
     /// up=false 不豁免：解析路径统一无分支，策略量合法性不看开关。
     #[test]
-    fn config_parse_rejects_inverted_rail_thresholds() {
+    fn cfg_rej_thresholds() {
         let base = "\ncutoff_voltage_mv = 3150\n[rr3-power.charger]\nstate_period_ms = 2000\n[rr3-power.rail]\nup = false\ndomain = \"rail5v\"\nsample_period_ms = 1000\n";
         let e = rr3_power_cfg_parse(
             &format!("[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = 3300\n{base}mild_mv = 4400\nsevere_mv = 4400\nmax_age_ms = 0\n"),
@@ -383,7 +383,7 @@ max_age_ms = 0
     /// ——采样拍不能自毁，也不能折 1ms 变成 I2C 读数自旋；eprintln 留痕在解析期
     /// 打（键名/原值/钳后值），此处钉收敛结果
     #[test]
-    fn config_parse_clamps_degenerate_period_to_floor() {
+    fn cfg_parse_floor() {
         let text = r#"
 [rr3-power.battery]
 sample_period_ms = 0

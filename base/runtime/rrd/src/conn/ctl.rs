@@ -277,7 +277,7 @@ mod tests {
 
     /// ctl.logs 参数：缺省合法；坏形 fail-closed 拒（不静默折默认）。
     #[test]
-    fn log_args_default_and_bad_shapes() {
+    fn log_def_bad_shapes() {
         let (p, t) = rr3_log_args(&json!({})).expect("全缺省合法");
         assert!(p.is_empty() && t == 0);
         let (p, t) = rr3_log_args(&json!({"prefix": "启动摘要", "tail": 3})).expect("正例");

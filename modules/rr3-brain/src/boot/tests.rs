@@ -6,7 +6,7 @@ use serde_json::json;
 
 /// 与仓内 config.toml 同形状的最小配置必须解析成功——漂移当场红
 #[test]
-fn config_parse_covers_repo_shape() {
+fn cfg_parse_repo_shape() {
     let cfg = rr3_brain_cfg_parse(&rr3_repo_cfg_fixture()).unwrap();
     assert_eq!(cfg.cloud_timeout_s, 20.0);
     assert_eq!(cfg.call_timeout_s, 30.0);
@@ -25,7 +25,7 @@ fn config_parse_covers_repo_shape() {
 
 /// 无 [[rr3-brain.model]] 行表 → cloud 段 fallback 四元组（mode/key_ref 双 None）
 #[test]
-fn config_parse_falls_back_to_cloud_without_model_table() {
+fn cfg_back_model_table() {
     let cfg = rr3_brain_cfg_parse(&rr3_fallback_cfg()).unwrap();
     assert_eq!(
         cfg.model.base_url, "https://api.siliconflow.cn/v1",
@@ -40,7 +40,7 @@ fn config_parse_falls_back_to_cloud_without_model_table() {
 
 /// bus 段缺键回落、dialog 键缺省 8000（Python .get(…, default) 同形状）
 #[test]
-fn config_parse_defaults_for_optional_keys() {
+fn cfg_parse_keys() {
     let text = r#"
 [rr3-brain.cloud]
 base_url = "https://api.siliconflow.cn"
@@ -61,7 +61,7 @@ timeout_s = 20
 /// 超时值域（本轮审计）：NaN/inf/非正/超上界一律拒——这些值进
 /// `Duration::from_secs_f64` 会在首个云端调用/RPC 上 panic，必须挡在启动前。
 #[test]
-fn config_rejects_out_of_domain_timeouts() {
+fn cfg_rej_out_timeouts() {
     let text = |timeout: &str, bus: &str| {
         format!(
                 "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = {timeout}\n[rr3-brain.dialog]\n[rr3-brain.bus]\ncall_timeout_s = {bus}\n"
@@ -83,7 +83,7 @@ fn config_rejects_out_of_domain_timeouts() {
 
 /// dialog 话轮封顶：<=0 必须拒（否则状态机起轮即过期，与 ops/set 写臂判据一致）
 #[test]
-fn config_rejects_nonpositive_max_utterance_ms() {
+fn cfg_rej_max_ms() {
     let text = "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\nmax_utterance_ms = 0\n";
     let e = rr3_brain_cfg_parse(text).unwrap_err();
     assert!(e.contains("max_utterance_ms") && e.contains(">0"), "{e}");
@@ -91,7 +91,7 @@ fn config_rejects_nonpositive_max_utterance_ms() {
 
 /// 缺段/缺键点名（fail-closed；cloud 四键＋dialog 段必填，bus 段可选）
 #[test]
-fn config_parse_rejects_missing_sections_and_fields() {
+fn cfg_rej_miss_fields() {
     let e = rr3_brain_cfg_parse("[rr3-brain]\nlog_level = \"info\"\n").unwrap_err();
     assert!(e.contains("[rr3-brain.cloud]"), "cloud 缺段点名: {e}");
     let e = rr3_brain_cfg_parse(
@@ -124,7 +124,7 @@ fn config_parse_rejects_missing_sections_and_fields() {
 /// 行表 fail-closed 四红：active 数≠1（两行/零行）、mode 不认、api_format 不认、
 /// 缺 base_url/model_id——文案逐字对位 Python
 #[test]
-fn model_row_rejects_structural_violations() {
+fn model_rej_violations() {
     let cloud = "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\n";
     let two_active = format!(
             "{cloud}[[rr3-brain.model]]\nname = \"甲\"\nbase_url = \"u1\"\nmodel_id = \"m1\"\nactive = true\n[[rr3-brain.model]]\nname = \"乙\"\nbase_url = \"u2\"\nmodel_id = \"m2\"\nactive = true\n"
@@ -164,7 +164,7 @@ fn model_row_rejects_structural_violations() {
 
 /// fallback 路径缺 cloud.llm_model 点名（只在无行表时必填）
 #[test]
-fn model_row_fallback_requires_cloud_llm_model() {
+fn model_row_llm_model() {
     let text = r#"
 [rr3-brain.cloud]
 base_url = "u"
@@ -180,7 +180,7 @@ timeout_s = 20
 
 /// key_ref 空白串折 None（Python strip() or None 同形状）；缺 api_key_ref 同 None
 #[test]
-fn model_row_key_ref_strip_and_none() {
+fn model_key_ref_none() {
     let cloud = "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\n";
     let blank = format!(
             "{cloud}[[rr3-brain.model]]\nname = \"甲\"\nbase_url = \"http://u1\"\nmodel_id = \"m1\"\napi_key_ref = \"  \"\nactive = true\n"
@@ -199,7 +199,7 @@ fn model_row_key_ref_strip_and_none() {
 /// API 根语义（ADR-0023）：模型行 base_url 是完整根，各厂商版本段各写各的；
 /// cloud 主机根 fallback 只在路径为空时补 `/v1`——不按主机名猜厂商版本段
 #[test]
-fn api_root_appends_v1_only_when_path_absent() {
+fn api_root_v1_absent() {
     for (input, want) in [
         ("https://api.deepseek.com", "https://api.deepseek.com/v1"),
         ("https://api.deepseek.com/", "https://api.deepseek.com/v1"),
@@ -223,7 +223,7 @@ fn api_root_appends_v1_only_when_path_absent() {
 
 /// 模型行 base_url 裁决：非空 / http(s) 前缀 / 不得自带 /chat/completions
 #[test]
-fn model_base_url_validation_rejects_malformed_roots() {
+fn model_val_rej_roots() {
     assert!(rr3_base_url_check("").is_err());
     assert!(rr3_base_url_check("u1").is_err());
     assert!(rr3_base_url_check("ftp://x/v1").is_err());
@@ -243,7 +243,7 @@ fn model_base_url_validation_rejects_malformed_roots() {
 /// 唤醒段（可选，2026-10-31）：缺段 = 关闭 + 缺省值；全量注入生效；
 /// 类型错/空短语表/空应答/负窗一律拒 boot（配置劣化不静默收编）。
 #[test]
-fn wake_section_defaults_off_and_parses_full() {
+fn wake_off_parses_full() {
     let base = "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\n";
     let cfg = rr3_brain_cfg_parse(base).unwrap();
     assert_eq!(cfg.wake, Rr3WakeCfg::default(), "缺段 = 关闭 + 缺省值");
@@ -271,7 +271,7 @@ fn wake_section_defaults_off_and_parses_full() {
 
 /// Python float 打印形状（config 就绪行逐字对位的数据基础）
 #[test]
-fn py_float_repr_matches_python_str() {
+fn py_float_repr_str() {
     assert_eq!(rr3_py_float_repr(20.0), "20.0");
     assert_eq!(rr3_py_float_repr(30.0), "30.0");
     assert_eq!(rr3_py_float_repr(17.25), "17.25");

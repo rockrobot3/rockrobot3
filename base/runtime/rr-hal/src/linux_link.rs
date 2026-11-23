@@ -233,7 +233,7 @@ mod tests {
 
     /// terse 反转义：`\:`→`:`、`\\`→`\`、无转义原样、孤立反斜杠吞掉不炸
     #[test]
-    fn nm_unescape_roundtrip() {
+    fn nm_roundtrip() {
         assert_eq!(rr3_nm_unescape("My\\:WiFi"), "My:WiFi");
         assert_eq!(rr3_nm_unescape("a\\\\b"), "a\\b");
         assert_eq!(rr3_nm_unescape("plain"), "plain");
@@ -243,7 +243,7 @@ mod tests {
     /// 字段提取：`KEY:value` 前缀行取值；值内转义冒号不拆（整段返回）；
     /// 无此键 None
     #[test]
-    fn nm_field_extracts_value_keeps_escape() {
+    fn nm_keeps_escape() {
         let out = "GENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\\:5G\n";
         assert_eq!(rr3_nm_field(out, "GENERAL.STATE"), Some("100 (connected)"));
         assert_eq!(rr3_nm_field(out, "GENERAL.CONNECTION"), Some("Home\\:5G"));
@@ -252,7 +252,7 @@ mod tests {
 
     /// STATE 裁决：100 在链，其余（30/40/50/垃圾）一律不在——不认不编造
     #[test]
-    fn nm_state_up_only_full_connectivity() {
+    fn nm_up_connectivity() {
         assert!(rr3_nm_state_up("100 (connected)"));
         assert!(rr3_nm_state_up("100"));
         assert!(!rr3_nm_state_up("30 (disconnected)"));
@@ -263,7 +263,7 @@ mod tests {
 
     /// SSID 候选裁决：NM 空值 `--` 与空串 → None，其余反转义返回
     #[test]
-    fn nm_ssid_rejects_nm_empty_marker() {
+    fn nm_rej_nm_marker() {
         assert_eq!(rr3_nm_ssid_opt("--"), None);
         assert_eq!(rr3_nm_ssid_opt(""), None);
         assert_eq!(rr3_nm_ssid_opt(" A "), Some("A".to_string()), "trim 空白");
@@ -273,7 +273,7 @@ mod tests {
     /// wifi 行两端夹逼：IN-USE `*` 才选中，SIGNAL 取行尾数字，SSID 中段
     /// 保留转义反转义；`--rescan` 不会让非选中行混入
     #[test]
-    fn nm_wifi_row_picks_star_line_only() {
+    fn nm_row_star_line() {
         assert_eq!(rr3_nm_wifi_row("*:Home:87"), Some(("Home".into(), 87)));
         assert_eq!(
             rr3_nm_wifi_row("*:Home\\:5G:72"),
@@ -288,7 +288,7 @@ mod tests {
     /// 质量百分比 → dBm：q=0 → None（不报假 −100），经验线性 q/2−100，
     /// 域钉在 −100..=−1
     #[test]
-    fn nm_signal_dbm_zero_means_unknown() {
+    fn nm_dbm_zero_unknown() {
         assert_eq!(rr3_nm_signal_to_dbm(0), None);
         assert_eq!(rr3_nm_signal_to_dbm(100), Some(-50));
         assert_eq!(rr3_nm_signal_to_dbm(87), Some(-57), "87/2-100=-57（截断）");
@@ -300,7 +300,7 @@ mod tests {
     /// 两次调用读数组装成 Rr3LinkState——SSID 取 IN-USE 行（广播真名），
     /// RSSI 换算落位
     #[test]
-    fn state_assembles_from_two_nmcli_calls() {
+    fn state_two_calls() {
         let dir = rr3_test_link_dir("ok");
         std::fs::create_dir_all(&dir).unwrap();
         let script = dir.join("fake-nmcli");
@@ -332,7 +332,7 @@ mod tests {
 
     /// 假 nmcli 退出非零：显式回错点名参数，不静默编造状态
     #[test]
-    fn nmcli_nonzero_exit_fails_loudly() {
+    fn nmcli_fail_loudly() {
         let dir = rr3_test_link_dir("err");
         std::fs::create_dir_all(&dir).unwrap();
         let script = dir.join("fake-nmcli-fail");
@@ -355,7 +355,7 @@ mod tests {
     /// spawn 包一层 ETXTBSY 瞬态重试（run#7 attempt1 实锤，见
     /// [`rr3_test_txtbsy_retry`]；重试最坏 ~200ms 不影响 <2s 判据）。
     #[test]
-    fn nmcli_timeout_kills_slow_child() {
+    fn nmcli_slow_child() {
         let dir = rr3_test_link_dir("tmo");
         std::fs::create_dir_all(&dir).unwrap();
         let script = dir.join("fake-nmcli-slow");

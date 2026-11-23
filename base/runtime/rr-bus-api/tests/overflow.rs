@@ -105,7 +105,7 @@ fn await_drops(hb_rx: &mpsc::Receiver<Value>) -> u64 {
 /// 主循环被长动作（ASR 超时重试、整段 TTS 播放）占住、inbox 被广播帧填满时，
 /// reader 不能卡在 send 上——否则心跳应答读不到，模块被自己的心跳宽限判死。
 #[test]
-fn inbox_full_keeps_heartbeat() {
+fn inbox_full_heartbeat() {
     let path = tmp_bus_path();
     let listener = UnixListener::bind(&path).unwrap();
     let (hb_tx, hb_rx) = mpsc::channel::<Value>();

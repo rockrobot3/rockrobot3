@@ -441,7 +441,7 @@ mod tests {
     /// 生成文本的形状回归：四常量齐全、数组项逐行带逗号（无 " 相邻" 双逗号
     /// ——曾实际产出 `"turn",,`）、@generated 头注在位（手改必被门 f 抓红）。
     #[test]
-    fn render_output_shape_is_pinned() {
+    fn render_shape_pinned() {
         let out = render(
             "rr3-act/servo/command",
             "rr3-interact/face/expression",
@@ -466,7 +466,7 @@ mod tests {
     /// 行程常量表形状回归（批N3 件五）：常量名 = RR3_AXIS_<大写 instance>、
     /// 三元组 (lo, hi, center) 序、match 臂逐轴点名、查无回 None、头注在位。
     #[test]
-    fn render_axes_shape_is_pinned() {
+    fn render_axes_pinned() {
         let out = render_axes(&[("pan".into(), 60, 120, 90), ("tilt".into(), 80, 100, 90)]);
         assert!(
             out.contains("pub(crate) const RR3_AXIS_PAN: (u32, u32, u32) = (60, 120, 90);"),

@@ -130,7 +130,7 @@ mod tests {
 
     /// 初始化序必须是 25 字节命令（一笔 0x00 控制 + 25 命令）＋ 8 页全零清屏。
     #[test]
-    fn init_sends_command_sequence_and_clears_all_pages() {
+    fn init_sends_seq_pages() {
         let (bus, f) = fake();
         let mut oled = OledRenderer::new(bus);
         oled.init().expect("假件 init 必须成功");
@@ -156,7 +156,7 @@ mod tests {
 
     /// 文本页：row 0 → 页 0；'A' 字模 + 1px 空列后接零（与编码面同源）。
     #[test]
-    fn show_text_writes_expected_page_zero() {
+    fn show_text_page_zero() {
         let (bus, f) = fake();
         let mut oled = OledRenderer::new(bus);
         oled.show_text("A", 90, 90).expect("假件文本渲染必须成功");

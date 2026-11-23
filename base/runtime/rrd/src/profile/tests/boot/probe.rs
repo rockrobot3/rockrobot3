@@ -8,7 +8,7 @@ use super::super::*;
 /// 是"缺格 → Degraded 点名件与键"的检出真值（探测拿不到答案不当作在位的下游）。
 /// 无硬件面可反证的格位（cognition.llm）不在缺格清单：那是"没有反证"不是"拿不到答案"。
 #[test]
-fn injected_absent_probe_names_missing_module_and_slot() {
+fn injected_miss_slot() {
     let root = Root::new("probe-absent");
     let p = root.write_profile("absent.toml", GOOD);
     let boot = boot_inputs_with_probe(&p, &crate::probe::Rr3AbsentProbe)
@@ -27,7 +27,7 @@ fn injected_absent_probe_names_missing_module_and_slot() {
 /// MC-4 门禁用例②：探测件只对一格报缺 → 只有那一格的点名模块进缺格，
 /// 其余同在位——证明缺格判定确实**逐格读探测结果**，不是整单连坐。
 #[test]
-fn injected_selective_probe_marks_only_its_slot() {
+fn injected_marks_slot() {
     struct OnlyServoAbsent;
     impl crate::probe::Rr3Probe for OnlyServoAbsent {
         fn rr3_probe_slot(&self, slot: &str) -> bool {

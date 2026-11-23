@@ -69,7 +69,7 @@ watchdog_timeout_ms = 1000
 
 /// 只在叠加层里的 topic：合并后放行，未合并按未注册主题拒
 #[test]
-fn overlay_topic_passes_only_when_merged() {
+fn overlay_merged() {
     let base = rr3_topic_parse(CONTRACT);
     let r1 = rr3_manifest_chk(&sima("rr3-sima/ping/state", 200, 1000), &base);
     assert!(
@@ -84,7 +84,7 @@ fn overlay_topic_passes_only_when_merged() {
 
 /// 叠加层不放行越权与健康规则（只扩主题名，不放宽判定）
 #[test]
-fn overlay_relaxes_nothing_but_membership() {
+fn overlay_membership() {
     let r = rr3_manifest_chk(&sima("rr3-simb/pong/state", 200, 1000), &merged());
     assert!(
         r.errors.iter().any(|e| e.contains("越权主题")),
@@ -105,7 +105,7 @@ fn overlay_relaxes_nothing_but_membership() {
 /// C14 申报面退役门（0.0.5 批J）：retired 主题不得被 publishes/rpc.exposes/subscribes
 /// 申报引用；正常主题不受影响（contract 真值上跑，asr/text 与 dialog/turn 已显式 retired）
 #[test]
-fn retired_topics_cannot_be_declared() {
+fn retired_be_declared() {
     let set = rr3_topic_parse(CONTRACT);
 
     // 发布申报 → 拒并点名
@@ -141,7 +141,7 @@ fn retired_topics_cannot_be_declared() {
 
 /// 空主题集 = 一条错误，不做后续校验
 #[test]
-fn empty_topic_set_fail_closes() {
+fn empty_fail_closes() {
     let r = rr3_manifest_chk(
         &sima("rr3-sima/ping/state", 200, 1000),
         &crate::topics::Rr3TopicSet::default(),
@@ -154,7 +154,7 @@ fn empty_topic_set_fail_closes() {
 
 /// 新旧入口对同一份 fixture 必须给出逐字相同的报错（防搬运丢规则）
 #[test]
-fn new_entry_matches_old_entry_on_repo_fixture() {
+fn new_old_repo_fixture() {
     let path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rr3-sense.toml");
     let old = rr3_manifest_gate(&path);
@@ -166,7 +166,7 @@ fn new_entry_matches_old_entry_on_repo_fixture() {
 
 /// 坏 manifest 的三类错误都必须由新入口点名具体字段（spec §9 的机器可验项）
 #[test]
-fn bad_manifests_name_the_field() {
+fn bad_mfts_name_field() {
     let m = merged();
     let missing =
         sima("rr3-sima/ping/state", 200, 1000).replace("restart_policy = \"always\"\n", "");

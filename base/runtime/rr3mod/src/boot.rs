@@ -86,7 +86,7 @@ mod tests {
     /// 方案 §2.8-1 用例一：env 覆盖优先（config_env 设了且 env 在，读 env 路径，
     /// 不碰 manifest 同目录）。
     #[test]
-    fn load_config_env_overrides_manifest_dir() {
+    fn load_cfg_env_mft_dir() {
         let _g = env_lock().lock().unwrap();
         let dir = rr3_tmp_dir("cfg-env");
         std::fs::create_dir_all(&dir).unwrap();
@@ -105,7 +105,7 @@ mod tests {
 
     /// 方案 §2.8-1 用例二：未设 env（None）走 manifest 同目录 config.toml。
     #[test]
-    fn load_config_falls_back_to_manifest_dir() {
+    fn load_cfg_mft_dir() {
         let dir = rr3_tmp_dir("cfg-fallback");
         std::fs::create_dir_all(&dir).unwrap();
         let manifest = dir.join("manifest.toml");
@@ -119,7 +119,7 @@ mod tests {
     /// 方案 §2.8-1 用例三：读失败文案点名路径（现行形状"读 config {path} 失败"；
     /// io error 尾巴是动态文案，按 repo 口径 contains 断言）。
     #[test]
-    fn load_config_missing_file_names_path() {
+    fn load_cfg_miss_names() {
         let err = load_config_text(None, "/nonexistent-rr3mod/manifest.toml").unwrap_err();
         assert!(err.starts_with("读 config "), "{err}");
         assert!(
@@ -131,7 +131,7 @@ mod tests {
     /// 批N28 批3：`rr3_config_path` 投影与 `load_config_text` 实读路径一致
     /// （缺省/env 覆盖两例）——投影单点漂移当场红。
     #[test]
-    fn config_path_projection_matches_load_config_text() {
+    fn cfg_load_cfg_text() {
         let _g = env_lock().lock().unwrap();
         let dir = rr3_tmp_dir("cfg-proj");
         std::fs::create_dir_all(&dir).unwrap();
@@ -155,7 +155,7 @@ mod tests {
 
     /// 方案 §2.8-3：缺 RR3_MANIFEST 错误文案逐字断言（现行形状）。
     #[test]
-    fn bootstrap_errors_without_manifest_env() {
+    fn bootstrap_errors_env() {
         let _g = env_lock().lock().unwrap();
         std::env::remove_var(crate::RR3_MANIFEST_ENV);
         // BusHandle 无 Debug（Rr3BusClient 不 derive），unwrap_err 用不了——match 取 Err

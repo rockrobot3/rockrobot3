@@ -199,7 +199,7 @@ mod tests {
 
     /// 契约必须解析成 23 格，三层分布 7/12/4（与 contract.rs 的形状 pin 同源、彼此独立）
     #[test]
-    fn contract_text_parses_into_expected_shape() {
+    fn contract_text_shape() {
         let table = rr3_slot_parse(CONTRACT);
         assert_eq!(table.slots.len(), 23, "契约格位数");
         assert!(!table.rr3_slot_is_empty());
@@ -282,7 +282,7 @@ mod tests {
 
     /// 坏文本给空表，空表必须报错（fail-open 护栏）
     #[test]
-    fn unparsable_text_is_not_a_pass_port() {
+    fn unparsable_not_port() {
         let table = rr3_slot_parse("this = is not = valid = toml");
         assert!(table.rr3_slot_is_empty());
         assert!(!table.rr3_slot_check().is_empty());
@@ -290,7 +290,7 @@ mod tests {
 
     /// 形状检查复用 capability 规则函数：非法名与非法层都被同一条门抓出
     #[test]
-    fn shape_check_reuses_the_capability_rule() {
+    fn shape_check_rule() {
         let bad = rr3_slot_parse(
             r#"
 [[slot]]
@@ -315,7 +315,7 @@ tier_scope = ["host"]
 
     /// C17 新键的反向断言：缺 status / 非法 status / 缺 tier_scope / 非法档名逐条点名
     #[test]
-    fn status_and_tier_scope_violations_are_named() {
+    fn status_tier_named() {
         let bad = rr3_slot_parse(
             r#"
 [[slot]]

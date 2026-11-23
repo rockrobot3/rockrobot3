@@ -187,7 +187,7 @@ mod tests {
     /// （"一次重启后仍能取到崩溃前的行"的载体语义）、socket 无父段时 fail-closed
     /// 报错（绝不落到 CWD 相对路径上悄悄建目录）。
     #[test]
-    fn unit_log_opens_appends_and_fails_closed() {
+    fn unit_log_fail_closed() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("时钟在 UNIX_EPOCH 之前")
@@ -224,7 +224,7 @@ mod tests {
     /// 低电拒绝只延后、不丢计划：身份/第几次/入口必须原样带过，延迟足够大
     /// （远大于扫尸节拍），避免低电段内紧循环重试。
     #[test]
-    fn low_power_retry_keeps_identity_and_delays() {
+    fn low_keeps_delays() {
         let p = rr3_low_power_retry("rr3-power", 2, "bin/rr3-power");
         assert_eq!(p.name, "rr3-power");
         assert_eq!(p.attempt, 2, "重启预算的计数不因被拒而归零");

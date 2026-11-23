@@ -42,7 +42,7 @@ fn rr3_module_manifest(tag: &str, name: &str, bin: &Path) -> SimManifest {
 }
 
 #[test]
-fn audio_chain_sense_to_interact_end_to_end() {
+fn audio_sense_end_end() {
     let sense_bin = rr3_build_module_bin("rr3-sense");
     let interact_bin = rr3_build_module_bin("rr3-interact");
     let (m_sense, m_inter, cfg, inter_cfg) = phases::stage(&sense_bin, &interact_bin);
@@ -99,7 +99,7 @@ mic_baseline_mm = 150   # 双麦间距（b3a 实测安装同源；sim 注入基�
 "#;
 
 #[test]
-fn audio_chain_doa_stereo_env_injection_end_to_end() {
+fn injection_audio_doa() {
     let sense_bin = rr3_build_module_bin("rr3-sense");
     let (m_sense, cfg, cfg_path) = phases::doa_stage(&sense_bin);
     let _cfg = CfgGuard { path: cfg_path };

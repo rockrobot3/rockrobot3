@@ -87,7 +87,7 @@ fn args_of(profile: &Path, candidate: &Path) -> Rr3AxisWriteArgs {
 }
 
 #[test]
-fn candidate_passing_full_judgement_is_stored_atomically() {
+fn candidate_atomically() {
     let root = Root::new("ok");
     let profile = root.profile();
     let candidate = root.write_candidate(&candidate_text(90));
@@ -110,7 +110,7 @@ fn candidate_passing_full_judgement_is_stored_atomically() {
 }
 
 #[test]
-fn candidate_failing_judgement_writes_nothing() {
+fn candidate_nothing() {
     let root = Root::new("badcand");
     let profile = root.profile();
     // 缺 calibrated 键（F-6 全键必填）：判据红 → 一个字节都不许落
@@ -123,7 +123,7 @@ fn candidate_failing_judgement_writes_nothing() {
 }
 
 #[test]
-fn candidate_pin_must_hit_assembly_pins() {
+fn candidate_hit_pins() {
     let root = Root::new("pinfk");
     let profile = root.profile();
     // 装配单只有 pan：tilt 不在 pin_id 全集（F-4 外键对账的写侧半边）
@@ -140,7 +140,7 @@ fn candidate_pin_must_hit_assembly_pins() {
 }
 
 #[test]
-fn broken_target_is_never_overwritten() {
+fn broken_overwritten() {
     let root = Root::new("brokentgt");
     let profile = root.profile();
     let candidate = root.write_candidate(&candidate_text(90));
@@ -163,7 +163,7 @@ fn broken_target_is_never_overwritten() {
 }
 
 #[test]
-fn same_pin_under_other_name_is_refused() {
+fn same_pin_refused() {
     let root = Root::new("duppin");
     let profile = root.profile();
     let candidate = root.write_candidate(&candidate_text(90));
@@ -183,7 +183,7 @@ fn same_pin_under_other_name_is_refused() {
 }
 
 #[test]
-fn existing_profile_for_same_pin_is_replaced() {
+fn existing_replaced() {
     let root = Root::new("replace");
     let profile = root.profile();
 
@@ -202,7 +202,7 @@ fn existing_profile_for_same_pin_is_replaced() {
 }
 
 #[test]
-fn parse_requires_both_paths_and_rejects_unknown_flags() {
+fn parse_rej_flags() {
     let ok = rr3_axis_write_parse(&[
         "--profile".into(),
         "/p/default.toml".into(),

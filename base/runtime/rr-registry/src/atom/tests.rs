@@ -41,13 +41,13 @@ subscribes = []
 
 /// 合法 atom 文本零报错；schema 字段集与 atom.schema.toml 同步（路径唯一）
 #[test]
-fn valid_battery_atom_passes() {
+fn valid_atom_passes() {
     let errs = rr3_atom_chk(&battery_text(), &slots());
     assert!(errs.is_empty(), "{errs:?}");
 }
 
 #[test]
-fn atom_field_paths_are_unique() {
+fn atom_field_unique() {
     let specs = rr3_atom_field_specs();
     let mut seen: Vec<&str> = specs.iter().map(|s| s.path.as_str()).collect();
     let before = seen.len();
@@ -59,7 +59,7 @@ fn atom_field_paths_are_unique() {
 
 /// 查册门：未登记格位拒绝；空格位表 fail-closed
 #[test]
-fn unregistered_slot_is_rejected_and_empty_table_fail_closes() {
+fn unreg_rej_closes() {
     let bad = battery_text().replace("power.battery", "power.solar");
     let errs = rr3_atom_chk(&bad, &slots());
     assert!(
@@ -76,7 +76,7 @@ fn unregistered_slot_is_rejected_and_empty_table_fail_closes() {
 
 /// 每格一件：provides.slots 恰一项，多项/零项都点名裁定出处
 #[test]
-fn provides_slots_must_be_exactly_one() {
+fn provides_be_exactly() {
     let two = battery_text().replace(
         "slots = [\"power.battery\"]",
         "slots = [\"power.battery\", \"power.charger\"]",
@@ -99,7 +99,7 @@ fn provides_slots_must_be_exactly_one() {
 
 /// 板无关断言：注释里塞厂商/引言语 token 也必须命中（注释是载荷面）
 #[test]
-fn board_free_assertion_hits_tokens_anywhere() {
+fn board_hits_anywhere() {
     let tainted = battery_text() + "\n# 后端绑定 INA219 @ GPIO2/3\n";
     let errs = rr3_atom_chk(&tainted, &slots());
     assert!(errs.iter().any(|e| e.contains("ina219")), "{errs:?}");
@@ -113,7 +113,7 @@ fn board_free_assertion_hits_tokens_anywhere() {
 
 /// 必填字段与 topic 形状：缺字段点名、坏主题点名、uses/事件缺省放行
 #[test]
-fn required_fields_and_topic_shape_are_enforced() {
+fn required_enforced() {
     let missing = battery_text().replace("version = \"0.0.1\"\n", "");
     let errs = rr3_atom_chk(&missing, &slots());
     assert!(
@@ -140,7 +140,7 @@ slots = ["audio.vad"]
 /// 批B③ 打样件钉死：rr3-power 的两份 atom.toml 必须过契约 + 查册门 + 板无关断言
 /// （打样件漂移当场红；路径经 CARGO_MANIFEST_DIR 钉到仓根，与模块层级无关）
 #[test]
-fn power_pilot_atoms_stay_compliant() {
+fn power_stay_compliant() {
     let battery = repo_file!("modules/rr3-power/atoms/battery/atom.toml");
     let charger = repo_file!("modules/rr3-power/atoms/charger/atom.toml");
     let errs = rr3_atom_chk(battery, &slots());
@@ -152,7 +152,7 @@ fn power_pilot_atoms_stay_compliant() {
 /// 批C① 重铺件钉死：rr3-sense 的四份 atom.toml 必须过契约 + 查册门 + 板无关断言
 /// （重铺件漂移当场红；每格一件由校验器跨字段规则把守）
 #[test]
-fn sense_relaid_atoms_stay_compliant() {
+fn sense_stay_compliant() {
     let capture = repo_file!("modules/rr3-sense/atoms/capture/atom.toml");
     let vad = repo_file!("modules/rr3-sense/atoms/vad/atom.toml");
     let env = repo_file!("modules/rr3-sense/atoms/env/atom.toml");
@@ -171,7 +171,7 @@ fn sense_relaid_atoms_stay_compliant() {
 /// 批C② 重铺件钉死：rr3-act 的三份 atom.toml 必须过契约 + 查册门 + 板无关断言
 /// （重铺件漂移当场红；每格一件由校验器跨字段规则把守）
 #[test]
-fn act_relaid_atoms_stay_compliant() {
+fn act_stay_compliant() {
     let servo = repo_file!("modules/rr3-act/atoms/servo/atom.toml");
     let led = repo_file!("modules/rr3-act/atoms/led/atom.toml");
     let relay = repo_file!("modules/rr3-act/atoms/relay/atom.toml");
@@ -184,7 +184,7 @@ fn act_relaid_atoms_stay_compliant() {
 /// 批C③ 重铺件钉死：rr3-interact 的两份 atom.toml 必须过契约 + 查册门 + 板无关断言
 /// （重铺件漂移当场红；每格一件由校验器跨字段规则把守）
 #[test]
-fn interact_relaid_atoms_stay_compliant() {
+fn interact_compliant() {
     let face = repo_file!("modules/rr3-interact/atoms/face/atom.toml");
     let player = repo_file!("modules/rr3-interact/atoms/player/atom.toml");
     for (name, text) in [("face", face), ("player", player)] {
@@ -196,7 +196,7 @@ fn interact_relaid_atoms_stay_compliant() {
 /// 批C④ 重铺件钉死：rr3-connect 的两份 atom.toml 必须过契约 + 查册门 + 板无关断言
 /// （重铺件漂移当场红；每格一件由校验器跨字段规则把守）
 #[test]
-fn connect_relaid_atoms_stay_compliant() {
+fn connect_compliant() {
     let wifi = repo_file!("modules/rr3-connect/atoms/wifi/atom.toml");
     let bt = repo_file!("modules/rr3-connect/atoms/bt/atom.toml");
     for (name, text) in [("wifi", wifi), ("bt", bt)] {
@@ -209,7 +209,7 @@ fn connect_relaid_atoms_stay_compliant() {
 /// 与板无关断言（机制本体 .py 原位——Python 单文件即机制+入口合一，Rust 五件套
 /// 拆分随 ADR-0016 迁移收敛；重铺件漂移当场红）
 #[test]
-fn brain_relaid_atoms_stay_compliant() {
+fn brain_stay_compliant() {
     let dialog = repo_file!("modules/rr3-brain/atoms/dialog/atom.toml");
     let asr = repo_file!("modules/rr3-brain/atoms/asr/atom.toml");
     let llm = repo_file!("modules/rr3-brain/atoms/llm/atom.toml");
@@ -223,7 +223,7 @@ fn brain_relaid_atoms_stay_compliant() {
 /// 收口批 E'：未知字段反向断言（rr3_no_unknown_keys）——
 /// typo 键（uses.slost）与未登记段双路红，合法 manifest 零命中（fail-closed 自证）
 #[test]
-fn unknown_fields_assert_flags_typo_keys() {
+fn unknown_typo_keys() {
     let specs = rr3_atom_field_specs();
     let bad: Value = toml::from_str(
             "[atom]\nname = \"x\"\nversion = \"0.1.0\"\n[provides]\nslots = [\"ui.face\"]\n[uses]\nslost = [\"audio.playback\"]\n[bogus]\ny = 2\n",
@@ -343,7 +343,7 @@ fn assert_slots_covered(
 /// ②provides 全集对 slots 表反查：除基座内建豁免集外**每格恰一件**（两件抢格 /
 /// 新格无件当场红），内建格不立件。
 #[test]
-fn repo_atoms_compliant_and_every_slot_uniquely_covered() {
+fn repo_slot_covered() {
     let root = repo_root();
     // 基座内建豁免集（0.0.5 方案 §12.1 终裁：boot 即在位、无独立原子目录——
     // rr-bus/rrd 承载或机制核切片承载；power.battery 虽 base 层但由 battery

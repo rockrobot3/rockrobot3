@@ -4,7 +4,7 @@
 use super::*;
 
 #[test]
-fn schema_embedded_has_expected_field_count() {
+fn schema_has_count() {
     let specs = rr_registry::rr3_field_specs();
     assert_eq!(
         specs.len(),
@@ -42,14 +42,14 @@ fn staged(tag: &str, text: String) -> PathBuf {
 }
 
 #[test]
-fn manifest_fixture_passes_validation() {
+fn mft_passes_val() {
     let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rr3-sense.toml");
     let report = rr_registry::rr3_manifest_gate(&p);
     assert!(report.ok(), "合法 manifest 必须通过: {:?}", report.errors);
 }
 
 #[test]
-fn manifest_missing_required_field_fails() {
+fn mft_miss_field_fail() {
     let m = staged("miss", fixture_text().replace("type = \"module\"\n", ""));
     let report = rr_registry::rr3_manifest_gate(&m);
     assert!(
@@ -63,7 +63,7 @@ fn manifest_missing_required_field_fails() {
 }
 
 #[test]
-fn manifest_bad_name_version_policy_fails() {
+fn mft_bad_name_fail() {
     let m = staged(
         "bad3",
         fixture_text()
@@ -86,7 +86,7 @@ fn manifest_bad_name_version_policy_fails() {
 }
 
 #[test]
-fn manifest_heartbeat_must_be_below_watchdog() {
+fn mft_must_be_watchdog() {
     let m = staged(
         "health",
         fixture_text().replace("heartbeat_ms = 2000", "heartbeat_ms = 20000"),
@@ -103,7 +103,7 @@ fn manifest_heartbeat_must_be_below_watchdog() {
 }
 
 #[test]
-fn manifest_publish_prefix_ownership_enforced() {
+fn mft_pub_own_enforced() {
     // D7③ 的 manifest 侧：发布主题前缀必须等于 manifest.name
     let m = staged(
         "prefix",
@@ -121,7 +121,7 @@ fn manifest_publish_prefix_ownership_enforced() {
 }
 
 #[test]
-fn manifest_unregistered_topic_rejected() {
+fn mft_unreg_topic_rej() {
     let m = staged(
         "unreg",
         fixture_text().replace(
@@ -138,7 +138,7 @@ fn manifest_unregistered_topic_rejected() {
 }
 
 #[test]
-fn manifest_unknown_dependency_moved_to_resolution_layer() {
+fn mft_moved_layer() {
     // ADR-0009 裁定 1：单件校验只保 capability 形状，"未知能力"的判定迁到
     // 跨 manifest 仲裁层——形状合法但谁也不提供的能力（拼错的 motor.foc）
     // 在单件层放行、在全集层被点名拒掉
@@ -162,7 +162,7 @@ fn manifest_unknown_dependency_moved_to_resolution_layer() {
 }
 
 #[test]
-fn manifest_capability_shape_and_type_and_bool_enforced() {
+fn mft_bool_enforced() {
     // provides 段形状非法 + type/lang 越界 + upgrades.staging 类型错
     let m = staged(
         "shape",
@@ -179,7 +179,7 @@ fn manifest_capability_shape_and_type_and_bool_enforced() {
 }
 
 #[test]
-fn check_rules_cover_spec_section4_shapes() {
+fn check_spec_shapes() {
     assert!(rr_registry::rr3_registry_check("module_name", "rr3-sense").is_empty());
     assert_eq!(
         rr_registry::rr3_registry_check("module_name", "rr3-sense2").len(),

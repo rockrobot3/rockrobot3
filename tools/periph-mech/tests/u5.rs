@@ -21,7 +21,7 @@ fn fnv1a64(data: &[u8]) -> u64 {
 /// U5 行为等价（共享机制面）：舵机 angle→duty 全表、OLED 单页字节流、轨压分档表。
 /// Pi/classic/S3 同用本 crate，本测试锁定三平台共同字节，任何一侧单改都会失败。
 #[test]
-fn u5_shared_mechanism_digest() {
+fn u5_shared_digest() {
     let mut lines = Vec::new();
     for a in 60..=120u32 {
         lines.push(format!("pan:{a}:{}", rr3_deg_to_duty(a, 410, 2048)));

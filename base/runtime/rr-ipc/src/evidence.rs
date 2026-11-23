@@ -234,7 +234,7 @@ mod tests {
     const GOOD_FM: &str = "+++\nform = \"对拍\"\nslot_or_role = \"power.rail\"\nmethod = \"万用表实测与面板读数对拍\"\nconclusion = \"severe_mv=3300 与实测一致\"\ndate = \"2026-10-19\"\nrecorder = \"lei_huang\"\n+++\n\n正文。\n";
 
     #[test]
-    fn ref_wellformed_accepts_form_plus_four_digits() {
+    fn ref_ok_four_digits() {
         assert!(rr3_evidence_ref_ok("对拍/0001"));
         assert!(rr3_evidence_ref_ok("实测/9999"));
         assert!(!rr3_evidence_ref_ok("对拍/0001/x"), "编号段含斜杠红");
@@ -249,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn verify_passes_a_wellformed_referenced_file() {
+    fn verify_passes_file() {
         let root = ut_root("pass");
         ut_write(&root, "对拍/0001", GOOD_FM);
         assert_eq!(rr3_evidence_verify(&root, "对拍/0001"), Ok(()));
@@ -257,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn verify_rejects_missing_file_by_name() {
+    fn verify_rej_miss_name() {
         let root = ut_root("missing");
         let e = rr3_evidence_verify(&root, "对拍/0001").expect_err("文件不存在必须红");
         assert!(e.contains("读不到"), "文案点名读不到: {e}");
@@ -265,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn verify_rejects_form_mismatch() {
+    fn verify_rej_mismatch() {
         let root = ut_root("form_mismatch");
         // 文件在 实测/ 下但 form 写"对拍"——搬家不改 form 即红
         fs::create_dir_all(root.join("实测")).expect("造第二形态目录");
@@ -276,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn verify_rejects_bad_frontmatter_variants() {
+    fn verify_bad_variants() {
         let root = ut_root("bad_fm");
         // 缺必填键
         ut_write(
@@ -319,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn verify_rejects_malformed_reference_before_touching_fs() {
+    fn verify_rej_fs() {
         let root = ut_root("bad_ref");
         ut_write(&root, "对拍/0001", GOOD_FM);
         // 形制不合的引用直接拒，文案不提文件——形制这道门在查文件之前

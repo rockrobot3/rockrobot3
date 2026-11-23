@@ -126,7 +126,7 @@ mod tests {
     const DUTY_MAX: u32 = 2048;
 
     #[test]
-    fn duty_conversion_endpoints_and_roundtrip() {
+    fn duty_conv_roundtrip() {
         assert_eq!(deg_to_duty(0, DUTY_MIN, DUTY_MAX), DUTY_MIN);
         assert_eq!(deg_to_duty(180, DUTY_MIN, DUTY_MAX), DUTY_MAX);
         assert_eq!(deg_to_duty(90, DUTY_MIN, DUTY_MAX), 1229);
@@ -140,7 +140,7 @@ mod tests {
     }
 
     #[test]
-    fn axis_check_rejects_out_of_travel_named() {
+    fn axis_rej_out_named() {
         // 协议级越界（>180）先行拒
         assert_eq!(
             axis_check(Axis::Pan, 200).unwrap_err(),
@@ -160,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn scan_points_stay_in_travel() {
+    fn scan_stay_travel() {
         for axis in [Axis::Pan, Axis::Tilt] {
             let (lo, hi) = axis.range();
             let pts = axis_scan_points(axis);
@@ -174,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn wander_step_folds_back_at_bounds() {
+    fn wander_back_bounds() {
         let mut dir: i8 = 1;
         assert_eq!(wander_step(115, &mut dir, 10, (60, 120)), 120);
         assert_eq!(dir, -1, "上端折返后方向须翻转");

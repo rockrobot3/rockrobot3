@@ -230,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn isqrt_matches_floor_sqrt_on_known_and_edge_values() {
+    fn isqrt_edge_values() {
         let cases = [
             (0u64, 0u64),
             (1, 1),
@@ -254,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn frame_rms_is_exact_integer_for_constant_frames() {
+    fn frame_rms_frames() {
         assert_eq!(rr3_frame_rms(&[]), 0);
         assert_eq!(rr3_frame_rms(&[0; 320]), 0);
         assert_eq!(rr3_frame_rms(&frame(3000)), 3000);
@@ -263,7 +263,7 @@ mod tests {
 
     /// golden 向量：常幅 3000 连喂 10 帧（200ms）→ 第 10 帧发 Onset。
     #[test]
-    fn retune_changes_threshold_for_subsequent_frames() {
+    fn retune_thr_frames() {
         let mut vad = state();
         for _ in 0..10 {
             assert_eq!(vad.rr3_vad_feed(&frame(1000)), None);
@@ -282,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn constant_speech_fires_onset_at_min_speech_boundary() {
+    fn constant_boundary() {
         let mut vad = state();
         for i in 1..10u32 {
             assert_eq!(vad.rr3_vad_feed(&frame(3000)), None, "第 {i} 帧不该发边沿");
@@ -298,7 +298,7 @@ mod tests {
 
     /// golden 向量：起音后 5 帧语音 + 35 帧静音 → speech_ms=300 的 Offset。
     #[test]
-    fn speech_then_tail_silence_fires_offset_with_net_speech_ms() {
+    fn speech_tail_net_ms() {
         let mut vad = state();
         for _ in 0..10 {
             vad.rr3_vad_feed(&frame(3000));
@@ -317,7 +317,7 @@ mod tests {
 
     /// 短于 min_speech_ms 的 blip 不发任何边沿。
     #[test]
-    fn blip_shorter_than_min_speech_emits_nothing() {
+    fn blip_min_nothing() {
         let mut vad = state();
         for _ in 0..5 {
             assert_eq!(vad.rr3_vad_feed(&frame(3000)), None);
@@ -329,7 +329,7 @@ mod tests {
 
     /// rms_peak 取起音窗内的最大帧 RMS。
     #[test]
-    fn onset_carries_peak_rms_across_the_window() {
+    fn onset_rms_window() {
         let mut vad = state();
         for _ in 0..3 {
             assert_eq!(vad.rr3_vad_feed(&frame(2000)), None);
@@ -347,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn silence_only_never_emits_any_edge() {
+    fn silence_any_edge() {
         let mut vad = state();
         for _ in 0..200 {
             assert_eq!(vad.rr3_vad_feed(&frame(0)), None);
@@ -356,7 +356,7 @@ mod tests {
 
     /// 滞回：语音态用 rms_tail 判静音，起音档与收尾档互不串用。
     #[test]
-    fn tail_threshold_holds_between_start_and_tail() {
+    fn tail_thr_start_tail() {
         let mut vad = Rr3VadState::rr3_vad_new(
             Rr3VadConfig {
                 rms_tail: 800,
@@ -385,7 +385,7 @@ mod tests {
 
     /// 判停中途恢复有声：silence_ms 清零重新数，净 speech_ms 继续累计。
     #[test]
-    fn mid_tail_speech_resets_silence_window() {
+    fn mid_tail_window() {
         let mut vad = state();
         for _ in 0..10 {
             vad.rr3_vad_feed(&frame(3000));
@@ -411,7 +411,7 @@ mod tests {
 
     /// 等号边界：rms == rms_start 算有声。
     #[test]
-    fn rms_equal_to_threshold_counts_as_speech() {
+    fn rms_thr_as_speech() {
         let mut vad = state();
         for _ in 0..9 {
             assert_eq!(vad.rr3_vad_feed(&frame(1500)), None);

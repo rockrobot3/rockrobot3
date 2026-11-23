@@ -90,7 +90,7 @@ mod tests {
     /// HAL 失败按腿分变体（批N24 件三）：读失败 → ReadBack、写失败 → Write，
     /// HAL 错原样随行——枚举映射是编排层渲染的依据，分错腿文案就张冠李戴。
     #[test]
-    fn apply_maps_hal_failures_to_readback_and_write_variants() {
+    fn apply_hal_variants() {
         assert_eq!(
             rr3_relay_apply(&mut Rr3ReadFailGpio, true).unwrap_err(),
             Rr3RelayApplyError::ReadBack(Rr3HalError::Busy),
@@ -106,7 +106,7 @@ mod tests {
     /// apply 落电平并回 `(生效, 前一)`——通断语义没有第三态（应答体组装随 A-8
     /// 上移承载层；变化判定依据随 A-7 进返回值）
     #[test]
-    fn apply_sets_level_and_reports_previous() {
+    fn apply_sets_previous() {
         let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
         assert_eq!(
             rr3_relay_apply(&mut gpio, true).unwrap(),
@@ -124,7 +124,7 @@ mod tests {
 
     /// 同态抑制判定（0.0.5 批I A-7）：翻转真、同态假
     #[test]
-    fn state_due_only_on_level_change() {
+    fn state_due_change() {
         assert!(rr3_relay_state_due(false, true));
         assert!(rr3_relay_state_due(true, false));
         assert!(!rr3_relay_state_due(true, true), "同态不续发");
@@ -133,7 +133,7 @@ mod tests {
 
     /// 计数键两态钉死（0.0.4 批B）：键是模块内部运维词汇，字面量唯一落点
     #[test]
-    fn counter_key_distinguishes_on_off() {
+    fn counter_key_off() {
         assert_eq!(rr3_relay_count_key(true), "relay_on");
         assert_eq!(rr3_relay_count_key(false), "relay_off");
     }

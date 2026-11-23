@@ -218,7 +218,7 @@ mod tests {
 
     /// 与仓内 config.toml 同形状的最小配置必须解析成功——漂移当场红
     #[test]
-    fn config_parse_covers_repo_shape() {
+    fn cfg_parse_repo_shape() {
         let text = r#"
 [rr3-connect.wifi]
 link_report_period_ms = 5000
@@ -239,7 +239,7 @@ up = false
     /// 兼容，同 bt 缺段回落口径）；显式值生效；显式 0 按 1 拒放（0 = 无下限
     /// 是策略漏洞，不当合法配置）
     #[test]
-    fn config_min_pass_len_defaults_to_legacy_eight() {
+    fn cfg_pass_len_eight() {
         let base = "[rr3-connect.wifi]\nlink_report_period_ms = 5000\ntimeout_ms = 20000\n";
         assert_eq!(rr3_conn_cfg_parse(base).unwrap().0.min_pass_len, 8);
         let text = format!("{base}min_pass_len = 6\n");
@@ -255,7 +255,7 @@ up = false
     /// 轮询周期/超时工程域（本轮审计）：0 周期钳 100ms（防 nmcli fork 风暴），
     /// 超时 <1s 抬到 1s、>60s 拒（恒失败与拖心跳都是配置错）。
     #[test]
-    fn config_clamps_period_and_timeout_domains() {
+    fn cfg_period_domains() {
         let text = |p: u64, t: u64| {
             format!("[rr3-connect.wifi]\nlink_report_period_ms = {p}\ntimeout_ms = {t}\n")
         };
@@ -267,7 +267,7 @@ up = false
     }
 
     #[test]
-    fn config_parse_rejects_missing_sections_and_fields() {
+    fn cfg_rej_miss_fields() {
         let e = rr3_conn_cfg_parse("[rr3-connect]\n").unwrap_err();
         assert!(e.contains("[rr3-connect.wifi]"), "缺段点名: {e}");
         let e =
@@ -280,7 +280,7 @@ up = false
     /// bt 开机初值注入（N-1）：缺段回落 false（旧 config 兼容）、up=true
     /// 生效、类型错点名拒（不静默吞）。
     #[test]
-    fn config_bt_up_defaults_false_and_type_checks() {
+    fn cfg_bt_up_checks() {
         let base = "[rr3-connect.wifi]\nlink_report_period_ms = 5000\ntimeout_ms = 20000\n";
         // 缺段回落 false
         assert!(!rr3_conn_cfg_parse(base).unwrap().1);

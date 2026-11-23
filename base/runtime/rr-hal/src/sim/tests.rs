@@ -14,7 +14,7 @@ use crate::{
 /// 的全程偏差 ≤100（幅度 0.8%，听感等价预算）；逐块推进（20ms 块）验证
 /// 相位跨块连续
 #[test]
-fn tts_block_tracks_sine_formula_within_budget() {
+fn tts_block_sine_budg() {
     let mut buf = [0i16; 320];
     for chunk in (0..16_000).step_by(320) {
         rr3_sim_tts_block(&mut buf, chunk);
@@ -33,7 +33,7 @@ fn tts_block_tracks_sine_formula_within_budget() {
 
 /// 扫描列表（N-9 迁入）：首行 SSID 与 sim 链路缺省 SSID 同一真值
 #[test]
-fn scan_list_first_ssid_ties_to_link_default() {
+fn scan_ties_link_def() {
     let list = rr3_sim_scan_list();
     assert_eq!(list.len(), 3);
     assert_eq!(list[0].0, crate::backend::RR3_HAL_SIM_LINK_SSID_DEFAULT);
@@ -53,7 +53,7 @@ const CFG_16K_STEREO: Rr3AudioCfg = Rr3AudioCfg {
 };
 
 #[test]
-fn wave_parse_covers_three_modes_and_rejects_garbage() {
+fn wave_rej_garbage() {
     for (s, want) in [
         ("sine", Rr3SimWave::Sine),
         ("SINE", Rr3SimWave::Sine),
@@ -72,7 +72,7 @@ fn wave_parse_covers_three_modes_and_rejects_garbage() {
 /// golden 向量：正弦前 8 点逐点相等（16k 采样率下 440Hz 的确定性开头）。
 /// 这批字面量同时钉住频率与幅度——改波形参数，这里当场红。
 #[test]
-fn sine_wave_matches_golden_prefix() {
+fn sine_wave_prefix() {
     let mut s = source(Rr3SimWave::Sine);
     s.open(RR3_AUDIO_CFG_16K_MONO16).unwrap();
     let mut buf = [0i16; 8];
@@ -86,7 +86,7 @@ fn sine_wave_matches_golden_prefix() {
 
 /// 相位跨 read 连续：两次 read 拼起来等于一次读双份
 #[test]
-fn sine_phase_is_continuous_across_reads() {
+fn sine_phase_reads() {
     let mut a = source(Rr3SimWave::Sine);
     a.open(RR3_AUDIO_CFG_16K_MONO16).unwrap();
     let mut b1 = [0i16; 160];
@@ -106,7 +106,7 @@ fn sine_phase_is_continuous_across_reads() {
 
 /// burst：偶秒正弦、奇秒静音；2s 周期恰为 440Hz 整周期数，第 3 秒与第 1 秒逐点相等
 #[test]
-fn burst_gates_sine_by_even_seconds_and_stays_deterministic() {
+fn burst_sine_stays_det() {
     let mut s = source(Rr3SimWave::Burst);
     s.open(RR3_AUDIO_CFG_16K_MONO16).unwrap();
     let mut pcm = [0i16; 3 * 16000];
@@ -132,7 +132,7 @@ fn burst_gates_sine_by_even_seconds_and_stays_deterministic() {
 
 /// 噪声确定性：同波两源读出逐点相等，且幅度不越 ±8000
 #[test]
-fn noise_is_deterministic_and_bounded() {
+fn noise_det_bounded() {
     let mut a = source(Rr3SimWave::Noise);
     a.open(RR3_AUDIO_CFG_16K_MONO16).unwrap();
     let mut ba = [0i16; 512];
@@ -150,7 +150,7 @@ fn noise_is_deterministic_and_bounded() {
 }
 
 #[test]
-fn silence_is_all_zero_and_read_before_open_is_invalid() {
+fn silence_open_bad() {
     let mut s = source(Rr3SimWave::Silence);
     let mut probe = [0i16; 10];
     let e = s.read(&mut probe).unwrap_err();
@@ -162,7 +162,7 @@ fn silence_is_all_zero_and_read_before_open_is_invalid() {
 }
 
 #[test]
-fn open_rejects_zero_rate_and_non_16bit() {
+fn open_rej_non_16bit() {
     for bad in [
         Rr3AudioCfg {
             sample_rate_hz: 0,
@@ -187,7 +187,7 @@ fn open_rejects_zero_rate_and_non_16bit() {
 }
 
 #[test]
-fn sink_requires_open_and_caps_tail_window() {
+fn sink_tail_window() {
     let mut sink = Rr3SimAudioSink::rr3_sim_sink_new(100);
     let e = sink.write(&[1]).unwrap_err();
     assert!(
@@ -211,7 +211,7 @@ fn sink_requires_open_and_caps_tail_window() {
 /// sim 舵机：初始角即构造值，set 后读回最后一次的值——设备面只记录不裁决，
 /// 越界裁决属模块侧（angle_limit 在模块 config），这条用例钉住分工边界。
 #[test]
-fn sim_servo_records_last_set_angle_without_judging() {
+fn sim_last_set_judging() {
     let mut s = Rr3SimServo::rr3_sim_servo_new(90);
     assert_eq!(s.rr3_sim_servo_angle(), 90, "初始角 = 中位 90°");
     assert_eq!(
@@ -227,7 +227,7 @@ fn sim_servo_records_last_set_angle_without_judging() {
 
 /// 方位角构造的值域门：±90 闭区间收，越界与 NaN 不认。
 #[test]
-fn sim_doa_ctor_accepts_only_pm90() {
+fn sim_doa_ctor_ok_pm90() {
     for deg in [-90.0, -60.0, 0.0, 45.0, 90.0] {
         let d = Rr3SimDoa::rr3_sim_doa_new(deg).unwrap_or_else(|| panic!("{deg} 应收"));
         assert_eq!(d.rr3_sim_doa_deg(), deg);
@@ -244,7 +244,7 @@ fn sim_doa_ctor_accepts_only_pm90() {
 /// 必须与注入角自洽（sense 侧 DoA 的正门前提——注入与反演同一模型）。
 /// 通道序按板端口径（ch0=物理右）；注入模型 `g_r = 1 + sinθ`、`g_l = 1 - sinθ`。
 #[test]
-fn sim_doa_stereo_ild_matches_injected_direction() {
+fn sim_ild_direction() {
     for deg in [-90.0, -60.0, -30.0, 0.0, 30.0, 60.0, 90.0] {
         let mut s = Rr3SimAudioSource::rr3_sim_source_doa(
             Rr3SimWave::Sine,
@@ -276,7 +276,7 @@ fn sim_doa_stereo_ild_matches_injected_direction() {
 /// `rr3_doa_fix` 用同一物理量（lag→sinθ→deg）反演，sim 基线与反演基线同源
 /// 由本测与 e2e_audio_chain 的 ±2° 容差双面钉住。
 #[test]
-fn sim_doa_stereo_itd_lag_matches_injected_direction() {
+fn sim_lag_direction() {
     // TDOA 判据域 ±60°：±90° 是 ILD 模型边界（单侧 2 倍另侧归零）——另侧静音
     // 无时延可测，TDOA 在该角退化（sense 侧互相关全零峰退 0°，物理同构），
     // 不属判据域。
@@ -331,7 +331,7 @@ fn sim_doa_stereo_itd_lag_matches_injected_direction() {
 /// sense VAD 的 silence_tail_ms=700ms，offset 永不触发（--chain 演练
 /// 60s 只见一次 onset 的根因）。
 #[test]
-fn burst_gate_counts_frames_so_stereo_keeps_one_second_windows() {
+fn burst_so_windows() {
     let mut s =
         Rr3SimAudioSource::rr3_sim_source_doa(Rr3SimWave::Burst, Rr3SimDoa::rr3_sim_doa_new(-60.0));
     s.open(CFG_16K_STEREO).unwrap();
@@ -352,7 +352,7 @@ fn burst_gate_counts_frames_so_stereo_keeps_one_second_windows() {
 
 /// 确定性：同角两源读出逐点相等；单声道链路不受方位注入影响（逐点等价）。
 #[test]
-fn sim_doa_is_deterministic_and_mono_is_invariant() {
+fn sim_det_invariant() {
     let mk = || {
         Rr3SimAudioSource::rr3_sim_source_doa(Rr3SimWave::Sine, Rr3SimDoa::rr3_sim_doa_new(-60.0))
     };
@@ -386,7 +386,7 @@ fn sim_doa_is_deterministic_and_mono_is_invariant() {
 
 /// sim 数字输出：电平写读回环 + 覆写。LED/继电器各持一路，行为同一件。
 #[test]
-fn sim_gpio_level_roundtrip_and_overwrite() {
+fn sim_gpio_overwrite() {
     let mut g = Rr3SimGpioOut::rr3_sim_gpio_new(false);
     assert!(!g.rr3_sim_gpio_level(), "初始断电态");
     assert!(!g.level().unwrap());
@@ -400,7 +400,7 @@ fn sim_gpio_level_roundtrip_and_overwrite() {
 /// （批I F1 起 trait 去 `Send + Sync`、写面 `&mut self`——单所有者独占写，
 /// 旧"跨线程写读"用例随线程面拆除，共享写归承载层的互斥面。）
 #[test]
-fn sim_display_draws_and_reads_back() {
+fn sim_draws_reads_back() {
     let mut d = Rr3SimDisplay::rr3_sim_display_new([0; 8]);
     assert_eq!(d.rr3_sim_frame(), [0; 8], "构造初始黑屏");
     d.draw(&[0b1111_1111, 0, 0, 0, 0, 0, 0, 0b1010_1010])
@@ -417,7 +417,7 @@ fn sim_display_draws_and_reads_back() {
 /// sim 电池：trait battery 读回构造/覆写后的三元组，电压曲线按
 /// 钉死的线性映射逐点核对——"设备只报数、策略不在这里"的分工同舵机那条。
 #[test]
-fn sim_battery_reads_percent_charging_and_derived_voltage() {
+fn sim_batt_reads_volt() {
     let b = Rr3SimBattery::rr3_sim_battery_new(80, false);
     let st = b.battery().unwrap();
     assert_eq!(
@@ -440,7 +440,7 @@ fn sim_battery_reads_percent_charging_and_derived_voltage() {
 /// sim 链路：trait state 读回构造/覆写后的三元组；断链时
 /// ssid/rssi 强制 None——设备面如实表现，模块侧不许从死链里读出网络信息。
 #[test]
-fn sim_link_reads_up_ssid_rssi_and_blanks_them_when_down() {
+fn sim_up_them_down() {
     let l = Rr3SimLink::rr3_sim_link_new(true, "rock-sim", -50);
     let st = l.state().unwrap();
     let ssid = st.ssid.as_ref().map(|s| s.rr3_ssid_text_as_str());

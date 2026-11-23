@@ -12,7 +12,7 @@ fn bytes(v: Value) -> Vec<u8> {
 
 /// 三个方法各自解析成功，id 与 params 原样带上
 #[test]
-fn parses_three_upstream_methods() {
+fn parses_three_methods() {
     for m in ["rr3.register", "rr3.heartbeat", "rr3.unregister"] {
         let got = rr3_rpc_parse(&bytes(
             json!({"jsonrpc":"2.0","id":7,"method":m,"params":{}}),
@@ -26,14 +26,14 @@ fn parses_three_upstream_methods() {
 
 /// 名字表覆盖全部变体：长度对齐、判别式连续（末变体下标 = 表长 - 1）
 #[test]
-fn name_table_covers_all_variants() {
+fn name_table_variants() {
     assert_eq!(RR3_RPC_NAMES.len(), 13);
     assert_eq!(Rr3RpcMethod::CtlDomainSet as usize, RR3_RPC_NAMES.len() - 1);
 }
 
 /// 畸形 JSON-RPC：一律 Invalid，文案指出缺哪一项
 #[test]
-fn rejects_malformed_request() {
+fn rej_malformed_req() {
     for (v, hint) in [
         (
             json!({"jsonrpc":"1.0","id":1,"method":"rr3.heartbeat"}),
@@ -57,7 +57,7 @@ fn rejects_malformed_request() {
 
 /// 未知方法必须拒（不许当 no-op 放行）
 #[test]
-fn rejects_unknown_method() {
+fn rej_unknown_method() {
     let (code, msg) = rr3_rpc_parse(&bytes(
         json!({"jsonrpc":"2.0","id":1,"method":"rr3.shUTDOWN","params":{}}),
     ))
@@ -77,7 +77,7 @@ fn rejects_bad_payloads() {
 
 /// register 的 manifest 文本取值：缺参 / 类型错 / 空串都拒
 #[test]
-fn manifest_param_is_strict() {
+fn mft_param_strict() {
     assert_eq!(
         rr3_rpc_manifest(&json!({"name":"rr3-sima","manifest":"[manifest]\n"})).unwrap(),
         "[manifest]\n"
@@ -95,7 +95,7 @@ fn manifest_param_is_strict() {
 
 /// Event payload 的 topic 取值同样严格（Task 8 的发布面靠它）
 #[test]
-fn topic_param_is_strict() {
+fn topic_param_strict() {
     assert_eq!(
         rr3_rpc_topic_param(&json!({"topic":"rr3-sima/ping/state"})).unwrap(),
         "rr3-sima/ping/state"
@@ -121,7 +121,7 @@ fn parses_call_method() {
 /// `rr3.ctl.wiring` 入列；批N5 件五笔4 起 `rr3.ctl.contracts` 入列；批N22 件一
 /// 起 `rr3.ctl.domain.set` 入列，白名单九 ctl）
 #[test]
-fn parses_ctl_methods_and_flags_them() {
+fn parses_ctl_them() {
     for m in [
         "rr3.ctl.status",
         "rr3.ctl.health",
@@ -159,7 +159,7 @@ fn parses_ctl_methods_and_flags_them() {
 /// 心跳可选 counters 字段的形状拆包（0.0.4 批B）：缺省/非对象/空 → None；
 /// 合法键值逐对收；非法值与空键静默跳过（脏拍不折心跳错误）
 #[test]
-fn heartbeat_counters_param_is_optional_and_lenient() {
+fn heartbeat_lenient() {
     assert!(rr3_rpc_counters(&json!({})).is_none(), "缺省字段");
     assert!(
         rr3_rpc_counters(&json!({"counters": {}})).is_none(),
@@ -185,7 +185,7 @@ fn heartbeat_counters_param_is_optional_and_lenient() {
 
 /// rr3.call 的参数：topic 必填，args 缺省 Null 且原样透传
 #[test]
-fn call_params_need_topic_and_args_default_to_null() {
+fn call_args_def_null() {
     let (topic, args) =
         rr3_rpc_call_params(&json!({"topic":"t/a","args":{"text":"hi"}})).expect("应有参数");
     assert_eq!(topic, "t/a");
@@ -200,7 +200,7 @@ fn call_params_need_topic_and_args_default_to_null() {
 
 /// 应答形状：JSON-RPC 2.0 + 同 id + result；注册回带的 src_task 是唯一的 task 来源
 #[test]
-fn result_shape_is_jsonrpc2() {
+fn result_jsonrpc2() {
     let out = rr3_rpc_build_result(9, &json!({"src_task": 2}));
     let v: Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(v["jsonrpc"], "2.0");
@@ -211,7 +211,7 @@ fn result_shape_is_jsonrpc2() {
 
 /// 错误应答用契约里的 AIRY_E* 判别值（不许自造码）
 #[test]
-fn error_shape_uses_contract_status_codes() {
+fn error_uses_codes() {
     let out = rr3_rpc_build_error(9, Rr3StatusCode::Busy, "已在册");
     let v: Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(
@@ -232,7 +232,7 @@ fn error_shape_uses_contract_status_codes() {
 
 /// 注册错误到状态码的映射（重复/超额=忙，保留名=权限）
 #[test]
-fn register_error_maps_to_status_code() {
+fn reg_error_maps_code() {
     use crate::registry::Rr3RegisterError;
     assert_eq!(
         rr3_rpc_reg_status(&Rr3RegisterError::Duplicate {
@@ -255,7 +255,7 @@ fn register_error_maps_to_status_code() {
 
 /// 发布拒绝到状态码：三种拒法都是权限/非法，不是忙
 #[test]
-fn publish_deny_maps_to_status_code() {
+fn pub_deny_maps_code() {
     use crate::registry::Rr3PublishDeny;
     assert_eq!(
         rr3_rpc_deny_status(&Rr3PublishDeny::ReservedNamespace { topic: "t".into() }),
@@ -278,7 +278,7 @@ fn publish_deny_maps_to_status_code() {
 /// topic 借用取法与拥有版同一判据：同值、同错误文案、空串/非串同拒
 /// （Event 转发热路径用借用版省一次 String 分配，口径不许分家）
 #[test]
-fn topic_ref_and_owned_param_share_one_judgement() {
+fn topic_ref_judgement() {
     let ok = json!({"topic": "rr3-sense/capture/dump"});
     assert_eq!(rr3_rpc_topic_ref(&ok).unwrap(), "rr3-sense/capture/dump");
     assert_eq!(rr3_rpc_topic_param(&ok).unwrap(), "rr3-sense/capture/dump");

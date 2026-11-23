@@ -3,7 +3,7 @@
 use super::*;
 
 #[test]
-fn fanout_shadow_counts_unsubscribed_without_changing_delivery() {
+fn fanout_delivery() {
     let mut r = RrdRegistry::new(1000);
     let (txa, rxa) = chan();
     let (txb, rxb) = chan();
@@ -39,7 +39,7 @@ fn fanout_shadow_counts_unsubscribed_without_changing_delivery() {
 
 /// 转发留痕闸：首次必记、同数沉默、连接数变化再记——音频流每帧一条会刷爆日志环。
 #[test]
-fn fanout_log_gate_only_on_conn_change() {
+fn fanout_log_change() {
     let mut r = RrdRegistry::new(1000);
     assert!(r.rr3_reg_fan_changed("rr3-sense/audio/pcm", 4), "首次必记");
     assert!(!r.rr3_reg_fan_changed("rr3-sense/audio/pcm", 4), "同数沉默");
@@ -59,7 +59,7 @@ fn fanout_log_gate_only_on_conn_change() {
 
 /// 路由表读取：exposes 匹配、多 callee 取 task 最小、failed 排除、未声明回 None
 #[test]
-fn callee_for_matches_exposes_and_prefers_lowest_task() {
+fn callee_lowest_task() {
     let mut r = RrdRegistry::new(1000);
     // simb 先注册（task 小），同样 exposes t/a；sima 晚 300ms 注册（判死时刻随之错开）
     let b = r
@@ -103,7 +103,7 @@ fn callee_for_matches_exposes_and_prefers_lowest_task() {
 /// exposes 索引随条目离表同步（批D2）：unregister 摘掉候选后路由即空；同身份
 /// 重注册换新 task，旧 task 的索引项不残留（索引不随失败历史增长）。
 #[test]
-fn callee_index_follows_unregister_and_reregistration() {
+fn callee_index_rereg() {
     let mut r = RrdRegistry::new(1000);
     let t0 = r
         .rr3_reg_add(&facts_exposes("rr3-idx", &["rr3-x/t/a"]), chan().0, 0)
@@ -136,7 +136,7 @@ fn callee_index_follows_unregister_and_reregistration() {
 
 /// 点名投递：在册活连接收得到，未知 task / 已死连接回 false
 #[test]
-fn send_to_delivers_to_named_connection_only() {
+fn send_named_conn() {
     use rr_ipc::{opcode, rr3_body_encode, Rr3Header, Rr3PayloadType};
     let mut r = RrdRegistry::new(1000);
     let (tx, rx) = chan();
@@ -174,7 +174,7 @@ fn send_to_delivers_to_named_connection_only() {
 
 /// 分配从 2 起单调递增，0/1 永不出现；快照按 task 升序
 #[test]
-fn task_ids_start_at_two_and_increase() {
+fn task_two_increase() {
     let mut r = RrdRegistry::new(1000);
     let a = r
         .rr3_reg_add(&facts("rr3-sima", 200, 1000, "always"), chan().0, 0)
@@ -196,7 +196,7 @@ fn task_ids_start_at_two_and_increase() {
 /// 快照的序是 task 升序而非名字升序：先注册 z 再注册 a，顺序必须跟着 task 走
 /// （少了 sort_by_key 这一行，`BTreeMap<String,_>` 的迭代序会把名字序冒充成 task 序）
 #[test]
-fn snapshot_orders_by_task_not_by_name() {
+fn snapshot_not_name() {
     let mut r = RrdRegistry::new(1000);
     let z = r
         .rr3_reg_add(&facts("rr3-zeta", 200, 1000, "always"), chan().0, 0)
@@ -218,7 +218,7 @@ fn snapshot_orders_by_task_not_by_name() {
 /// 健康快照（F3 / ADR-0010 裁定 4）：task 升序、回显判定用的三个数——
 /// `since_beat_ms` 必须是 `now - last_beat`，配置回显条目自己的 heartbeat/watchdog
 #[test]
-fn health_snapshot_echoes_the_judgement_inputs_in_task_order() {
+fn health_task_order() {
     let mut r = RrdRegistry::new(1000);
     let z = r
         .rr3_reg_add(&facts("rr3-zeta", 200, 1000, "always"), chan().0, 0)
@@ -246,7 +246,7 @@ fn health_snapshot_echoes_the_judgement_inputs_in_task_order() {
 
 /// 健康快照的 `since_beat_ms` 对"now 早于 last_beat"不得回绕：saturating_sub 兜底
 #[test]
-fn health_snapshot_since_beat_never_wraps() {
+fn health_beat_wraps() {
     let mut r = RrdRegistry::new(1000);
     r.rr3_reg_add(&facts("rr3-sima", 200, 1000, "always"), chan().0, 1000)
         .unwrap();
@@ -259,7 +259,7 @@ fn health_snapshot_since_beat_never_wraps() {
 
 /// 冷启动观测列：boot_ms = 注册时刻 - 基准；基准未定格时为 None（不拿 0 冒充）
 #[test]
-fn health_snapshot_boot_ms_is_registration_offset() {
+fn health_ms_reg_offset() {
     let mut r = RrdRegistry::new(1000);
     r.rr3_reg_add(&facts("rr3-simb", 200, 1000, "always"), chan().0, 1350)
         .unwrap();
@@ -284,7 +284,7 @@ fn health_snapshot_boot_ms_is_registration_offset() {
 
 /// 四个阶段名与 `as_str()` 一对一：下行状态广播与集成测试按这些字面量比对
 #[test]
-fn phase_names_are_the_wire_vocabulary() {
+fn phase_vocabulary() {
     assert_eq!(Rr3Phase::Registered.as_str(), "registered");
     assert_eq!(Rr3Phase::Running.as_str(), "running");
     assert_eq!(Rr3Phase::Degraded.as_str(), "degraded");
@@ -304,7 +304,7 @@ fn phase_names_are_the_wire_vocabulary() {
 
 /// 注册拒绝的三条文案逐字钉住（运维日志与 Task 10 的 wire 用例按字面比对）
 #[test]
-fn register_error_display_is_verbatim() {
+fn reg_error_verbatim() {
     assert_eq!(
         Rr3RegisterError::Duplicate {
             name: "rr3-sima".into(),
@@ -332,7 +332,7 @@ fn register_error_display_is_verbatim() {
 /// 三条拒绝文案各自点名自己的关键信息：冒充点名性质、越权点名 owner+sender、
 /// 未点名主题点名主题（Task 10 靠这些子串区分被哪一层拒的）
 #[test]
-fn publish_deny_display_distinguishes_the_three_layers() {
+fn pub_deny_layers() {
     let d = Rr3PublishDeny::ReservedNamespace {
         topic: "rr3-runtime/module/state".into(),
     };

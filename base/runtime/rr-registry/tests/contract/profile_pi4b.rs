@@ -131,7 +131,7 @@ fn classic_pins(v: &toml::Value) {
 /// （host 档 / chip / 宿主两键 + 板侧十一键同源 / 十一格绑定 / 恰一条 [[pin]] = MAX7219）。
 /// 完整形状由 default/distro 测试与 rrd 装载门共同覆盖；线束与档位漂移即红。
 #[test]
-fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
+fn pi4b_pins_t1_harness() {
     let root = repo_root();
     let text = std::fs::read_to_string(root.join("profiles/pi4b-host-esp32-classic.toml"))
         .expect("profiles/pi4b-host-esp32-classic.toml 必须存在（W2/T1）");
@@ -220,7 +220,7 @@ fn t2_shape(v: &toml::Value) {
 }
 
 #[test]
-fn pi4b_host_esp32s3_profile_pins_t2_harness() {
+fn pi4b_pins_t2_harness() {
     let root = repo_root();
     let text = std::fs::read_to_string(root.join("profiles/pi4b-host-esp32s3.toml"))
         .expect("profiles/pi4b-host-esp32s3.toml 必须存在（W2/T2）");
@@ -357,7 +357,7 @@ fn n44_pins(v: &toml::Value) {
 /// 三模块（connect/interact/brain）。net.bt 是 placeholder 不进生产装配面。
 /// 完整装载链由 rrd 的 boot drill 覆盖。
 #[test]
-fn pi4b_host_profile_shape_n44_harness() {
+fn pi4b_n44_harness() {
     let root = repo_root();
     let text = std::fs::read_to_string(root.join("profiles/pi4b-host.toml"))
         .expect("profiles/pi4b-host.toml 必须存在（N44）");

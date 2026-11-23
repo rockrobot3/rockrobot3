@@ -27,7 +27,7 @@ mod tests {
 
     /// 逐字段对位 legacy asr.c build_wav_header（字节序/档位）。
     #[test]
-    fn wav_header_matches_legacy_asr_c() {
+    fn wav_legacy_asr_c() {
         let hdr = rr3_wav_header(16000, 3200);
         assert_eq!(&hdr[0..4], b"RIFF");
         assert_eq!(u32::from_le_bytes(hdr[4..8].try_into().unwrap()), 36 + 3200);
@@ -44,7 +44,7 @@ mod tests {
 
     /// 零长度数据：RIFF 长度只含头，data 长度 0。
     #[test]
-    fn wav_header_handles_empty_data() {
+    fn wav_empty_data() {
         let hdr = rr3_wav_header(8000, 0);
         assert_eq!(u32::from_le_bytes(hdr[4..8].try_into().unwrap()), 36);
         assert_eq!(u32::from_le_bytes(hdr[40..44].try_into().unwrap()), 0);

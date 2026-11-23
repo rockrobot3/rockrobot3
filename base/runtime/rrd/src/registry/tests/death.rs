@@ -4,7 +4,7 @@ use super::*;
 
 /// fanout：跳过发起者；对端已 drop 只是少计，不 panic
 #[test]
-fn fanout_skips_sender_and_survives_dropped_peer() {
+fn fanout_skips_peer() {
     let mut r = RrdRegistry::new(1000);
     let (txa, rxa) = chan();
     let (txb, rxb) = chan();
@@ -34,7 +34,7 @@ fn fanout_skips_sender_and_survives_dropped_peer() {
 /// 保留连接**——返回 0、计数 +1；队列腾空后下一帧自动续投。旧行为置 tx=None
 /// 会让模块在心跳仍通的情况下永久失聪（没有重连信号），播放期积压即可触发。
 #[test]
-fn fanout_drops_frames_but_keeps_slow_consumer() {
+fn fanout_but_consumer() {
     let mut r = RrdRegistry::new(1000);
     let (tx, rx) = mpsc::sync_channel::<Rr3Frame>(1);
     let t = r
@@ -88,7 +88,7 @@ fn fanout_drops_frames_but_keeps_slow_consumer() {
 
 /// 到期后连接句柄被丢掉：之后 fanout 不再往死连接塞
 #[test]
-fn expired_module_is_excluded_from_fanout() {
+fn expired_fanout() {
     let mut r = RrdRegistry::new(1000);
     let (txa, rxa) = chan();
     let (txb, _rxb) = chan();
@@ -104,7 +104,7 @@ fn expired_module_is_excluded_from_fanout() {
 
 /// 移除后既不在快照里也不再是 fanout 目标，task 号也不回收
 #[test]
-fn removed_module_leaves_the_table_entirely() {
+fn removed_entirely() {
     let mut r = RrdRegistry::new(1000);
     let (txa, rxa) = chan();
     let a = r
@@ -123,7 +123,7 @@ fn removed_module_leaves_the_table_entirely() {
 /// 真实崩溃循环：每次死亡之间隔着一次重注册（新 task）。今天必然红——
 /// `rr3_reg_add` 把 `restarts` 归零，第 6 次仍给得出计划，5 次上限永远撞不到。
 #[test]
-fn crash_budget_survives_reregistration_and_caps_after_five_incarnations() {
+fn crash_caps_five_inc() {
     let mut r = RrdRegistry::new(1000);
     let f = || facts("rr3-sima", 100, 500, "always");
     let mut delays = Vec::new();
@@ -162,7 +162,7 @@ fn crash_budget_survives_reregistration_and_caps_after_five_incarnations() {
 /// 达上限不是"只打一行日志"：health 行必须把崩溃连击与终态一起回显，
 /// 外部（ctl/面板/运维脚本）才能把"永久降级"与"正在重启"区分开。
 #[test]
-fn health_exposes_restart_exhausted_at_cap() {
+fn health_restart_cap() {
     let mut r = RrdRegistry::new(1000);
     let f = || facts("rr3-sima", 100, 500, "always");
     for i in 0..RR3_RESTART_FAILURE_CAP {
@@ -177,7 +177,7 @@ fn health_exposes_restart_exhausted_at_cap() {
 
 /// 到期那一路也记账，且**只记一次**：判死后 conn 再收尾不得双计（ledger R-A4 的收口）
 #[test]
-fn expiry_charges_once_and_the_later_conn_death_is_silent() {
+fn expiry_conn_silent() {
     let mut r = RrdRegistry::new(1000);
     let t = r
         .rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
@@ -201,7 +201,7 @@ fn expiry_charges_once_and_the_later_conn_death_is_silent() {
 
 /// `never` 策略下到期不给计划——`Rr3Expiry.restart` 不是装饰
 #[test]
-fn expiry_of_a_never_module_reports_no_restart() {
+fn expiry_no_restart() {
     let mut r = RrdRegistry::new(1000);
     let t = r
         .rr3_reg_add(&facts("rr3-simb", 100, 500, "never"), chan().0, 0)
@@ -255,7 +255,7 @@ fn survive_second_life(r: &mut RrdRegistry, t2: u64) {
 /// 两颗基准不许混：归零看 **registered_at_ms**（这一世活了多久），判死看 **last_beat_ms**
 /// （多久没喂狗）。所以本条一直喂狗（永不判死），只在"注册后第 521ms"那一刻等归零。
 #[test]
-fn surviving_a_watchdog_window_clears_the_crash_budget() {
+fn surviving_crash_budg() {
     let mut r = RrdRegistry::new(1000);
     let f = || facts("rr3-sima", 100, 500, "always");
     let t = r.rr3_reg_add(&f(), chan().0, 0).unwrap();
@@ -282,7 +282,7 @@ fn surviving_a_watchdog_window_clears_the_crash_budget() {
 
 /// 所有权：owned 的连接断线时 conn 一路什么都不做（等退出码）
 #[test]
-fn owned_conn_death_defers_terminal_state_to_the_exit_status() {
+fn owned_exit_status() {
     let mut r = RrdRegistry::new(1000);
     let f = facts("rr3-sima", 100, 500, "always");
     let t = r.rr3_reg_add(&f, chan().0, 0).unwrap();
@@ -323,7 +323,7 @@ fn owned_conn_death_defers_terminal_state_to_the_exit_status() {
 
 /// 两种到达次序都不许双计：到期先判死 vs conn 先 deferred
 #[test]
-fn death_and_expiry_in_either_order_charge_exactly_once() {
+fn death_order_once() {
     let f = || facts("rr3-sima", 100, 500, "always");
     // (a) watchdog 先判死并记账，收尸后到 → 收尸必须是 Silent（R-A4 的封印就在这半条）
     let mut a = RrdRegistry::new(1000);
@@ -362,7 +362,7 @@ fn death_and_expiry_in_either_order_charge_exactly_once() {
 
 /// 显式 unregister 之后，子进程退出码不得变成一次崩溃
 #[test]
-fn unregister_then_child_exit_does_not_charge() {
+fn unregister_charge() {
     let mut r = RrdRegistry::new(1000);
     let f = facts("rr3-sima", 100, 500, "always");
     let t = r.rr3_reg_add(&f, chan().0, 0).unwrap();
@@ -389,7 +389,7 @@ fn unregister_then_child_exit_does_not_charge() {
 
 /// 从未注册的子进程：没有条目可广播，但账必须记（否则坏 entry 能把机器转着圈地重起）
 #[test]
-fn child_that_never_registered_is_charged_by_name_until_the_cap() {
+fn child_reg_name_cap() {
     let mut r = RrdRegistry::new(1000);
     let f = facts("rr3-sima", 100, 500, "always");
     for i in 0..RR3_RESTART_FAILURE_CAP {
@@ -410,7 +410,7 @@ fn child_that_never_registered_is_charged_by_name_until_the_cap() {
 
 /// 死因→phase 的映射只有这一处（conn 与 supervisor 共用）
 #[test]
-fn phase_for_exit_is_the_single_source_of_the_two_words() {
+fn phase_exit_two_words() {
     assert_eq!(rr3_phase_for_exit(true), "unregistered");
     assert_eq!(rr3_phase_for_exit(false), "failed");
 }

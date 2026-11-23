@@ -106,7 +106,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn notify_addr_marks_abstract_socket() {
+    fn notify_addr_socket() {
         assert_eq!(
             rr3_notify_addr_from(OsStr::new("@rr3")),
             Some(b"\0rr3\0".to_vec())

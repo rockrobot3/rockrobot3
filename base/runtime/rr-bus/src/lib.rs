@@ -21,13 +21,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn broadcast_dst_task_matches_standard() {
+    fn broadcast_standard() {
         assert_eq!(RR3_BROADCAST_DST_TASK, 0);
     }
 
     /// 任务号三段不得重叠：0 广播 / 1 rrd / ≥2 模块
     #[test]
-    fn task_id_space_is_disjoint() {
+    fn task_id_disjoint() {
         assert_eq!(RR3_BROADCAST_DST_TASK, 0);
         assert_eq!(RR3_TASK_RRD, 1);
         assert_eq!(RR3_TASK_FIRST_MODULE, 2);
@@ -43,7 +43,7 @@ mod tests {
     /// 0..=139 占位带内。**不再**把两个字面量互相比一遍冒充"对齐调度类"的验证——
     /// v0.0.1 没有任何契约/ADR 定义过 0-139，真正的优先级语义随 M2 的调度 ADR 落地后替换本测试。
     #[test]
-    fn priority_window_is_nonempty_placeholder_band() {
+    fn priority_window_band() {
         const BAND: std::ops::RangeInclusive<u32> = 0..=139; // 常量文档声明的占位带
         const {
             // const 上下文不允许 format!：字面值见上方两个常量本体，此处只钉关系
@@ -61,13 +61,13 @@ mod tests {
     }
 
     #[test]
-    fn bus_reexports_contract_version() {
+    fn bus_contract_version() {
         assert_eq!(RR3_BUS_CONTRACT_VERSION, 1);
     }
 
     /// re-export 与 rr-core 真值一致（下沉后防两册漂移）
     #[test]
-    fn reexports_match_rr_core_truth() {
+    fn reexports_rr_truth() {
         assert_eq!(rr_core::RR3_TASK_RRD, RR3_TASK_RRD);
         assert_eq!(rr_core::RR3_METHOD_CALL, RR3_METHOD_CALL);
         assert_eq!(rr_core::RR3_TOPIC_SEP, RR3_TOPIC_SEP);

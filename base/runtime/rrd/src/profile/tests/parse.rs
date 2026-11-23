@@ -59,7 +59,7 @@ fn good_profile_parses() {
 }
 
 #[test]
-fn parse_errors_are_all_collected_and_named() {
+fn parse_errors_named() {
     let text = GOOD
         .replace("schema_version = 5", "schema_version = 9")
         .replace("\"act.servo\" = \"rr3-pa\"", "\"act.servo\" = \"\"")
@@ -88,7 +88,7 @@ fn parse_errors_are_all_collected_and_named() {
 }
 
 #[test]
-fn missing_sections_and_empty_enabled_slots_are_errors() {
+fn miss_slots_errors() {
     let errs = rr3_profile_parse("schema_version = 5\n").expect_err("缺段必须报错");
     assert!(
         errs.iter().any(|e| e.contains("缺少 [bindings]")),
@@ -194,7 +194,7 @@ fn cap_value_flows() {
 /// 类型错逐条点名；合法值如实收进结构体（换成 64 仍解析成功——证明容量是
 /// 装配单数据不是解析器写死）。
 #[test]
-fn runtime_log_ring_cap_missing_or_nonpositive_is_red_and_value_flows() {
+fn runtime_miss_flows() {
     cap_seg_missing();
     cap_key_missing();
     cap_nonpositive();
@@ -205,7 +205,7 @@ fn runtime_log_ring_cap_missing_or_nonpositive_is_red_and_value_flows() {
 }
 
 #[test]
-fn unparsable_toml_is_single_error() {
+fn unparsable_error() {
     let errs = rr3_profile_parse("[bindings\n").expect_err("必须报错");
     assert_eq!(errs.len(), 1);
     assert!(errs[0].starts_with("装配单 TOML 解析失败"), "{errs:?}");
@@ -213,7 +213,7 @@ fn unparsable_toml_is_single_error() {
 
 /// 满配：manifest 路径按 <root>/modules/<名>/module.toml 解析，缺格为空
 #[test]
-fn full_profile_resolves_manifests_and_finds_no_missing() {
+fn full_mfts_no_miss() {
     let root = Root::new("full");
     let p = root.write_profile("full.toml", GOOD);
     let boot = boot_inputs(&p).expect("满配装配单应通过");

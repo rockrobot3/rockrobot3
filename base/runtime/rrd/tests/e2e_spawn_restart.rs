@@ -164,7 +164,7 @@ fn s1_restart(rrd: &mut RrdTest, b: &mut RrdClient, pid1: u64, task1: u64) {
 
 /// S1 — DoD 主链：boot 起的模块真的上线（`running` 第一次有线上的脸），崩了按策略起第二世
 #[test]
-fn boot_spawned_module_reaches_running_then_restarts_after_crash() {
+fn boot_then_crash() {
     let m = rr3_fixture_manifest("sr-s1", "sima"); // restart_policy = always
                                                    // 与 S2/S3 同一处置：本用例钉的是"退出码那一路的定性"，共用夹具的 500ms
                                                    // watchdog 是 e2e_watchdog 的判据。高负载机上收尸可能晚于 500ms，watchdog
@@ -180,7 +180,7 @@ fn boot_spawned_module_reaches_running_then_restarts_after_crash() {
 /// S2 — A-6 的对照：**同一个 abort role、两种所有权、两种线上相位**。
 /// 删掉 owned 那半，这条就退化成 11a 之前的现值（"崩溃检测分不清被打死与体面退场"）。
 #[test]
-fn an_owned_crash_is_failed_while_a_foreign_one_is_unregistered() {
+fn owned_fail_unreg() {
     let owned = rr3_fixture_manifest("sr-s2-own", "simb"); // 被 boot 的那一份
     let foreign = rr3_fixture_manifest("sr-s2-fgn", "sima"); // 测试自己起的那一份
                                                              // 夹具默认的 wd=500ms 是 e2e_watchdog 的判据，不是本用例要的：这里钉的是"退出码定性"，
@@ -234,7 +234,7 @@ fn an_owned_crash_is_failed_while_a_foreign_one_is_unregistered() {
 
 /// S3 — `never` 策略的崩溃：一条 failed 广播 + 绝不再起一个进程
 #[test]
-fn never_policy_crash_does_not_spawn_again() {
+fn never_not_again() {
     let m = rr3_fixture_manifest("sr-s3", "simb"); // restart_policy = never
                                                    // 同 S2：钉的是退出码那一路的定性 + never 不再起，500ms watchdog 抢记会把两路搅在一起
     rr3_fixture_watchdog_ms(&m, 60_000);
@@ -328,7 +328,7 @@ fn s4_second(rrd: &mut RrdTest, pid1: u64, task1: u64) {
 
 /// S4 — 第二条崩溃路：watchdog 到期判死一个 owned 的挂死模块 → **先杀再起** → 重新注册
 #[test]
-fn watchdog_expiry_of_an_owned_hang_kills_and_restarts() {
+fn watchdog_restart() {
     let m = rr3_fixture_manifest("sr-s4", "sima"); // always：判死那一路的计划会执行
     let mut rrd = RrdTest::rr3_start_boot("sr-s4", &[&m.path], "go_silent", E2E_TICK_MS);
     let (pid1, task1) = s4_kill_first(&mut rrd);
@@ -337,7 +337,7 @@ fn watchdog_expiry_of_an_owned_hang_kills_and_restarts() {
 
 /// S5 — 孤儿卫生：rrd 死了不许留下 boot 起的常驻夹具（CI 污染，不是理论风险）
 #[test]
-fn rrd_death_does_not_leave_boot_spawned_children() {
+fn rrd_not_children() {
     let m = rr3_fixture_manifest("sr-s5", "sima");
     let mut rrd = RrdTest::rr3_start_boot("sr-s5", &[&m.path], "resident", E2E_TICK_MS);
     let spawn = rrd.rr3_wait_log("spawn rr3-sima pid=");

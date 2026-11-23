@@ -189,7 +189,7 @@ mod tests {
 
     /// 契约必须解析成 8 owner / 契约钉数的 topic（与 contract.rs 的形状 pin 同源、彼此独立）
     #[test]
-    fn contract_text_parses_into_expected_shape() {
+    fn contract_text_shape() {
         let set = rr3_topic_parse(CONTRACT);
         assert_eq!(
             set.topics.len(),
@@ -213,7 +213,7 @@ mod tests {
 
     /// 坏文本给空集，空集必须报错（fail-open 护栏）
     #[test]
-    fn unparsable_text_is_not_a_pass_port() {
+    fn unparsable_not_port() {
         let set = rr3_topic_parse("this = is not = valid = toml");
         assert!(set.rr3_topic_is_empty());
         assert!(!set.rr3_topic_check().is_empty());
@@ -221,7 +221,7 @@ mod tests {
 
     /// 合法叠加层只增不改，生产条目的 owner 仍以契约为准
     #[test]
-    fn merge_appends_without_touching_contract_entries() {
+    fn merge_entries() {
         let base = rr3_topic_parse(CONTRACT);
         let merged = base
             .rr3_topic_merge(&rr3_topic_parse(OVERLAY))
@@ -263,7 +263,7 @@ mod tests {
 
     /// 撞名必须 Err 并点名条目（测试注入不得改写生产契约的 owner/kind）
     #[test]
-    fn merge_rejects_and_names_topic_conflict() {
+    fn merge_rej_conflict() {
         let evil = rr3_topic_parse(
             r#"
 [[owner]]
@@ -282,7 +282,7 @@ owner = "rr3-sima"
 
     /// 叠加层自身形状：未登记 owner / 非法 kind 都被同一条规则函数抓出
     #[test]
-    fn overlay_shape_uses_the_same_rules() {
+    fn overlay_same_rules() {
         let bad = rr3_topic_parse(
             r#"
 [[owner]]
@@ -301,7 +301,7 @@ owner = "rr3-simb"
     /// C14 首例退役（0.0.5 批J）：asr/text 与 dialog/turn 显式 status="retired"，
     /// 号位保留、义务解除；其余 26 条无显式标记。status 随 merge 带得过来。
     #[test]
-    fn contract_pins_two_retired_topics() {
+    fn contract_two_topics() {
         let set = rr3_topic_parse(CONTRACT);
         assert_eq!(
             set.rr3_topic_status("rr3-interact/asr/text").as_deref(),
@@ -335,7 +335,7 @@ owner = "rr3-simb"
 
     /// 非法 status 值必须被形状检查点名
     #[test]
-    fn bad_topic_status_is_named() {
+    fn bad_topic_named() {
         let bad = rr3_topic_parse(
             r#"
 [[owner]]
@@ -356,7 +356,7 @@ status = "archived"
 
     /// 随仓库提交的夹具叠加层必须自检通过且与契约零撞名
     #[test]
-    fn committed_overlay_fixture_is_self_consistent() {
+    fn committed_consistent() {
         let set = rr3_topic_parse(OVERLAY);
         assert!(
             set.rr3_topic_check().is_empty(),

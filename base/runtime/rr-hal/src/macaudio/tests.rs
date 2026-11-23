@@ -11,7 +11,7 @@ use super::source::*;
 use crate::{Rr3AudioCfg, Rr3AudioSource, Rr3HalError, RR3_AUDIO_CFG_16K_MONO16};
 
 #[test]
-fn cfg_check_rejects_non_16bit_and_zero() {
+fn cfg_rej_non_zero() {
     assert!(rr3_mac_cfg_check(RR3_AUDIO_CFG_16K_MONO16).is_ok());
     for bad in [
         Rr3AudioCfg {
@@ -39,7 +39,7 @@ fn cfg_check_rejects_non_16bit_and_zero() {
 }
 
 #[test]
-fn asbd_shape_is_s16le_interleaved() {
+fn asbd_interleaved() {
     let a = rr3_mac_asbd(RR3_AUDIO_CFG_16K_MONO16);
     assert_eq!(a.m_sample_rate, 16000.0);
     assert_eq!(a.m_format_id, 0x6C70_636D, "m_format_id 应为 'lpcm'");
@@ -64,7 +64,7 @@ fn asbd_shape_is_s16le_interleaved() {
 }
 
 #[test]
-fn status_err_carries_code() {
+fn status_err_code() {
     let e = rr3_mac_status_err("AudioQueueStart", -50);
     let Rr3HalError::InvalidParam(t) = &e else {
         panic!("open 面错误应折 InvalidParam");
@@ -75,7 +75,7 @@ fn status_err_carries_code() {
 /// 有界等（B18 挂死面回归）：无唤醒源时到点返回 false，绝不永久挂起——
 /// 设备掉线下 read/write 走这条分支带因上抛（此前是无超时 `cv.wait`）。
 #[test]
-fn wait_times_out_without_notify() {
+fn wait_out_notify() {
     let m = Mutex::new(0usize);
     let cv = Condvar::new();
     let (guard, ready) = rr3_mac_wait(
@@ -90,7 +90,7 @@ fn wait_times_out_without_notify() {
 
 /// 条件已成立时立即就绪，不吃满超时窗（短超时下也不假红）。
 #[test]
-fn wait_returns_ready_without_waiting() {
+fn wait_ready_waiting() {
     let m = Mutex::new(3usize);
     let cv = Condvar::new();
     let (guard, ready) = rr3_mac_wait(
@@ -108,7 +108,7 @@ fn wait_returns_ready_without_waiting() {
 /// （会开真麦 ~1s，宿主终端首次触发 TCC 麦克风授权弹窗）。
 #[test]
 #[ignore = "真设备冒烟：会开真麦，手跑见注"]
-fn mac_source_real_device_reads_nonzero_audio() {
+fn mac_real_reads_audio() {
     let mut src = Rr3MacAudioSource::rr3_mac_source_new();
     src.open(RR3_AUDIO_CFG_16K_MONO16).expect("mac 源 open");
     println!("queue 协商流格式: {}", src.rr3_mac_stream_fmt());

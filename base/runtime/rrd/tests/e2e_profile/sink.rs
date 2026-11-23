@@ -25,7 +25,7 @@ use crate::support::*;
 /// SIGTERM 优雅关停即可证：同步 append 下行早已当场在文件里，重启回收与
 /// 关停形状无关（SIGKILL 崩溃只会更早截尾，不会多出别的路径）。
 #[test]
-fn rrd_reboot_recovers_previous_run_lines_from_disk() {
+fn rrd_run_lines_disk() {
     let root = Root::new("sink");
     let profile = stage_sink(&root);
     // —— 第一世：boot → rr3-pb running → kill -9 → 收尸行 → kill rrd ——

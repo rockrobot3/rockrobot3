@@ -8,7 +8,7 @@ use super::*;
 /// NIST FIPS 180-4 标准测试向量（含空串 / 单字节 / 一块 / 填充临界 56 字节
 /// [恰好 448 bit，填充须另起一块] / 跨三块 112 字节）——自持实现的正确性锚。
 #[test]
-fn sha256_matches_nist_vectors() {
+fn sha256_nist_vectors() {
     assert_eq!(
         rr3_sha256_hex(b""),
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -41,7 +41,7 @@ fn sha256_matches_nist_vectors() {
 /// （同一份快照，判据定义域 = "这份文件"，改/删只反映在重读对比里）。快照
 /// 未在册的 available:false 形由 --manifest e2e 路径覆盖（e2e_profile）。
 #[test]
-fn contracts_audit_judges_full_drift_missing_and_renders() {
+fn contracts_renders() {
     let root = std::env::temp_dir().join(format!("rrd-contracts-audit-{}", std::process::id()));
     let stem = "audit-robot";
     let chip = "rk3566";

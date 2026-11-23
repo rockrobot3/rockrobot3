@@ -246,7 +246,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn glyph_is_bounded_and_fail_closed() {
+    fn glyph_fail_closed() {
         assert_eq!(rr3_glyph(b' '), [0x00, 0x00, 0x00, 0x00, 0x00]);
         assert_eq!(rr3_glyph(b'A'), [0x7E, 0x11, 0x11, 0x11, 0x7E]);
         // 表外字节（含控制符与高位）一律空格字形，不越界
@@ -256,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn text_page_rejects_row_and_places_glyph() {
+    fn text_rej_row_glyph() {
         assert_eq!(
             rr3_text_page(4, b"X", 4, 21).unwrap_err(),
             "文本行号越界: 4"
@@ -271,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn frame_pages_center_scale_mapping() {
+    fn frame_scale_mapping() {
         let mut frame = [0u8; 8];
         frame[0] = 0x80; // 页 0 源行最左像素（bit7）
         let pages = rr3_frame_pages(&frame);
@@ -287,7 +287,7 @@ mod tests {
     }
 
     #[test]
-    fn init_and_contrast_command_shapes() {
+    fn init_command_shapes() {
         let cmds = rr3_init_commands(0x4F);
         assert_eq!(cmds.len(), 25);
         assert_eq!(cmds[16], 0x81, "亮度命令前导");
@@ -298,7 +298,7 @@ mod tests {
     }
 
     #[test]
-    fn oled_lines_wrap_and_append_angle_row() {
+    fn oled_wrap_angle_row() {
         let rows = rr3_oled_lines("0123456789ABCDEFGHIJKLMNOPQRST", 90, 80, 4, 21);
         assert_eq!(rows.len(), 4);
         assert_eq!(rows[0], b"0123456789ABCDEFGHIJK");

@@ -113,7 +113,7 @@ mod tests {
 
     /// 增益三档（MC-2 工单判据）：0% → 全零 / 100% → 逐字原样 / 饱和不回卷
     #[test]
-    fn gain_three_rungs_zero_full_and_saturating() {
+    fn gain_full_saturating() {
         // 0% → 全零样点
         let mut s = vec![123i16, -456, i16::MAX, i16::MIN];
         rr3_tts_apply_gain(&mut s, 0);
@@ -136,7 +136,7 @@ mod tests {
     /// 起播水位（MC-2，legacy 0cf029e 语义）：达水位起播 / 未达不起播 /
     /// 短回答（总长 < 水位）流完整即播——水位取 min 不卡短语音
     #[test]
-    fn prebuffer_ready_gate_min_semantics() {
+    fn prebuffer_semantics() {
         // 达水位：缓冲 800ms ≥ 水位 500ms → 播
         assert!(rr3_prebuffer_ready(800, 800, 500));
         // 恰好等于水位（边界含等号）→ 播
@@ -153,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn play_passes_samples_through_in_20ms_blocks() {
+    fn play_passes_blocks() {
         let mut sink = ChunkSpySink::new();
         let input: Vec<i16> = (0..700).map(|i| (i * 37 - 5000) as i16).collect();
         let played = rr3_tts_play(&mut sink, &input).unwrap();
@@ -166,14 +166,14 @@ mod tests {
     }
 
     #[test]
-    fn play_empty_input_writes_nothing_and_is_zero_ms() {
+    fn play_input_zero_ms() {
         let mut sink = ChunkSpySink::new();
         assert_eq!(rr3_tts_play(&mut sink, &[]).unwrap(), 0);
         assert!(sink.lens.is_empty(), "空输入不产生任何 write");
     }
 
     #[test]
-    fn play_write_error_propagates_verbatim() {
+    fn play_error_verbatim() {
         // 未 open 的 sim sink 首次 write 即拒（后端拒）——错误按零堆枚举原样
         // 上抛（批N24 件四），人读文案由编排层渲染（composite 用例钉逐字）
         let mut sink = Rr3SimAudioSink::rr3_sim_sink_new(16000);

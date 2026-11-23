@@ -60,7 +60,7 @@ fn act_call(
 /// 键 = auto 保守缺省）被代码拒动不落角、拒因点名"未标定"；显式 jog 放行；
 /// 已标定轴 auto 照常（既有基线不动）。
 #[test]
-fn uncalibrated_axis_refuses_auto_but_jogs() {
+fn uncalibrated_jogs() {
     let args_auto = json!([{"topic": "rr3-act/servo/command", "args": {"angle_deg": 45}}]);
     let args_jog =
         json!([{"topic": "rr3-act/servo/command", "args": {"angle_deg": 45, "motion": "jog"}}]);
@@ -102,7 +102,7 @@ fn uncalibrated_axis_refuses_auto_but_jogs() {
 }
 
 #[test]
-fn valid_relay_action_drives_gpio() {
+fn valid_relay_gpio() {
     let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
     let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
     let out = act_call(
@@ -130,7 +130,7 @@ fn valid_relay_action_drives_gpio() {
 
 /// 批F2 开放面：servo/command 动作经行程裁决落到 sim 舵机，结果是角度变体。
 #[test]
-fn valid_servo_action_drives_sim_servo() {
+fn valid_sim_servo() {
     let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
     let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
     for (deg, want) in [
@@ -152,7 +152,7 @@ fn valid_servo_action_drives_sim_servo() {
 
 /// servo 动作同样吃行程/类型裁决（同一 parse 函数）：越界折拒因不落角。
 #[test]
-fn servo_action_is_judged_by_travel_and_type() {
+fn servo_travel_type() {
     let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
     let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
     for bad in [
@@ -167,7 +167,7 @@ fn servo_action_is_judged_by_travel_and_type() {
 }
 
 #[test]
-fn foreign_topic_is_rejected_by_exposes_gate() {
+fn foreign_rej_gate() {
     let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
     let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
     let out = act_call(
@@ -184,7 +184,7 @@ fn foreign_topic_is_rejected_by_exposes_gate() {
 }
 
 #[test]
-fn exposed_but_closed_topic_is_rejected_by_open_gate() {
+fn exposed_but_rej_gate() {
     let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
     let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
     // led/effect 未列开放集（本形态不开 led 意图路）；relay/servo 在开放集内
@@ -205,7 +205,7 @@ fn exposed_but_closed_topic_is_rejected_by_open_gate() {
 /// A-9 核心证据：注入开放集**收窄**即执行面收窄——只开 relay 时 servo/command
 /// 被开放门拒、不落角；空开放集时已归属主题一律拒（改数据不改码）。
 #[test]
-fn injected_open_set_narrows_intent_surface() {
+fn injected_set_surface() {
     let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
     let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
     // 只开 relay/set：servo/command 被开放门拒
@@ -241,7 +241,7 @@ fn injected_open_set_narrows_intent_surface() {
 /// 开放集含本模块无执行臂的主题（配置/执行面不一致）→ 兜底臂点名，不静默
 /// 放行（boot 校验挡住这种配置，本臂是纵深防御）
 #[test]
-fn open_set_without_exec_arm_is_named() {
+fn open_set_arm_named() {
     let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
     let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
     let with_led = vec![RR3_LED_EFFECT_TOPIC.to_string()];
@@ -263,7 +263,7 @@ fn open_set_without_exec_arm_is_named() {
 }
 
 #[test]
-fn malformed_actions_are_named_not_fatal() {
+fn malformed_not_fatal() {
     let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
     let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
     // actions 不是数组
@@ -292,7 +292,7 @@ fn malformed_actions_are_named_not_fatal() {
 }
 
 #[test]
-fn multiple_actions_execute_in_order() {
+fn multiple_order() {
     let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
     let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
     let out = act_call(
@@ -361,7 +361,7 @@ fn assert_gate_blocked(
 /// 腿二·正确性——执行面（servo/relay）拒动且拒因点名"低电禁动"，
 /// 妆面（led）不因低电禁动而拒（仍走开放门=未列开放集），解禁后照常执行。
 #[test]
-fn low_gate_blocks_effector_not_face_on_intent_path() {
+fn low_not_face_intent() {
     // 腿一·确定性：闭锁态两跑逐条相等（无隐藏状态）
     assert_eq!(
         low_gate_run(true),

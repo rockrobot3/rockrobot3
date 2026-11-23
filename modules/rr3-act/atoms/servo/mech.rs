@@ -138,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn check_travel_accepts_bounds_and_rejects_out_of_range() {
+    fn check_ok_rej_range() {
         assert!(rr3_servo_travel(0, &cfg()).is_ok(), "行程下界合法");
         assert!(rr3_servo_travel(180, &cfg()).is_ok(), "行程上界合法");
         assert_eq!(
@@ -153,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn check_timeout_defaults_to_cfg_and_rejects_zero_beyond_limit() {
+    fn check_cfg_rej_limit() {
         assert_eq!(
             rr3_servo_timeout(None, &cfg()).unwrap(),
             800,
@@ -179,7 +179,7 @@ mod tests {
     /// 限速门判定真值随批D₃ 迁 rr-core `control`（逐拍/窗口用例随迁）——
     /// 本地只钉"re-export 可用"：同一构造 + 一次注入调用走通 rr-core 面。
     #[test]
-    fn rate_gate_is_rr_core_reexport() {
+    fn rate_rr_reexport() {
         let mut gate = Rr3RateGate::rr3_gate_new(50);
         assert!(gate.rr3_gate_allow(1_000));
         assert!(!gate.rr3_gate_allow(1_010), "窗内连发被限（rr-core 判定）");
@@ -188,7 +188,7 @@ mod tests {
     /// 动作形态判定（批N3 件三）：缺席 = auto 保守（不申报按自动）；jog/auto
     /// 在册放行；calib-* 标定面词与词表外词在运行命令面点名拒。
     #[test]
-    fn check_motion_defaults_to_auto_and_narrows_to_runface_words() {
+    fn check_auto_words() {
         assert_eq!(
             rr3_servo_motion(None).unwrap(),
             Rr3ActMotion::Auto,

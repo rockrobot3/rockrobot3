@@ -78,7 +78,7 @@ mod tests {
 
     /// 多通道单声道化：选能量最高通道、单声道原样、并列取首通道、空输入安全。
     #[test]
-    fn best_channel_picks_louder_and_mono_passthrough() {
+    fn best_passthrough() {
         assert_eq!(rr3_pcm_best_channel(&[1, -2, 3], 1), vec![1, -2, 3]);
         assert_eq!(rr3_pcm_best_channel(&[1, -2, 3], 0), vec![1, -2, 3]);
         assert_eq!(
@@ -99,7 +99,7 @@ mod tests {
 
     /// 零分配定声道：能量高者胜、并列取最小通道、单声道/空输入回 0。
     #[test]
-    fn chan_pick_matches_energy_order() {
+    fn chan_pick_order() {
         assert_eq!(rr3_chan_pick(&[1000, 100, 2000, 200], 2), 0);
         assert_eq!(rr3_chan_pick(&[100, 900, 50, 1500], 2), 1);
         assert_eq!(rr3_chan_pick(&[0, 0, 0, 0], 2), 0, "并列取首通道");
@@ -110,7 +110,7 @@ mod tests {
 
     /// 零分配抽通道：写入选中通道、`out` 短则截断、越界不 panic。
     #[test]
-    fn chan_take_writes_selected_and_truncates() {
+    fn chan_take_sel_trunc() {
         let s = [1000, 100, 2000, 200, -500, -50];
         let mut full = [0i16; 3];
         assert_eq!(rr3_chan_take(&s, 2, 1, &mut full), 3);
@@ -128,7 +128,7 @@ mod tests {
 
     /// 流式两函数与分配版逐位同源：pick+take 必须复现 best_channel。
     #[test]
-    fn pick_take_reproduce_best_channel() {
+    fn pick_best_channel() {
         for (samples, ch) in [
             (vec![1000i16, 100, 2000, 200, -500, -50], 2u8),
             (vec![100, 900, 50, 1500, -30, 700], 2),

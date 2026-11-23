@@ -9,7 +9,7 @@ use std::time::Duration;
 
 /// 首帧必须是 rr3.register；心跳不能抢跑（legacy 教训 76c0ad8 的线上级写法）
 #[test]
-fn first_frame_must_be_register() {
+fn first_must_be_reg() {
     let mut rrd = RrdTest::rr3_start("order");
     let mut c = rrd.rr3_connect();
     rr3_send(&mut c, &rr3_rpc_frame("rr3.heartbeat", 1, json!({}), 0));
@@ -37,7 +37,7 @@ fn first_frame_must_be_register() {
 
 /// 注册后伪造 src_task：拒这一帧、回原 id、不断连、不牵连后续心跳
 #[test]
-fn spoofed_src_task_is_rejected_without_killing_connection() {
+fn spoofed_src_rej_conn() {
     let mut rrd = RrdTest::rr3_start("spoof");
     let mut a = rrd.rr3_connect();
     rr3_send(
@@ -72,7 +72,7 @@ fn spoofed_src_task_is_rejected_without_killing_connection() {
 
 /// 上行只许 Request：把心跳塞进 Notification 帧里上来 → 拒（分派依据是前缀，不是内容）
 #[test]
-fn upstream_must_use_request_type() {
+fn upstream_req_type() {
     let rrd = RrdTest::rr3_start("type");
     let mut a = rrd.rr3_connect();
     rr3_send(
@@ -102,7 +102,7 @@ fn upstream_must_use_request_type() {
 
 /// 连上却不注册：读超时收掉，且只是那一条连接的事
 #[test]
-fn silent_connection_times_out_and_rrd_survives() {
+fn silent_rrd_survives() {
     let mut rrd = RrdTest::rr3_start("idle");
     let _idle = rrd.rr3_connect(); // 一帧不发；--pre-register-timeout-ms 300
     assert!(rrd.rr3_wait_log("连接收尾").contains("首帧读取失败"));
@@ -118,7 +118,7 @@ fn silent_connection_times_out_and_rrd_survives() {
 /// 首帧的 `dst_task` 必须是 rrd（评审 A-1/I-2 的 m08）：形状完全正确、只把 dst 填成 0 →
 /// 拒 EINVAL 且文案点名 dst_task；这条被拒的连接不牵连后来的正常注册。
 #[test]
-fn first_frame_dst_must_be_rrd() {
+fn first_dst_be_rrd() {
     let mut rrd = RrdTest::rr3_start("dstfirst");
     let mut c = rrd.rr3_connect();
     // 与 rr3_register_frame 同形（src 按契约填 0），唯一差别是 dst_task=0 广播而不是 1=rrd
@@ -161,7 +161,7 @@ fn first_frame_dst_must_be_rrd() {
 /// `rr3_serve_frame` 返回 `Err` → 连接按崩溃收尾、**不回错误帧**，所以判据只能是否定式：
 /// 连接被关掉之前不会收到 `beat=accepted` 的应答。删掉门禁即走到 `rr3_serve_request` 回 accepted。
 #[test]
-fn upstream_dst_must_be_rrd() {
+fn upstream_dst_be_rrd() {
     let mut rrd = RrdTest::rr3_start("updst");
     let mut a = rrd.rr3_connect();
     rr3_send(

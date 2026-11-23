@@ -6,7 +6,7 @@ use super::*;
 /// 未知 topic 兜底文案逐字（Python f"rr3-brain 只 exposes {RPC_EXPOSES}，收到
 /// {rpc_topic}" 同形——列表 repr 是 Python 形状）
 #[test]
-fn unknown_topic_error_names_exposes_list() {
+fn unknown_error_list() {
     let mut c = cfg();
     let (mut cl, _g) = mock_clients(&c);
     let mut d = Rr3Dialog::rr3_new(8000);
@@ -20,7 +20,7 @@ fn unknown_topic_error_names_exposes_list() {
 /// completion 臂激活（迁移件2）：mock 档回显＋{"text": …} 应答体（Python
 /// result = {"text": llm.complete(text)} 同 wire）
 #[test]
-fn completion_arm_mocks_echo_reply() {
+fn completion_arm_reply() {
     let mut c = cfg();
     let (mut cl, _g) = mock_clients(&c);
     let mut d = Rr3Dialog::rr3_new(8000);
@@ -38,7 +38,7 @@ fn completion_arm_mocks_echo_reply() {
 /// completion 臂 text 参数 str() coercion（Python str(args.get("text", ""))：
 /// 缺键回落空串、非串折词——mock 回显即观测面）
 #[test]
-fn completion_arm_coerces_text_like_python_str() {
+fn completion_arm_str() {
     let mut c = cfg();
     let (mut cl, _g) = mock_clients(&c);
     let mut d = Rr3Dialog::rr3_new(8000);
@@ -73,7 +73,7 @@ fn completion_arm_coerces_text_like_python_str() {
 /// completion 臂 real 档缺密钥：业务失败 Err 折 error 应答（Python try/except
 /// RuntimeError 同 wire——文案点名环境变量，不静默降级）
 #[test]
-fn completion_arm_real_without_key_folds_error() {
+fn completion_key_error() {
     let mut c = cfg();
     let _g = env_lock();
     let mut cl = Rr3CloudClients::from_cfg(&c);
@@ -94,7 +94,7 @@ fn completion_arm_real_without_key_folds_error() {
 
 /// ops/list 臂经 rr3_rpc_arm 全链路可达（快照组体在 rpc.rs 逐键钉，此处钉臂位）
 #[test]
-fn ops_list_arm_reachable_via_rpc_arm() {
+fn ops_arm_via_rpc_arm() {
     let mut c = cfg();
     let (mut cl, _g) = mock_clients(&c);
     let mut d = Rr3Dialog::rr3_new(8000);
@@ -105,7 +105,7 @@ fn ops_list_arm_reachable_via_rpc_arm() {
 /// ops/set 臂写后按组重建：llm 组写 model_id 后重建不红（重建取数在
 /// rpc.rs model_row_of_reflects_live_write 钉真值），mock 档 complete 照走
 #[test]
-fn ops_set_arm_rebuilds_llm_client_after_write() {
+fn ops_arm_llm_write() {
     let mut c = cfg();
     let (mut cl, _g) = mock_clients(&c);
     let mut d = Rr3Dialog::rr3_new(8000);
@@ -134,7 +134,7 @@ fn ops_set_arm_rebuilds_llm_client_after_write() {
 /// ops/set dialog 组就地改参（迁移件四接线）：写臂应答后 max_utterance_ms
 /// live 生效（doc 真值同拍写入——重启回 config.toml 真值）
 #[test]
-fn ops_set_arm_dialog_group_updates_live_param() {
+fn ops_arm_dlg_param() {
     let mut c = cfg();
     let (mut cl, _g) = mock_clients(&c);
     let mut d = Rr3Dialog::rr3_new(8000);
@@ -157,7 +157,7 @@ fn ops_set_arm_dialog_group_updates_live_param() {
 
 /// 事件臂订阅面外事件静默过滤（Python 主循环 if/elif 兜底同形状）
 #[test]
-fn event_arm_ignores_unsubscribed_topics() {
+fn event_arm_topics() {
     let (mut dp, _g) = mock_dispatcher(cfg());
     let bus = FakeTurnBus::reply(json!({"played_ms": 120}));
     dp.rr3_event_arm("rr3-other/topic", &json!({"x": 1}), &bus)
@@ -169,7 +169,7 @@ fn event_arm_ignores_unsubscribed_topics() {
 /// 事件臂全链路：pcm 预滚/积累 + vad onset/offset 判停 → 触发整轮
 /// （mock 档三客户端走通 ASR→LLM→TTS→分帧→点名→intent 发布）
 #[test]
-fn event_arm_vad_offset_triggers_full_turn() {
+fn event_arm_vad_turn() {
     let (mut dp, _g) = mock_dispatcher(cfg());
     let bus = FakeTurnBus::reply(json!({"played_ms": 120}));
     dp.rr3_event_arm(RR3_TOPIC_PCM, &pcm_event_body(b"\x01\x02", 200), &bus)
@@ -199,7 +199,7 @@ fn event_arm_vad_offset_triggers_full_turn() {
 /// 节拍臂时长判停触发整轮：0 封顶 onset 即刻到点（Python
 /// test_duration_cap_expires 同款零等待技巧）
 #[test]
-fn tick_arm_expired_triggers_full_turn() {
+fn tick_arm_full_turn() {
     let mut c = cfg();
     c.max_utterance_ms = 0;
     let (mut dp, _g) = mock_dispatcher(c);

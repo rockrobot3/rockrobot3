@@ -52,7 +52,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fires_once_after_needed_consecutive_observations() {
+    fn fires_once_cons_obs() {
         let mut t = Rr3DoaTrack::rr3_new(2);
         assert_eq!(t.rr3_feed(Rr3DoaBin::Left), None);
         assert_eq!(t.rr3_feed(Rr3DoaBin::Left), Some(Rr3DoaBin::Left));
@@ -60,7 +60,7 @@ mod tests {
     }
 
     #[test]
-    fn bin_change_restarts_the_count() {
+    fn bin_change_count() {
         let mut t = Rr3DoaTrack::rr3_new(3);
         assert_eq!(t.rr3_feed(Rr3DoaBin::Left), None);
         assert_eq!(t.rr3_feed(Rr3DoaBin::Left), None);
@@ -70,7 +70,7 @@ mod tests {
     }
 
     #[test]
-    fn reset_clears_partial_consensus() {
+    fn reset_part_cons() {
         let mut t = Rr3DoaTrack::rr3_new(2);
         t.rr3_feed(Rr3DoaBin::Left);
         t.rr3_reset();
@@ -79,7 +79,7 @@ mod tests {
     }
 
     #[test]
-    fn zero_need_behaves_as_one() {
+    fn zero_need_behaves_as() {
         let mut t = Rr3DoaTrack::rr3_new(0);
         assert_eq!(t.rr3_feed(Rr3DoaBin::Center), Some(Rr3DoaBin::Center));
     }

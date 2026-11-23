@@ -77,7 +77,7 @@ mod tests {
     /// 参数裁决：合法值放行，缺参 / 类型错 / 未知值全部点名——业务性失败折
     /// result.error 的入参一半钉在这里。
     #[test]
-    fn session_args_parse_open_only() {
+    fn session_args_open() {
         assert_eq!(rr3_session_args(&json!({"action": "open"})), Ok(()));
         let e = rr3_session_args(&json!({})).unwrap_err();
         assert!(e.contains("action"), "缺参点名: {e}");
@@ -91,7 +91,7 @@ mod tests {
     /// 未就绪文案按配网态分流（D5）：AP 态点名 mode=ap（不许折叠成 up=false），
     /// station 断链保留原词。
     #[test]
-    fn session_result_follows_link_up() {
+    fn session_link_up() {
         let v = rr3_session_result(&st(true), "station").unwrap();
         assert_eq!(v["session"], "opened");
         assert_eq!(v["endpoint"], "mock");

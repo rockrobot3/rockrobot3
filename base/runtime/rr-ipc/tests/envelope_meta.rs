@@ -78,7 +78,7 @@ fn hex_to_bytes(s: &str) -> Vec<u8> {
 
 /// C1①：`x-byte-size` 是三份真相的交汇处（Rust 常量 / 偏移表合计 / golden 实际字节数）
 #[test]
-fn contract_byte_size_matches_rust_offsets_and_golden() {
+fn contract_rust_golden() {
     let json = schema_json();
     let byte_size = json["properties"]["header"]["x-byte-size"]
         .as_u64()
@@ -114,7 +114,7 @@ fn contract_byte_size_matches_rust_offsets_and_golden() {
 /// C1②：`x-offset-sum` 与偏移表是**两处独立记账**，三者（自身加数 / 自身结果 / 偏移表）
 /// 必须互相咬合，且结果就是 Rust 头长度 128——任何一处被单独改动都该红
 #[test]
-fn contract_offset_sum_agrees_with_offset_table_and_rust() {
+fn contract_sum_rust() {
     let json = schema_json();
     let raw = json["properties"]["header"]["properties"]["fields"]["x-offset-sum"]
         .as_str()
@@ -160,7 +160,7 @@ fn contract_offset_sum_agrees_with_offset_table_and_rust() {
 /// maximum 钉 Rust `MAX_PAYLOAD_LEN`；minimum 钉 Rust 侧真实下界 0
 ///（`payload_len = 0` 表示"无 payload"，是合法值而非错误），并用解析器行为复核
 #[test]
-fn payload_len_bounds_match_contract() {
+fn payload_len_contract() {
     let json = schema_json();
     let field = contract_field(&json, "payload_len");
     let c_min = field["minimum"]
@@ -203,7 +203,7 @@ fn payload_len_bounds_match_contract() {
 /// I3：`RR3_CONTRACT_SCHEMA_VERSION`（rrd 横幅里的 "contracts schema v1"）此前无人断言；
 /// 现与 `contracts/envelope.schema.json` 顶层 `x-schema-version`（2026-09-29 追加的元数据键）逐值对齐
 #[test]
-fn contract_schema_version_metadata_matches_rust() {
+fn contract_schema_rust() {
     let json = schema_json();
     let c = json["x-schema-version"]
         .as_u64()

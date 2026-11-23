@@ -71,7 +71,7 @@ fn boot_role_rejections() {
 }
 
 #[test]
-fn defaults_come_from_contract_constants() {
+fn defaults_constants() {
     // 装配面必选门（基-23）后"纯缺省"不再可解析：本用例只关心与装配面无关的
     // 默认值，走 --profile 正门满足必选门（manifests 缺省空断言由它保住）
     let cfg =
@@ -98,7 +98,7 @@ fn defaults_come_from_contract_constants() {
 /// 三值同钉：`restart_base_ms` / `pre_register_timeout_ms` / `watchdog_tick_ms`
 /// 都从同一个 parse 出来，漂任何一个都会让集成测试的时间口径与生产不一致。
 #[test]
-fn watchdog_tick_is_configurable_and_never_zero() {
+fn watchdog_tick_zero() {
     let ok = rr3_cli_parse_env(
         &a(&["--manifest", "/m/d.toml", "--socket", "/tmp/x.sock"]),
         &env_none,
@@ -127,7 +127,7 @@ fn watchdog_tick_is_configurable_and_never_zero() {
 /// 为什么**不**校验取值：role 的合法集是夹具 `sim_peer` 的约定，不是守护进程的契约——
 /// rrd 校验它就要跟着夹具新增的脚本一起改（第二处真值），而且真设备模块根本不读这个变量。
 #[test]
-fn boot_role_defaults_to_resident_and_is_pass_through_verbatim() {
+fn boot_pass_verbatim() {
     boot_role_verbatim();
     boot_role_rejections();
 }
@@ -135,7 +135,7 @@ fn boot_role_defaults_to_resident_and_is_pass_through_verbatim() {
 /// env 覆盖必须生效（rrd 与模块用同一个 env 键找总线，spec §4）——但覆盖的是**注入的表**：
 /// 本文件里没有任何 `set_var`，进程环境从头到尾没被碰过，因此也不需要串行化锁。
 #[test]
-fn default_socket_follows_bus_env() {
+fn def_socket_bus_env() {
     let injected = |k: &str| (k == RR3_BUS_PATH_ENV).then(|| "/tmp/rr3-m2-env.sock".to_string());
     let cfg = rr3_cli_parse_env(&a(&["--manifest", "/m/d.toml"]), &injected).unwrap();
     assert_eq!(cfg.socket, PathBuf::from("/tmp/rr3-m2-env.sock"));
@@ -156,7 +156,7 @@ fn default_socket_follows_bus_env() {
 /// 默认值的来源必须是**注入的参数**，不是进程环境：本用例全程不 `set_var`，
 /// 所以它与其它用例并行时既不会污染别人也不会读到别人的值——ENV_LOCK 因此不再需要。
 #[test]
-fn default_socket_comes_from_injected_env() {
+fn def_socket_comes_env() {
     let injected = |k: &str| (k == RR3_BUS_PATH_ENV).then(|| "/tmp/rr3-m2-inject.sock".to_string());
     let cfg = rr3_cli_parse_env(&a(&["--manifest", "/m/d.toml"]), &injected).unwrap();
     assert_eq!(cfg.socket, PathBuf::from("/tmp/rr3-m2-inject.sock"));
@@ -169,7 +169,7 @@ fn default_socket_comes_from_injected_env() {
 /// 只读不写，所以这条也不依赖任何串行化锁；它钉住"委托没写反"，防止
 /// `rr3_cli_parse` 被悄悄改成"常量默认值"而没人发现。
 #[test]
-fn production_entry_delegates_to_the_process_env() {
+fn production_entry_env() {
     let from_parse = rr3_cli_parse(&a(&["--manifest", "/m/d.toml"])).unwrap();
     let from_reader =
         rr3_cli_parse_env(&a(&["--manifest", "/m/d.toml"]), &|k| std::env::var(k).ok()).unwrap();
@@ -185,7 +185,7 @@ fn production_entry_delegates_to_the_process_env() {
 }
 
 #[test]
-fn overlay_and_repeated_manifests_keep_order() {
+fn overlay_keep_order() {
     let cfg = rr3_cli_parse_env(
         &a(&[
             "--topics-overlay",
@@ -209,7 +209,7 @@ fn overlay_and_repeated_manifests_keep_order() {
 /// "缺省 None 即后门路径"的旧读法随装配面必选门（基-23）作废：None 只有在
 /// manifests 非空（--manifest 后门）时才合法，纯 None 由双缺拒用例钉住。
 #[test]
-fn profile_is_the_front_door_and_coexists_with_overlay() {
+fn profile_door_overlay() {
     let cfg = rr3_cli_parse_env(
         &a(&[
             "--topics-overlay",
@@ -240,7 +240,7 @@ fn profile_is_the_front_door_and_coexists_with_overlay() {
 /// 判定位都不跑而 rrd 退出码 0）。拒在 parse 处非 0 退出；文案要点名两个开关、
 /// 为什么（装载门整体不跑）与用法。
 #[test]
-fn assembly_surface_is_mandatory_neither_flag_is_rejected() {
+fn assembly_flag_rej() {
     for args in [
         a(&[]),
         a(&["--socket", "/tmp/x.sock"]),
@@ -265,7 +265,7 @@ fn assembly_surface_is_mandatory_neither_flag_is_rejected() {
 /// `--contracts`（0.0.2 T5）：默认 None（编译期仓内路径）、显式值原样携带、
 /// 路径口径与其它路径开关同族（缺参数 / `-` 开头值都拒）。
 #[test]
-fn contracts_is_optional_with_shared_path_flag_rules() {
+fn contracts_flag_rules() {
     let dflt = rr3_cli_parse_env(&a(&["--manifest", "/m/d.toml"]), &env_none).unwrap();
     assert_eq!(
         dflt.contracts, None,
@@ -302,7 +302,7 @@ fn contracts_is_optional_with_shared_path_flag_rules() {
 /// 同给当场拒（Q3 裁定细则）：两参数不管谁先谁后，parse 处即非 0 退出，
 /// 不留"谁赢"的歧义。文案要点名两个开关与裁定出处。
 #[test]
-fn profile_and_manifest_together_are_rejected_at_parse_in_both_orders() {
+fn profile_rej_orders() {
     for args in [
         a(&[
             "--profile",
@@ -329,7 +329,7 @@ fn profile_and_manifest_together_are_rejected_at_parse_in_both_orders() {
 
 /// 数字参数必须真是数字：笔误不许悄悄变成默认值
 #[test]
-fn numeric_flags_reject_garbage() {
+fn numeric_rej_garbage() {
     for args in [
         a(&["--restart-base-ms", "fast"]),
         a(&["--pre-register-timeout-ms", "-1"]),
@@ -340,7 +340,7 @@ fn numeric_flags_reject_garbage() {
 }
 
 #[test]
-fn missing_value_unknown_option_and_empty_socket_are_errors() {
+fn miss_empty_errors() {
     let e = rr3_cli_parse(&a(&["--socket"])).expect_err("缺参数必须报错");
     assert!(e.contains("--socket 缺参数") && e.contains("用法"), "{e}");
     assert!(rr3_cli_parse(&a(&["--shard", "/tmp/x"]))
@@ -354,7 +354,7 @@ fn missing_value_unknown_option_and_empty_socket_are_errors() {
 /// 值以 `-` 开头 = 那是下一个开关，不是值。`--socket --topics-overlay` 曾经把
 /// `--topics-overlay` 当套接字路径吞下、静默丢掉叠加层（唯一的 fail-open 缝）。
 #[test]
-fn path_values_must_not_start_with_dash() {
+fn path_must_not_dash() {
     for (flag, next) in [
         ("--socket", "--topics-overlay"),
         ("--topics-overlay", "--manifest"),
@@ -379,7 +379,7 @@ fn path_values_must_not_start_with_dash() {
 /// 给出 `delay_ms = 表值 × 0 = 0`，一个反复崩溃的模块会被零延迟重启到拖死整机
 /// （spec §5.3 的退避表正是为了避免这个）。下界因此是 1，不是"允许 0 当缺省"。
 #[test]
-fn restart_base_ms_floor_is_one() {
+fn restart_ms_floor() {
     let e = rr3_cli_parse(&a(&["--restart-base-ms", "0"]))
         .expect_err("0 必须拒：退避恒为 0 = 热重启循环");
     assert!(
@@ -399,7 +399,7 @@ fn restart_base_ms_floor_is_one() {
 /// 溢出后 `rr3_reg_death` 的饱和乘法会给出 `u64::MAX`（= 永不重启），那是**策略结论**
 /// 而不是算术意外，必须在启动时就听到，不能等模块再也回不来才发现。
 #[test]
-fn restart_base_ms_ceiling_is_tied_to_the_backoff_table() {
+fn restart_ms_table() {
     let last = *RR3_RESTART_BACKOFF.last().expect("退避表非空");
     let max_ok = u64::MAX / last;
     // 常量和表必须同源：改表（加一档、把末档改成 120）不改常量的话，溢出缝就悄悄回来了
@@ -423,7 +423,7 @@ fn restart_base_ms_ceiling_is_tied_to_the_backoff_table() {
 /// 待创建的套接字路径**不存在**是常态（bind 之前哪来的文件），解析必须照样成功。
 /// 这条钉住"为什么是 `std::path::absolute` 而不是 `canonicalize`"：后者会 ENOENT。
 #[test]
-fn socket_absolute_path_does_not_require_existence() {
+fn socket_not_existence() {
     let raw = Path::new("rr3-m2-never-created-check.sock");
     assert!(
         !raw.exists(),
@@ -441,7 +441,7 @@ fn socket_absolute_path_does_not_require_existence() {
 /// 所以横幅、bind、以及模块侧看到的 `RR3_BUS_PATH` 才是同一个字符串。
 #[cfg(unix)]
 #[test]
-fn absolute_socket_path_is_returned_verbatim_on_unix() {
+fn absolute_socket_unix() {
     let raw = Path::new("/tmp/rr3-m2-absolute-check.sock");
     assert_eq!(rr3_socket_abs(raw).unwrap(), raw);
 }

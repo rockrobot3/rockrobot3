@@ -17,7 +17,7 @@ use crate::report::histogram_text;
 /// 注册应答帧形状：src=rrd、dst=分配 task、Response 前缀 + JSON-RPC id 回显 +
 /// result.src_task（rrd rr3_handshake 线上形状的对拍锚）。
 #[test]
-fn register_reply_frame_shape() {
+fn reg_frame_shape() {
     let f = register_reply(1, 2, 777);
     assert_eq!(f.header.opcode, opcode::SEND);
     assert_eq!(f.header.src_task, RR3_TASK_RRD);
@@ -33,7 +33,7 @@ fn register_reply_frame_shape() {
 
 /// 心跳应答形状：{"beat": "accepted"}（rrd D-6 OK 臂同款）。
 #[test]
-fn heartbeat_reply_frame_shape() {
+fn heartbeat_shape() {
     let f = heartbeat_reply(5, 2, 1);
     let (ty, body) = rr3_body_split(&f.payload).unwrap();
     assert_eq!(ty, Rr3PayloadType::Response);
@@ -46,7 +46,7 @@ fn heartbeat_reply_frame_shape() {
 /// parse_upstream：对哨兵同款组帧（Request + rr3.register + params{name,manifest}）
 /// 逐字段还原；dst_task 非法被点名（rrd 握手 dst 门同口径）。
 #[test]
-fn parse_upstream_round_trip_register() {
+fn parse_round_trip_reg() {
     let manifest = "[manifest]\nname = \"rr3-sentinel\"\n[health]\nheartbeat_ms = 200\n";
     let f = rr3_frame_compose(
         opcode::SEND,
@@ -88,7 +88,7 @@ fn parse_upstream_round_trip_register() {
 
 /// round-trip 下行请求形状：Request + rr3.call + params{topic,args}（rrd 转发同款）。
 #[test]
-fn round_trip_request_shape() {
+fn round_trip_req_shape() {
     let f = round_trip_request(2, 9);
     assert_eq!(f.header.dst_task, 2);
     // M3 忠实形状：转发帧 src=调用方 task（conn.rs rr3_route_call 实锤：
@@ -120,7 +120,7 @@ fn parity_request_shape() {
 /// 期望形状函数与差分函数的自证：宿主 runner == 契约期望（契约腿在测试面
 /// 也钉一道）；差分函数对逐字段篡改逐个点名。
 #[test]
-fn parity_expect_json_and_diff() {
+fn parity_json_diff() {
     let host = parity_expect_json(&rr3_parity_run());
     let expected = parity_expect_json(&RR3_PARITY_EXPECTED);
     assert_eq!(host, expected, "runner 与期望向量漂移（契约腿红）");
@@ -141,7 +141,7 @@ fn parity_expect_json_and_diff() {
 
 /// ⑦ 直方图分桶标签：10ms 粒度、桶区间首尾正确（[190-199ms) 形状）。
 #[test]
-fn histogram_buckets_are_labeled_by_ms_range() {
+fn histogram_ms_range() {
     let text = histogram_text(&[195, 200, 205, 205, 310]);
     assert!(text.contains("[190-199ms)=1"), "{text}");
     assert!(text.contains("[200-209ms)=3"), "{text}");

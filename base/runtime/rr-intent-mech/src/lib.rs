@@ -151,7 +151,7 @@ mod tests {
 
     /// 吸合词表逐词命中 → Relay{on:true} 恰一条
     #[test]
-    fn on_word_yields_relay_true() {
+    fn word_yields_relay() {
         for text in ["开灯", "帮我把灯打开", "请开一下灯", "点亮"] {
             assert_eq!(
                 rr3_extract_actions(text),
@@ -163,7 +163,7 @@ mod tests {
 
     /// 断开词表逐词命中 → Relay{on:false} 恰一条
     #[test]
-    fn off_word_yields_relay_false() {
+    fn off_word_relay() {
         for text in ["关灯", "把灯关掉", "关闭灯", "熄灯"] {
             assert_eq!(
                 rr3_extract_actions(text),
@@ -175,7 +175,7 @@ mod tests {
 
     /// 否定护栏（吸合族）：命中词前两字符内有否定字 → 弃
     #[test]
-    fn negative_guard_rejects() {
+    fn negative_guard_rej() {
         for text in ["别开灯", "不要关灯", "先别开灯，等等"] {
             assert!(
                 rr3_extract_actions(text).is_empty(),
@@ -186,7 +186,7 @@ mod tests {
 
     /// 无关文本不产动作（空串同）
     #[test]
-    fn unrelated_text_yields_nothing() {
+    fn unrelated_nothing() {
         for text in ["今天天气怎么样", "你好", "讲个故事", ""] {
             assert!(
                 rr3_extract_actions(text).is_empty(),
@@ -197,7 +197,7 @@ mod tests {
 
     /// 开与关同句产两条按序动作（relay 最终态由最后一条决定）
     #[test]
-    fn on_and_off_in_one_sentence_yields_in_order() {
+    fn off_yields_order() {
         assert_eq!(
             rr3_extract_actions("开灯，等等再关灯"),
             [
@@ -209,7 +209,7 @@ mod tests {
 
     /// 批F2 判据 8：向左/向右/回中 → 70/110/90 三档（落 pan 行程 [70,110]）
     #[test]
-    fn turn_words_yield_servo_commands() {
+    fn turn_servo_commands() {
         let cases: [(&[&str], i64); 3] = [
             (&["向左", "往左看", "左转一下", "看左边"], 70),
             (&["向右", "往右看", "右转一下", "看右边"], 110),
@@ -228,7 +228,7 @@ mod tests {
 
     /// 否定护栏同样管转向："别向左"不得转头
     #[test]
-    fn turn_negative_guard_rejects() {
+    fn turn_guard_rej() {
         for text in ["别向左", "不要向右", "先别回中"] {
             assert!(
                 rr3_extract_actions(text).is_empty(),
@@ -239,7 +239,7 @@ mod tests {
 
     /// 两族动作同句共存：relay 在前、servo 在后，按序执行
     #[test]
-    fn relay_and_turn_in_one_sentence_yield_in_order() {
+    fn relay_turn_order() {
         assert_eq!(
             rr3_extract_actions("开灯，然后向左"),
             [
@@ -251,7 +251,7 @@ mod tests {
 
     /// 动作自述面（主题/取值）与执行侧认领键同源
     #[test]
-    fn action_accessors_expose_topic_and_args() {
+    fn action_topic_args() {
         let relay = Rr3IntentAction::Relay { on: false };
         assert_eq!(relay.rr3_topic(), RR3_TOPIC_RELAY_SET);
         assert_eq!(relay.rr3_relay_on(), Some(false));

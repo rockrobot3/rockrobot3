@@ -71,7 +71,7 @@ fn assemble_desc_pinned() {
 }
 
 #[test]
-fn assemble_registry_tables_are_pinned() {
+fn assemble_pinned() {
     assemble_handles_pinned();
     assemble_desc_pinned();
 }
@@ -81,7 +81,7 @@ fn assemble_registry_tables_are_pinned() {
 /// config.toml 上无注入缺——真值数据（battery/charger/bt 三份）与 config 漂移
 /// 由此测试当场拦下。数量钉 17：新增件须走 rr3-mkmod 五件套，删除须走 ADR。
 #[test]
-fn repo_assemble_manifests_validate_and_injection_complete() {
+fn injection_repo_mfts() {
     let modules = repo_root().join("modules");
     let mut mnames: Vec<PathBuf> = std::fs::read_dir(&modules)
         .expect("读不到 modules/ 目录")
@@ -214,7 +214,7 @@ fn rpi_platform_shape() {
 }
 
 #[test]
-fn platform_tables_parse_and_shape_is_pinned() {
+fn platform_pinned() {
     esp_platform_shape();
     s3_platform_shape();
     rk_platform_shape();
@@ -316,7 +316,7 @@ fn composite_rejects() {
 }
 
 #[test]
-fn composite_declaration_face_is_pinned() {
+fn composite_pinned() {
     for (name, atoms) in COMPOSITE_EXPECTED {
         assert_composite(name, atoms);
     }
@@ -331,7 +331,7 @@ fn composite_declaration_face_is_pinned() {
 /// 丢键）。rr-registry 不依赖 rr-hal，按契约测试惯例读真值文本扫描（与
 /// roles/devices/platform 的 include_str! 同路）。
 #[test]
-fn descriptor_keys_and_registry_desc_keys_are_the_same_batch() {
+fn descriptor_batch() {
     let desc = std::fs::read_to_string(repo_root().join("base/runtime/rr-hal/src/descriptor.rs"))
         .expect("rr-hal descriptor.rs 必须存在");
     for k in rr_registry::RR3_ASSEMBLE_DESC_KEYS.iter() {

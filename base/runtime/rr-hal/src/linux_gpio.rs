@@ -262,7 +262,7 @@ mod tests {
     /// ioctl 号与内核 linux/gpio.h 常量硬编码对齐（aarch64/x86_64 generic-abi）：
     /// _IOWR(0xB4, 0x03, 364) 等——布局漂移或编码式写错在此最先暴露
     #[test]
-    fn ioctl_numbers_match_kernel_uapi() {
+    fn ioctl_match_uapi() {
         assert_eq!(GPIO_GET_LINEHANDLE_IOCTL, 0xC16C_B403);
         assert_eq!(GPIOHANDLE_GET_LINE_VALUES_IOCTL, 0xC040_B408);
         assert_eq!(GPIOHANDLE_SET_LINE_VALUES_IOCTL, 0xC040_B409);
@@ -270,7 +270,7 @@ mod tests {
 
     /// #[repr(C)] 结构体布局 = ioctl 契约：大小/对齐漂移即失败
     #[test]
-    fn request_and_data_layout_matches_uapi() {
+    fn req_data_layout_uapi() {
         // gpiohandle_request：64*4 + 4 + 64 + 32 + 4 + 4 = 364，对齐 4
         assert_eq!(std::mem::size_of::<Rr3GpioHandleRequest>(), 364);
         assert_eq!(std::mem::align_of::<Rr3GpioHandleRequest>(), 4);
@@ -283,7 +283,7 @@ mod tests {
     /// open 成功但 ioctl 非字符设备必 ENOTTY，ensure 显式回 InvalidParam，
     /// 且 chip fd 随 File drop 关闭（无泄漏面）
     #[test]
-    fn ensure_on_non_chardev_fails_loudly() {
+    fn ensure_fail_loudly() {
         let root = std::env::temp_dir().join(format!("rr3-hal-gpio-{}-err", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("gpiochip0"), "").unwrap();
@@ -303,7 +303,7 @@ mod tests {
 
     /// 占位实例（从未 ensure）Drop 不碰任何 fd：构造后直接丢弃不炸
     #[test]
-    fn drop_without_ensure_is_noop() {
+    fn drop_ensure_noop() {
         let root = std::env::temp_dir().join(format!("rr3-hal-gpio-{}-drop", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let out = Rr3LinuxGpioOut::rr3_gpio_out_new(&root, 0, 4, "relay");

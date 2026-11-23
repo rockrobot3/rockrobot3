@@ -107,7 +107,7 @@ fn set_read_timeout(conn: &Rr3UartConn) {
 /// 宿主往返必须能醒来：VMIN=0/VTIME 档下无数据静默即回错误（Closed 形状），
 /// 而不是像缺省阻塞读那样永久挂住——板死/断线时调用线程必须能被释放。
 #[test]
-fn read_timeout_bounds_empty_recv() {
+fn read_empty_recv() {
     let (_master, mut conn) = pty_pair(RR3_UART_BAUD_DEFAULT);
     conn.rr3_set_read_timeout(2).expect("设读超时失败");
     let t0 = std::time::Instant::now();
@@ -128,7 +128,7 @@ fn read_timeout_bounds_empty_recv() {
 /// 一个 `\n` 再出正式字节——帧失步根因处置的线上行为钉在这里（2026-10-30，
 /// 判据实验与机理见 [`Rr3UartConn::tx_idle_preamble`]）。
 #[test]
-fn tx_idle_preamble_precedes_burst_after_idle() {
+fn tx_idle_burst_idle() {
     let (mut master, mut conn) = pty_pair(RR3_UART_BAUD_DEFAULT);
     // 模拟"开口后从未写过"：from_fd 出厂置 Some(now)，这里显式归 None。
     conn.last_tx = None;
@@ -153,7 +153,7 @@ fn tx_idle_preamble_precedes_burst_after_idle() {
 
 /// 正常帧：整帧写入 → 整帧读回（阻塞路径）；反向发送同一条 blanket impl 面验证。
 #[test]
-fn uart_round_trip_normal_frame() {
+fn uart_trip_frame() {
     let (mut master, mut conn) = pty_pair(RR3_UART_BAUD_DEFAULT);
     let f = frame(hdr(5), b"hello");
     let bytes = rr3_frame_to_bytes(&f).unwrap();
@@ -182,7 +182,7 @@ fn bytes_len(f: &Rr3Frame) -> usize {
 /// 坏 magic：头层拒收路径在真实 fd 上保持同语义（Header(BadMagic)），且
 /// 拒收后连接不报废——后续正常帧照常收发。
 #[test]
-fn uart_rejects_bad_magic_then_resumes() {
+fn uart_rej_bad_resumes() {
     let (mut master, mut conn) = pty_pair(RR3_UART_BAUD_DEFAULT);
     let mut bad = hdr(2).to_bytes().to_vec();
     bad[0..4].copy_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
@@ -206,7 +206,7 @@ fn uart_rejects_bad_magic_then_resumes() {
 /// `TornHeader { got: 64 }`（半帧不得当新帧起始）；随后整帧到达仍能整帧读回
 /// （runbook ⑤ 的"注入后不死锁"要求在单测里的等价形状）。
 #[test]
-fn uart_rejects_torn_header_then_resyncs() {
+fn uart_rej_resyncs() {
     let (mut master, mut conn) = pty_pair(RR3_UART_BAUD_DEFAULT);
     set_read_timeout(&conn);
     let mut torn = hdr(9).to_bytes().to_vec();
@@ -229,7 +229,7 @@ fn uart_rejects_torn_header_then_resyncs() {
 /// 超时读（机制面新增护栏，d4 600s 实锤）：静默必须 `Ok(0)` 且**按时醒来**
 /// （不死锁不空转）；来数据必须读到，且超时档读过的字节与原帧逐字节一致。
 #[test]
-fn uart_read_timeout_idle_zero_then_data() {
+fn uart_zero_then_data() {
     let (mut master, mut conn) = pty_pair(RR3_UART_BAUD_DEFAULT);
     let mut buf = [0u8; 64];
     let t0 = std::time::Instant::now();
@@ -260,7 +260,7 @@ fn uart_read_timeout_idle_zero_then_data() {
 
 /// 设备不存在 → open 报 IO 错（错误路径不 panic、不静默）。
 #[test]
-fn uart_open_rejects_missing_device() {
+fn uart_rej_miss_device() {
     assert!(Rr3UartConn::open(Path::new("/nonexistent/rr3-uart-test")).is_err());
 }
 
@@ -268,7 +268,7 @@ fn uart_open_rejects_missing_device() {
 /// （坏 magic 头字节，CP2102 残留同形）必须被 configure 的 tcflush 冲掉——
 /// 随后开口写入的完整帧整帧读回，垃圾不得混入。走真实 open(path) 入口。
 #[test]
-fn uart_open_flushes_stale_input() {
+fn uart_open_input() {
     let (mut master, _slave_keepalive, slave_path) = pty_pair_with_path();
     use std::io::Write as _;
     // 残留字节：一条坏 magic 头 + 尾巴（若不被冲掉，开口首读必 BadMagic）
@@ -292,7 +292,7 @@ fn uart_open_flushes_stale_input() {
 
 /// 波特率档位表：三档内放行，档位外拒绝（静默换档是线路事故）。
 #[test]
-fn uart_baud_speed_table() {
+fn uart_baud_table() {
     assert!(rr3_uart_baud_speed(115200).is_ok());
     assert!(rr3_uart_baud_speed(9600).is_ok());
     assert!(rr3_uart_baud_speed(921600).is_ok());
@@ -315,7 +315,7 @@ fn uart_baud_speed_table() {
 /// 锁主：诊断窗内 exec 已完成、fd 已关），不是账本泄漏；有界重试即过。
 /// 真泄漏形状（退账漏 close）锁是永久的，重试恒败照常 panic——守门不弱化。
 #[test]
-fn uart_open_same_process_pair_reentrant() {
+fn uart_pair_reentrant() {
     let (_master, _slave_keepalive, slave_path) = pty_pair_with_path();
     let _rx = Rr3UartConn::open(&slave_path).expect("首次 open 必须成功");
     let _tx = Rr3UartConn::open(&slave_path).expect("同进程双开（桥 rx/tx 形状）必须放行");
@@ -415,7 +415,7 @@ fn assert_excl_error(err: std::io::Error) {
 /// 就绪文件握手（harness 自身的 stdout 输出不可作握手信道），父进程关 stdin
 /// 即收兵。
 #[test]
-fn uart_excl_cross_process_second_process_rejected() {
+fn uart_excl_cross_rej() {
     let (_master, _slave_keepalive, slave_path) = pty_pair_with_path();
     if excl_holder_probe() {
         return;

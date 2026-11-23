@@ -244,7 +244,7 @@ mod tests {
 
     /// 并发 upsert 不丢键（本轮审计）：面板每连接一线程，读-改-写必须串行。
     #[test]
-    fn concurrent_upserts_do_not_lose_keys() {
+    fn concurrent_not_keys() {
         let path = tmp_secrets("concurrent");
         let mut hs = Vec::new();
         for i in 0..16 {
@@ -271,7 +271,7 @@ mod tests {
     /// 一律不 chmod 父目录——否则 `RR3_SECRETS_FILE=/tmp/x.json` 会把 /tmp 收成
     /// 0700，属破坏性副作用。
     #[test]
-    fn own_dir_only_for_default_path() {
+    fn own_dir_def() {
         let def = PathBuf::from("/home/u/.rr3/secrets.json");
         assert!(rr3_secrets_own(None, &def, Some("/home/u".into())));
         assert!(!rr3_secrets_own(
@@ -291,7 +291,7 @@ mod tests {
     /// 整表重写——下一次 upsert 会把它永久抹掉（数据丢失伪装成成功）。读须
     /// 回错点名 ref，写路径随之拒且原文件逐字不动。
     #[test]
-    fn read_rejects_non_string_values_without_data_loss() {
+    fn read_rej_non_loss() {
         let path = tmp_secrets("shape");
         let bad = r#"{"keys":{"a":"v","b":123}}"#;
         std::fs::write(&path, bad).unwrap();
@@ -310,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn path_resolution_env_wins_then_home() {
+    fn path_env_then_home() {
         // env 非空优先
         assert_eq!(
             rr3_secrets_resolve(Some("/tmp/x.json".into()), Some("/home/u".into())).unwrap(),
@@ -327,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn upsert_insert_overwrite_and_delete_with_mode_0600() {
+    fn upsert_mode_0600() {
         let path = tmp_secrets("upsert");
         rr3_secrets_upsert(&path, "DeepSeek官方", "sk-a").unwrap();
         rr3_secrets_upsert(&path, "SiliconFlow", "sk-b").unwrap();
@@ -346,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn upsert_rejects_blank_or_spaced_ref() {
+    fn upsert_rej_blank_ref() {
         let path = tmp_secrets("refs");
         assert!(rr3_secrets_upsert(&path, "", "v").is_err());
         assert!(rr3_secrets_upsert(&path, "  ", "v").is_err());
@@ -356,7 +356,7 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_existing_file_errors_instead_of_overwrite() {
+    fn corrupt_overwrite() {
         let path = tmp_secrets("corrupt");
         std::fs::write(&path, "不是json").unwrap();
         let err = rr3_secrets_upsert(&path, "r", "v").unwrap_err();
@@ -368,7 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn list_returns_names_only_never_values() {
+    fn list_never_values() {
         let path = tmp_secrets("list");
         rr3_secrets_upsert(&path, "r1", "sk-secret-value").unwrap();
         rr3_secrets_upsert(&path, "r2", "sk-other").unwrap();

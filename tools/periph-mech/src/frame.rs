@@ -96,7 +96,7 @@ mod tests {
     }
 
     #[test]
-    fn recv_parses_host_call_and_rejects_torn_frame() {
+    fn recv_rej_torn_frame() {
         let mut io = recv_host_call(7);
         let req = frame_recv(&mut io).expect("合法帧必须过全部门");
         assert_eq!(req.id, 7);
@@ -112,7 +112,7 @@ mod tests {
     }
 
     #[test]
-    fn response_roundtrip_bytes_and_clock_stamp() {
+    fn resp_clock_stamp() {
         let req = {
             let mut io = recv_host_call(11);
             frame_recv(&mut io).expect("请求可解析")

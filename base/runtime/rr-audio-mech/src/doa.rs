@@ -325,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn frame_conversion_covers_registered_and_odd_rates() {
+    fn frame_reg_odd_rates() {
         assert_eq!(rr3_frames_per_tick(16000, 20), 320, "登记配置的黄金值");
         assert_eq!(rr3_frames_per_tick(16000, 10), 160);
         assert_eq!(rr3_frames_per_tick(8000, 20), 160);
@@ -339,7 +339,7 @@ mod tests {
 
     /// golden 向量：延迟反演逐位钉死——符号、lag 上限、Q7、K_Q15、asin 查表。
     #[test]
-    fn tdoa_inverts_delay_and_bins_pm90() {
+    fn tdoa_delay_bins_pm90() {
         let cfg = doa_cfg();
         for (tau, want_deg, want_bin) in [
             (-7, -90, Rr3DoaBin::Left),
@@ -359,7 +359,7 @@ mod tests {
 
     /// 符号校准注入面：同一 TDOA 窗换 `sign` 即翻左右，角度取反。
     #[test]
-    fn sign_inverts_left_right() {
+    fn sign_left_right() {
         let samples = delayed_stereo(4, 3200, 3000);
         let normal = rr3_doa_fix(&samples, 2, &doa_cfg()).unwrap();
         let mut flipped = doa_cfg();
@@ -372,7 +372,7 @@ mod tests {
 
     /// 置信度：相干声源接近满值，独立双麦噪声低值（漫反射抑制的判据）。
     #[test]
-    fn confidence_high_for_coherent_source_low_for_independent_noise() {
+    fn confidence_low_noise() {
         let cfg = doa_cfg();
         let coherent = delayed_stereo(4, 3200, 3000);
         let fx = rr3_doa_fix(&coherent, 2, &cfg).expect("相干源应判出");
@@ -384,7 +384,7 @@ mod tests {
 
     /// 单声道/空窗/全静音/欠能量窗恒 None；尾帧过门照样判。
     #[test]
-    fn tdoa_returns_none_for_mono_silence_and_quiet() {
+    fn tdoa_none_mono_quiet() {
         let cfg = doa_cfg();
         assert_eq!(
             rr3_doa_fix(&[10, -10, 20, -20], 1, &cfg),
@@ -408,7 +408,7 @@ mod tests {
 
     /// 分档阈值注入面：同一窗换 `bin_threshold_deg` 即换档，反演角与阈值无关。
     #[test]
-    fn injected_threshold_moves_the_bins() {
+    fn injected_thr_bins() {
         let samples = delayed_stereo(2, 3200, 3000);
         let wide = rr3_doa_fix(&samples, 2, &doa_cfg()).unwrap();
         assert_eq!(wide.bin, Rr3DoaBin::Center, "30° 边界：17° 落中档");
@@ -421,7 +421,7 @@ mod tests {
 
     /// 多通道（>2）取前两路 L/R 对：第三路起的内容不影响判向结果。
     #[test]
-    fn tdoa_uses_first_two_channels_only() {
+    fn tdoa_two_channels() {
         let stereo = delayed_stereo(-4, 1600, 3000);
         let three: Vec<i16> = stereo
             .chunks_exact(2)

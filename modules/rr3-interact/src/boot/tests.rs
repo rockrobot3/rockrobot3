@@ -5,7 +5,7 @@ use super::*;
 
 /// 仓内 config.toml 同形状的最小配置必须解析成功——漂移当场红
 #[test]
-fn config_parse_covers_repo_shape() {
+fn cfg_parse_repo_shape() {
     let text = r#"
 [rr3-interact.player]
 prebuffer_ms = 500
@@ -42,7 +42,7 @@ face_expect = "happy"
 /// face/panel/selftest 新键（批N4 件五 I-17/I-18②）：键/段缺省回落 legacy
 /// 值；类型错、在册外值、0 值逐键点名拒（fail-closed）
 #[test]
-fn face_panel_selftest_keys_fall_back_and_reject_bad_values() {
+fn face_rej_bad_values() {
     let minimal = "[rr3-interact.face]\nnon_pointable = []\n";
     // 全缺省：face 节拍/兜底回落 250/idle，panel 五值回落 legacy，
     // selftest 回落 happy
@@ -172,7 +172,7 @@ fn reject_expect_shape() {
 /// wiring 组零 fail；在册三态任选；值域外、组预期词表外、未知腿名、非字符
 /// 串值、非表段逐键点名拒 boot（fail-closed）
 #[test]
-fn selftest_expect_table_falls_back_and_rejects_unknown_legs_and_states() {
+fn selftest_rej_states() {
     selftest_defaults();
     selftest_explicit();
     reject_expect_words();
@@ -181,7 +181,7 @@ fn selftest_expect_table_falls_back_and_rejects_unknown_legs_and_states() {
 
 /// player 两键（MC-2）：键/段缺省回落默认；类型错、负数、越界逐键点名拒
 #[test]
-fn player_keys_fall_back_to_defaults_and_reject_bad_values() {
+fn play_rej_bad_values() {
     // 整段缺省（I-11 最小形状）→ 回落 legacy 默认 500/70
     let cfg = rr3_itact_cfg_parse("[rr3-interact.face]\nnon_pointable = []\n").unwrap();
     assert_eq!(cfg.player.prebuffer_ms, 500, "缺段回落默认水位");
@@ -220,7 +220,7 @@ fn player_keys_fall_back_to_defaults_and_reject_bad_values() {
 }
 
 #[test]
-fn config_parse_rejects_missing_sections_and_fields() {
+fn cfg_rej_miss_fields() {
     let e = rr3_itact_cfg_parse("").unwrap_err();
     assert!(e.contains("[rr3-interact.face]"), "缺段点名: {e}");
     let e = rr3_itact_cfg_parse("[rr3-interact.face]\n").unwrap_err();

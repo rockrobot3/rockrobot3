@@ -8,7 +8,7 @@ use crate::drill::{RR3_SIM_MODULE_A, RR3_SIM_MODULE_B, RR3_SIM_MODULE_BRAIN};
 
 /// 日志判据只认完整行：写一半的末行不得提前返回（否则字段缺半截误判）。
 #[test]
-fn log_find_ignores_partial_tail() {
+fn log_find_part_tail() {
     let partial = "启动\n对话轮完成: trace=1 tts_pcm_ms=";
     assert_eq!(rr3_log_find(partial, "对话轮完成"), None);
     let full = "启动\n对话轮完成: trace=1 actions=1\n";
@@ -20,7 +20,7 @@ fn log_find_ignores_partial_tail() {
 
 /// 钉住"演练用的名字/主题必须真实在契约里"——契约改名时这里红，不是演练跑到一半红
 #[test]
-fn brain_sim_identities_exist_in_the_real_contract() {
+fn brain_sim_contract() {
     let contract = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../contracts/topics.toml");
     let text = std::fs::read_to_string(&contract)
         .unwrap_or_else(|e| panic!("读 {}: {e}", contract.display()));
@@ -41,7 +41,7 @@ fn brain_sim_identities_exist_in_the_real_contract() {
 }
 
 #[test]
-fn manifests_have_absolute_entries_and_contract_shapes() {
+fn mfts_have_shapes() {
     let ms = rr3_brain_manifests(
         Path::new("/abs/rr3-sense"),
         Path::new("/abs/rr3-interact"),
@@ -76,7 +76,7 @@ fn config_shapes() {
 }
 
 #[test]
-fn real_cloud_config_carries_production_models_and_endpoint() {
+fn real_cfg_endpoint() {
     // 真值镜像 modules/rr3-brain/config.toml：cloud.base_url 是主机根（ASR/TTS
     // 自拼 /v1/audio/*）；模型行 base_url 是完整 API 根（LLM 只拼 /chat/completions）
     let cfg = rr3_brain_cfg_text(true, "https://api.siliconflow.cn");

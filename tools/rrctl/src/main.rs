@@ -133,7 +133,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_extracts_command_and_bus_override() {
+    fn parse_bus_override() {
         let a = parse(&v(&["status"]));
         assert_eq!((a.bus.as_deref(), a.cmd.as_deref()), (None, Some("status")));
         assert!(a.rest.is_empty());
@@ -154,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_keeps_tail_args_in_order() {
+    fn parse_args_order() {
         let a = parse(&v(&["tail", "rr3-sense/audio/vad_start", "--count", "3"]));
         assert_eq!(a.cmd.as_deref(), Some("tail"));
         assert_eq!(a.rest, v(&["rr3-sense/audio/vad_start", "--count", "3"]));
@@ -165,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn bus_path_override_beats_default() {
+    fn bus_beats_def() {
         assert_eq!(resolve_bus_path(Some("/tmp/x.sock")), "/tmp/x.sock");
         let expected =
             std::env::var(RR3_BUS_PATH_ENV).unwrap_or_else(|_| RR3_UDS_PATH_DEFAULT.to_string());

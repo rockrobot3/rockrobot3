@@ -156,7 +156,7 @@ mod tests {
 
     /// RFC 4648 §10 的测试向量（权威字面量，不是实现回抄）
     #[test]
-    fn base64_matches_rfc4648_vectors() {
+    fn base64_vectors() {
         let cases: [(&[u8], &str); 7] = [
             (b"", ""),
             (b"f", "Zg=="),
@@ -173,7 +173,7 @@ mod tests {
 
     /// 解码以同一份 RFC 4648 向量钉死，并证明 encode∘decode 是恒等
     #[test]
-    fn base64_decode_matches_rfc4648_vectors_and_roundtrips() {
+    fn base64_roundtrips() {
         let cases: [(&[u8], &str); 7] = [
             (b"", ""),
             (b"f", "Zg=="),
@@ -195,7 +195,7 @@ mod tests {
 
     /// 任意长度往返（覆盖 16bit 样点流的实际形态：640B 块 = 856 字符）
     #[test]
-    fn base64_decode_roundtrips_arbitrary_lengths() {
+    fn base64_lengths() {
         for len in [1usize, 2, 3, 4, 5, 319, 320, 640, 960] {
             let raw: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
             let enc = rr3_base64_encode(&raw);
@@ -205,7 +205,7 @@ mod tests {
 
     /// fail-closed：非法长度 / 越界字符 / 错位填充一律拒
     #[test]
-    fn base64_decode_rejects_malformed_input() {
+    fn base64_rej_input() {
         // 长度非 4 倍数
         assert_eq!(
             rr3_base64_decode("Zg="),

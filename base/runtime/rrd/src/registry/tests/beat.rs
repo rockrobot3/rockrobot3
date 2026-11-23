@@ -4,7 +4,7 @@ use super::*;
 
 /// 注册即 registered；收到心跳才 running；未在册 task 的心跳被拒
 #[test]
-fn heartbeat_promotes_registered_to_running() {
+fn heartbeat_running() {
     let mut r = RrdRegistry::new(1000);
     let t = r
         .rr3_reg_add(&facts("rr3-sima", 200, 1000, "always"), chan().0, 0)
@@ -22,7 +22,7 @@ fn heartbeat_promotes_registered_to_running() {
 /// 稳态心跳间隔峰值（续轮二十五）：只统计续命拍；首拍间隔是启动延迟不计；
 /// 峰值只升不降（点读 `since_beat_ms` 会错过两次采样之间的抖动）。
 #[test]
-fn beat_peak_tracks_steady_interval_only() {
+fn beat_peak_interval() {
     let mut r = RrdRegistry::new(1000);
     let t = r
         .rr3_reg_add(&facts("rr3-sima", 200, 1000, "always"), chan().0, 0)
@@ -43,7 +43,7 @@ fn beat_peak_tracks_steady_interval_only() {
 
 /// 到期完全由显式毫秒驱动：窗口内不判死，超窗口判死转 failed，此后喂狗无效
 #[test]
-fn expire_uses_explicit_monotonic_millis() {
+fn expire_uses_millis() {
     let mut r = RrdRegistry::new(1000);
     let t = r
         .rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
@@ -81,7 +81,7 @@ fn expire_uses_explicit_monotonic_millis() {
 /// `watchdog_ms == 该模块自己的超时值`。线程侧的日志逐字引用它们，
 /// 日志说"501 ≥ 500"而实际按别的数判死，就是线上唯一可读的判死证据在撒谎。
 #[test]
-fn expiry_report_carries_the_numbers_that_decided_it() {
+fn expiry_decided() {
     let mut r = RrdRegistry::new(1000);
     let t = r
         .rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
@@ -104,7 +104,7 @@ fn expiry_report_carries_the_numbers_that_decided_it() {
 
 /// registered（一颗心跳都没拿到）同样受 watchdog 约束
 #[test]
-fn registered_without_any_beat_still_expires() {
+fn reg_any_beat_expires() {
     let mut r = RrdRegistry::new(1000);
     let t = r
         .rr3_reg_add(&facts("rr3-sima", 100, 300, "always"), chan().0, 0)
@@ -115,7 +115,7 @@ fn registered_without_any_beat_still_expires() {
 
 /// 到期扫描不得牵连健康模块（唯一监视线程可安全每 tick 全表扫）
 #[test]
-fn expire_only_reports_stale_modules() {
+fn expire_stale_modules() {
     let mut r = RrdRegistry::new(1000);
     let a = r
         .rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
@@ -147,7 +147,7 @@ fn expire_only_reports_stale_modules() {
 
 /// 越权发布：前缀不等于注册名即拒，文案带 owner/sender
 #[test]
-fn publish_rejects_foreign_prefix() {
+fn pub_rej_prefix() {
     let set = topic_set(&[
         ("rr3-sima/ping/state", "rr3-sima"),
         ("rr3-simb/pong/state", "rr3-simb"),

@@ -10,7 +10,7 @@ use std::time::Duration;
 
 /// 两个模块各拿一个不同 task，且互相看得见对方上线
 #[test]
-fn two_peers_get_distinct_tasks_and_online_broadcast() {
+fn two_get_broadcast() {
     let mut rrd = RrdTest::rr3_start("dual");
     let mut a = rrd.rr3_connect();
     rr3_send(
@@ -49,7 +49,7 @@ fn two_peers_get_distinct_tasks_and_online_broadcast() {
 
 /// 同名重复注册 = AIRY_EBUSY，且先来的那个不受牵连
 #[test]
-fn duplicate_name_is_busy_and_first_peer_survives() {
+fn duplicate_survives() {
     let mut rrd = RrdTest::rr3_start("dup");
     let mut a = rrd.rr3_connect();
     rr3_send(
@@ -85,7 +85,7 @@ fn duplicate_name_is_busy_and_first_peer_survives() {
 
 /// 冒充内建命名空间的模块名 = AIRY_EPERM
 #[test]
-fn registering_reserved_owner_is_eperm() {
+fn registering_eperm() {
     let rrd = RrdTest::rr3_start("reserved");
     let mut c = rrd.rr3_connect();
     rr3_send(
@@ -109,7 +109,7 @@ fn registering_reserved_owner_is_eperm() {
 
 /// 坏 manifest：文案必须点名具体字段；三次失败之后守护照常服务，且不占 task 号
 #[test]
-fn bad_manifests_name_the_field_and_keep_rrd_alive() {
+fn bad_keep_rrd_alive() {
     let mut rrd = RrdTest::rr3_start("bad");
     let good = rr3_manifest("rr3-sima", 100, 500, "always");
     let cases = [
@@ -158,7 +158,7 @@ fn bad_manifests_name_the_field_and_keep_rrd_alive() {
 
 /// 主动退订：干净退出，绝不触发重启（哪怕 restart_policy=always）
 #[test]
-fn unregister_is_clean_exit_and_never_restarts() {
+fn unregister_restart() {
     let mut rrd = RrdTest::rr3_start("unreg");
     let mut a = rrd.rr3_connect();
     rr3_send(
@@ -190,7 +190,7 @@ fn unregister_is_clean_exit_and_never_restarts() {
 /// 钉过（"应答必须点对点回给请求者"），心跳/退订应答的头字段今天没人看——
 /// 把 `rr3_reply_ok` 的 dst 改成 `RR3_BROADCAST_DST_TASK` 就会在这里变红。
 #[test]
-fn replies_are_point_to_point() {
+fn replies_point_point() {
     let rrd = RrdTest::rr3_start("ptp");
     let mut a = rrd.rr3_connect();
     register_sima(&mut a);

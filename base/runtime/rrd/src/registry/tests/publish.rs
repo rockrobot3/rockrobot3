@@ -9,7 +9,7 @@ use super::*;
 /// 任何绕开 check 造出来的表都可能带着"首段是 rr3-sima、owner 登记的是 rr3-simb"的条目。
 /// 故本用例**刻意不用** `topic_set()`（它 assert 过 check，结构上造不出这张表）。
 #[test]
-fn publish_check_uses_the_registered_owner_not_just_the_first_segment() {
+fn pub_reg_not_segment() {
     let set = rr_registry::rr3_topic_parse(
         r#"schema_version = 1
 [[owner]]
@@ -48,7 +48,7 @@ owner = "rr3-simb"
 /// 夹具要点：主题**在册**且首段与发送方相符，所以前两道分支都不会命中，只有第三道
 /// （登记 owner 与发送方比对）能拒——本用例钉的就是它的回显值。
 #[test]
-fn publish_foreign_prefix_echoes_question_mark_when_owner_is_missing() {
+fn pub_mark_owner_miss() {
     let set = rr_registry::rr3_topic_parse(
             "\n[[owner]]\nname = \"rr3-sima\"\n[[topic]]\nname = \"rr3-sima/ping/state\"\nkind = \"event\"\n",
         );
@@ -77,7 +77,7 @@ fn publish_foreign_prefix_echoes_question_mark_when_owner_is_missing() {
 /// "两条分支同一写法"逐分支钉住：前一段打第一处构造点（head ≠ sender），
 /// 后一段打第三道分支（head == sender、在册、owner 却取不到）。
 #[test]
-fn foreign_prefix_owner_echo_is_question_mark_on_both_construction_sites() {
+fn foreign_mark_ctor() {
     // 第一处构造点：主题 rr3-sima/x/y 在册且 owner 键缺失，发送方 rr3-simb → 前缀不符分支
     let set = rr_registry::rr3_topic_parse(
         "\n[[owner]]\nname = \"rr3-sima\"\n[[topic]]\nname = \"rr3-sima/x/y\"\nkind = \"event\"\n",
@@ -109,7 +109,7 @@ fn foreign_prefix_owner_echo_is_question_mark_on_both_construction_sites() {
 
 /// 主题名少于两段（`rr3-sima` 独占一段）时前缀仍须等于注册名，越权面不因段数缩小
 #[test]
-fn publish_rejects_foreign_prefix_with_single_segment_topic() {
+fn pub_rej_single_topic() {
     let set = topic_set(&[
         ("rr3-sima/ping/state", "rr3-sima"),
         ("rr3-simb/pong/state", "rr3-simb"),
@@ -126,7 +126,7 @@ fn publish_rejects_foreign_prefix_with_single_segment_topic() {
 
 /// 冒充内建命名空间优先于一切判定（哪怕该主题真在主题集里）
 #[test]
-fn publish_rejects_runtime_impersonation_first() {
+fn pub_rej_first() {
     let set = topic_set(&[("rr3-runtime/module/state", "rr3-runtime")]);
     assert_eq!(
         RrdRegistry::rr3_reg_pub_check("rr3-sima", "rr3-runtime/module/state", &set)
@@ -142,7 +142,7 @@ fn publish_rejects_runtime_impersonation_first() {
 
 /// `rr3-runtime/*` 对任何模块都是禁区，与它在主题集里有没有条目无关
 #[test]
-fn publish_rejects_reserved_namespace_whatever_the_sender_claims() {
+fn pub_rej_ns_claims() {
     let set = topic_set(&[("rr3-sima/ping/state", "rr3-sima")]);
     assert_eq!(
         RrdRegistry::rr3_reg_pub_check("rr3-sima", "rr3-runtime/system/heartbeat", &set),
@@ -160,7 +160,7 @@ fn publish_rejects_reserved_namespace_whatever_the_sender_claims() {
 
 /// 前缀对但没在册（拼错域名）也必须拒
 #[test]
-fn publish_rejects_unregistered_topic() {
+fn pub_rej_unreg_topic() {
     let set = topic_set(&[("rr3-sima/ping/state", "rr3-sima")]);
     assert_eq!(
         RrdRegistry::rr3_reg_pub_check("rr3-sima", "rr3-sima/ping/others", &set),
@@ -172,7 +172,7 @@ fn publish_rejects_unregistered_topic() {
 
 /// 越权只计数，不影响在册状态与后续合法发布
 #[test]
-fn denied_publish_is_counted_not_fatal() {
+fn denied_pub_not_fatal() {
     let mut r = RrdRegistry::new(1000);
     r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
         .unwrap();
@@ -190,7 +190,7 @@ fn denied_publish_is_counted_not_fatal() {
 
 /// never：死亡即 failed，不给重启计划
 #[test]
-fn never_policy_never_restarts() {
+fn never_never_restart() {
     let mut r = RrdRegistry::new(1000);
     r.rr3_reg_add(&facts("rr3-simb", 100, 500, "never"), chan().0, 0)
         .unwrap();

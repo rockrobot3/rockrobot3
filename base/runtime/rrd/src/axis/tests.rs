@@ -23,7 +23,7 @@ fn sample_pin_ids() -> BTreeSet<String> {
 
 /// 解析 → 逐键值面断言；序列化键序 = 词表序；再装载 round-trip 逐键相等
 #[test]
-fn parse_and_serialize_round_trip_in_vocabulary_order() {
+fn parse_trip_order() {
     let f =
         rr3_act_prof_parse(&sample_text(), "axis.toml", &sample_pin_ids()).expect("示例档应全绿");
     assert_eq!(f.pin, "act.axis.pwm.pan");
@@ -53,7 +53,7 @@ fn parse_and_serialize_round_trip_in_vocabulary_order() {
 
 /// 未知键 + 缺键同批全数点名（错误全收集，不挤牙膏；F-6 留空即红）
 #[test]
-fn unknown_and_missing_keys_are_all_collected() {
+fn unknown_collected() {
     let mut lines: Vec<String> = sample_text().lines().map(String::from).collect();
     lines.push("extra_key = 1".to_string());
     let idx = lines
@@ -70,7 +70,7 @@ fn unknown_and_missing_keys_are_all_collected() {
 
 /// pin 外键未命中 [pins] 的 pin_id 集（F-4：档案与绑定之间必须有外键）
 #[test]
-fn pin_foreign_key_miss_is_red() {
+fn pin_key_miss_red() {
     let text = sample_text().replace("act.axis.pwm.pan", "act.axis.pwm.unknown");
     let errs =
         rr3_act_prof_parse(&text, "axis.toml", &sample_pin_ids()).expect_err("外键未命中应红");
@@ -83,7 +83,7 @@ fn pin_foreign_key_miss_is_red() {
 
 /// schema 版本对账：只认 1，升版走契约级评审
 #[test]
-fn schema_mismatch_is_red() {
+fn schema_mismatch_red() {
     let text = sample_text().replace("schema = 1", "schema = 2");
     let errs =
         rr3_act_prof_parse(&text, "axis.toml", &sample_pin_ids()).expect_err("schema 版本不对应红");
@@ -93,7 +93,7 @@ fn schema_mismatch_is_red() {
 
 /// 行程窗口自洽判据：须严格 lo < center < hi（lo == center 也破）
 #[test]
-fn window_self_consistency_is_red() {
+fn window_self_red() {
     let text = sample_text().replace("lo_deg = 60", "lo_deg = 90");
     let errs =
         rr3_act_prof_parse(&text, "axis.toml", &sample_pin_ids()).expect_err("行程窗口自洽破应红");
@@ -102,7 +102,7 @@ fn window_self_consistency_is_red() {
 
 /// dir_sign = 0 是物理矛盾（单独点名）；dir_sign = 2 越域（±1 之外）
 #[test]
-fn dir_sign_zero_and_out_of_domain_are_red() {
+fn dir_zero_out_red() {
     let text = sample_text().replace("dir_sign = 1", "dir_sign = 0");
     let errs =
         rr3_act_prof_parse(&text, "axis.toml", &sample_pin_ids()).expect_err("dir_sign = 0 应红");
@@ -115,7 +115,7 @@ fn dir_sign_zero_and_out_of_domain_are_red() {
 
 /// 词键词表外即红（hold 词形真值在 rr-hal-api，装载侧不认第二份）
 #[test]
-fn hold_word_out_of_vocabulary_is_red() {
+fn hold_word_out_red() {
     let text = sample_text().replace("hold = \"release\"", "hold = \"auto\"");
     let errs = rr3_act_prof_parse(&text, "axis.toml", &sample_pin_ids()).expect_err("词表外应红");
     assert!(errs[0].contains("hold = \"auto\" 不在册"), "{errs:?}");
@@ -124,7 +124,7 @@ fn hold_word_out_of_vocabulary_is_red() {
 /// 落盘 → 读回 round-trip；原子写序走完不得留 tmp 残留
 #[cfg(unix)]
 #[test]
-fn store_then_load_round_trips_without_tmp_leftover() {
+fn store_tmp_leftover() {
     let dir = tmpdir("round");
     let path = dir.join("pan.toml");
     let f = rr3_act_prof_parse(&sample_text(), "axis.toml", &sample_pin_ids()).unwrap();
@@ -142,7 +142,7 @@ fn store_then_load_round_trips_without_tmp_leftover() {
 
 /// 无档案 = None（机制不代言缺省）；坏件 = Err 且字节不动（不许覆盖）
 #[test]
-fn load_missing_is_none_and_broken_file_is_err_without_overwrite() {
+fn load_miss_overwrite() {
     let dir = tmpdir("broken");
     let path = dir.join("pan.toml");
     assert_eq!(

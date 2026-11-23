@@ -213,7 +213,7 @@ fn tail_no_resend(obs: &mut RrdClient) {
 }
 
 #[test]
-fn power_module_low_battery_fallback_end_to_end() {
+fn power_low_end_end() {
     // ---------- 夹具：真二进制 + 真 manifest + config 同树 ----------
     let bin = rr3_build_module_bin("rr3-power");
     let root = E2eRoot::rr3_new("power", "power");

@@ -179,7 +179,7 @@ fn pin_triples(topics: &[(String, String, String)]) {
 /// 反过来说，删一条主题、改一条 kind、改一个 owner 数同样会红——评审证明这正是
 /// 此前门禁的空洞（只有 owner 数与 fixture 引用的四条主题被钉住）。
 #[test]
-fn registry_shape_is_pinned() {
+fn registry_pinned() {
     let text = topics_toml();
 
     pin_owner_shape(&text);
@@ -192,7 +192,7 @@ fn registry_shape_is_pinned() {
 /// asr/text 与 dialog/turn 仍在册（pin 住号位），但申报面（publishes/rpc.exposes/subscribes）
 /// 引用它们必被拒；未标记状态的主题 = None（正常语义）。
 #[test]
-fn retired_topics_are_pinned_and_undeclarable() {
+fn retired_undeclarable() {
     // ① 号位保留：两条 retired 主题仍在册；普通主题未标记 = None
     let set = rr_registry::rr3_topic_parse(&topics_toml());
     assert_eq!(
@@ -233,7 +233,7 @@ fn retired_topics_are_pinned_and_undeclarable() {
 /// modules/ 下每个模块的 module.toml 都必须过同一份 manifest 契约。
 /// 骨架可以没有实现，manifest 不可以不合契约——否则要等 rrd 上线才暴露拒注册。
 #[test]
-fn every_module_manifest_passes_contract() {
+fn every_contract() {
     let modules = repo_root().join("modules");
     let mut dirs: Vec<std::path::PathBuf> = std::fs::read_dir(&modules)
         .expect("读不到 modules/ 目录")
@@ -271,7 +271,7 @@ fn every_module_manifest_passes_contract() {
 /// contracts/topics.toml 每条 owner 的 `path` 必须真的存在。
 /// 曾经 6 个 owner 指向不存在的 modules/rr3-*：契约在说谎，且五步检查无人拦截。
 #[test]
-fn every_owner_path_exists() {
+fn every_owner_exists() {
     let root = repo_root();
     let v: toml::Value = toml::from_str(&topics_toml()).expect("topics.toml 必须可解析");
     let owners = v

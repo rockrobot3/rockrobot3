@@ -42,7 +42,7 @@ fn relativize(abs: &Path, cwd: &Path) -> Option<PathBuf> {
 
 /// 不带叠加层 = 生产面，契约钉数条主题一个不多
 #[test]
-fn contract_only_load_is_the_production_surface() {
+fn contract_surface() {
     let (set, added) = rr3_topics_load(&contract(), None).expect("契约装载应成功");
     assert_eq!(
         set.rr3_topic_names().len(),
@@ -54,7 +54,7 @@ fn contract_only_load_is_the_production_surface() {
 }
 
 #[test]
-fn overlay_adds_fixture_topics_and_lists_them() {
+fn overlay_adds_them() {
     let (set, added) =
         rr3_topics_load(&contract(), Some(&fixture_overlay())).expect("夹具应能合并");
     assert_eq!(
@@ -76,7 +76,7 @@ fn overlay_adds_fixture_topics_and_lists_them() {
 /// merge 将来退化；装载处的复验是同一件事的 fail-closed 版本，kind 那一支的**反向**实证
 /// 见 `contract_topic_kind_rewritten_by_the_merge_is_rejected`。
 #[test]
-fn merged_set_is_rechecked_against_the_contract() {
+fn merged_set_contract() {
     let (base_set, _) = rr3_topics_load(&contract(), None).expect("契约装载应成功");
     let (merged, _) = rr3_topics_load(&contract(), Some(&fixture_overlay())).expect("夹具应能合并");
     assert!(
@@ -112,7 +112,7 @@ fn merged_set_is_rechecked_against_the_contract() {
 /// `read_set` 的形状自检那一步就会被"不在 owner 命名空间内"拦下；只有**自身形状合法**
 /// 的叠加层（owner 与首段一致）才走得到 merge，进而被撞名规则点名——故这里用 rr3-sense。
 #[test]
-fn overlay_conflict_refuses_startup_and_names_the_entry() {
+fn overlay_entry() {
     let ov = tmp_named(
         "conflict",
         r#"
@@ -132,7 +132,7 @@ owner = "rr3-sense"
 
 /// 空叠加层 / owner 未登记的叠加层都必须拒，不得静默放行
 #[test]
-fn bad_overlay_is_rejected_not_ignored() {
+fn bad_rej_not_ignored() {
     let e1 = rr3_topics_load(
         &contract(),
         Some(&tmp_named("empty", "schema_version = 1\n")),
@@ -153,7 +153,7 @@ fn bad_overlay_is_rejected_not_ignored() {
 
 /// 契约文件本身丢了也要拒启动（不能"零主题继续跑"）
 #[test]
-fn missing_contract_is_fatal() {
+fn miss_contract_fatal() {
     let e = rr3_topics_load(Path::new("/nonexistent/rr3-topics.toml"), None)
         .expect_err("契约缺失必须拒");
     assert!(e[0].contains("读不到主题契约"), "{e:?}");
@@ -166,7 +166,7 @@ fn missing_contract_is_fatal() {
 /// 与 CF-3（套接字用 `std::path::absolute`）的分工见 `rr3_contract_abs` 的注释：
 /// 契约**必须已存在**，所以 canonicalize 在这里恰是对的工具，而 bind 前的套接字用它会误拒。
 #[test]
-fn contract_path_is_normalised_before_it_reaches_the_error_text() {
+fn contract_error_text() {
     assert!(
             RR3_CONTRACT_TOPICS_PATH.contains(".."),
             "用例前提：生产常量本身就是带 .. 的形状，否则这条修法没有对象（收到 {RR3_CONTRACT_TOPICS_PATH}）"
@@ -205,7 +205,7 @@ fn contract_path_is_normalised_before_it_reaches_the_error_text() {
 }
 
 #[test]
-fn reserved_namespace_detection() {
+fn reserved_detection() {
     assert!(rr3_topics_reserved("rr3-runtime/system/heartbeat"));
     assert!(rr3_topics_reserved("rr3-runtime/module/state"));
     assert!(!rr3_topics_reserved("rr3-sima/ping/state"));
@@ -215,7 +215,7 @@ fn reserved_namespace_detection() {
 /// 叠加层里 owner 已登记、但 topic 首段不是该 owner —— 冒充别人的命名空间必须拒
 /// （钉住 `rr3_topic_check` 的"不在 owner 命名空间内"分支）
 #[test]
-fn overlay_topic_outside_its_owner_namespace_is_rejected() {
+fn overlay_owner_ns_rej() {
     let ov = tmp_named(
             "crossns",
             "\n[[owner]]\nname = \"rr3-sima\"\n[[topic]]\nname = \"rr3-simb/hijack/state\"\nkind = \"event\"\nowner = \"rr3-sima\"\n",
@@ -231,7 +231,7 @@ fn overlay_topic_outside_its_owner_namespace_is_rejected() {
 /// `rr3_topic_names()` 承诺升序：契约文本是"按 owner 分组手写"的顺序，
 /// 若实现退化成插入序，本测试的第一/最后一条断言就会红。
 #[test]
-fn names_are_ascending_not_contract_file_order() {
+fn names_not_file_order() {
     let (set, _) = rr3_topics_load(&contract(), None).expect("契约装载应成功");
     let names = set.rr3_topic_names();
     assert!(
@@ -251,7 +251,7 @@ fn names_are_ascending_not_contract_file_order() {
 
 /// 不在册 topic 的 owner 是 None（rrd 靠这个返回值拒注册，不能给空串或 panic）
 #[test]
-fn unknown_topic_has_no_owner() {
+fn unknown_has_no_owner() {
     let (set, _) = rr3_topics_load(&contract(), None).expect("契约装载应成功");
     assert_eq!(set.rr3_topic_owner("rr3-nobody/not/registered"), None);
     assert_eq!(
@@ -312,7 +312,7 @@ owner = "rr3-sima"
 /// 一对 base/merged 代表"merge 退化后的产物"，直接打复验函数；同一对输入里的合法新增
 /// 对照组证明这条规则不会把"只加新 topic"一起否掉。
 #[test]
-fn contract_topic_kind_rewritten_by_the_merge_is_rejected() {
+fn contract_kind_rej() {
     let base = base_topic_set();
     // 退化 merge 的产物：名字与 owner 都没动，只把 kind 换成另一个白名单值
     let tampered = tampered_topic_set();
@@ -344,7 +344,7 @@ fn contract_topic_kind_rewritten_by_the_merge_is_rejected() {
 /// （Windows 上 canonicalize 会带 `\\?\` verbatim 前缀，那仍是绝对路径，
 /// `is_absolute()` 与等值比较都成立；Linux 生产侧就是干净的 `/abs/...`。）
 #[test]
-fn relative_overlay_path_resolves_to_absolute() {
+fn relative_absolute() {
     let abs = fixture_overlay();
     let cwd = std::env::current_dir().expect("测试进程必须有可查的 CWD");
     let rel = relativize(&abs, &cwd).expect("夹具路径必须能改写成相对形式");
@@ -375,7 +375,7 @@ fn relative_overlay_path_resolves_to_absolute() {
 
 /// 解析不了的路径要如实报错，不许悄悄回显原词（否则路径绝对化形同虚设）
 #[test]
-fn unresolvable_path_reports_instead_of_echoing() {
+fn unresolvable_echoing() {
     let e =
         rr3_topics_abs(Path::new("no-such-dir/rr3-nope.toml")).expect_err("不存在的路径必须报错");
     assert!(
@@ -393,7 +393,7 @@ fn unresolvable_path_reports_instead_of_echoing() {
 /// 直接拿调用方给的原词做文案 → 运维照报错里的路径去查，展开的是他自己的 CWD。
 /// 与 `contract_path_is_normalised_before_it_reaches_the_error_text`（CF-4）同口径、同工具。
 #[test]
-fn overlay_declaring_reserved_namespace_is_rejected() {
+fn overlay_ns_rej() {
     let dir = std::env::temp_dir().join(format!("rr3-ov-cf3-{}", std::process::id()));
     let nested = dir.join("nested");
     std::fs::create_dir_all(&nested).expect("建用例临时目录");
@@ -442,7 +442,7 @@ owner = "rr3-sima"
 
 /// 形状错误必须自带来源——契约的错与叠加层的错打出来不能一样
 #[test]
-fn shape_errors_name_their_source() {
+fn shape_errors_source() {
     let overlay_bad = tmp_named(
             "shape-overlay",
             "\n[[owner]]\nname = \"x\"\n[[topic]]\nname = \"rr3-sense/audio/pcm\"\nkind = \"event\"\nowner = \"x\"\n",

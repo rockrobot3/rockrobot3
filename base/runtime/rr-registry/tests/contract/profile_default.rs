@@ -8,7 +8,7 @@ use super::*;
 /// 型号集与 mate 集封闭——加器件 = append 不红，改型号/删型号 = 契约级变更当场红
 /// （wire.mate 对账⑦-d、id_reg 探测 L-14、peak_ma 互校⑨ 的判据源都在这一册）。
 #[test]
-fn devices_table_shape_and_mates_are_pinned() {
+fn devices_mates_pinned() {
     let root = repo_root();
     let devices = rr_registry::rr3_dev_parse(
         &std::fs::read_to_string(root.join("contracts/devices.toml"))
@@ -209,7 +209,7 @@ fn default_bindings(
 /// 绑到真实模块、与该模块的 manifest provides 对账；enabled_slots 与 provides 全集相等；
 /// 全部非 base 格位恰好被绑定一次（default 机不留缺格）。
 #[test]
-fn default_profile_binds_module_slots_to_real_modules() {
+fn def_real_modules() {
     let root = repo_root();
     let table = rr_registry::rr3_slot_parse(&slots_toml());
     profile_set(&root);
@@ -329,7 +329,7 @@ fn distro_bindings(
 /// 正是快路 payload 缺 Python brain 的诚实表达（P2：缺格点名降级，不拒 boot；
 /// CI distro-smoke 的断言锚点与这份装配单同源）。
 #[test]
-fn distro_profile_binds_exactly_the_body_layer() {
+fn distro_body_layer() {
     let root = repo_root();
     let table = rr_registry::rr3_slot_parse(&slots_toml());
     let manifests: std::collections::BTreeMap<String, toml::Value> =

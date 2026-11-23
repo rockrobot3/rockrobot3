@@ -5,7 +5,7 @@ use super::*;
 /// 唯一提供者死了（conn EOF 路）→ 依赖它的 Running 模块置 Degraded；
 /// 心跳只续命不升级（Kept），降级不被一颗心跳抹平
 #[test]
-fn provider_death_degrades_running_dependent() {
+fn provider_dependent() {
     let mut r = RrdRegistry::new(20);
     r.rr3_reg_providers(providers_of(&[("cap.x", &["rr3-prov"])]));
     let p = facts("rr3-prov", 100, 5000, "always");
@@ -52,7 +52,7 @@ fn provider_death_degrades_running_dependent() {
 /// G4：装配缺项的预降级——注册入表即 Degraded、心跳只续命（Kept）、
 /// 能力传播解除不捞回（修数据 + 重启 rrd 是唯一解除路）
 #[test]
-fn predegraded_module_registers_degraded_and_is_not_rescued() {
+fn predegraded_rescued() {
     let mut r = RrdRegistry::new(20);
     r.rr3_reg_predegrade(["rr3-dep".to_string()]);
     r.rr3_reg_providers(providers_of(&[("cap.x", &["rr3-prov"])]));
@@ -91,7 +91,7 @@ fn predegraded_module_registers_degraded_and_is_not_rescued() {
 
 /// 多提供者"任一存活即满足"：只死一个不降级；两个全灭才降级
 #[test]
-fn any_surviving_provider_keeps_dependent_running() {
+fn any_keeps_running() {
     let mut r = RrdRegistry::new(20);
     r.rr3_reg_providers(providers_of(&[("cap.x", &["rr3-p1", "rr3-p2"])]));
     let d = facts_with_depends("rr3-dep", &["cap.x"]);
@@ -160,7 +160,7 @@ fn dep_phase(r: &RrdRegistry) -> Option<Rr3Phase> {
 
 /// 解除的判据是"全部 required 就位"：只回来一个提供者不许解除
 #[test]
-fn provider_recovery_undegrades_only_when_all_deps_satisfied() {
+fn provider_satisfied() {
     let (mut r, dt) = dep_under_two_caps();
     let px = promote_module(&mut r, "rr3-px");
     promote_module(&mut r, "rr3-py");
@@ -202,7 +202,7 @@ fn provider_recovery_undegrades_only_when_all_deps_satisfied() {
 /// true（下降沿，conn 据此广播恰一次 battery-ok 解除点名），旗未置位时返回
 /// false；解除后可再次升起（低电是可循环的 episodes，不是一次性熔断）。
 #[test]
-fn low_power_flag_rises_once_lowers_and_rises_again() {
+fn low_flag_once_again() {
     let mut r = RrdRegistry::new(1000);
     assert!(!r.rr3_reg_lp_is_set(), "初始未置位");
     assert!(r.rr3_reg_lp_raise(), "首次置位是上升沿");

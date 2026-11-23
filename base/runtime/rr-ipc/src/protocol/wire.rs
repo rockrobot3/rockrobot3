@@ -116,7 +116,7 @@ mod tests {
     /// 帧头部必须与 golden 向量逐字节一致（跨架构对比发射端用的同一个不变量；
     /// 往返与 torn-io 语义仍由 `transport::frame` 的 io 半边用例覆盖）
     #[test]
-    fn frame_header_is_byte_identical_to_golden() {
+    fn frame_byte_golden() {
         let g = golden();
         let pure = rr3_golden_pure(&g);
 
@@ -151,7 +151,7 @@ mod tests {
 
     /// 写侧自校验：长度不符就一个字都不许拼出去
     #[test]
-    fn frame_to_bytes_rejects_length_mismatch() {
+    fn frame_rej_mismatch() {
         let f = Rr3Frame {
             header: hdr(9),
             payload: b"123"[..].to_vec(),
@@ -167,7 +167,7 @@ mod tests {
 
     /// 字节化自洽：to_bytes 的产物按头字段解析回同一帧（无 io 参与）
     #[test]
-    fn frame_to_bytes_round_trips_through_header_parse() {
+    fn frame_trips_parse() {
         let f = Rr3Frame {
             header: hdr(5),
             payload: b"hello"[..].to_vec(),

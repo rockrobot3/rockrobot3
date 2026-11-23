@@ -214,7 +214,7 @@ mod tests {
     /// ui.face 两角色同属 ui.face.phys 绑定组：组内一路绑定即满足，缺组点名组名
     /// （W5-3 校验②按组判——SPI 点阵与 I2C OLED 二选一）。
     #[test]
-    fn face_group_satisfies_with_one_binding() {
+    fn face_group_binding() {
         let roles = rr_registry::rr3_role_parse(ROLES);
         let mut profile = Rr3Profile::default();
         profile

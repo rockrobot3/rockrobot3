@@ -6,7 +6,7 @@ use std::path::Path;
 use super::*;
 
 #[test]
-fn ctl_query_roundtrips_and_reports_errors() {
+fn ctl_query_errors() {
     let dir = std::env::temp_dir().join(format!("panel-ctl-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -58,7 +58,7 @@ fn ctl_query_roundtrips_and_reports_errors() {
 /// RAII 守卫的 panic 路径：连接线程 panic 展开时槽位必须归还（旧实现
 /// fetch_sub 在闭包尾，panic 即泄漏）。
 #[test]
-fn conn_slot_guard_releases_on_panic_unwind() {
+fn conn_slot_unwind() {
     let live = Arc::new(AtomicUsize::new(0));
     let r = std::panic::catch_unwind(|| {
         let _slot = Rr3ConnSlot::rr3_acquire(&live);
@@ -185,7 +185,7 @@ fn wait_spawn_counter(beats: &Arc<Mutex<Vec<Value>>>) {
 /// （stack_size(usize::MAX)）打头一条连接，后续连接照常 200；槽位账平；
 /// 失败进 counters（panel_spawn_fail 随心跳自报）。
 #[test]
-fn panel_survives_spawn_failure_and_bumps_counter() {
+fn panel_fail_counter() {
     // 前置自证：stack_size(usize::MAX) 的 spawn 在本平台确定性失败
     //（attr_setstacksize EINVAL；实测小值如 1 会被 macOS 静默 clamp，
     // 不可作注入，故取上溢值）
@@ -214,7 +214,7 @@ fn panel_survives_spawn_failure_and_bumps_counter() {
 
 /// 回环判定：IP 才判 loopback；主机名/非法形状按非回环（保守告警）。
 #[test]
-fn panel_loopback_only_accepts_loopback_ips() {
+fn panel_ok_ips() {
     assert!(rr3_panel_loopback("127.0.0.1:8080"));
     assert!(rr3_panel_loopback("[::1]:8080"));
     assert!(!rr3_panel_loopback("0.0.0.0:8080"));

@@ -8,7 +8,7 @@ use rr_ota::bootenv;
 use std::path::{Path, PathBuf};
 /// 打印的标签必须与 rr-ota 常量逐一对应（否则文档与代码就分家了）
 #[test]
-fn slot_labels_come_from_rr_ota_constants() {
+fn slot_rr_constants() {
     assert_eq!(
         ALL_SLOTS.map(|s| s.rr3_slot_label()),
         ["rr_a", "rr_b", "rr_factory"]
@@ -18,7 +18,7 @@ fn slot_labels_come_from_rr_ota_constants() {
 /// 写侧实装后，"恒拒"面由"无效目标拒"取代：不在册标签在用法层拒
 /// （exit 2）；业务规则（同槽 / factory 目标 / 形状漂移）归 rr-ota::bootconf
 #[test]
-fn slot_arg_maps_known_labels_and_rejects_unknown_ones() {
+fn slot_arg_rej_unknown() {
     assert_eq!(rr3_slot_arg("rr_a"), Ok(Rr3Slot::SlotA));
     assert_eq!(rr3_slot_arg("rr_b"), Ok(Rr3Slot::SlotB));
     assert_eq!(rr3_slot_arg("rr_factory"), Ok(Rr3Slot::Factory));
@@ -27,7 +27,7 @@ fn slot_arg_maps_known_labels_and_rejects_unknown_ones() {
 }
 /// CLI 壳端到端：临时文件 读 → 改写 → 原子写回；业务拒（同槽）透传 rr-ota 文案
 #[test]
-fn switch_command_rewrites_file_and_rejects_same_slot() {
+fn switch_rej_same_slot() {
     let dir = std::env::temp_dir().join(format!("rr3-ota-ctl-{}-e2e", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -59,7 +59,7 @@ fn switch_command_rewrites_file_and_rejects_same_slot() {
 }
 /// --bootconf 是硬门槛：缺参必须在用法层拒，不得缺省碰任何路径
 #[test]
-fn bootconf_arg_is_mandatory_and_never_defaulted() {
+fn bootconf_defaulted() {
     let args: Vec<String> = vec!["switch".into(), "rr_b".into()];
     assert!(rr3_bootconf_arg(&args).is_err(), "缺 --bootconf 必须拒");
     let args: Vec<String> = vec!["switch".into(), "rr_b".into(), "--bootconf".into()];
@@ -96,7 +96,7 @@ fn rb_fixture(tag: &str) -> (PathBuf, PathBuf) {
 /// arm 写四变量、ok 写两变量：都经真实 fs 读改写，读回逐键等值。
 #[cfg(unix)]
 #[test]
-fn rollback_arm_then_ok_cycles_through_env_file() {
+fn rollback_ok_env_file() {
     let (cfg, dir) = rb_fixture("cycle");
     let envp = vec!["--env".into(), cfg.to_string_lossy().into_owned()];
     let mut arm = vec!["--limit".into(), "3".into(), "--altcmd".into()];
@@ -128,7 +128,7 @@ fn rollback_arm_then_ok_cycles_through_env_file() {
 /// 各自独立成立：文案点名对象，退出码分 1（业务）与 2（用法）。
 #[cfg(unix)]
 #[test]
-fn rollback_error_faces_are_named() {
+fn rollback_error_named() {
     let (cfg, dir) = rb_fixture("err");
     let envp = cfg.to_string_lossy().into_owned();
     let mk = |limit: &str, alt: &str| -> Vec<String> {
@@ -284,7 +284,7 @@ fn write_key(path: &Path, seed: &[u8; 32]) -> PathBuf {
 }
 /// 生成 → 签名 → 验签全链；镜像篡改必须拒。
 #[test]
-fn ota_sign_verify_flow_is_end_to_end() {
+fn ota_flow_end_end() {
     let f = OtaFixture::new("flow");
     f.prepare();
     let mut args = f.verify_args();
@@ -302,7 +302,7 @@ fn ota_sign_verify_flow_is_end_to_end() {
 }
 /// 用错私钥签名必须拒；私钥权限过宽必须拒。
 #[test]
-fn sign_rejects_wrong_key_and_loose_permissions() {
+fn sign_rej_permissions() {
     let f = OtaFixture::new("wrong-key");
     f.prepare();
     let other = write_key(&f.dir.join("other.key"), &[9u8; 32]);
@@ -329,7 +329,7 @@ fn sign_rejects_wrong_key_and_loose_permissions() {
 }
 /// 降级门与开关互斥；platform/board 不匹配必须拒。
 #[test]
-fn verify_enforces_downgrade_and_target_policy() {
+fn verify_target_policy() {
     let f = OtaFixture::new("policy");
     f.prepare();
     let mut args = f.verify_args();
@@ -360,7 +360,7 @@ fn verify_enforces_downgrade_and_target_policy() {
 }
 /// --pub-dir 按 key_id 查公钥；缺键点名实际查找路径。
 #[test]
-fn pub_dir_resolves_key_id_and_names_missing_key() {
+fn pub_key_id_miss_key() {
     let f = OtaFixture::new("pub-dir");
     f.prepare();
     let keys = f.dir.join("keys");
@@ -378,7 +378,7 @@ fn pub_dir_resolves_key_id_and_names_missing_key() {
 }
 /// install：验签通过才落 staging 文件；缺 confirm、目录目标、篡改镜像都拒。
 #[test]
-fn install_writes_only_verified_staging_file() {
+fn install_writes_file() {
     let f = OtaFixture::new("install");
     f.prepare();
     let target = f.dir.join("staging.img");
@@ -410,7 +410,7 @@ fn install_writes_only_verified_staging_file() {
 }
 /// 文本输入有上界：超大私钥/manifest 在读取前拒，不把内存读穿。
 #[test]
-fn oversized_text_inputs_are_rejected() {
+fn oversized_text_rej() {
     let dir = std::env::temp_dir().join(format!("rr3-ota-sign-{}-big", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -442,7 +442,7 @@ fn oversized_text_inputs_are_rejected() {
 }
 /// manifest 元数据不合法时在生成面拒，不产生半成品。
 #[test]
-fn manifest_rejects_bad_metadata() {
+fn mft_rej_bad_metadata() {
     let f = OtaFixture::new("metadata");
     let mk = |version: &str, platform: &str| -> Vec<String> {
         vec![

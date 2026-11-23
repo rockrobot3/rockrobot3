@@ -14,7 +14,7 @@ use support::*;
 
 /// 横幅与监听行都必须回显解析后的绝对路径，且那个路径真的能连上并注册
 #[test]
-fn banner_and_listen_line_show_the_resolved_absolute_path() {
+fn banner_show_absolute() {
     let name = format!("rr3-m2-{}-banner.sock", std::process::id());
     // 期望值按 rrd 同一把尺子算：macOS 上 /tmp 是 /private/tmp 的符号链接，内核 getcwd
     // 返回的是真实路径，`std::path::absolute` 拼出来的横幅因此是 /private/tmp/…。

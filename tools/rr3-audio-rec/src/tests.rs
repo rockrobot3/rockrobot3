@@ -52,7 +52,7 @@ fn wav_header_fields() {
 }
 
 #[test]
-fn parse_audio_event_roundtrip_and_gates() {
+fn parse_event_gates() {
     let pcm: Vec<u8> = (0..16u8).collect();
     // 整链路：板形帧 → seal → 还原（rr-ipc 同源路径）→ 四道门全过
     let sealed = Rr3FrameBuf::from(&board_like_frame(7, &pcm, RR3_HOST_TASK));
@@ -75,7 +75,7 @@ fn parse_audio_event_roundtrip_and_gates() {
 // ok_reply_line_accepts_stream_prefixed_mixed_line），本件不再持第二份。
 
 #[test]
-fn seq_tracker_gap_accounting() {
+fn seq_gap_accounting() {
     let mut t = SeqTracker {
         prev: None,
         gaps: 0,
@@ -118,7 +118,7 @@ fn synth_stereo(l: i16, r: i16) -> Vec<u8> {
 }
 
 #[test]
-fn doa_ild_sign_separation_and_silence_gate() {
+fn doa_ild_sign_gate() {
     let mut d = DoaTracker::new();
     // 左占优（20dB）：az 正满幅钳位
     let line = d.feed(&synth_stereo(8000, 800)).expect("窗满出行");
@@ -144,7 +144,7 @@ fn doa_ild_sign_separation_and_silence_gate() {
 }
 
 #[test]
-fn parse_args_tier_table() {
+fn parse_tier_table() {
     let ok = |argv: &[&str]| -> Result<Args, String> {
         parse_args(&argv.iter().map(|s| s.to_string()).collect::<Vec<_>>())
     };

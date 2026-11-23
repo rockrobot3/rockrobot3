@@ -98,7 +98,7 @@ mod tests {
 
     /// 四份在册平台表全部可解析（演练两份的"空集显式"是裁定②的形状，不是缺段）
     #[test]
-    fn contract_tables_parse() {
+    fn contract_parse() {
         let esp = rr3_plat_parse(ESP32).expect("esp32 表须可解析");
         assert_eq!(esp.rr3_platform_name(), "esp32");
         let s3 = rr3_plat_parse(ESP32S3).expect("esp32s3 表须可解析");
@@ -111,7 +111,7 @@ mod tests {
 
     /// esp32 表形状 pin（与 board.rs 引脚真值段同源；改数据须同批改这里）
     #[test]
-    fn esp32_shape_is_pinned() {
+    fn esp32_shape_pinned() {
         let esp = rr3_plat_parse(ESP32).expect("esp32 表须可解析");
         assert_eq!(
             esp.rr3_ctl_names(),
@@ -149,7 +149,7 @@ mod tests {
 
     /// 演练两份的形状 pin：空集显式 + 构造表与现役 profile 对账
     #[test]
-    fn rehearsal_shapes_are_pinned() {
+    fn rehearsal_pinned() {
         let rk = rr3_plat_parse(RK3566).expect("rk3566 表须可解析");
         assert!(rk.rr3_adc_pins().is_empty());
         assert!(rk.rr3_conflicts().is_empty());
@@ -188,7 +188,7 @@ mod tests {
 
     /// 缺失语义（裁定①）：最小文本一次点名全部五段；单键缺与段缺同红
     #[test]
-    fn missing_sections_and_keys_are_named() {
+    fn miss_keys_named() {
         // 五段全缺的最小文本：controller / capabilities / conflict / construction /
         // controller_wordform 各点名一条
         let errs =

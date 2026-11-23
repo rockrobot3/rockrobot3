@@ -60,7 +60,7 @@ fn pty_pair() -> (fs::File, fs::File, PathBuf) {
 /// UART 端口 + 帧面真值：宿主帧整帧写入 → 板侧 conn 收帧 → 应答帧整帧回读。
 /// 这里同时证明 `Rr3UartConn` 经 rr-ipc blanket 自动满足 [`Rr3UartPort`]。
 #[test]
-fn uart_frame_roundtrip_via_pty() {
+fn uart_frame_via_pty() {
     fn assert_uart_port<T: rr_periph_proto::ports::Rr3UartPort>() {}
     assert_uart_port::<Rr3UartConn>();
 
@@ -112,7 +112,7 @@ fn uart_frame_roundtrip_via_pty() {
 /// 残尾吞净后复位失步，这正是坏帧可恢复的形状。读取放独立线程 + 主线程
 /// 限时收：**回归时测试不会自己挂死**，而是明确报出"没有上界"。
 #[test]
-fn frame_read_half_frame_times_out() {
+fn frame_read_half_out() {
     let (mut master, _slave_keepalive, path) = pty_pair();
     let mut conn = Rr3UartConn::open_with_baud(&path, 115_200).expect("pty slave 打开失败");
     master
@@ -135,7 +135,7 @@ fn frame_read_half_frame_times_out() {
 
 // ----- I2C / ADS1115 -----
 #[test]
-fn i2c_port_forwards_write_transaction() {
+fn i2c_port_transaction() {
     let (bus, f) = fake();
     let mut port = bus.clone();
     port.rr3_i2c_write(0x3C, &[0x00, 0xAE])
@@ -146,7 +146,7 @@ fn i2c_port_forwards_write_transaction() {
 /// ADS1115：配置字 = 0x8383（A0/±4.096V/单次/128SPS/比较器关）；raw 20960
 /// （A0=2.62V，直入模块目标向量）→ 轨压 5240mV（2:1 分压）。
 #[test]
-fn ads1115_config_and_conversion() {
+fn ads1115_cfg_conv() {
     let (bus, f) = fake();
     f.borrow_mut().read_data = vec![0x51, 0xE0];
     let mut ads = Ads1115::new(bus, ADS1115_ADDR);
@@ -163,7 +163,7 @@ fn ads1115_config_and_conversion() {
 
 /// 无器件/坏总线：`rail` 回 Err 且点名 ADS1115，不 panic；错通道点名拒。
 #[test]
-fn ads1115_absent_reports_err_without_panic() {
+fn ads1115_err_panic() {
     let (bus, f) = fake();
     f.borrow_mut().read_err = Some("NACK".into());
     let mut ads = Ads1115::new(bus, ADS1115_ADDR);
@@ -203,7 +203,7 @@ fn pwm_fixture() -> (PathBuf, PwmPort) {
 
 /// tick → sysfs 纳秒：1229 tick（90°）= 1,500,244ns；0 = 释放（enable 0）。
 #[test]
-fn pwm_duty_writes_ns_and_releases_at_zero() {
+fn pwm_duty_ns_zero() {
     let (root, mut pwm) = pwm_fixture();
     assert_eq!(pwm_ticks_to_ns(0), 0);
     assert_eq!(pwm_ticks_to_ns(DUTY_MIN_TICKS), 500_488);
@@ -231,7 +231,7 @@ fn pwm_duty_writes_ns_and_releases_at_zero() {
 
 /// 根不在位：export 写失败必须回 Err 并点名（不 panic、不静默）。
 #[test]
-fn pwm_missing_root_is_err() {
+fn pwm_miss_root_err() {
     let mut pwm = PwmPort::new("/nonexistent/rr3-pi-pwmchip");
     let e = pwm
         .rr3_pwm_duty(Rr3PwmChannel::Pan, 1229)
@@ -242,7 +242,7 @@ fn pwm_missing_root_is_err() {
 // ----- Clock -----
 
 #[test]
-fn clock_is_monotonic_nondecreasing() {
+fn clock_nondecreasing() {
     let c = MonotonicClock;
     let a = c.rr3_now_ns();
     std::thread::sleep(Duration::from_millis(5));

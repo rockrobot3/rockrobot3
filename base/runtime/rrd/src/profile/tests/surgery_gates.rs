@@ -9,7 +9,7 @@ use super::*;
 /// 门 n 稳态判据（§8，power P-13）：[hardware] 出现物理键即红——GOOD 无电表
 /// pin，i2c_bus 无派生者，按稳态文案点名
 #[test]
-fn gate_n_hardware_physical_key_is_fatal() {
+fn gate_n_key_fatal() {
     let root = Root::new("gate-n-static");
     let text = format!("{GOOD}\n[hardware]\ni2c_bus = 1\n");
     let p = root.write_profile("gate-n-static.toml", &text);
@@ -22,7 +22,7 @@ fn gate_n_hardware_physical_key_is_fatal() {
 
 /// 门 n 两处并存判据：pin 实际派生该键时点名两份取值（[hardware] 值 vs 派生值）
 #[test]
-fn gate_n_coexistence_names_both_values() {
+fn gate_n_names_values() {
     let root = Root::new("gate-n-both");
     let text = format!("{GOOD}\n[hardware]\npwm_chip = 5\n");
     let p = root.write_profile("gate-n-both.toml", &text);
@@ -37,7 +37,7 @@ fn gate_n_coexistence_names_both_values() {
 /// [hardware] 再出现即红——GOOD 无显示 pin，按稳态文案点名（SPI 器件走 schema 2
 /// 旧路直给的迁移残留，正是敞口 18 行登记的病形）
 #[test]
-fn gate_n_spi_device_steady_state_red() {
+fn gate_n_spi_state_red() {
     let root = Root::new("gate-n-spi");
     let text = format!("{GOOD}\n[hardware]\nspi_device = \"/dev/spidev0.0\"\n");
     let p = root.write_profile("gate-n-spi.toml", &text);
@@ -51,7 +51,7 @@ fn gate_n_spi_device_steady_state_red() {
 /// 门 n 两处并存判据（spi_device 形）：显示 pin 已派生该键时 [hardware] 残留直给
 /// → 点名两份取值（两值恰同也是红——并存本身就是第二真值点，L-23）
 #[test]
-fn gate_n_spi_device_coexistence_names_both_values() {
+fn gate_n_spi_values() {
     let root = Root::new("gate-n-spi-both");
     let text = format!(
         "{GOOD}\n[[pin]]\nrole = \"ui.face.spi\"\ncontroller = \"spidev0\"\nchannel = 0\n\
@@ -73,7 +73,7 @@ fn gate_n_spi_device_coexistence_names_both_values() {
 /// GOOD 补了 power.charger.meter pin（批N3 件八：power.charger 有归属角色了，满配须有
 /// pin——本测试删 servo pin 后清单纯 act.servo 一条；power.charger pin 在场不误报）
 #[test]
-fn role_missing_is_listed_not_fatal() {
+fn role_miss_not_fatal() {
     let root = Root::new("role-missing");
     let text = GOOD.replace(
             "\n[[pin]]\nrole = \"act.axis.pwm\"\ninstance = \"pan\"\ncontroller = \"pwm0\"\nchannel = 0\nphysical = [12]\ndirection = \"out\"\nrail = \"rail5v\"\nfailsafe = \"release\"\nmux_group = []\n",
@@ -93,7 +93,7 @@ fn role_missing_is_listed_not_fatal() {
 /// slots.toml 在 boot 即拒并点名——不能只靠 CI 契约测试兜底（装机现场改坏的
 /// 契约同样不得带病起）。
 #[test]
-fn boot_inputs_rejects_out_of_whitelist_slot_contract() {
+fn boot_rej_contract() {
     let root = Root::new("slot-shape");
     let bad_slots = root.dir.join("slots-bad.toml");
     std::fs::write(
@@ -126,7 +126,7 @@ tier_scope = ["quantum"]
 
 /// schema_version=2 三新段必填：缺段逐条点名（fail-closed，一次收集完）
 #[test]
-fn new_sections_are_required_and_named() {
+fn new_required_named() {
     let errs = rr3_profile_parse("schema_version = 2\n").expect_err("缺新段必须报错");
     for want in [
         "缺少 [platform]",
@@ -141,7 +141,7 @@ fn new_sections_are_required_and_named() {
 
 /// [platform]/[supplies] 形状：tier 值域、类型逐键检查，坏值一次全收集
 #[test]
-fn platform_and_supplies_shape_errors_are_named() {
+fn platform_named() {
     let text = GOOD
         .replace("tier = \"host\"", "tier = \"nano\"")
         .replace("watchdog_present = true", "watchdog_present = 1")
@@ -164,7 +164,7 @@ fn platform_and_supplies_shape_errors_are_named() {
 
 /// 三新段未知键逐条点名（一条不静默放行）
 #[test]
-fn new_sections_unknown_keys_are_named() {
+fn new_keys_named() {
     let text = GOOD
         .replace("tier = \"host\"", "tier = \"host\"\nfoo = 1")
         .replace(
@@ -187,7 +187,7 @@ fn new_sections_unknown_keys_are_named() {
 /// bare + 看门狗在场 → 一致，放行。tier 换档同批翻转 [supplies.budget] 为
 /// bare 档形状（分档自洽：not_applicable = false + 三数键，parse 层判据）。
 #[test]
-fn bare_tier_without_watchdog_is_fatal() {
+fn bare_tier_fatal() {
     let root = Root::new("g6");
     let bad = GOOD
             .replace("tier = \"host\"", "tier = \"bare\"")
@@ -213,7 +213,7 @@ fn bare_tier_without_watchdog_is_fatal() {
 /// 引用 scope 全档的 power.battery → 放行。enabled_slots 是唯一允许基础层
 /// 格位的引用面，反例经它构造。
 #[test]
-fn tier_outside_slot_tier_scope_is_fatal() {
+fn tier_slot_tier_fatal() {
     let root = Root::new("l10");
     // tier 换 bare 同批翻转 [supplies.budget] 为 bare 档形状（分档自洽，
     // bare_tier_without_watchdog_is_fatal 注记同源）
@@ -314,7 +314,7 @@ gnd_common = "star-1"
 /// pin_id ∪ {vcc,gnd}（F-3 自造语法）、net 越出 domains（F-5）、mate 越出
 /// devices mate 集（§4.1b 门 o）逐条点名；命中集全绿由末段正例钉住。
 #[test]
-fn wiring_cross_file_gates_are_fatal() {
+fn wiring_file_fatal() {
     wiring_signal_gate();
     wiring_net_gate();
     wiring_mate_gate();
@@ -324,7 +324,7 @@ fn wiring_cross_file_gates_are_fatal() {
 /// 接线档装载门（fail-closed，后果 = 拒）：留空反例（§5 缺失语义列——rated_a
 /// 无不适值可言，缺即红）与闭合面破（feeds 悬空引用）都在 boot 即拒并点名
 #[test]
-fn wiring_shape_and_closure_gates_are_fatal_at_boot() {
+fn wiring_fatal_boot() {
     let root = Root::new("wiring-blank");
     let p = root.write_profile("wiring-blank.toml", GOOD);
     root.write_wiring(&p, &GOOD_WIRING.replace("rated_a = 1.0\n", ""));
@@ -348,7 +348,7 @@ fn wiring_shape_and_closure_gates_are_fatal_at_boot() {
 /// [slots].present 声明缺是缺格三源合一第一源：present 移除某格 →
 /// (模块, 格位) 进缺格清单（缺格不是致命项，其余模块不牵连）
 #[test]
-fn absent_slot_declaration_is_missing_source() {
+fn absent_miss_source() {
     let root = Root::new("present");
     let text = GOOD.replace(", \"power.charger\"", "");
     let p = root.write_profile("absent.toml", &text);
@@ -362,7 +362,7 @@ fn absent_slot_declaration_is_missing_source() {
 
 /// [slots].present 查册门：未在册格位、基础层格位 → 致命点名
 #[test]
-fn present_registry_gate_rejects_unknown_and_base_slots() {
+fn present_rej_slots() {
     let root = Root::new("presentgate");
     let unknown = GOOD.replace(
         "present = [\"act.servo\"",

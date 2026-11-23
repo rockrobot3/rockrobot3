@@ -84,7 +84,7 @@ fn assert_status_cols(v: &serde_json::Value) {
 }
 
 #[test]
-fn ctl_status_lists_registered_modules_and_does_not_register_itself() {
+fn ctl_not_reg_itself() {
     let (t, _a, task) = ctl_status_setup();
     let mut ctl = t.rr3_connect();
     let v = rr3_ask_ctl(&mut ctl, "rr3.ctl.status", 1);
@@ -102,7 +102,7 @@ fn ctl_status_lists_registered_modules_and_does_not_register_itself() {
 }
 
 #[test]
-fn ctl_health_echoes_heartbeat_and_watchdog_numbers() {
+fn ctl_echoes_numbers() {
     let t = RrdTest::rr3_start_no_overlay("ctl-health");
     let mut a = t.rr3_connect();
     rr3_send(
@@ -144,7 +144,7 @@ fn ctl_health_echoes_heartbeat_and_watchdog_numbers() {
 }
 
 #[test]
-fn ctl_logs_returns_ring_tail_containing_banner() {
+fn ctl_ring_tail_banner() {
     let t = RrdTest::rr3_start_no_overlay("ctl-logs");
     let mut ctl = t.rr3_connect();
     let v = rr3_ask_ctl(&mut ctl, "rr3.ctl.logs", 1);
@@ -160,7 +160,7 @@ fn ctl_logs_returns_ring_tail_containing_banner() {
 }
 
 #[test]
-fn ctl_ota_is_always_refused_with_permission() {
+fn ctl_ota_permission() {
     let t = RrdTest::rr3_start_no_overlay("ctl-ota");
     let mut ctl = t.rr3_connect();
     let v = rr3_ask_ctl(&mut ctl, "rr3.ctl.ota", 7);
@@ -183,7 +183,7 @@ fn ctl_ota_is_always_refused_with_permission() {
 /// 与 ota 的"方法面定型、执行面恒拒"同构。解锁路径不测（真重启），其存在性
 /// 由 conn.rs 的 `rr3_reboot_unlocked` 单点承载。
 #[test]
-fn ctl_reboot_is_refused_by_default_double_gate() {
+fn ctl_def_double_gate() {
     let t = RrdTest::rr3_start_no_overlay("ctl-reboot");
     let mut ctl = t.rr3_connect();
     let v = rr3_ask_ctl(&mut ctl, "rr3.ctl.reboot", 7);
@@ -202,7 +202,7 @@ fn ctl_reboot_is_refused_by_default_double_gate() {
 /// `available:false` + 点名解锁路径（不造假数据）。快照在册面（--profile 启动）
 /// 的渲染完整性由 assembly.rs 单测用门 d 同源词表逐键钉死；两端到端形状在此合拢。
 #[test]
-fn ctl_wiring_reports_unavailable_without_profile_boot() {
+fn ctl_wiring_boot() {
     // 基-23：本用例要钉的是"--manifest 调试后门路径无装配快照"，起法显式走后门
     // （rr3_start_manifest_stub）——监听面主口径（rr3_start 一族）已改走缺格跳过
     // 装配单正门，那里的 rr3.ctl.wiring 是 available:true，不再是这里的被测形状。
@@ -224,7 +224,7 @@ fn ctl_wiring_reports_unavailable_without_profile_boot() {
 }
 
 #[test]
-fn registered_module_uplink_ctl_is_refused_but_connection_survives() {
+fn reg_ctl_but_survives() {
     let t = RrdTest::rr3_start_no_overlay("ctl-uplink-deny");
     let (mut a, task) = register_sima_task(&t);
 

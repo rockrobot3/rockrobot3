@@ -28,7 +28,7 @@ fn connect_simb(rrd: &RrdTest) -> RrdClient {
 
 /// 真进程完成握手、task 取自 rrd 的应答（不是自设），心跳被连续接受
 #[test]
-fn sim_peer_registers_and_beats_are_accepted() {
+fn sim_peer_beats_ok() {
     let mut rrd = RrdTest::rr3_start("e2e-beat");
     let manifest = rr3_fixture_manifest("beat", "sima");
     let mut peer = SimPeer::rr3_start(&rrd.socket, &manifest, "resident");
@@ -56,7 +56,7 @@ fn sim_peer_registers_and_beats_are_accepted() {
 
 /// 真进程发布 → **早已在册**的旁观连接收到转发帧，体原样、类型仍是 Event、src_task 是发布者的分配值
 #[test]
-fn sim_peer_publish_reaches_another_connection() {
+fn sim_peer_pub_conn() {
     let mut rrd = RrdTest::rr3_start("e2e-pub");
 
     // 旁观连接必须先上线：转发只发给"当时在册"的连接，晚注册的收不到（Task 7 的 fanout 语义）。
@@ -90,7 +90,7 @@ fn sim_peer_publish_reaches_another_connection() {
 
 /// 主动 unregister → 恰好一条 unregistered 广播；never 策略不产生重启计划
 #[test]
-fn sim_peer_clean_exit_broadcasts_unregistered_and_never_restarts() {
+fn sim_exit_restart() {
     let mut rrd = RrdTest::rr3_start("e2e-clean");
 
     // 同上：收广播的连接必须在夹具退场之前就已在册
@@ -115,7 +115,7 @@ fn sim_peer_clean_exit_broadcasts_unregistered_and_never_restarts() {
 /// rrd 只能给出 `unregistered` 加一行 `跳过重启`。owned 那一路（真退出码 → `failed`）
 /// 由 `e2e_spawn_restart.rs` 的 S2 与它同框对照。
 #[test]
-fn killed_foreign_peer_is_only_an_eof_and_its_plan_is_skipped() {
+fn killed_eof_skipped() {
     let mut rrd = RrdTest::rr3_start("e2e-abort");
 
     let mut b = connect_simb(&rrd);
@@ -154,7 +154,7 @@ fn killed_foreign_peer_is_only_an_eof_and_its_plan_is_skipped() {
 
 /// 同一个二进制、两份 manifest → 两个身份；role 只改行为、不改身份（两边都用正面断言）
 #[test]
-fn identity_comes_from_manifest_not_from_the_role_env() {
+fn identity_mft_not_env() {
     let mut rrd = RrdTest::rr3_start("e2e-identity");
     let ma = rr3_fixture_manifest("id-a", "sima");
     let mb = rr3_fixture_manifest("id-b", "simb");

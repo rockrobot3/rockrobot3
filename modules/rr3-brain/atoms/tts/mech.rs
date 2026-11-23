@@ -91,7 +91,7 @@ mod tests {
     /// WAV 抽 data 块：fmt 块在前、data 块在后（say 的实际形状）；非 RIFF/缺
     /// data/长度越界一律 None
     #[test]
-    fn wav_data_chunk_extracts_payload_and_rejects_malformed() {
+    fn wav_rej_malformed() {
         let mut wav = Vec::new();
         wav.extend_from_slice(b"RIFF");
         wav.extend_from_slice(&(36u32 + 6).to_le_bytes());

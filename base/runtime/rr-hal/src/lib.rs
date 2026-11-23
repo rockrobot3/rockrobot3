@@ -105,7 +105,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pcm_stream_duration_uses_channels_and_rate() {
+    fn pcm_stream_uses_rate() {
         let s = Rr3PcmStream {
             cfg: RR3_AUDIO_CFG_16K_MONO16,
             samples: vec![],

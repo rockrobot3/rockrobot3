@@ -261,7 +261,7 @@ mod tests {
 
     /// 单拍扫描判据：恰一个 tick 不算超时，超过 1ms 即点名；扫描耗时不含等待。
     #[test]
-    fn tick_over_only_past_one_tick() {
+    fn tick_past_tick() {
         let tick = Duration::from_millis(200);
         let base = Instant::now();
         assert!(!rr3_tick_over(base, base + tick, tick), "恰 tick 不算超时");
@@ -275,7 +275,7 @@ mod tests {
     /// 固定栅格：不超时按 deadline 推进（周期不随扫描耗时累加）；已越过下一拍
     /// 则从收尾时刻重排，不补跑积压的拍。
     #[test]
-    fn next_deadline_keeps_grid_or_rebases_after_overrun() {
+    fn next_grid_overrun() {
         let tick = Duration::from_millis(200);
         let base = Instant::now();
         let deadline = base + tick;

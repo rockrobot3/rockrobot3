@@ -80,7 +80,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn retry_budget_halves_after_first_try() {
+    fn retry_budg_first_try() {
         assert_eq!(rr3_retry_budget(8.0, 1), 8.0, "首调用配置全额");
         assert_eq!(rr3_retry_budget(8.0, 2), 4.0, "重试减半");
         assert_eq!(rr3_retry_budget(8.0, 3), 4.0, "之后保持减半");

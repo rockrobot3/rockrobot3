@@ -179,7 +179,7 @@ mod tests {
     /// Err 折 {"error":…} 两形状）、Event→on_event、on_tick 每圈一次、
     /// on_tick 的 Err 上抛（serve 以该 Err 返回）。
     #[test]
-    fn serve_dispatches_rpc_event_and_tick_in_order() {
+    fn serve_rpc_tick_order() {
         let bus = connect_client("serve-order", FakeMode::Primed);
         let mut d = RecordingDispatcher::new_until_dispatched();
         // 5ms 不是"加大超时"：止步条件已改为"回调齐 + 至少两圈"，这里只是避免
@@ -228,7 +228,7 @@ mod tests {
     /// echo → boom：echo 正常进账后 boom 处置失败，serve 以该 Err 返回
     /// （后到两枚 rr3.call 不再处理——上抛即停圈）。
     #[test]
-    fn serve_propagates_event_handler_error() {
+    fn serve_hand_error() {
         let bus = connect_client("serve-boom", FakeMode::Primed);
         let mut d = RecordingDispatcher::new(0, "rr3mod-t/boom");
         let err = serve(bus, &mut d, Duration::ZERO).unwrap_err();
@@ -242,7 +242,7 @@ mod tests {
 
     /// 方案 §2.8-2 死亡探针：断开后 serve 返回，文案逐字（现行五模块同款）。
     #[test]
-    fn serve_death_probe_returns_exact_text() {
+    fn serve_exact_text() {
         let bus = connect_client("serve-dead", FakeMode::DropAfterRegister);
         std::thread::sleep(Duration::from_millis(100)); // 放大 reader EOF 先于 serve 的窗口
         let mut d = RecordingDispatcher::new(0, "");
@@ -256,7 +256,7 @@ mod tests {
     /// 方案 §2.8-4：BusHandle Clone 冒烟——Clone 后同连接语义（双句柄 publish
     /// 各自可用，fake rrd 记到两条 Event）。
     #[test]
-    fn bus_handle_clone_shares_connection() {
+    fn bus_clone_conn() {
         let bus = connect_client("serve-clone", FakeMode::Quiet);
         let bus2 = bus.clone();
         assert!(bus.connected() && bus2.connected(), "双句柄同连接同活");
@@ -280,7 +280,7 @@ mod tests {
     /// [`BusHandle::wrap`] 包进句柄后业务面可用（connected/publish 同活）。
     /// 面板线程宿主与单测夹具的同一构造路径。
     #[test]
-    fn bus_handle_wrap_smoke() {
+    fn bus_wrap_smoke() {
         let client = crate::test_support::connect_raw("serve-wrap", FakeMode::Quiet);
         let bus = BusHandle::wrap(client);
         assert!(bus.connected(), "wrap 后句柄同连接同活");

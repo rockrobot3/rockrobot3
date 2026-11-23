@@ -116,7 +116,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pwm_ticks_map_to_expected_ns() {
+    fn pwm_ticks_map_ns() {
         assert_eq!(pwm_ticks_to_ns(0), 0);
         assert_eq!(pwm_ticks_to_ns(DUTY_MAX_TICKS), 2_500_000);
         assert_eq!(pwm_ticks_to_ns(DUTY_MIN_TICKS), 500_488);

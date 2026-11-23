@@ -66,7 +66,7 @@ fn open() -> Rr3Spool<MemDev> {
 }
 
 #[test]
-fn roundtrip_writes_header_and_payload() {
+fn roundtrip_payload() {
     let mut sp = open();
     assert_eq!(sp.rr3_cap(), RR3_SPOOL_SECTOR * 2);
     assert_eq!(sp.rr3_load(), Ok(None));
@@ -85,7 +85,7 @@ fn roundtrip_writes_header_and_payload() {
 }
 
 #[test]
-fn begin_invalidates_previous_record() {
+fn begin_record() {
     let mut sp = open();
     sp.rr3_begin(1).unwrap();
     sp.rr3_push(&[0xAA; 16]).unwrap();
@@ -95,7 +95,7 @@ fn begin_invalidates_previous_record() {
 }
 
 #[test]
-fn oversized_block_fails_without_header() {
+fn oversized_header() {
     let mut sp = open();
     sp.rr3_begin(3).unwrap();
     let too_big = vec![0u8; RR3_SPOOL_SECTOR * 2 + 1];
@@ -105,7 +105,7 @@ fn oversized_block_fails_without_header() {
 }
 
 #[test]
-fn empty_finish_is_rejected() {
+fn empty_finish_rej() {
     let mut sp = open();
     sp.rr3_begin(4).unwrap();
     assert_eq!(sp.rr3_finish(), Err(Rr3SpoolErr::Empty));
@@ -113,7 +113,7 @@ fn empty_finish_is_rejected() {
 }
 
 #[test]
-fn io_failure_is_reported_and_poisons_record() {
+fn io_fail_record() {
     let mut sp = open();
     sp.rr3_begin(5).unwrap();
     sp.dev.fail_at = Some(RR3_SPOOL_DATA);
@@ -122,7 +122,7 @@ fn io_failure_is_reported_and_poisons_record() {
 }
 
 #[test]
-fn header_mismatch_is_detected() {
+fn header_detected() {
     let mut sp = open();
     sp.rr3_begin(6).unwrap();
     sp.rr3_push(&[0x55; 32]).unwrap();
@@ -132,7 +132,7 @@ fn header_mismatch_is_detected() {
 }
 
 #[test]
-fn crc_detects_corrupted_payload() {
+fn crc_detects_payload() {
     let mut sp = open();
     sp.rr3_begin(8).unwrap();
     sp.rr3_push(&[0x33; 64]).unwrap();
@@ -142,7 +142,7 @@ fn crc_detects_corrupted_payload() {
 }
 
 #[test]
-fn power_loss_mid_record_leaves_no_segment() {
+fn power_mid_no_segment() {
     let mut sp = open();
     sp.rr3_begin(9).unwrap();
     sp.rr3_push(&[0x77; 128]).unwrap();
@@ -153,7 +153,7 @@ fn power_loss_mid_record_leaves_no_segment() {
 }
 
 #[test]
-fn read_bounds_and_clear() {
+fn read_bounds_clear() {
     let mut sp = open();
     sp.rr3_begin(10).unwrap();
     sp.rr3_push(&[0x11; 100]).unwrap();
@@ -165,7 +165,7 @@ fn read_bounds_and_clear() {
 }
 
 #[test]
-fn abort_resets_recording_without_touching_committed() {
+fn abort_committed() {
     let mut sp = open();
     sp.rr3_abort().unwrap();
     sp.rr3_begin(11).unwrap();
@@ -187,7 +187,7 @@ fn abort_resets_recording_without_touching_committed() {
 }
 
 #[test]
-fn corrupt_header_is_named_not_empty() {
+fn corrupt_not_empty() {
     let mut sp = open();
     let mut raw = rr3_hdr_encode(&Rr3SegInfo {
         seq: 1,
@@ -211,7 +211,7 @@ fn corrupt_header_is_named_not_empty() {
 }
 
 #[test]
-fn bad_layout_is_rejected() {
+fn bad_layout_rej() {
     assert_eq!(
         Rr3Spool::rr3_new(MemDev::new(RR3_SPOOL_DATA)).err(),
         Some(Rr3SpoolErr::Layout)
@@ -223,7 +223,7 @@ fn bad_layout_is_rejected() {
 }
 
 #[test]
-fn hdr_decode_rejects_untrusted_fields() {
+fn hdr_rej_fields() {
     let good = rr3_hdr_encode(&Rr3SegInfo {
         seq: 1,
         len: 2,

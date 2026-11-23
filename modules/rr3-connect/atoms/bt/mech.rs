@@ -117,7 +117,7 @@ mod tests {
     /// 开机初值注入（N-1）：up=true 构造即 Discoverable，false = Off
     /// （出厂不自动开蓝牙）——注入语义钉在纯函数单测。
     #[test]
-    fn bt_state_new_takes_up_injection() {
+    fn injection_bt_state() {
         let s = Rr3BtState::rr3_bt_state_new(true);
         assert_eq!(s.rr3_bt_phase(), Rr3BtPhase::Discoverable, "注入 up 即上电");
         let s = Rr3BtState::rr3_bt_state_new(false);
@@ -128,7 +128,7 @@ mod tests {
     /// power_on → Discoverable → link_up → Connected → link_down →
     /// Discoverable → power_off → Off，全程合法转移必成。
     #[test]
-    fn bt_phase_roundtrips_full_chain() {
+    fn bt_phase_full_chain() {
         let mut s = Rr3BtState::rr3_bt_state_new(false);
         assert_eq!(s.rr3_bt_phase(), Rr3BtPhase::Off, "出厂关机");
         assert!(s.rr3_bt_power_on());
@@ -149,7 +149,7 @@ mod tests {
     /// Discoverable 不能重复上电、不能离链；Connected 不能重复入链、
     /// 不能直接断电（须先 link_down——不 fake"连着还能静默关"）。
     #[test]
-    fn bt_illegal_transitions_are_rejected_without_moving() {
+    fn bt_trans_rej_moving() {
         let mut s = Rr3BtState::rr3_bt_state_new(false);
         assert!(!s.rr3_bt_link_up(), "Off 不能直接入链");
         assert!(!s.rr3_bt_link_down(), "Off 不能离链");

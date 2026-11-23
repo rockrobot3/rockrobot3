@@ -239,7 +239,7 @@ mod tests {
 
     /// 真工件的当前槽就是 rr_a（extlinux.conf 的 append 行默认从 A 槽起）
     #[test]
-    fn current_slot_reads_the_real_artifact() {
+    fn cur_real_artifact() {
         assert_eq!(
             rr3_bootconf_slot(REAL).unwrap(),
             Rr3Slot::SlotA,
@@ -249,7 +249,7 @@ mod tests {
 
     /// switch rr_a→rr_b：生效行的根标签被换、注释一字不动、可逆性逐字还原
     #[test]
-    fn switch_to_peer_is_byte_exact_on_the_real_artifact() {
+    fn switch_real_artifact() {
         let got = rr3_bootconf_switch(REAL, Rr3Slot::SlotB).unwrap();
         assert!(
             got.contains("\n    append root=LABEL=rr_b rootwait rw console=ttyS2,1500000"),
@@ -271,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn switch_rejects_same_slot_and_factory_target() {
+    fn switch_rej_target() {
         let e = rr3_bootconf_switch(REAL, Rr3Slot::SlotA).unwrap_err();
         assert!(e.contains("同槽幂等拒"), "同槽拒因要点名: {e}");
         let e = rr3_bootconf_switch(REAL, Rr3Slot::Factory).unwrap_err();
@@ -282,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn factory_switches_root_and_is_idempotent() {
+    fn factory_idempotent() {
         let got = rr3_bootconf_factory(REAL).unwrap();
         assert!(got.contains("root=LABEL=rr_factory"), "{got}");
         assert!(
@@ -300,7 +300,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_ambiguous_or_foreign_root_tokens_are_errors() {
+    fn miss_root_errors() {
         for bad in ["", "\n\n", "label rockrobot3\n    kernel /Image\n"] {
             let e = rr3_bootconf_switch(bad, Rr3Slot::SlotB).unwrap_err();
             assert!(e.contains("root=LABEL"), "缺 token 要点名: {e}");
@@ -315,7 +315,7 @@ mod tests {
 
     /// 原子写落位后内容正确、临时文件零残留（rename 已把它消耗掉）
     #[test]
-    fn atomic_write_renames_into_place_without_tmp_leftover() {
+    fn atomic_tmp_leftover() {
         let tmp = TmpDir::new("atomic");
         let path = tmp.0.join("extlinux.conf");
         fs::write(&path, "root=LABEL=rr_a").expect("写初版");
@@ -338,7 +338,7 @@ mod tests {
     /// **其中一份完整文本**——固定 tmp 名时后建者会截断前者、前者的 rename 把
     /// 后者半截文本提成正式引导配置（设备起不来）。
     #[test]
-    fn concurrent_stores_never_promote_a_partial_file() {
+    fn concurrent_part_file() {
         let tmp = TmpDir::new("race");
         let path = tmp.0.join("extlinux.conf");
         fs::write(&path, "root=LABEL=rr_a").expect("写初版");
@@ -362,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn cmdline_parse_covers_label_form_and_names_the_gap() {
+    fn cmdline_form_gap() {
         let slot =
             rr3_cmdline_slot("console=ttyS2,1500000 root=LABEL=rr_b rootwait rw quiet\n").unwrap();
         assert_eq!(slot, Rr3Slot::SlotB);

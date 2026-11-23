@@ -61,7 +61,7 @@ fn block(amp: i16) -> [i16; BLOCK_SAMPLES] {
 }
 
 #[test]
-fn noise_below_threshold_never_opens() {
+fn noise_thr_opens() {
     let bus = bus();
     let mut v = VoiceRun::rr3_new_mode(Rr3VoiceMode::Mem);
     for i in 0..100 {
@@ -74,7 +74,7 @@ fn noise_below_threshold_never_opens() {
 }
 
 #[test]
-fn hysteresis_tail_holds_between_thresholds() {
+fn hysteresi_threshold() {
     let bus = bus();
     let mut v = VoiceRun::rr3_new_mode(Rr3VoiceMode::Mem);
     for _ in 0..10 {
@@ -92,7 +92,7 @@ fn hysteresis_tail_holds_between_thresholds() {
 }
 
 #[test]
-fn constant_speech_opens_then_offset_closes() {
+fn constant_then_closes() {
     let bus = bus();
     let mut v = VoiceRun::rr3_new_mode(Rr3VoiceMode::Mem);
     for i in 0..9 {
@@ -113,7 +113,7 @@ fn constant_speech_opens_then_offset_closes() {
 }
 
 #[test]
-fn overlong_utterance_is_forced_closed() {
+fn overlong_closed() {
     let bus = bus();
     let mut v = VoiceRun::rr3_new_mode(Rr3VoiceMode::Mem);
     for _ in 0..10 {
@@ -128,7 +128,7 @@ fn overlong_utterance_is_forced_closed() {
 }
 
 #[test]
-fn gated_batch_resets_state() {
+fn gated_batch_state() {
     let bus = bus();
     let mut v = VoiceRun::rr3_new_mode(Rr3VoiceMode::Mem);
     for _ in 0..10 {
@@ -141,7 +141,7 @@ fn gated_batch_resets_state() {
 }
 
 #[test]
-fn boot_calibration_tunes_vad_from_noise_median() {
+fn boot_vad_median() {
     let bus = bus();
     let mut v = VoiceRun::rr3_new_mode(Rr3VoiceMode::Mem);
     v.calibrated = false;
@@ -163,7 +163,7 @@ fn boot_calibration_tunes_vad_from_noise_median() {
 }
 
 #[test]
-fn periodic_doa_requires_consensus_then_steers() {
+fn periodic_doa_steers() {
     let bus = bus();
     let mut v = VoiceRun::rr3_new_mode(Rr3VoiceMode::Mem);
     v.pre = stereo_l_lead(9600, 3000);
@@ -190,7 +190,7 @@ fn periodic_doa_requires_consensus_then_steers() {
 }
 
 #[test]
-fn onset_center_steers_to_rest_pan() {
+fn onset_rest_pan() {
     let bus = bus();
     let mut v = VoiceRun::rr3_new_mode(Rr3VoiceMode::Mem);
     v.pre = stereo_same(9600, 3000);
@@ -208,7 +208,7 @@ fn onset_center_steers_to_rest_pan() {
 }
 
 #[test]
-fn low_confidence_doa_does_not_steer() {
+fn low_doa_not_steer() {
     let bus = bus();
     let mut v = VoiceRun::rr3_new_mode(Rr3VoiceMode::Mem);
     v.pre = stereo_indep(9600, 3000);

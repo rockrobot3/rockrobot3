@@ -12,7 +12,7 @@ fn st(mv: u16, percent: u8) -> Rr3BatteryState {
 }
 
 #[test]
-fn state_body_carries_full_summary_with_own_seq() {
+fn state_full_own_seq() {
     let v = rr3_battery_body(7, st(3700, 50));
     assert_eq!(v["seq"], 7);
     assert_eq!(v["voltage_mv"], 3700);
@@ -23,7 +23,7 @@ fn state_body_carries_full_summary_with_own_seq() {
 /// battery/low 体与 schema 逐字段对齐：三必填，且**没有**多余字段
 /// （additionalProperties=false，多带 charging 会直接违反契约）。
 #[test]
-fn low_body_matches_schema_exactly() {
+fn low_body_exactly() {
     let v = rr3_battery_low_body(1, st(3250, 5));
     assert_eq!(v["seq"], 1);
     assert_eq!(v["percent"], 5);
@@ -38,7 +38,7 @@ fn low_body_matches_schema_exactly() {
 /// battery/ok 体与 schema 逐字段对齐（批N5 件二笔3）：三必填，且**没有**多余
 /// 字段——与 low 同形状（additionalProperties=false）。
 #[test]
-fn ok_body_matches_schema_exactly() {
+fn ok_body_exactly() {
     let v = rr3_battery_ok_body(2, st(3310, 8));
     assert_eq!(v["seq"], 2);
     assert_eq!(v["percent"], 8);
@@ -51,7 +51,7 @@ fn ok_body_matches_schema_exactly() {
 }
 
 #[test]
-fn charger_body_carries_own_seq_and_charging() {
+fn chg_own_seq_charging() {
     let v = rr3_charger_body(3, true);
     assert_eq!(v["seq"], 3);
     assert_eq!(v["charging"], true);
@@ -244,7 +244,7 @@ fn parity_leg2_power_rail_tier_effective_matches_ruling_semantics() {
 // 的用例落本文件；板侧 tools/esp32-periph-base 的 tier_of/RailJudge 不改，语义逐字对照。
 
 #[test]
-fn rail_state_body_carries_four_keys() {
+fn rail_body_four_keys() {
     let v = rr3_rail_state_body(5, 4500, 120, "mild");
     assert_eq!(v["seq"], 5);
     assert_eq!(v["mv"], 4500);
@@ -254,7 +254,7 @@ fn rail_state_body_carries_four_keys() {
 }
 
 #[test]
-fn rail_judge_feed_matches_board_semantics() {
+fn rail_feed_semantics() {
     // 板侧 RailJudge::feed 逐字对照（mild=4600/severe=4400）：档位 = tier_of 纯
     // mV 分类，event = 两线任一低电段首拍。4500 对 severe 线是"严格回阈 ⇒ 再
     // 武装"（Rr3LowEdge 语义），故 4300 是新段首发再报——与"向下档变 ⇔ 边沿
@@ -313,7 +313,7 @@ fn parity_leg2_power_rail_judge_edge_equivalent_to_downward_transition() {
 }
 
 #[test]
-fn rail_beat_unknown_not_refed_and_passthrough() {
+fn rail_not_passthrough() {
     // ⑥-c2 消费执法两条（P-15 末列"执行面按保守侧处置、展示面原样显示"的落点）：
     // ① 产出侧已折的 Unknown 原样透传——mv 再好也不许从 mv 重分类出 Ok（不喂核，
     //    执行面保持置位）；

@@ -121,7 +121,7 @@ mod tests {
 
     /// 事务面应答体形状：dump 快照逐字段点名（后端名、生效配置、vad 阈值组）。
     #[test]
-    fn dump_result_carries_backend_cfg_and_vad_section() {
+    fn dump_cfg_vad_section() {
         let cfg = Rr3SenseConfig::default();
         let v = rr3_dump_result(9, "sim", &cfg);
         assert_eq!(v["seq"], 9);
@@ -137,7 +137,7 @@ mod tests {
     /// ops 槽快照（批N4 面 + b3b 三新槽）：白名单十槽应答，槽名与 assemble.toml
     /// 槽表申报同源；白名单纪律 = 组内恰好这些槽，config 其余键不进应答。
     #[test]
-    fn ops_snapshot_carries_whitelisted_slots_including_doa_window() {
+    fn ops_slots_doa_window() {
         let v = rr3_sense_ops(&Rr3SenseConfig::default());
         assert_eq!(v["audio"]["sample_rate"], 16000);
         assert_eq!(v["audio"]["channels"], 1);
@@ -162,7 +162,7 @@ mod tests {
     const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
     #[test]
-    fn pcm_event_body_round_trips_through_base64() {
+    fn pcm_body_base64() {
         let pcm = Rr3PcmStream {
             cfg: Rr3AudioCfg {
                 sample_rate_hz: 16000,
@@ -209,7 +209,7 @@ mod tests {
 
     /// doa 字段体形状：deg + bin 两键（schema additionalProperties=false，多带即违约）。
     #[test]
-    fn doa_field_carries_deg_and_bin_only() {
+    fn doa_field_deg_bin() {
         let v = rr3_doa_field(&Rr3DoaFix {
             deg: -60,
             bin: Rr3DoaBin::Left,
@@ -221,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn vad_event_body_carries_edge_shape() {
+    fn vad_body_edge_shape() {
         let on = rr3_vad_event_body(
             3,
             Rr3VadEdge::Onset {
@@ -246,7 +246,7 @@ mod tests {
     /// 也丢弃——静音帧无方向可判，形状纪律与 rms_peak 同一条。
     /// 字段体由 capture 原子产出（deg+bin 两键），此处只钉桥接形状。
     #[test]
-    fn vad_event_body_carries_doa_on_onset_only() {
+    fn vad_body_doa_onset() {
         let on = rr3_vad_event_body(
             5,
             Rr3VadEdge::Onset {

@@ -133,7 +133,7 @@ fn db_concurrency() {
 /// 全体同时（最坏缺省）、恰一组归属 = 组内互斥取 max（收窄须是数据，F-12）、
 /// 多组归属 = 不收窄（宁超算不漏算）。
 #[test]
-fn demand_budget_check_nine() {
+fn demand_budget_check() {
     db_positive();
     db_over_cap();
     db_ghost_rail();
@@ -146,7 +146,7 @@ fn demand_budget_check_nine() {
 /// 最坏值与申报者——"舵机堵转叠加满亮屏"这一 ADR-0021 裁定 2 立项红例在
 /// 装载链可达（多件同域叠加逐件全额计）。
 #[test]
-fn demand_budget_chain_boot_rejects_over_cap() {
+fn demand_budget_rej() {
     let root = Root::new("budget-red");
     root.stage_display_atom("face", "[]");
     root.stage_display_atom("oled", "[]");
@@ -168,7 +168,7 @@ fn demand_budget_chain_boot_rejects_over_cap() {
 /// 覆写 servo 为无申报——act.axis.pwm（全仓唯一 kind=power 角色）挂轨 rail5v 而
 /// rr3-pa 申报面无 rail5v 需求，红条点名 pin、模块与判据原文。
 #[test]
-fn demand_budget_chain_boot_rejects_uncovered_power_pin() {
+fn demand_budget_e2e4() {
     let root = Root::new("budget-undeclared");
     root.stage_servo_undeclared();
     let p = root.write_profile("undeclared.toml", GOOD);
@@ -184,7 +184,7 @@ fn demand_budget_chain_boot_rejects_uncovered_power_pin() {
 /// 全额）+ 700 = 1400 ≤ 2000，boot 过——与红例①对照钉住"同布局、只多一条申报
 /// 数据，红转绿"，收窄是申报者自证声明，判据只认数据不验物理。
 #[test]
-fn demand_budget_chain_boot_accepts_group_narrowing() {
+fn demand_budget_ok() {
     let root = Root::new("budget-grouped");
     root.stage_display_atom("face", "[\"axis\"]");
     root.stage_display_atom("oled", "[\"axis\"]");
@@ -197,7 +197,7 @@ fn demand_budget_chain_boot_accepts_group_narrowing() {
 /// 边界等号绿（Σ = 预算不算超）、栈超红 ⑩-a、堆超红 ⑩-b——F-13 形状
 /// （堆值不计栈）下只红 ⑩-b 不级联 ⑩-a，两条红文各点名判据号与两侧数值。
 #[test]
-fn memory_budget_check_entity_green_and_red() {
+fn mem_budg_green_red() {
     let budget = Rr3Budget {
         not_applicable: false,
         task_stack_budget_bytes: 65536,
@@ -325,7 +325,7 @@ fn tier_section_errors() {
 /// rtos 档 not_applicable = true ⇒ 红；rtos 档缺三数键 ⇒ 红；段缺 ⇒ 红
 /// （DoD 3：每个缺失语义有留空反例）。
 #[test]
-fn budget_tier_consistency_errors_are_named() {
+fn budg_errors_named() {
     tier_host_errors();
     tier_rtos_errors();
     tier_section_errors();
@@ -337,7 +337,7 @@ fn budget_tier_consistency_errors_are_named() {
 /// 判据号与两侧数值（申报义务未触发，红例用合成数据——见 stage_memory_atom
 /// 诚实注记）。
 #[test]
-fn memory_budget_chain_boot_rejects_stack_over_budget() {
+fn mem_boot_rej_budg() {
     let root = Root::new("mem-stack-red");
     root.stage_memory_atom("stackhog", 98304, 0);
     let p = root.write_profile("mem-stack-red.toml", ESP32_GOOD);
@@ -352,7 +352,7 @@ fn memory_budget_chain_boot_rejects_stack_over_budget() {
 /// 16384 B 在预算内（⑩-a 绿），堆申报 327680 B > 可用堆 228864 B（327680 −
 /// 98816，N-13 ② 全账后）⇒ 只红 ⑩-b——只加总栈会击穿半边的反例在装载链可达。
 #[test]
-fn memory_budget_chain_boot_rejects_heap_over_budget_while_stack_green() {
+fn mem_rej_budg_green() {
     let root = Root::new("mem-heap-red");
     root.stage_memory_atom("stacklegit", 16384, 0);
     root.stage_memory_atom("heaphog", 0, 327680);
@@ -365,7 +365,7 @@ fn memory_budget_chain_boot_rejects_heap_over_budget_while_stack_green() {
 /// 门 c 装载拒链·校验⑩ 绿例：Σ栈 = 预算（等号不算超）且堆在可用堆内 ⇒ boot 过
 /// ——与红例①对照钉住边界语义（≤ 判，> 才红）。
 #[test]
-fn memory_budget_chain_boot_accepts_boundary_sums() {
+fn mem_boot_ok_sums() {
     let root = Root::new("mem-green");
     root.stage_memory_atom("stacklegit", 65536, 228864);
     let p = root.write_profile("mem-green.toml", ESP32_GOOD);
@@ -378,7 +378,7 @@ fn memory_budget_chain_boot_accepts_boundary_sums() {
 /// ESP32_GOOD 单轴（实例 1）+ 双件同值申报对照红例①直接钉数值（98304 =
 /// 件级两件直加），扩算语义由 rr3_demand_expand 的 ⑨ 用例反向对照。
 #[test]
-fn memory_budget_sums_are_per_atom_not_per_instance() {
+fn mem_not_per_instance() {
     let root = Root::new("mem-peratom");
     root.stage_memory_atom("stacka", 49152, 0);
     root.stage_memory_atom("stackb", 49152, 0);

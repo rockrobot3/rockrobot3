@@ -9,7 +9,7 @@ use super::*;
 /// 字符串化；原十三键 = 十 host 键 + 批N4 三键，批N17 件二随键集补 cred_store，
 /// W5-3 补 oled_addr；批N9 七键不在本测试覆盖面，键域由 entry/rr-ipc 侧单测钉）。
 #[test]
-fn full_descriptor_parses_all_fifteen_keys() {
+fn full_parses_keys() {
     let text = concat!(
         "alsa_device = \"default\"\n",
         "pwm_chip = \"0\"\n",
@@ -47,7 +47,7 @@ fn full_descriptor_parses_all_fifteen_keys() {
 
 /// 空文本 = 空绑定（合法，装配单未给 [hardware]；纯 sim 形态照常起）。
 #[test]
-fn empty_text_is_empty_bindings() {
+fn empty_text_bindings() {
     assert_eq!(
         rr3_bindings_parse("").expect("空文本必须合法"),
         Rr3HalBindings::default()
@@ -71,7 +71,7 @@ fn bad_value_text() -> &'static str {
 /// fail-closed 点名：未知键、坏值（十进制域/裸十六进制/空串/越 u8/非 nvs:
 /// 前缀）、非字符串值，一次全收集不静默放行。
 #[test]
-fn unknown_keys_and_bad_values_are_all_named() {
+fn unknown_bad_named() {
     let errs = rr3_bindings_parse(bad_value_text()).expect_err("坏值必须报错");
     assert_eq!(errs.len(), 9, "{errs:?}");
     assert!(
@@ -115,7 +115,7 @@ fn unknown_keys_and_bad_values_are_all_named() {
 
 /// compose 分层：描述符为底、overrides 同键覆盖赢、overrides 也能补描述符没给的键。
 #[test]
-fn compose_overrides_win_over_descriptor() {
+fn compose_descriptor() {
     let desc = "pwm_chip = \"0\"\ngpio_led_line = \"4\"\n";
     let mut ov = BTreeMap::new();
     ov.insert("pwm_chip".to_string(), "1".to_string());
@@ -133,7 +133,7 @@ fn compose_overrides_win_over_descriptor() {
 /// compose fail-closed：坏描述符合并成一条 Err；overrides 未知键/坏值点名；
 /// 无描述符 + 空 overrides = 空绑定（不是某板缺省）。
 #[test]
-fn compose_fails_closed_and_names_the_cause() {
+fn compose_fail_cause() {
     let e = rr3_bindings_compose(Some("pwm_chip = \"x\"\n"), &BTreeMap::new())
         .expect_err("坏描述符必须败");
     assert!(

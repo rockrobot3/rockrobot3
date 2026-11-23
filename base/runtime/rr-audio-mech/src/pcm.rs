@@ -266,7 +266,7 @@ mod tests {
     }
 
     #[test]
-    fn wav_info_accepts_header_before_data() {
+    fn wav_info_ok_data() {
         let b = wav(16_000, 1, &[1, 0, 2, 0]);
         let info = rr3_wav_info(&b[..44]).unwrap().unwrap();
         assert_eq!(info.sample_rate, 16_000);
@@ -279,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn wav_data_and_format_are_extracted() {
+    fn wav_data_extracted() {
         let pcm = [0x01, 0x00, 0x02, 0x00];
         let b = wav(16_000, 1, &pcm);
         let got = rr3_wav_pcm(&b).unwrap().unwrap();
@@ -289,13 +289,13 @@ mod tests {
     }
 
     #[test]
-    fn non_wav_is_reported_as_raw() {
+    fn non_wav_as_raw() {
         assert_eq!(rr3_wav_pcm(b"\x01\x02\x03\x04"), Ok(None));
         assert_eq!(rr3_wav_pcm(b""), Ok(None));
     }
 
     #[test]
-    fn malformed_wav_is_rejected() {
+    fn malformed_wav_rej() {
         let mut no_data = wav(16_000, 1, &[0, 0]);
         no_data.truncate(40); // 砍掉 data 头
         assert_eq!(rr3_wav_pcm(&no_data).unwrap_err(), "WAV 缺 data 块");
@@ -310,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn data_size_beyond_file_is_clamped() {
+    fn data_file_clamped() {
         let mut b = wav(16_000, 1, &[1, 0, 2, 0]);
         let data_size_off = b.len() - 8;
         b[data_size_off..data_size_off + 4].copy_from_slice(&9999u32.to_le_bytes());
@@ -319,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn mono_is_duplicated_with_fade_endpoints_zero() {
+    fn mono_fade_zero() {
         let src: [i16; 4] = [1000, -1000, 2000, -2000];
         let mut bytes = Vec::new();
         for s in src {
@@ -343,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn stereo_passthrough_keeps_samples() {
+    fn stereo_keeps_samples() {
         let mut bytes = Vec::new();
         for s in [1i16, 2, 3, 4] {
             bytes.extend_from_slice(&s.to_le_bytes());
@@ -354,7 +354,7 @@ mod tests {
     }
 
     #[test]
-    fn odd_length_and_bad_channels_are_rejected() {
+    fn odd_length_bad_rej() {
         let mut out = Vec::new();
         assert!(rr3_pcm_stereo(&[0, 1, 2], 1, 0, 0, &mut out).is_err());
         assert!(rr3_pcm_stereo(&[0, 1], 3, 0, 0, &mut out).is_err());
@@ -362,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn duration_uses_frames_and_rate() {
+    fn duration_uses_rate() {
         assert_eq!(rr3_pcm_ms(32_000, 1, 16_000), 1000);
         assert_eq!(rr3_pcm_ms(32_000, 2, 16_000), 500);
         assert_eq!(rr3_pcm_ms(32_000, 0, 16_000), 0);

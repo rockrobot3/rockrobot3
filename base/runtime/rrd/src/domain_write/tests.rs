@@ -6,7 +6,7 @@ use serde_json::json;
 
 /// parse 正例：三写口各自合法形状全收（armed 布尔、severe_mv/current_ceil_ma 正整数）
 #[test]
-fn parse_accepts_three_named_writes() {
+fn parse_ok_writes() {
     let p = rr3_write_parse(&json!({
         "target": "domain", "name": "rail5v", "key": "armed",
         "value": true, "confirm": true, "evidence": "实测/0002"
@@ -35,7 +35,7 @@ fn parse_accepts_three_named_writes() {
 
 /// parse 拒面：缺参 / 白名单外键 / 型坏 / 零值——全 Invalid 逐条点名
 #[test]
-fn parse_rejects_bad_shapes_fail_closed() {
+fn parse_rej_bad_closed() {
     for (v, hint) in [
         (json!({"name":"x","key":"armed","value":true}), "target"),
         (
@@ -72,7 +72,7 @@ fn parse_rejects_bad_shapes_fail_closed() {
 
 /// 路径推导正例：七成员记账行 → 六路路径（形状 = boot 记账真实成员名）
 #[test]
-fn paths_derive_from_truth_set_entries() {
+fn paths_set_entries() {
     let ts = vec![
         ts_entry("profiles/esp32-mini.toml", "/x/profiles/esp32-mini.toml"),
         ts_entry("contracts/topics.toml", "/x/contracts/topics.toml"),
@@ -100,7 +100,7 @@ fn paths_derive_from_truth_set_entries() {
 
 /// 路径推导缺员逐条点名（fail-closed——记账形状破不猜路径）
 #[test]
-fn paths_reject_missing_members_by_name() {
+fn paths_rej_miss_name() {
     let e = rr3_write_paths(&[]).expect_err("空记账必须拒");
     assert!(e.contains("profiles/<stem>.toml"), "{e}");
     let ts = vec![ts_entry(
@@ -113,7 +113,7 @@ fn paths_reject_missing_members_by_name() {
 
 /// 同类成员重复 = 记账形状破：写口拒，不静默取首条（那会把写落到错误文件）
 #[test]
-fn paths_reject_duplicate_members() {
+fn paths_rej_members() {
     let ts = vec![
         ts_entry("profiles/a.toml", "/x/profiles/a.toml"),
         ts_entry("profiles/b.toml", "/x/profiles/b.toml"),
@@ -135,7 +135,7 @@ fn ts_entry(member: &str, path: &str) -> Rr3TruthSetEntry {
 /// 证据根推导（本轮审计）：两级父目录才成立；推不出即拒——旧序退回相对
 /// 路径，root 侧写口的证据根会由启动目录决定（猜路径）。
 #[test]
-fn evidence_root_derives_or_rejects() {
+fn evidence_root_rej() {
     let root = rr3_evidence_root(Path::new("/x/profiles/a.toml")).unwrap();
     assert_eq!(root, PathBuf::from("/x/docs/evidence"));
     let e = rr3_evidence_root(Path::new("a.toml")).expect_err("无两级父目录必须拒");
@@ -145,7 +145,7 @@ fn evidence_root_derives_or_rejects() {
 /// 轴实例名形制（本轮审计）：只收单段标识——名字直接拼进轴档路径，`..`
 /// 或分隔符会把写口放大成"改轴目录外的在册档"。
 #[test]
-fn axis_name_is_single_segment_only() {
+fn axis_name_segment() {
     for ok in ["pan", "tilt", "arm_l", "a"] {
         assert!(rr3_axis_name_ok(ok), "{ok} 是合法单段名");
     }

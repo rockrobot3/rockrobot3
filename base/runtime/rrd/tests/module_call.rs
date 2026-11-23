@@ -190,7 +190,7 @@ fn answer_roundtrip(
 
 /// 全链路 round trip：调用方 → rrd（转发）→ 被调方 → rrd（改道）→ 调用方
 #[test]
-fn call_routes_to_callee_and_response_comes_back() {
+fn call_resp_comes_back() {
     let rrd = RrdTest::rr3_start("mcall-rt");
     let mut callee = rrd.rr3_connect();
     let task_c = register(
@@ -269,7 +269,7 @@ fn heartbeat_survives(caller: &mut RrdClient, task_r: u64) {
 
 /// 没人 exposes 的 topic：Invalid 错误帧，连接不断（下一帧照常服务）
 #[test]
-fn call_unknown_topic_is_rejected_and_connection_survives() {
+fn call_rej_survives() {
     let rrd = RrdTest::rr3_start("mcall-unknown");
     let (mut caller, task_r) = register_caller(&rrd);
     check_unknown_topic(&mut caller, task_r);
@@ -278,7 +278,7 @@ fn call_unknown_topic_is_rejected_and_connection_survives() {
 
 /// 自呼拒：唯一 exposes 该 topic 的模块就是调用方自己
 #[test]
-fn call_to_self_is_rejected() {
+fn call_self_rej() {
     let rrd = RrdTest::rr3_start("mcall-self");
     let mut caller = rrd.rr3_connect();
     let task_r = register(
@@ -316,7 +316,7 @@ fn call_to_self_is_rejected() {
 
 /// trace_id = 0 的上行 Response：没有回路，拒帧不断连
 #[test]
-fn response_without_trace_id_is_rejected() {
+fn resp_trace_id_rej() {
     let rrd = RrdTest::rr3_start("mcall-trace0");
     let mut callee = rrd.rr3_connect();
     let task_c = register(

@@ -66,7 +66,7 @@ mod tests {
     /// 主题点名信封形状：method 恒 rr3.call、主题在 params.topic、args 原样内嵌
     /// （rrd 转发形状的分发依据；漂移此处即红）。
     #[test]
-    fn call_frame_is_rr3_call_with_topic_in_params() {
+    fn call_rr3_call_params() {
         let frame = rr3_bridge_call(7, RR3_SERVO_TOPIC, &json!({ "angle_deg": 90 }));
         assert_eq!(frame.header.src_task, RR3_TASK_HOST);
         assert_eq!(frame.header.dst_task, RR3_PERIPH_TASK);
@@ -83,7 +83,7 @@ mod tests {
 
     /// 通用 method 面信封：method/params 原样内嵌（rr3.set_bindings 的协议形状锚）。
     #[test]
-    fn request_body_params_is_generic_method_envelope() {
+    fn req_body_envelope() {
         let s = rr3_bridge_req_body(9, "rr3.set_bindings", &json!({ "args": {} }));
         let v: Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["jsonrpc"], "2.0");

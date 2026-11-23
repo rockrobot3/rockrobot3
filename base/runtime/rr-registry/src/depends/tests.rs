@@ -13,7 +13,7 @@ fn facts(name: &str, provides: &[&str], deps: &[&str], prio: i64) -> Rr3DependsF
 }
 
 #[test]
-fn facts_extraction_with_default_priority() {
+fn facts_def_priority() {
     let text = r#"
 [manifest]
 name = "rr3-x"
@@ -39,7 +39,7 @@ start_priority = 40
 }
 
 #[test]
-fn facts_missing_name_and_non_string_items_reported() {
+fn facts_miss_reported() {
     let errs =
         rr3_depends_parse("[provides]\ncapabilities = [\"x\"]\n").expect_err("缺名字必须报错");
     assert!(
@@ -64,7 +64,7 @@ fn facts_missing_name_and_non_string_items_reported() {
 }
 
 #[test]
-fn duplicate_names_rejected_before_edges() {
+fn duplicate_rej_edges() {
     let errs = rr3_boot_order(&[
         facts("rr3-a", &["cap.x"], &["bus.publish"], 100),
         facts("rr3-a", &[], &[], 100),
@@ -75,7 +75,7 @@ fn duplicate_names_rejected_before_edges() {
 }
 
 #[test]
-fn tie_break_is_priority_then_name() {
+fn tie_break_then_name() {
     // 同层三模块：priority 决定先后，同 priority 按名字典序（b 在 c 前，与入参顺序无关）
     let order = rr3_boot_order(&[
         facts("rr3-c", &[], &[], 50),
@@ -87,7 +87,7 @@ fn tie_break_is_priority_then_name() {
 }
 
 #[test]
-fn self_dependency_is_a_cycle() {
+fn self_cycle() {
     // 自己 provides、base 也没有的能力被自己依赖 = 自环 → 整批拒
     let errs = rr3_boot_order(&[
         facts("rr3-a", &["cap.x"], &["cap.x"], 100),
@@ -101,7 +101,7 @@ fn self_dependency_is_a_cycle() {
 
 /// plan_boot：不可满足只拒点名模块，其余照常按拓扑序成序
 #[test]
-fn plan_boot_rejects_only_the_unsatisfiable_and_orders_the_rest() {
+fn plan_boot_rej_rest() {
     let plan = rr3_plan_boot(&[
         facts("rr3-bad", &[], &["cap.ghost"], 10),
         facts("rr3-c", &[], &["bus.publish"], 50),
@@ -116,7 +116,7 @@ fn plan_boot_rejects_only_the_unsatisfiable_and_orders_the_rest() {
 /// plan_boot：被拒模块的 provides 仍计入可满足性——依赖它能力的下游不连坐，
 /// 也不排在"永远不会上线的位置"后面（剔除者不作为边目标）
 #[test]
-fn plan_boot_keeps_rejected_module_provides_for_dependents() {
+fn plan_rej_dependents() {
     let plan = rr3_plan_boot(&[
         facts("rr3-ghost", &[], &["cap.ghost"], 10),
         // rr3-ghost 自己不可满足，但它 provides cap.y；rr3-user 依赖 cap.y
@@ -133,7 +133,7 @@ fn plan_boot_keeps_rejected_module_provides_for_dependents() {
 
 /// plan_boot：环照旧拒整个 boot（fatal），不产出半死集合
 #[test]
-fn plan_boot_fatals_on_cycle() {
+fn plan_boot_cycle() {
     let plan = rr3_plan_boot(&[
         facts("rr3-a", &["cap.a"], &["cap.b"], 100),
         facts("rr3-b", &["cap.b"], &["cap.a"], 100),

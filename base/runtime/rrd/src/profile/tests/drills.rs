@@ -15,7 +15,7 @@ use super::*;
 /// act.relay.gpio/power.battery.meter）、⑦-b 的三域名（batt/rail5v/rail3v3）、
 /// ⑦-d 的 SG90-3P 全部命中仓内真值（跨档对账的三份真值两两闭合）。
 #[test]
-fn default_profile_wiring_drill() {
+fn def_wiring_drill() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let p = repo.join("profiles/default.toml");
     let wiring = crate::wiring::rr3_wiring_path(&p).expect("真仓装配单可推导");
@@ -33,7 +33,7 @@ fn default_profile_wiring_drill() {
 /// 闭合（distro.toml 的 pin/域集真值 + 同一 devices.toml mate 集），镜像漂移
 /// 即此测试红；装机 deb 面由此件随 rr3-pack 入包（Z-4）。
 #[test]
-fn distro_profile_wiring_drill() {
+fn distro_wiring_drill() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let p = repo.join("profiles/distro.toml");
     let boot = boot_inputs(&p).expect("distro 机装配单+接线档必须过完整装载门（host 档）");
@@ -49,7 +49,7 @@ fn distro_profile_wiring_drill() {
 /// 通告、桥断仍守护）触发条件 = 0.0.7 轻承载档真板，本测试只证装配链层
 /// "裁剪 = 改数据"（CI 全集层形状 pin 在 rr-registry contract.rs）。
 #[test]
-fn esp32_mini_profile_boot_inputs_drill() {
+fn esp32_boot_drill() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let p = repo.join("profiles/esp32-mini.toml");
     let boot = boot_inputs(&p).expect("esp32-mini 装配单必须过完整装载门（rtos 档）");
@@ -100,7 +100,7 @@ fn esp32_mini_profile_boot_inputs_drill() {
 /// act.servo 一格；[[pin]] pan/tilt 双轴成对（role_missing 空 = 校验②无缺角色）；
 /// [hardware] 板侧四键原样进 RR3_HAL_BINDINGS 注入文本（rtos 档直给）。
 #[test]
-fn pi4b_board_profile_boot_inputs_drill() {
+fn pi4b_boot_drill() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let p = repo.join("profiles/pi4b-board.toml");
     let boot = boot_inputs(&p).expect("pi4b-board 装配单必须过完整装载门（rtos 薄板档）");
@@ -150,7 +150,7 @@ fn pi4b_board_profile_boot_inputs_drill() {
 /// [[pin]] 仅 MAX7219；[hardware] 两键 + SPI 派生键进注入文本；本机无 act/sense
 /// 末梢，故不出现板侧十一键。
 #[test]
-fn pi4b_host_profile_boot_inputs_drill() {
+fn pi4b_host_boot_drill() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let p = repo.join("profiles/pi4b-host.toml");
     let boot = boot_inputs(&p).expect("pi4b-host 装配单必须过完整装载门（host 档）");
@@ -273,7 +273,7 @@ fn solo_hal_injected(boot: &Rr3ProfileBoot) {
 /// 十格在位、[[pin]] 两条（pan PWM + OLED I2C）；[hardware] 两键 + 派生键
 /// （pwm_chip/pwm_channel/i2c_bus/oled_addr）进注入文本。
 #[test]
-fn pi4b_solo_profile_boot_inputs_drill() {
+fn pi4b_solo_boot_drill() {
     let boot = solo_boot();
     solo_queue_is_five(&boot);
     solo_sources_agree(&boot);

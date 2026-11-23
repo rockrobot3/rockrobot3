@@ -152,7 +152,7 @@ fn board_pins(v: &toml::Value, root: &std::path::Path) {
 /// act.servo（bindings/enabled/present 三源一致）。完整装载链由 rrd 的 boot drill
 /// （pi4b_board_profile_boot_inputs_drill）覆盖，本测试只钉形状与线束。
 #[test]
-fn pi4b_board_profile_pins_w4_harness() {
+fn pi4b_pins_w4_harness() {
     let root = repo_root();
     let table = rr_registry::rr3_slot_parse(&slots_toml());
     let text = std::fs::read_to_string(root.join("profiles/pi4b-board.toml"))

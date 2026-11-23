@@ -287,7 +287,7 @@ mod tests {
     /// 键 = auto 保守缺省）折 result.error 点名"未标定"；显式 jog 落角；已标定
     /// 轴 auto 照常。与 intent 路同判（判据 rr-hal-api 单真值点）。
     #[test]
-    fn rpc_servo_refuses_uncalibrated_auto_but_jogs() {
+    fn rpc_refuses_but_jogs() {
         let conservative = Rr3ActAxisState::rr3_conservative();
         let calibrated = Rr3ActAxisState {
             hard_stop: rr_hal_api::Rr3ActHardStop::Yes,
@@ -326,7 +326,7 @@ mod tests {
 
     /// relay/set 参数裁决：只认真布尔（自 relay 原子件迁入，文案断言逐字）
     #[test]
-    fn relay_parse_accepts_only_real_booleans() {
+    fn relay_ok_booleans() {
         assert!(rr3_relay_parse_args(&json!({"on": true})).unwrap());
         assert!(!rr3_relay_parse_args(&json!({"on": false})).unwrap());
         for bad in [
@@ -343,7 +343,7 @@ mod tests {
 
     /// relay 应答/摘要体逐字对齐契约 schema（schema 钉死键数，多键即漂移）
     #[test]
-    fn relay_body_matches_contract_shape() {
+    fn relay_body_shape() {
         assert_eq!(rr3_relay_result(true)["on"], true);
         let v = rr3_relay_state_body(3, true);
         assert_eq!(v["seq"], 3);
@@ -357,7 +357,7 @@ mod tests {
 
     /// servo/command 下钻全链：合法值三条路径（缺 move_ms / 显式时限 / 行程边界）
     #[test]
-    fn servo_parse_accepts_angle_with_optional_move_ms() {
+    fn servo_ok_move_ms() {
         let (angle, ms) = rr3_servo_parse_args(&json!({"angle_deg": 90}), &servo_cfg()).unwrap();
         assert_eq!((angle, ms), (90, 800), "缺 move_ms 取 config 上限");
         let (angle, ms) =
@@ -370,7 +370,7 @@ mod tests {
 
     /// 下钻点名：缺参/类型错/越 u16 在承载层；行程内越界由件判定点名
     #[test]
-    fn servo_parse_rejects_missing_non_integer_and_out_of_range() {
+    fn servo_rej_miss_range() {
         let e = rr3_servo_parse_args(&json!({}), &servo_cfg()).unwrap_err();
         assert!(e.contains("angle_deg"), "缺参数要点名: {e}");
         for bad in [
@@ -390,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn servo_parse_rejects_move_ms_beyond_timeout_and_zero() {
+    fn servo_rej_ms_zero() {
         let e = rr3_servo_parse_args(&json!({"angle_deg": 90, "move_ms": 801}), &servo_cfg())
             .unwrap_err();
         assert!(e.contains("时限上限"), "超上限拒收: {e}");
@@ -406,7 +406,7 @@ mod tests {
     /// 零堆枚举后，编排层渲染的 `String` 必须与改前逐字一致——act 册 §9
     /// 契约字面量（面板与 legacy 依赖字面），零行为改变的直接证据。
     #[test]
-    fn servo_parse_error_texts_are_verbatim() {
+    fn servo_error_verbatim() {
         assert_eq!(
             rr3_servo_parse_args(&json!({"angle_deg": 181}), &servo_cfg()).unwrap_err(),
             "angle_deg=181 超出行程 [0, 180]"
@@ -426,7 +426,7 @@ mod tests {
     /// relay 错误文案逐字钉死（批N24 件三）：两腿渲染各一断言，`{e}` 走
     /// `Rr3HalError` Display（HAL 错文本随行原样）。
     #[test]
-    fn relay_apply_error_text_is_verbatim() {
+    fn relay_error_verbatim() {
         use rr_hal_api::Rr3HalError;
         let e = relay::Rr3RelayApplyError::ReadBack(Rr3HalError::Busy);
         assert_eq!(rr3_relay_err_text(&e), "继电器读回失败: HAL 设备忙");
@@ -436,7 +436,7 @@ mod tests {
 
     /// servo/state 体 seq/angle 两键钉死（自 servo 原子件迁入）
     #[test]
-    fn servo_state_body_carries_seq_and_angle() {
+    fn servo_body_seq_angle() {
         let v = rr3_servo_state_body(7, 135);
         assert_eq!(v["seq"], 7);
         assert_eq!(v["angle_deg"], 135);
@@ -444,7 +444,7 @@ mod tests {
 
     /// led/effect 下钻：缺/非串/不认逐条点名（A-9：白名单子集由注入实参给）
     #[test]
-    fn led_parse_args_rejects_missing_non_string_and_unknown() {
+    fn led_rej_miss_unknown() {
         let all = led_effects_all();
         let e = rr3_led_parse_args(&json!({}), &all).unwrap_err();
         assert!(e.contains("effect"), "缺参数要点名: {e}");
@@ -456,7 +456,7 @@ mod tests {
 
     /// A-9：注入子集收窄即行为改变——在册但不在子集内的值被拒，报本形态白名单
     #[test]
-    fn led_parse_args_narrows_by_injected_subset() {
+    fn led_args_subset() {
         let only_on = [Rr3LedEffect::On];
         assert_eq!(
             rr3_led_parse_args(&json!({"effect": "on"}), &only_on).unwrap(),

@@ -8,7 +8,7 @@ use super::*;
 
 /// 原子写走 rr-ipc 单一写序后：内容可读回、同目录临时件不残留。
 #[test]
-fn atomic_write_lands_without_tmp_residue() {
+fn atomic_tmp_residue() {
     let dir = std::env::temp_dir().join(format!("rr3-ota-dsync-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("建临时目录");

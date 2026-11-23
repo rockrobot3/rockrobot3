@@ -10,7 +10,7 @@ use std::time::Duration;
 
 /// 合法发布：叠加层在册 + 前缀是自己 → 转发给别的连接，且不回 ACK
 #[test]
-fn legal_publish_is_forwarded_to_other_peers() {
+fn legal_pub_peers() {
     let mut rrd = RrdTest::rr3_start("pub-ok");
     let (mut a, mut b) = (rrd.rr3_connect(), rrd.rr3_connect());
     register_sima(&mut a);
@@ -69,7 +69,7 @@ fn legal_publish_is_forwarded_to_other_peers() {
 /// 只测在册的那一条会漏掉这个分支：末段的 owner 比对是**在册主题**上的兜底，
 /// 对不在册的主题它根本不会执行。
 #[test]
-fn foreign_prefix_publish_is_eperm_and_counted() {
+fn foreign_pub_counted() {
     let mut rrd = RrdTest::rr3_start("pub-foreign");
     let mut a = rrd.rr3_connect();
     register_sima(&mut a);
@@ -103,7 +103,7 @@ fn foreign_prefix_publish_is_eperm_and_counted() {
 
 /// 冒充内建命名空间（最危险的伪造面）：rr3-runtime/* 是 rrd 的下行广播，上行必拒
 #[test]
-fn impersonating_runtime_namespace_is_refused() {
+fn impersona_refused() {
     let rrd = RrdTest::rr3_start("pub-impersonate");
     let mut a = rrd.rr3_connect();
     rr3_send(
@@ -140,7 +140,7 @@ fn impersonating_runtime_namespace_is_refused() {
 
 /// 在册但前缀对、主题没登记（拼错域名）→ AIRY_EINVAL，不是静默丢弃
 #[test]
-fn unregistered_topic_is_einval() {
+fn unreg_topic_einval() {
     let rrd = RrdTest::rr3_start("pub-unknown");
     let mut a = rrd.rr3_connect();
     register_sima(&mut a);
@@ -169,7 +169,7 @@ fn unregistered_topic_is_einval() {
 /// 而 rr3-sense/* 在册但 owner 不是 sima → 两种拒法都要成立。
 /// 这条专治"叠加层被当成生产放行口"（K4）。
 #[test]
-fn overlay_is_not_a_production_pass() {
+fn overlay_not_pass() {
     let rrd = RrdTest::rr3_start_no_overlay("pub-noov");
     let mut a = rrd.rr3_connect();
     // 夹具 manifest 里没有 publishes，校验只对契约负责 → 注册本身合法
@@ -218,7 +218,7 @@ fn overlay_is_not_a_production_pass() {
 /// 可能触发重启，与它自己的文档注释和房内风格（src_task 伪造、payload 类型不支持都是
 /// "回错误帧 + Keep"）冲突，故取注释为准。
 #[test]
-fn event_without_topic_key_replies_error_and_keeps_connection() {
+fn event_key_error_conn() {
     let mut rrd = RrdTest::rr3_start("pub-notopic");
     let mut a = rrd.rr3_connect();
     rr3_send(
@@ -274,7 +274,7 @@ fn rr3_pub_order_pair(name: &str) -> (RrdTest, RrdClient, RrdClient) {
 /// 之后再回头挑一条 Response —— 证明"先挑 Event"不会把后面的读法饿掉。
 /// 夹具若退回"不匹配的帧即丢"，第二、三次读法就等不到帧。
 #[test]
-fn forwarded_events_are_read_by_content_not_arrival_order() {
+fn forwarded_not_order() {
     let (_rrd, mut a, mut b) = rr3_pub_order_pair("pub-order");
 
     for seq in [1u64, 2] {

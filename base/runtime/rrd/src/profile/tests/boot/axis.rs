@@ -33,7 +33,7 @@ fn esp32_good_tilt() -> String {
 /// 文本按 `calibrated=<bool>,hard_stop=<词>,lo=<n>,hi=<n>,center=<n>` 投影，
 /// 点名清单干净——rr3-act 拒动判据与行程裁决的输入面就是这五键的档案真值。
 #[test]
-fn axis_state_projects_when_exactly_one_profile_loads() {
+fn axis_state_loads() {
     let root = Root::new("axis-one");
     let p = root.write_profile("full.toml", GOOD);
     root.write_axis(&p, "pan", &axis_text("act.axis.pwm.pan", true, "yes"));
@@ -49,7 +49,7 @@ fn axis_state_projects_when_exactly_one_profile_loads() {
 /// （模块侧折保守缺省，§6 复位语义④），点名清单逐条入账且**不拒 boot**——
 /// 档案装载是降级面，与缺格/缺角色同档。
 #[test]
-fn axis_state_stays_empty_and_notes_broken_profile() {
+fn axis_notes_profile() {
     let root = Root::new("axis-broken");
     let p = root.write_profile("full.toml", GOOD);
     root.write_axis(&p, "pan", "schema = 1\npin = \"act.axis.pwm.pan\"\n");
@@ -71,7 +71,7 @@ fn axis_state_stays_empty_and_notes_broken_profile() {
 /// → 注入文本空串并点名副本——同 pin 副本不是消歧对象是病灶（恰一份合法才投影
 /// 的 boot 链防线；写侧同款拒面在 axis_write 件四，读侧点名指清理）。
 #[test]
-fn axis_state_stays_empty_and_notes_duplicate_pin_profiles() {
+fn axis_pin_profiles() {
     let root = Root::new("axis-two");
     let p = root.write_profile("full.toml", GOOD);
     root.write_axis(&p, "pan", &axis_text("act.axis.pwm.pan", true, "yes"));
@@ -95,7 +95,7 @@ fn axis_state_stays_empty_and_notes_duplicate_pin_profiles() {
 /// 可辨源：pan [60,120] ≠ tilt [80,100]）；点名清单干净——注入的行程必须属于
 /// 被驱动的那根轴。
 #[test]
-fn axis_state_projects_driven_axis_when_two_axes_present() {
+fn axis_two_present() {
     let root = Root::new("axis-dual");
     let p = root.write_profile("dual.toml", &esp32_good_tilt());
     root.write_axis(&p, "pan", &axis_text("act.axis.pwm.pan", true, "yes"));
@@ -116,7 +116,7 @@ fn axis_state_projects_driven_axis_when_two_axes_present() {
 /// pin、档案只有 tilt，轴读数 = 缺省 pan → 单份也对轴，"注入 tilt 行程、驱动
 /// pan 轴"是错配，宁可空串折保守缺省并点名。
 #[test]
-fn axis_state_stays_empty_when_axis_env_misses_every_instance() {
+fn axis_env_instance() {
     let text = GOOD.replace("instance = \"pan\"", "instance = \"tilt\"");
     let root = Root::new("axis-mismatch");
     let p = root.write_profile("tilt-only.toml", &text);

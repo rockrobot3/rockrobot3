@@ -9,7 +9,7 @@ use super::*;
 /// （与"通道坏了"分开点名）。对端缓冲可能很大，故连续写若干帧直到失败，
 /// 不用单帧大小赌缓冲上限。
 #[test]
-fn write_timeout_is_counted() {
+fn write_counted() {
     let (peer, writer) = UnixStream::pair().expect("pair");
     writer
         .set_write_timeout(Some(Duration::from_millis(50)))

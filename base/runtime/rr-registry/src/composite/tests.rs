@@ -7,7 +7,7 @@ use super::*;
 
 /// 正例：满配组合件（atoms + 空面明写）与带注入面组合件都过
 #[test]
-fn full_and_empty_surface_parse() {
+fn full_empty_parse() {
     let f = rr3_composite_parse(
         "schema_version = 1\n\n[composite]\nname = \"rr3-x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\", \"b\"]\nhandles = []\nops = []\nno_injection = true\n",
     )
@@ -28,7 +28,7 @@ fn full_and_empty_surface_parse() {
 
 /// schema 位裁定：写 2（件级域的值）必须红，且点名"同名不同域"
 #[test]
-fn schema_version_domain_is_named() {
+fn schema_domain_named() {
     let errs = rr3_composite_parse(
         "schema_version = 2\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\nhandles = []\nops = []\nno_injection = true\n",
     )
@@ -136,7 +136,7 @@ fn bad_injection_shape() {
 /// 形状坏逐条点名：unit 出域 / atoms 空·重复·空串·非串 / 顶层与段级未知键 /
 /// 缺 [composite] / 缺 [assemble] / L-5 漏写与并存
 #[test]
-fn bad_shapes_are_all_named() {
+fn bad_shapes_named() {
     bad_unit_shape();
     bad_atoms_shape();
     bad_sections_shape();
@@ -146,7 +146,7 @@ fn bad_shapes_are_all_named() {
 /// 内存申报键是件级专用（校验⑩ 分子面，批N2 n2c-v10）：组合件级 [assemble]
 /// 点名即拦，同 demands 的件级专用语义——内存账是原子件的物理属性。
 #[test]
-fn composite_assemble_rejects_memory_keys() {
+fn composite_rej_keys() {
     for key in ["task_stack_bytes", "heap_peak_bytes"] {
         let errs = rr3_composite_parse(&format!(
             "schema_version = 1\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\nhandles = []\nops = []\nno_injection = true\n{key} = 4096\n"

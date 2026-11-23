@@ -207,7 +207,7 @@ mod tests {
     /// ON 应答判据：OK 可在行中（p3 冒烟实录形状——seq=10604 帧的 b64 payload
     /// 与 `OK audio on` 同行）；裸 `OK` 不误配（b64 字符表含 O/K）。
     #[test]
-    fn ok_reply_line_accepts_stream_prefixed_mixed_line() {
+    fn ok_line_ok_line() {
         assert!(ok_reply_line("OK audio on"));
         assert!(ok_reply_line(
             "CR//D/MQAwAFEAcAARALD/8f8wAPH/MAAxALD/UQBQADEA...,\"rate\":16000,\"seq\":10604,\"topic\":\"rr3-sense/audio/pcm\"}OK audio on"
@@ -222,7 +222,7 @@ mod tests {
     /// 80 恰在字符内部（bytes 79..82），旧实现 `&line[..80]` 在此直接 panic
     /// （读线程毙命）；本件截断语义保真且永不 panic。
     #[test]
-    fn log_head_never_panics_on_multibyte_boundary() {
+    fn log_head_boundary() {
         let line = format!("{}\u{FFFD}", "a".repeat(79)).repeat(2);
         let head = rr3_log_head(&line, 80);
         assert_eq!(head.chars().count(), 80);

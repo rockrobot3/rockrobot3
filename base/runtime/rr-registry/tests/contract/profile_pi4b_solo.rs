@@ -158,7 +158,7 @@ fn solo_consistency(v: &toml::Value) {
 }
 
 #[test]
-fn pi4b_solo_profile_is_complete_single_board_chain() {
+fn pi4b_solo_chain() {
     let root = repo_root();
     let text = std::fs::read_to_string(root.join("profiles/pi4b-solo.toml"))
         .expect("profiles/pi4b-solo.toml 必须存在（W5-1）");

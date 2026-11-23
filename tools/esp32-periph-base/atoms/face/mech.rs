@@ -202,7 +202,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn expr_eye_base_sixteen_states_and_fallback() {
+    fn expr_eye_fallback() {
         let s = expr_eye_base;
         assert_eq!(s("blink"), EyeStyle::new(4, 0, 0, 100, Brow::None));
         assert_eq!(s("happy"), EyeStyle::new(55, 0, 2, 100, Brow::None));
@@ -238,7 +238,7 @@ mod tests {
 
     /// 基态表键唯一且不含 `idle`（`idle` 归兜底；重复键会被首命中遮蔽）。
     #[test]
-    fn expr_eyes_keys_unique() {
+    fn expr_keys_unique() {
         for (i, (a, _)) in EXPR_EYES.iter().enumerate() {
             assert_ne!(*a, "idle", "idle 不占表位");
             for (b, _) in EXPR_EYES.iter().skip(i + 1) {
@@ -250,7 +250,7 @@ mod tests {
     /// 满开 100%：眼中心行（直段区）实心段 = 两眼各 19 列（cx±9 含端点），
     /// 段外与两眼间隙全零。
     #[test]
-    fn capsule_full_open_center_row_geometry() {
+    fn capsule_row_geometry() {
         // y=32（页 4 bit0）= 满开眼中心行（CY=32）
         let buf = eye_page(4, EyeStyle::new(100, 0, 0, 100, Brow::None));
         for (x, b) in buf.iter().enumerate() {
@@ -264,7 +264,7 @@ mod tests {
     /// （y∈[31,33]，圆角 rem=0 截断 y=30/34）：页 3 bit7 + 页 4 bit0/bit1，
     /// 圆角行列宽收窄，其余页全零。
     #[test]
-    fn capsule_blink_is_two_row_slit() {
+    fn capsule_two_row_slit() {
         let blink = EyeStyle::new(4, 0, 0, 100, Brow::None);
         let p3 = eye_page(3, blink);
         let p4 = eye_page(4, blink);
@@ -287,7 +287,7 @@ mod tests {
     /// 超出画布上沿 → 全零；垂直下移 30 → 像素只落在画布底行，页 6/7 的
     /// 置位分布与圆角收窄一致。
     #[test]
-    fn capsule_scan_offset_clamps_without_wrap() {
+    fn capsule_scan_wrap() {
         for page in 0u8..8 {
             assert!(
                 eye_page(page, EyeStyle::new(100, 120, 0, 100, Brow::None))
@@ -314,7 +314,7 @@ mod tests {
     /// 眼高缩放（surprised 125%）：满开眼高 32px → 眼心行上下各 16 行，
     /// 中心行仍全宽；页 2（y 16..23）首行即眼形顶（y=16 圆角截断，y=17 起）。
     #[test]
-    fn capsule_tall_eye_extends_height() {
+    fn capsule_eye_height() {
         let tall = EyeStyle::new(100, 0, 0, 125, Brow::None);
         let p2 = eye_page(2, tall);
         assert_eq!(p2[42] & 1, 0, "y=16 圆角 rem=0 截断（眼高 32 顶行）");
@@ -327,7 +327,7 @@ mod tests {
     /// 眉形几何：怒眉内端低、丧眉外端低、专注眉平压、困惑眉左高一低；
     /// 无眉态页 1 全零。
     #[test]
-    fn capsule_brow_slant_direction() {
+    fn capsule_direction() {
         // 页 1 = y 8..15：眉基线 14（dy=0）→ 只有 y=14/15 两行；怒左眼内端
         // （x 靠 51）斜率下压，故内端像素落 y=16+，页 1 内端不亮、外端亮。
         let angry = eye_page(1, EyeStyle::new(45, 0, 0, 100, Brow::Angry));
@@ -357,7 +357,7 @@ mod tests {
 
     /// 困惑态左右眼不等开合：右眼（open 100%）纵向比左眼（55%）高出一截。
     #[test]
-    fn confused_eyes_are_asymmetric() {
+    fn confused_asymmetric() {
         let conf = EyeStyle::new(90, 0, 0, 100, Brow::Confused).uneven(-35);
         // y=22（页 2 bit6）：右眼（半高 13）在形内、左眼（半高 7）已在形外
         let p2 = eye_page(2, conf);
@@ -368,7 +368,7 @@ mod tests {
     /// 彩蛋眼形：love 心形（中心实、下尖收口）、dizzy 同心环（中心空、环上亮）、
     /// scared 空心环 + 瞳孔（边框亮、环内空、中心瞳孔亮）。
     #[test]
-    fn easter_egg_shapes_geometry() {
+    fn easter_egg_geometry() {
         // love：页 4 中心行全宽（列 33..51），页 7（y56..63，ny<-1.8）无像素
         let love = EyeStyle::new(100, 0, 0, 100, Brow::None).art(EyeShape::Heart);
         let p4 = eye_page(4, love);

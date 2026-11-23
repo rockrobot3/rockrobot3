@@ -296,7 +296,7 @@ mod tests {
 
     /// init 序列 golden：首条关显示、含电荷泵使能、末条开显示
     #[test]
-    fn init_seq_follows_datasheet_order() {
+    fn init_seq_order() {
         assert_eq!(RR3_SSD1306_INIT_SEQ[0], 0xAE, "先 DISPLAYOFF");
         assert!(
             RR3_SSD1306_INIT_SEQ
@@ -314,19 +314,19 @@ mod tests {
 
     /// 窗口命令形状：列 0..127、页 0..7（水平寻址模式的整帧窗口）
     #[test]
-    fn window_covers_full_panel() {
+    fn window_full_panel() {
         assert_eq!(RR3_SSD1306_WINDOW, [0x21, 0x00, 0x7F, 0x22, 0x00, 0x07]);
     }
 
     /// 空帧 = 全黑（每页 128 列全 0）
     #[test]
-    fn blank_frame_is_all_zero() {
+    fn blank_frame_zero() {
         assert_eq!(rr3_oled_fb(&[0; 8]), [0u8; 1024]);
     }
 
     /// 全亮帧 = 页内 [32, 96) 全 0xFF、两侧留白（64x64 居中）
     #[test]
-    fn full_frame_is_centered_64x64() {
+    fn full_frame_64x64() {
         let fb = rr3_oled_fb(&[0xFF; 8]);
         for page in 0..RR3_OLED_PAGES {
             let base = page * RR3_OLED_W;
@@ -339,7 +339,7 @@ mod tests {
 
     /// 单点放大：帧第 0 行 bit7（最左）只占 page0 的 [32, 40)，其余页全黑
     #[test]
-    fn single_pixel_scales_to_8x8_block() {
+    fn single_8x8_block() {
         let mut frame = [0u8; 8];
         frame[0] = 0x80;
         let fb = rr3_oled_fb(&frame);
@@ -362,7 +362,7 @@ mod tests {
     /// 设备名形状（i2c-dev.h `i2c-%d`）：漏连字符会打开不存在的路径，真机首启即
     /// 以"总线不在位"暴露——纯函数钉死命名，不靠现场猜。
     #[test]
-    fn bus_path_uses_i2c_dash_bus_naming() {
+    fn bus_i2c_bus_naming() {
         let dev = Rr3Ssd1306I2cDisplay::rr3_ssd1306_new(Path::new("/dev"), 1, 0x3C);
         assert_eq!(dev.bus_dev_path(), PathBuf::from("/dev/i2c-1"));
     }
@@ -371,7 +371,7 @@ mod tests {
     /// open 成功但 I2C_SLAVE 非字符设备必 ENOTTY，ensure 显式回 InvalidParam
     /// 并点名总线路径；draw 同路径复核
     #[test]
-    fn ensure_on_non_chardev_fails_loudly() {
+    fn ensure_fail_loudly() {
         let root = std::env::temp_dir().join(format!("rr3-hal-oled-{}-err", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("i2c-1"), "").unwrap();
@@ -389,7 +389,7 @@ mod tests {
 
     /// 占位实例（从未 ensure）Drop 不碰任何 fd
     #[test]
-    fn drop_without_ensure_is_noop() {
+    fn drop_ensure_noop() {
         let root = std::env::temp_dir().join(format!("rr3-hal-oled-{}-drop", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let out = Rr3Ssd1306I2cDisplay::rr3_ssd1306_new(&root, 1, 0x3C);

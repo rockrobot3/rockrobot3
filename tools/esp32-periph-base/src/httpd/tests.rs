@@ -17,7 +17,7 @@ fn admin_token_check() {
 /// 表即分派真值：表内每行可查、method/path 交叉必拒（防"GET 走写口"的
 /// 白名单越界——W4-2 起第五列处理臂就是分派本身，结构上无表臂漂移）。
 #[test]
-fn route_table_is_dispatch_truth() {
+fn route_table_truth() {
     for (method, path, _, _, _) in RR3_BOARD_ROUTES {
         assert!(
             rr3_route_lookup(method, path).is_some(),
@@ -42,7 +42,7 @@ fn route_table_is_dispatch_truth() {
 /// applies 只收 `live`/空；method 词表只收 GET/POST（注册面映射与 handler
 /// 识别共用同一词表——批N14 件二扩 POST 行时钉死）。
 #[test]
-fn covers_wordform_shape() {
+fn covers_shape() {
     for (method, path, covers, applies, _) in RR3_BOARD_ROUTES {
         assert!(
             *method == "GET" || *method == "POST",
@@ -65,7 +65,7 @@ fn covers_wordform_shape() {
 /// 配网页字段名与写口解析器同源（2026-11-20 真板实锤：页面发 `password`、
 /// 写口认 `pass`，保存恒回 `stage:"body"`）。改任一侧必须同步。
 #[test]
-fn index_form_posts_pass_field() {
+fn index_pass_field() {
     assert!(
         RR3_BOARD_INDEX_HTML.contains("pass:pass.value"),
         "配网页必须发 `pass` 字段（写口 rr3_wifi_write_body 只认 pass）"
@@ -78,7 +78,7 @@ fn index_form_posts_pass_field() {
 
 /// OLED 提示写口：ASCII 非空 ≤63B；空/缺字段/超长拒。
 #[test]
-fn oled_body_bounds_text_and_hold() {
+fn oled_body_text_hold() {
     let w = rr3_oled_body(br#"{"text":"LEFT 1/10","hold":true}"#).unwrap();
     assert_eq!(w.text, "LEFT 1/10");
     assert!(w.hold, "hold=true 应保持提示不被表情覆盖");
@@ -95,7 +95,7 @@ fn oled_body_bounds_text_and_hold() {
 /// 写口 body 解析域（纯函数）：合法/空密码合法（开放网络）/坏 JSON/缺字段/
 /// 非串字段全点名。
 #[test]
-fn wifi_write_body_domain() {
+fn wifi_body_domain() {
     let (s, p) = rr3_wifi_write_body(br#"{"ssid":"ap","pass":"pw"}"#).unwrap();
     assert_eq!((s.as_str(), p.as_str()), ("ap", "pw"));
     assert!(
@@ -120,7 +120,7 @@ fn wifi_write_body_domain() {
 /// 写口应答 JSON 形状：四字段名/类型钉死（拒绝态与成功态同形状——
 /// 宿主消费面契约面）。
 #[test]
-fn wifi_write_json_shape() {
+fn wifi_json_shape() {
     let mk = |r: &Rr3WifiWriteResult| {
         let v: serde_json::Value = serde_json::from_str(&rr3_wifi_write_json(r)).unwrap();
         v

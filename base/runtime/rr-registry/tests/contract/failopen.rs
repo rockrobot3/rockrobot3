@@ -6,7 +6,7 @@ use super::*;
 // ---------- Fix round 1：封死三处 fail-open 漏洞 ----------
 
 #[test]
-fn manifest_non_string_publish_item_is_rejected() {
+fn mft_non_pub_item_rej() {
     // F1：publishes 混入非字符串项必须报告，而非被 filter_map 静默丢弃
     let m = staged(
         "f1pub",
@@ -27,7 +27,7 @@ fn manifest_non_string_publish_item_is_rejected() {
 }
 
 #[test]
-fn manifest_non_string_dependency_item_is_rejected() {
+fn mft_non_item_rej() {
     // F1：depends.required 混入非字符串项同样必须报告
     let m = staged(
         "f1dep",
@@ -45,7 +45,7 @@ fn manifest_non_string_dependency_item_is_rejected() {
 }
 
 #[test]
-fn manifest_rpc_exposes_must_be_registered() {
+fn mft_rpc_must_be_reg() {
     // F2：rpc.exposes 命中 contracts/topics.toml（CI 检查③），未注册的 RPC 名必须被拒
     let m = staged(
         "f2rpc",
@@ -66,7 +66,7 @@ fn manifest_rpc_exposes_must_be_registered() {
 }
 
 #[test]
-fn manifest_fixture_rpc_exposes_still_accepted() {
+fn mft_rpc_exposes_ok() {
     // F2：新增 rr3-sense/capture/dump 后，合法 fixture 的 rpc.exposes 仍须通过
     let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rr3-sense.toml");
     let report = rr_registry::rr3_manifest_gate(&p);
@@ -78,7 +78,7 @@ fn manifest_fixture_rpc_exposes_still_accepted() {
 }
 
 #[test]
-fn topics_registry_zero_topics_is_rejected() {
+fn topics_zero_rej() {
     // F3：8 owner / 0 topic 的空注册表必须被拒——空表不是放行许可证
     let owners = rr_registry::rr3_topics_owners(&topics_toml());
     assert_eq!(owners.len(), 8);

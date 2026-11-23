@@ -171,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_requires_uart_and_socket() {
+    fn parse_uart_socket() {
         assert!(parse_args(&args(&[])).is_err());
         assert!(parse_args(&args(&["--uart", "/dev/ttyUSB0"])).is_err());
         assert!(parse_args(&args(&["--socket", "/tmp/s.sock"])).is_err());
@@ -188,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_rejects_unknown_flag_and_missing_value() {
+    fn parse_rej_miss_value() {
         assert!(
             parse_args(&args(&["--uark", "/dev/x"])).is_err(),
             "未知参数必须报错"
@@ -201,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_baud_tier_table() {
+    fn parse_tier_table() {
         let ok = parse_args(&args(&[
             "--uart", "/dev/x", "--socket", "/tmp/s", "--baud", "9600",
         ]))

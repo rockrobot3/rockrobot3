@@ -75,7 +75,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn banner_names_both_schemas_and_topic_count() {
+    fn banner_topic_count() {
         let s = rr3_banner(1, 1, "/var/run/rock3-ipc.sock", 21);
         assert!(s.contains("contracts schema v1"), "{s}");
         assert!(s.contains("manifest schema v1"), "{s}");
@@ -85,7 +85,7 @@ mod tests {
 
     /// 主题数必须来自装载结果（把 21 写死进文案就抓不到叠加层生效与否）
     #[test]
-    fn banner_topic_count_is_not_hardcoded() {
+    fn banner_not_hardcoded() {
         assert!(rr3_banner(1, 1, "/tmp/x", 24).contains("24 topics"));
     }
 }

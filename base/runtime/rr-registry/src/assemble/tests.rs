@@ -17,7 +17,7 @@ ops = [
 "#;
 
 #[test]
-fn sample_and_empty_arrays_parse() {
+fn sample_empty_parse() {
     let f = rr3_assemble_parse(OK_SAMPLE).expect("正例必须过");
     assert_eq!(f.handles.len(), 2);
     assert_eq!(f.handles[0].trait_name, "Rr3Power");
@@ -35,7 +35,7 @@ fn sample_and_empty_arrays_parse() {
 
 /// L-5 空面规则：两数组均空而漏写 no_injection ⇒ 红；no_injection 与非空面并存 ⇒ 红。
 #[test]
-fn empty_surface_requires_no_injection_marker() {
+fn injection_no_empty() {
     // 漏写 → 点名"未明写 no_injection"
     let errs = rr3_assemble_parse("schema_version = 2\n\n[assemble]\nhandles = []\nops = []\n")
         .expect_err("空面漏写声明必须红");
@@ -111,7 +111,7 @@ fn bad_shape_op_errs(errs: &[String]) {
 }
 
 #[test]
-fn bad_shapes_are_all_named() {
+fn bad_shapes_named() {
     let text = concat!(
         "schema_version = 1\n", // 版本不认
         "mystery = 1\n",        // 顶层未知键
@@ -133,7 +133,7 @@ fn bad_shapes_are_all_named() {
 }
 
 #[test]
-fn missing_required_keys_are_named() {
+fn miss_keys_named() {
     // 缺 schema_version / 缺 [assemble] / 缺两键
     let errs =
         rr3_assemble_parse("[assemble]\nhandles = []\nops = []\n").expect_err("缺版本必须点名");
@@ -152,7 +152,7 @@ fn missing_required_keys_are_named() {
 }
 
 #[test]
-fn injection_gaps_walk_config_paths() {
+fn injection_gaps_walk() {
     let facts = rr3_assemble_parse(OK_SAMPLE).expect("正例必须过");
     let cfg = "[rr3-power.battery]\nlow_voltage_mv = 3300\n";
     // i2c 句柄不参与注入缺；ops 的一条在、一条缺 → 恰一条缺口
@@ -269,7 +269,7 @@ fn demand_group_errs(errs: &[String]) {
 /// 电流需求申报面（基-36 首件）：正例解析 + 缺键 = 空申报合法 + 坏形逐条点名。
 /// 判据本体（Σ ≤ cap）不在本模块——读者在 rrd rr3_demand_budget。
 #[test]
-fn demands_parse_and_shape_errors_are_named() {
+fn demands_errors_named() {
     demands_ok();
 
     // 缺 demands 键 = 空申报合法（执法面归门 c）
@@ -285,7 +285,7 @@ fn demands_parse_and_shape_errors_are_named() {
 /// 合法 + 负数/非整数红。判据本体（Σ ≤ 预算）不在本模块——读者在
 /// rrd `rr3_memory_budget`（分母住 [supplies].budget）。
 #[test]
-fn memory_bytes_parse_and_shape_errors_are_named() {
+fn mem_errors_named() {
     // 正例：两键显式给出（件级语义非每实例，直加不扩算——头注同源）
     let f = rr3_assemble_parse(
             "schema_version = 2\n\n[assemble]\nhandles = [\n  { trait = \"Rr3Display\", desc_key = \"spi_device\" },\n]\nops = []\ntask_stack_bytes = 8192\nheap_peak_bytes = 24576\n",

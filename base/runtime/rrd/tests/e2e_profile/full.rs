@@ -139,7 +139,7 @@ fn contracts_truth(c: &Value) {
 /// P1 — 满配：enabled_slots 决定起谁。三个格位各有一件、bindings 与 enabled_slots 互认领 →
 /// 三条 spawn 行 + ctl.status 轮询到三个全 running。
 #[test]
-fn full_profile_spawns_every_face_module_and_all_reach_running() {
+fn full_face_running() {
     let root = Root::new("full");
     for name in ["rr3-pa", "rr3-pb", "rr3-pc"] {
         root.write_module(name);

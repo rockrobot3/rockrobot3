@@ -16,7 +16,7 @@ fn rr3_test_probe_root(tag: &str) -> PathBuf {
 
 /// 格位 → 面映射：硬件格位逐条归面，软件格/运行期格/基础层归 None。
 #[test]
-fn slot_probe_face_maps_hardware_and_software_slots() {
+fn slot_face_maps_slots() {
     assert_eq!(rr3_slot_probe_face("act.servo"), Some(Rr3ProbeFace::Pwm));
     assert_eq!(rr3_slot_probe_face("act.led"), Some(Rr3ProbeFace::Gpio));
     assert_eq!(rr3_slot_probe_face("act.relay"), Some(Rr3ProbeFace::Gpio));
@@ -43,7 +43,7 @@ fn slot_probe_face_maps_hardware_and_software_slots() {
 
 /// 空假根：硬件格位全缺（fail-closed），软件/运行期格位在位（无反证）。
 #[test]
-fn linux_probe_on_empty_root_reports_hardware_absent() {
+fn linux_root_absent() {
     let root = rr3_test_probe_root("empty");
     std::fs::create_dir_all(&root).unwrap();
     let probe = Rr3LinuxProbe::rr3_linux_probe_new(&root);
@@ -65,7 +65,7 @@ fn linux_probe_on_empty_root_reports_hardware_absent() {
 /// 假根摆上五面设备节点 → 对应格位全在位；未摆的面仍缺。这条是"真值接线"
 /// 的主判据（探测确实读了设备面，而不是恒真/恒假）。
 #[test]
-fn linux_probe_reads_device_faces_from_root() {
+fn linux_faces_root() {
     let root = rr3_test_probe_root("faces");
     std::fs::create_dir_all(root.join("sys/class/pwm/pwmchip0")).unwrap();
     std::fs::create_dir_all(root.join("sys/class/gpio/gpiochip0")).unwrap();
@@ -88,7 +88,7 @@ fn linux_probe_reads_device_faces_from_root() {
 
 /// 空 ALSA 卡表（文件在但 0 字节）= 无卡注册 → 缺（"拿不到答案不当作在位"）。
 #[test]
-fn linux_probe_treats_empty_alsa_cards_as_absent() {
+fn linux_alsa_as_absent() {
     let root = rr3_test_probe_root("alsa-empty");
     std::fs::create_dir_all(root.join("proc/asound")).unwrap();
     std::fs::write(root.join("proc/asound/cards"), b"").unwrap();
@@ -104,7 +104,7 @@ fn linux_probe_treats_empty_alsa_cards_as_absent() {
 /// "总线在、器件不在" → 缺。改造前这一格恒判在位（只看 /dev/i2c-* 存在），
 /// 器件没接也绿——缺格降级环在 I2C 三格上不转的真缺陷。
 #[test]
-fn linux_probe_i2c_requires_device_node_not_just_bus() {
+fn linux_i2c_not_bus() {
     let root = rr3_test_probe_root("dev-only");
     std::fs::create_dir_all(root.join("dev")).unwrap();
     std::fs::write(root.join("dev/i2c-1"), b"").unwrap();
@@ -121,7 +121,7 @@ fn linux_probe_i2c_requires_device_node_not_just_bus() {
 
 /// 器件级正例：总线节点 + sysfs 从机节点都在 → 在位；从机节点摆错总线号 → 缺。
 #[test]
-fn linux_probe_i2c_device_node_satisfies_and_is_bus_scoped() {
+fn linux_i2c_bus_scoped() {
     let root = rr3_test_probe_root("dev-node");
     std::fs::create_dir_all(root.join("dev")).unwrap();
     std::fs::write(root.join("dev/i2c-1"), b"").unwrap();
@@ -141,7 +141,7 @@ fn linux_probe_i2c_device_node_satisfies_and_is_bus_scoped() {
 /// addr 词形坏（无 0x 前缀 / 越出 7 位地址域）= 拿不到答案 = 缺
 /// （fail-closed，不回落总线级冒充在位）。
 #[test]
-fn linux_probe_i2c_bad_addr_word_is_absent() {
+fn linux_i2c_bad_absent() {
     let root = rr3_test_probe_root("bad-addr");
     std::fs::create_dir_all(root.join("dev")).unwrap();
     std::fs::write(root.join("dev/i2c-1"), b"").unwrap();
@@ -159,7 +159,7 @@ fn linux_probe_i2c_bad_addr_word_is_absent() {
 /// 兼容面：装配单未声明 [pins] / 该格无 I2C 绑定（bus/addr 任一缺席）→
 /// 回落五面总线级判据原样——无 [pins] 形态的行为逐位不变（e2e 夹具即此形）。
 #[test]
-fn linux_probe_i2c_without_binding_falls_back_to_bus_level() {
+fn linux_i2c_bus_level() {
     let root = rr3_test_probe_root("fallback");
     std::fs::create_dir_all(root.join("dev")).unwrap();
     std::fs::write(root.join("dev/i2c-1"), b"").unwrap();
@@ -175,7 +175,7 @@ fn linux_probe_i2c_without_binding_falls_back_to_bus_level() {
 
 /// sim 显式档：任何格位回"在位"（装配单缺 binding 才是它表达的缺格）。
 #[test]
-fn sim_probe_reports_every_slot_present() {
+fn sim_slot_present() {
     let probe = Rr3SimProbe;
     for slot in ["act.servo", "sensor.env", "cognition.llm", ""] {
         assert!(probe.rr3_probe_slot(slot), "sim 档必须全在位: {slot:?}");
@@ -185,7 +185,7 @@ fn sim_probe_reports_every_slot_present() {
 /// 恒缺档（非 linux 生产面）：有硬件面的格位全缺，无硬件面可反证的格位在位
 /// （与真值探测同判——"没有反证"不是"拿不到答案"）。
 #[test]
-fn absent_probe_reports_hardware_faces_missing_software_present() {
+fn absent_miss_present() {
     let probe = Rr3AbsentProbe;
     for slot in [
         "act.servo",
@@ -204,7 +204,7 @@ fn absent_probe_reports_hardware_faces_missing_software_present() {
 /// 台-1 清零观察式：显式档优先 + 平台默认分流（用**纯选择函数**断言，不读 env——
 /// 单测进程 env 共享，读 env 会串别的用例；env 读取本身无分支逻辑）。
 #[test]
-fn probe_select_prefers_explicit_then_dispatches_by_target() {
+fn probe_then_target() {
     // 显式 sim：即便在 linux 上也选 sim（e2e/开发机的唯一出口，不再当缺省）
     assert!(rr3_probe_select(Some("sim")).rr3_probe_slot("act.servo"));
     // 显式 absent：全缺

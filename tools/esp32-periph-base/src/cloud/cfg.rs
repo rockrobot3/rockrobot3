@@ -309,7 +309,7 @@ mod tests {
     }
 
     #[test]
-    fn cloud_body_requires_three_fields_and_optional_key() {
+    fn cloud_body_three_key() {
         let b = body(serde_json::json!({
             "base": "https://api.example.com",
             "model": "tts-1",
@@ -334,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn cloud_check_rejects_http_and_overlong_values() {
+    fn cloud_rej_values() {
         let ok = Rr3CloudWrite {
             base: "https://a".into(),
             model: "m".into(),
@@ -369,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn url_trims_trailing_slash() {
+    fn url_trims_slash() {
         let cfg = Rr3CloudCfg {
             base: "https://x/".into(),
             key: String::new(),

@@ -272,7 +272,7 @@ mod tests {
 
     /// 原子五件套：五文件齐全 + atom.toml 回灌过查册门与板无关断言
     #[test]
-    fn atom_generation_passes_registry_validation() {
+    fn atom_passes_val() {
         let root = scratch_root("ok");
         let files =
             rr3_mkmod_gen_atom("sample_atom", "power.battery", &root).expect("合法生成必须成功");
@@ -295,7 +295,7 @@ mod tests {
     /// 件面只留纯机制（结构体+判定函数），载荷组装归组合件承载层（ADR-0019 修订 4）。
     /// 模板漂移反向断言（模块设计索引 X-5 教训：模板不改，新件一生成就违规）。
     #[test]
-    fn generated_atom_face_carries_no_serde_json() {
+    fn generated_no_json() {
         let root = scratch_root("closure");
         rr3_mkmod_gen_atom("sample_atom", "power.battery", &root).unwrap();
         for rel in [
@@ -312,7 +312,7 @@ mod tests {
 
     /// 非法输入三类：坏原子名、已存在目录、未登记格位（查册门回灌拒绝）
     #[test]
-    fn atom_generation_rejects_bad_inputs() {
+    fn atom_rej_bad_inputs() {
         let root = scratch_root("bad");
         assert!(matches!(
             rr3_mkmod_gen_atom("Bad-Atom", "power.battery", &root),

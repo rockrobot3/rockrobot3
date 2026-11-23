@@ -71,7 +71,7 @@ mod tests {
 
     /// 板侧应答 → 宿主解析：字节级往返一致（组帧与解析是同 crate 直接对拍）。
     #[test]
-    fn response_roundtrip_ok_and_error_shapes() {
+    fn resp_ok_error_shapes() {
         let req = rr3_req_parse(&rr3_bridge_call(
             21,
             crate::consts::RR3_SERVO_TOPIC,

@@ -53,7 +53,7 @@ mod tests {
 
     /// 载荷 schema（contracts/events/brain-intent-result.schema.json）钉的两键形状
     #[test]
-    fn action_shape_matches_contract() {
+    fn action_contract() {
         let all: Vec<Value> = rr3_extract_actions("开灯，然后向左");
         assert_eq!(all.len(), 2, "开灯+向左产两条按序动作: {all:?}");
         for action in all {
@@ -71,7 +71,7 @@ mod tests {
 
     /// 适配面顺序：relay 在前、servo 在后，args 值逐字落契约
     #[test]
-    fn mixed_sentence_keeps_order_and_args() {
+    fn mixed_order_args() {
         let actions = rr3_extract_actions("开灯，等等再关灯，然后向右");
         assert_eq!(actions.len(), 3, "{actions:?}");
         assert_eq!(actions[0]["args"], json!({"on": true}));
@@ -82,7 +82,7 @@ mod tests {
 
     /// 否定护栏经适配面仍生效（"别向左"不得产动作）
     #[test]
-    fn negative_guard_survives_adapter() {
+    fn negative_adapter() {
         assert!(rr3_extract_actions("别向左").is_empty());
         assert!(rr3_extract_actions("今天天气怎么样").is_empty());
     }

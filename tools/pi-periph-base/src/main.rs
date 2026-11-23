@@ -66,7 +66,7 @@ mod tests {
     use serde_json::{json, Value};
 
     #[test]
-    fn parse_axis_and_degree_are_fail_closed() {
+    fn parse_fail_closed() {
         assert!(parse_axis(None).is_ok());
         assert!(parse_axis(Some(&json!("pan"))).is_ok());
         assert!(parse_axis(Some(&Value::Null)).is_ok());
@@ -82,7 +82,7 @@ mod tests {
 
     /// 绑定对账：四键失配逐条计数，未注入不判、其余键不参与（Pi 不适用）。
     #[test]
-    fn reconcile_counts_only_pi_bus_keys() {
+    fn reconcile_pi_keys() {
         let mut b = Rr3BoardBindings::default();
         assert_eq!(reconcile_bindings(&b), 0, "未注入不判");
         b.i2c_sda = Some(BIND_I2C_SDA);
@@ -97,7 +97,7 @@ mod tests {
 
     /// INFO 对无 ADS 的板子必须显式 rail=absent，不得把默认 0mV/Ok 冒领成有效采样。
     #[test]
-    fn info_marks_absent_rail_explicitly() {
+    fn info_rail_explicitly() {
         let absent = info_of(&State::boot());
         assert!(absent.contains("rail=absent"), "{absent}");
         assert!(!absent.contains("rail=0mV"), "{absent}");

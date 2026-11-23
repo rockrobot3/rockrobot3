@@ -6,7 +6,7 @@ use crate::profile::rr3_profile_parse;
 
 /// 校验①-a：role 未在 roles.toml 在册 → 致命点名（真契约上跑）
 #[test]
-fn pin_unknown_role_is_fatal() {
+fn pin_role_fatal() {
     let root = Root::new("pin-role");
     let text = GOOD.replace("role = \"act.axis.pwm\"", "role = \"act.axis.magical\"");
     let p = root.write_profile("pin-role.toml", &text);
@@ -16,7 +16,7 @@ fn pin_unknown_role_is_fatal() {
 
 /// 校验①-b per_instance 两侧：true 角色缺 instance / false 角色填 instance 都红
 #[test]
-fn pin_per_instance_rules_are_fatal_both_sides() {
+fn pin_per_fatal_sides() {
     let root = Root::new("pin-perinst");
     // act.axis.pwm per_instance=true，删 instance → 必填缺
     let text = GOOD.replace("instance = \"pan\"\n", "");
@@ -37,7 +37,7 @@ fn pin_per_instance_rules_are_fatal_both_sides() {
 /// 校验①-b 留空反例（§5 缺失语义）：requires 必填字段删键即红——channel 以
 /// None = 缺、failsafe 以空串 = 缺，一次收集、逐条点名，一条不静默放行
 #[test]
-fn pin_requires_left_blank_is_fatal() {
+fn pin_left_blank_fatal() {
     let root = Root::new("pin-blank");
     let text = GOOD
         .replace("channel = 0\n", "")
@@ -50,7 +50,7 @@ fn pin_requires_left_blank_is_fatal() {
 
 /// 校验① direction 相等：pin.direction 与角色 direction 各说一套 → 致命点名
 #[test]
-fn pin_direction_mismatch_is_fatal() {
+fn pin_mismatch_fatal() {
     let root = Root::new("pin-direction");
     let text = GOOD.replace("direction = \"out\"", "direction = \"in\"");
     let p = root.write_profile("pin-direction.toml", &text);
@@ -63,7 +63,7 @@ fn pin_direction_mismatch_is_fatal() {
 
 /// [[pin]] 形状：未知键/坏类型/缺身份键逐条点名，一次收集完
 #[test]
-fn pin_section_shape_errors_are_named() {
+fn pin_errors_named() {
     let text =
         format!("{GOOD}\n[[pin]]\nrole = \"\"\ndirection = \"out\"\nwat = 1\nphysical = [\"x\"]\n");
     // GOOD 现役两条 pin，追加的坏 pin 序号 = #2
@@ -97,7 +97,7 @@ fn pin_section_shape_errors_are_named() {
 /// 校验⑥-a/⑥-b 反例（§18 F-5 的自造域名 + 功率面挂 none）：未在册 rail 与
 /// kind=power 而 rail=none 都必须拒 boot 并点名
 #[test]
-fn pin_rail_domain_gate_is_fatal() {
+fn pin_rail_gate_fatal() {
     let root = Root::new("rail-gate");
     // ⑥-a：自造域名（F-5：rail24 不在任何一处在册集——文档示例值会被装机档抄）
     let text = GOOD.replace("rail = \"rail5v\"", "rail = \"rail24\"");

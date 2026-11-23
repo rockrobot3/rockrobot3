@@ -40,7 +40,7 @@ evidence = "none"
 
 /// 正例：只动目标域的目标键行——注释保留、邻域同名键行原封、块序不变
 #[test]
-fn domain_keys_apply_touches_target_block_only() {
+fn domain_keys_block() {
     let out =
         rr3_domain_apply(SURGERY_TEXT, "batt", &[("severe_mv", "3200")]).expect("合法手术应过");
     // 目标行已改
@@ -60,7 +60,7 @@ fn domain_keys_apply_touches_target_block_only() {
 
 /// 正例：armed + evidence 两键行一次手术（写口联动写形状）
 #[test]
-fn domain_keys_apply_pairs_armed_and_evidence() {
+fn domain_keys_evidence() {
     let out = rr3_domain_apply(
         SURGERY_TEXT,
         "rail5v",
@@ -78,7 +78,7 @@ fn domain_keys_apply_pairs_armed_and_evidence() {
 /// 单引号域名的档同样可手术（TOML 两形都合法、装载期都收）：旧判据只认双
 /// 引号会把在册域误报"缺域"——写口功能丢失且拒因与事实不符。
 #[test]
-fn domain_keys_apply_accepts_single_quoted_name() {
+fn domain_keys_ok_name() {
     let text = SURGERY_TEXT.replace("name = \"batt\"", "name = 'batt'");
     let out = rr3_domain_apply(&text, "batt", &[("severe_mv", "3200")]).expect("单引号域应可手术");
     assert!(out.contains("severe_mv = 3200"), "{out}");
@@ -87,7 +87,7 @@ fn domain_keys_apply_accepts_single_quoted_name() {
 /// 域块头带行内注释/尾空白仍识头（TOML 允许；旧整行等值会漏收该域——
 /// 轻则误报"缺域"，重则把其键行算进邻块）。
 #[test]
-fn domain_keys_apply_accepts_commented_block_head() {
+fn domain_keys_ok_head() {
     let text = SURGERY_TEXT.replace(
         "[[supplies.domain]]\nname = \"batt\"",
         "[[supplies.domain]]  # 电池域\nname = \"batt\"",
@@ -101,7 +101,7 @@ fn domain_keys_apply_accepts_commented_block_head() {
 /// 与紧写同义、装载期同收——手术面旧判据按紧写字面前缀匹配会误报"缺域"，
 /// 在册域的写口功能整体丢失。
 #[test]
-fn domain_keys_apply_accepts_spaced_block_head() {
+fn domain_keys_ok_3e75() {
     let text = SURGERY_TEXT.replace(
         "[[supplies.domain]]\nname = \"batt\"",
         "[[ supplies.domain ]]\nname = \"batt\"",
@@ -115,7 +115,7 @@ fn domain_keys_apply_accepts_spaced_block_head() {
 /// 对"在册域"的判据不得劈叉，否则写口对合法档误报"缺域"。逐形各判一次，
 /// 同时核"他域仍拒"（定界没被放宽成"见块就收"）。
 #[test]
-fn domain_locator_agrees_with_toml_loader() {
+fn domain_toml_loader() {
     for head in [
         "[[supplies.domain]]",
         "[[ supplies.domain ]]",
@@ -157,7 +157,7 @@ fn rr3_repo_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 /// 病根：文本启发式与解析器判据劈叉。逐档逐条判等后，新增合法书写形制不靠
 /// 人工想用例也不会静默丢功能。不空转：至少各判一份。
 #[test]
-fn repo_files_locator_matches_loader() {
+fn repo_files_loader() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let mut domains = 0usize;
     for f in rr3_repo_files(&root.join("profiles")) {
@@ -268,7 +268,7 @@ fn check_variant(f: &std::path::Path, vtext: &str, vi: usize, names: &[String]) 
 /// B37/B38 的误报都是"合法变体被文本判据拒"，这里用解析器做 oracle，
 /// 而不是只断言"没报错"。
 #[test]
-fn repo_domain_variants_survive_surgery() {
+fn repo_domain_surgery() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let mut checked = 0usize;
     for f in rr3_repo_files(&root.join("profiles")) {
@@ -287,7 +287,7 @@ fn repo_domain_variants_survive_surgery() {
 
 /// 缺域拒：域名不在册不带病落盘
 #[test]
-fn domain_keys_apply_rejects_missing_domain() {
+fn domain_rej_domain() {
     let e =
         rr3_domain_apply(SURGERY_TEXT, "rail9v", &[("severe_mv", "1")]).expect_err("缺域必须拒");
     assert!(e.contains("rail9v") && e.contains("缺域拒"), "{e}");
@@ -295,7 +295,7 @@ fn domain_keys_apply_rejects_missing_domain() {
 
 /// 多义拒：同名两块 = 装载期域名唯一判据破，手术面不替解析器裁决
 #[test]
-fn domain_keys_apply_rejects_ambiguous_domain() {
+fn domain_rej_bf90() {
     let dup = format!("{SURGERY_TEXT}\n[[supplies.domain]]\nname = \"batt\"\nnominal_mv = 1\nsevere_mv = 2\narmed = false\nevidence = \"none\"\n");
     let e = rr3_domain_apply(&dup, "batt", &[("severe_mv", "1")]).expect_err("同名多义必须拒");
     assert!(e.contains("命中 2 个"), "{e}");
@@ -303,7 +303,7 @@ fn domain_keys_apply_rejects_ambiguous_domain() {
 
 /// 键行缺拒：块内缺目标键（档被改病）不插入不猜
 #[test]
-fn domain_keys_apply_rejects_missing_key_line() {
+fn domain_rej_miss_line() {
     let broken = SURGERY_TEXT.replace("severe_mv = 3300\n", "");
     let e =
         rr3_domain_apply(&broken, "batt", &[("severe_mv", "3200")]).expect_err("键行缺失必须拒");
@@ -313,7 +313,7 @@ fn domain_keys_apply_rejects_missing_key_line() {
 /// 平铺键行手术（轴档案用）：替换正例 + 词边界（`hi_deg` 不得命中他行）+
 /// 缺行拒
 #[test]
-fn toml_key_line_apply_flat_and_word_boundary() {
+fn toml_key_boundary() {
     let axis = "schema = 1\npin = \"act.axis.pwm.pan\"\nhi_deg = 120\nslew_deg_s = 100\n";
     let out = rr3_key_line_apply(axis, "hi_deg", "135").expect("平铺手术应过");
     assert!(out.contains("hi_deg = 135"), "{out}");

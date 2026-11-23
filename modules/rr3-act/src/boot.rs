@@ -41,7 +41,7 @@ mod tests {
     /// 坏布尔/词表外词/未知键/重复键/越 u16 逐条点名红——装配链注入的文本坏了
     /// 必须看得见，不许静默猜。
     #[test]
-    fn axis_state_env_parses_strict() {
+    fn axis_env_strict() {
         let ok =
             Rr3ActAxisState::rr3_from_env("calibrated=true,hard_stop=yes,lo=60,hi=120,center=90")
                 .unwrap();
@@ -104,7 +104,7 @@ mod tests {
     /// 与仓内 config.toml 同形状的最小配置必须解析成功——漂移当场红。
     /// 行程键不在 config（批N3 件五门 g 收敛），本夹具与仓内文件同形。
     #[test]
-    fn config_parse_covers_repo_shape() {
+    fn cfg_parse_repo_shape() {
         let text = r#"
 [rr3-act.servo]
 move_timeout_ms = 800
@@ -145,7 +145,7 @@ saturate_notice_ms = 500
     /// 桥共享判据：只有舵机面与音频面同选 esp32 才归 sense 独占。
     #[test]
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    fn shared_rule_only_when_both_esp32() {
+    fn shared_rule_esp32() {
         assert!(rr3_shared_rule("esp32", "esp32"));
         assert!(!rr3_shared_rule("esp32", "linux"));
         assert!(!rr3_shared_rule("linux", "esp32"));
@@ -154,14 +154,14 @@ saturate_notice_ms = 500
 
     /// 可缺面门：占位（装配单未启用该格）只点名不致命；Busy/参数错是真故障。
     #[test]
-    fn opt_face_degrades_only_placeholder() {
+    fn opt_face_placeholder() {
         assert!(rr3_opt_face("LED", "placeholder", Err(Rr3HalError::Unsupported("x"))).is_ok());
         assert!(rr3_opt_face("LED", "linux", Err(Rr3HalError::Busy)).is_err());
         assert!(rr3_opt_face("继电器", "linux", Ok(true)).is_ok());
     }
 
     #[test]
-    fn config_parse_rejects_missing_sections_and_fields() {
+    fn cfg_rej_miss_fields() {
         let e = rr3_act_config_parse("").unwrap_err();
         assert!(e.contains("[rr3-act.servo]"), "缺段点名: {e}");
         // 行程键已撤（批N3 件五门 g），servo 节只剩时限/限速两必填键——
@@ -183,7 +183,7 @@ saturate_notice_ms = 500
     /// loop_hz 越界拒 boot（0.0.5 批I A-3）：装不进 u32 的值点名拒绝，
     /// 不得被 `as u32` 裸截断成小值静默变形
     #[test]
-    fn config_parse_rejects_loop_hz_overflow() {
+    fn cfg_rej_hz_overflow() {
         let text = r#"
 [rr3-act.servo]
 move_timeout_ms = 800
@@ -214,7 +214,7 @@ saturate_notice_ms = 500
     /// 饱和通告窗越界拒 boot（本轮静态审计）：`rr3_reflex_plan` 的窗数折算
     /// `div_ceil(…) as u32` 会把无上界巨值静默截断，语义失真且不可定位。
     #[test]
-    fn config_parse_rejects_notice_overflow() {
+    fn cfg_rej_overflow() {
         let text = r#"
 [rr3-act.servo]
 move_timeout_ms = 800
@@ -247,7 +247,7 @@ saturate_notice_ms = 18446744073709551615
     /// A-9 fail-closed：灯效白名单子集与意图开放集逐条点名——缺键/类型错/
     /// 越界值都拒 boot（空数组合法，另行覆盖）
     #[test]
-    fn config_parse_rejects_bad_effects_and_open_topics() {
+    fn cfg_rej_bad_topics() {
         // 基座（四段齐备），按需替换 led.effects / intent.open_topics 行
         let base = |led: &str, top: &str| {
             format!(

@@ -291,7 +291,7 @@ mod tests {
 
     /// 点名下钻与应答体形状（用例自件面随迁，I-8：承载层守字节面）。
     #[test]
-    fn args_and_result_shapes() {
+    fn args_result_shapes() {
         assert_eq!(
             rr3_tts_parse_args(&json!({ "text": "hi", "pcm_bytes": 640 })).unwrap(),
             ("hi".to_string(), 640)
@@ -333,7 +333,7 @@ mod tests {
     /// tts PCM 缓冲对账（MC-1）：完整 = 过；半流/残留 = 拒且缺口字节进拒因；
     /// 零字节申报一律拒（I-21① 下界：(0,0) 不再是合法通过态）
     #[test]
-    fn tts_pcm_integrity_rejects_half_and_residual_streams() {
+    fn tts_pcm_rej_streams() {
         assert_eq!(rr3_pcm_integrity(640, 640), Ok(()));
         let e = rr3_pcm_integrity(1920, 640).unwrap_err();
         assert!(e.contains("半流") && e.contains("1280"), "{e}");
@@ -352,7 +352,7 @@ mod tests {
 
     /// s16le 字节列 → i16 样点：小端两两成对，奇数尾字节防御性丢弃
     #[test]
-    fn pcm_bytes_to_samples_is_little_endian_pairs() {
+    fn pcm_bytes_pairs() {
         assert_eq!(rr3_pcm_to_samples(&[0x34, 0x12]), vec![0x1234]);
         assert_eq!(rr3_pcm_to_samples(&[0x00, 0x80]), vec![i16::MIN]);
         assert!(rr3_pcm_to_samples(&[0x01]).is_empty());
@@ -363,7 +363,7 @@ mod tests {
     /// 收流缓冲，拼接流必须逐字节还原基准 PCM，seq/ms 同拍（两侧各自的单测钉
     /// 语义，这条钉"同一份字节基准两侧对得上"）。
     #[test]
-    fn tts_pcm_buf_matches_shared_golden_vector() {
+    fn tts_pcm_buf_vector() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../contracts/golden/tts-pcm-frames.json");
         let text = std::fs::read_to_string(&path)
@@ -402,7 +402,7 @@ mod tests {
 
     /// 注入集经组合件透传进件面判定（I-11 端到端）：缺省排除 talk；放开则 talk 可点名
     #[test]
-    fn non_pointable_flows_through_handle_face() {
+    fn non_flows_face() {
         let mut f = Rr3Face::default();
         let err = rr3_handle_face(&mut f, &json!({ "expression": "talk" }), &["talk"]).unwrap_err();
         assert!(err.contains("不可被点名"), "talk 被排除集拒: {err}");
@@ -413,7 +413,7 @@ mod tests {
     /// 错误文案逐字钉死（批N24 件四，L-3 形状清理的对账单测）：机制层改交
     /// 零堆枚举后，编排层渲染的 `String` 必须与改前逐字一致（线上契约面）。
     #[test]
-    fn face_set_error_texts_are_verbatim() {
+    fn face_error_verbatim() {
         let e = Rr3FaceSetError::UnknownExpression("wink");
         assert_eq!(
             rr3_face_err_text(&e, &["talk"]),
@@ -435,7 +435,7 @@ mod tests {
     /// tts 错误文案逐字钉死（批N24 件四）：`{e}` 走 `Rr3HalError` Display
     /// （HAL 错文本随行原样）。
     #[test]
-    fn tts_play_error_text_is_verbatim() {
+    fn tts_error_verbatim() {
         let e = Rr3TtsPlayError::Write(rr_hal_api::Rr3HalError::Busy);
         assert_eq!(rr3_tts_err_text(&e), "写播放面失败: HAL 设备忙");
     }

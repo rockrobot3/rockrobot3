@@ -291,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn duty_maps_angle_edges_linearly() {
+    fn duty_maps_linearly() {
         assert_eq!(servo_duty_ns(0).unwrap(), RR3_SERVO_PULSE_MIN_NS);
         assert_eq!(servo_duty_ns(90).unwrap(), 1_500_000, "中位 90° = 1.5ms");
         assert_eq!(servo_duty_ns(180).unwrap(), RR3_SERVO_PULSE_MAX_NS);
@@ -302,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn duty_rejects_out_of_domain_angle() {
+    fn duty_rej_out_angle() {
         for bad in [181u16, 200, 360, u16::MAX] {
             let e = servo_duty_ns(bad).unwrap_err();
             assert!(
@@ -315,7 +315,7 @@ mod tests {
 
     /// 反演对映射全域往返恒等（整数式精确，无累积误差）
     #[test]
-    fn angle_inverts_duty_exactly_across_domain() {
+    fn angle_duty_domain() {
         for deg in 0..=RR3_SERVO_ANGLE_MAX_DEG {
             let duty = servo_duty_ns(deg).unwrap() as u64;
             assert_eq!(servo_angle_of_duty(duty).unwrap(), deg, "deg={deg}");
@@ -323,7 +323,7 @@ mod tests {
     }
 
     #[test]
-    fn angle_rejects_duty_out_of_pulse_band() {
+    fn angle_rej_out_band() {
         for bad in [0u64, 499_999, 2_500_001, RR3_SERVO_PERIOD_NS as u64] {
             let e = servo_angle_of_duty(bad).unwrap_err();
             assert!(
@@ -337,7 +337,7 @@ mod tests {
     /// 通道已在位（不写 export）：ensure 落定全量配置 → 探活读回中位 90°，
     /// 与 sim 后端"初始角 90°"观测一致（R11 换装判据：编排零改动）。
     #[test]
-    fn ensure_configures_and_probe_reads_neutral() {
+    fn ensure_reads_neutral() {
         let root = temp_root("in-place");
         let pwm_dir = fake_chip_in_place(&root, 0, 0);
         let dev = Rr3LinuxPwmServo::rr3_pwm_servo_new(&root, 0, 0);
@@ -369,7 +369,7 @@ mod tests {
 
     /// set_angle 落占空比 + 反演回读一致；越域角回错且不改现状
     #[test]
-    fn set_angle_writes_duty_and_reads_back() {
+    fn set_duty_reads_back() {
         let root = temp_root("set");
         let pwm_dir = fake_chip_in_place(&root, 0, 1);
         let mut dev = Rr3LinuxPwmServo::rr3_pwm_servo_new(&root, 0, 1);
@@ -394,7 +394,7 @@ mod tests {
     /// 通道未导出：ensure 写 export，等目录出现后配置；Drop 归还自己导出的通道。
     /// 假 sysfs 不会自动建目录，由看护线程在 export 被写入后补建（仿真内核行为）。
     #[test]
-    fn ensure_exports_channel_and_drop_returns_it() {
+    fn ensure_drop_returns() {
         let root = temp_root("export");
         let chip_dir = root.join("pwmchip0");
         std::fs::create_dir_all(&chip_dir).unwrap();
@@ -440,7 +440,7 @@ mod tests {
 
     /// 未使用即丢弃（选择函数构造 → 探活前失败退出的路径）：不碰任何文件
     #[test]
-    fn drop_without_use_touches_nothing() {
+    fn drop_use_nothing() {
         let root = temp_root("unused");
         let pwm_dir = fake_chip_in_place(&root, 2, 0);
         let dev = Rr3LinuxPwmServo::rr3_pwm_servo_new(&root, 2, 0);

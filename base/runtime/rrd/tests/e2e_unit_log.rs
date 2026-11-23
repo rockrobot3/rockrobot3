@@ -99,7 +99,7 @@ fn assert_stderr_landed(log_file: &Path) {
 }
 
 #[test]
-fn spawned_module_stderr_lands_in_per_unit_log() {
+fn spawned_per_unit_log() {
     // ---- 夹具：打一行 stderr 即退的脚本 + 绝对 entry 的 manifest ----
     let script = unit_log_script();
     let manifest = unit_log_manifest(&script);

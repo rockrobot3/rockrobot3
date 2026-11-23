@@ -18,7 +18,7 @@ impl Rr3GpioOut for DummyGpio {
 /// dyn 兼容校验：trait 对象必须能装箱/借用（承载层要持有异构设备集合）。
 /// 同步 trait 无 `Send + Sync` 约束——单所有者语义，承载层主循环独占。
 #[test]
-fn hal_traits_are_object_safe() {
+fn hal_object_safe() {
     let mut boxed: Box<dyn Rr3GpioOut> = Box::new(DummyGpio(false));
     assert!(boxed.set(true).is_ok());
     assert!(boxed.level().unwrap());
@@ -32,7 +32,7 @@ fn hal_traits_are_object_safe() {
 }
 
 #[test]
-fn audio_default_cfg_matches_legacy_pcm() {
+fn audio_def_cfg_pcm() {
     let cfg = RR3_AUDIO_CFG_16K_MONO16;
     assert_eq!(
         (cfg.sample_rate_hz, cfg.channels, cfg.bit_depth),
@@ -41,7 +41,7 @@ fn audio_default_cfg_matches_legacy_pcm() {
 }
 
 #[test]
-fn hal_error_carries_backend_name() {
+fn hal_error_name() {
     let e = Rr3HalError::Unsupported("linux/iio");
     assert_eq!(e.to_string(), "HAL 后端不支持: linux/iio");
     let e = Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new("行程 [0, 180]"));
@@ -51,7 +51,7 @@ fn hal_error_carries_backend_name() {
 /// 定长缓冲：容量内逐字保留；超长按 char 边界截断（多字节字符不劈半），
 /// `as_str` 恒合法。
 #[test]
-fn err_text_truncates_on_char_boundary() {
+fn err_char_boundary() {
     let t = Rr3ErrText::rr3_err_text_new("行程 [0, 180] 越域");
     assert_eq!(t.rr3_err_text_as_str(), "行程 [0, 180] 越域");
     let long = "汉".repeat(200);
@@ -62,7 +62,7 @@ fn err_text_truncates_on_char_boundary() {
 }
 
 #[test]
-fn ssid_text_roundtrips_and_truncates() {
+fn ssid_text_trunc() {
     let t = Rr3SsidText::rr3_ssid_text_new("home-5g");
     assert_eq!(t.rr3_ssid_text_as_str(), "home-5g");
     let long = "s".repeat(40);
@@ -75,7 +75,7 @@ fn ssid_text_roundtrips_and_truncates() {
 
 /// 占位后端回错（能力缺失显式回错，不静默退化）
 #[test]
-fn placeholder_returns_unsupported() {
+fn placehold_unsupport() {
     let mut p = Rr3UnavailableSource;
     assert!(matches!(
         p.set(true),
@@ -102,7 +102,7 @@ fn placeholder_returns_unsupported() {
 /// P-15（T-6）：档位词表四态在册——`Unknown` 与三电平档在接口上可区分，
 /// 档名串与板侧守护行同源（三档同 `RailTier::name`，第四态补 `unknown`）。
 #[test]
-fn rail_tier_has_four_states_with_pinned_names() {
+fn rail_has_four_names() {
     assert_eq!(Rr3RailTier::Ok.rr3_rail_tier_name(), "ok");
     assert_eq!(Rr3RailTier::Mild.rr3_rail_tier_name(), "mild");
     assert_eq!(Rr3RailTier::Severe.rr3_rail_tier_name(), "severe");
@@ -130,7 +130,7 @@ fn rail_tier_has_four_states_with_pinned_names() {
 /// 边界不折、陈旧 Severe 不许冒充新鲜（T-6 立项理由——没有 Unknown 第四态，
 /// 面板/brain 拿着不敢信的数据照样判定）。
 #[test]
-fn rail_tier_effective_folds_stale_or_unclocked_readings_into_unknown() {
+fn rail_tier_unknown() {
     // 新鲜读数原样（三电平档都不折）
     assert_eq!(
         rr3_rail_tier_fold(Rr3RailTier::Ok, Some(100), 1_000),
@@ -162,7 +162,7 @@ fn rail_tier_effective_folds_stale_or_unclocked_readings_into_unknown() {
 /// 拒动判据红例组（批N3，全案 §6 硬约束——"未标定不得自动"与 hard_stop
 /// 护栏都是代码拒动）：四形态 × 三挡块事实 × 标定位的全组合关键臂。
 #[test]
-fn act_motion_allowed_refuses_uncalibrated_auto_and_unknown_hardstop() {
+fn act_refuses_hardstop() {
     use Rr3ActHardStop as Hs;
     use Rr3ActMotion as Mo;
     // 点动永远放行（未标定轴的唯一合法动作面）
@@ -191,7 +191,7 @@ fn act_motion_allowed_refuses_uncalibrated_auto_and_unknown_hardstop() {
 /// 档案字段词表形状 pin（批N3，§4.4 档案十四键）：键名唯一、两处"只回显"
 /// 如实标注（F-25 读者三态——settle_ms/warmup_ms 是 §4.4 点名的已知候选）。
 #[test]
-fn act_profile_fields_pinned_shape_and_reader_annotations() {
+fn act_annotations() {
     assert_eq!(RR3_ACT_PROFILE_FIELDS.len(), 14);
     for (i, a) in RR3_ACT_PROFILE_FIELDS.iter().enumerate() {
         for b in RR3_ACT_PROFILE_FIELDS.iter().skip(i + 1) {
@@ -225,7 +225,7 @@ fn act_profile_fields_pinned_shape_and_reader_annotations() {
 /// 三档案词枚举（hold / hard_stop / source）name ↔ parse 同源 round-trip：
 /// 词形改动只许落各 enum 的 impl 一处，档案文本串漂移即红。
 #[test]
-fn act_word_enums_name_parse_round_trip() {
+fn act_word_name_trip() {
     for (h, w) in [(Rr3ActHold::Hold, "hold"), (Rr3ActHold::Release, "release")] {
         assert_eq!(h.rr3_act_hold_name(), w);
         assert_eq!(Rr3ActHold::rr3_act_hold_parse(w), Some(h));
@@ -264,7 +264,7 @@ fn act_word_enums_name_parse_round_trip() {
 /// 位置读数来源在册（坑 11：开环回显与闭环测量在接口上可区分——来源缺席的
 /// 裸角度不许冒充测量）；占位后端对执行件/载体缝回错（能力缺失显式回错）。
 #[test]
-fn position_and_placeholder_actuator_store_pinned() {
+fn position_act_pinned() {
     let p = Rr3Position {
         deg: 90,
         source: Rr3PositionSource::Commanded,

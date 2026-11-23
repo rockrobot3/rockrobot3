@@ -24,7 +24,7 @@ use rr_registry::Rr3AssembleDemand;
 /// esp32-mini→esp32），轴档案目录成员恒在清单（在则随装、缺目录合法由消费方裁）。
 /// 成员名单有变必须改 [`rr3_truth_set`] 本体并同步三处消费方，本用例红即拦截。
 #[test]
-fn runtime_truth_set_members_are_pinned() {
+fn runtime_set_pinned() {
     let distro = rr3_profile_parse(include_str!("../../../../../profiles/distro.toml"))
         .expect("真仓 distro 装配单必须合法");
     let t = rr3_truth_set(&distro, "distro");
@@ -59,7 +59,7 @@ fn runtime_truth_set_members_are_pinned() {
 /// `--profile` canonicalize 产物、契约四册 = `--contracts` join、平台事实表 =
 /// platform/ join 选册、接线档 = 接线布局推导原样记账。
 #[test]
-fn truth_set_members_and_boot_locations_are_the_same_set() {
+fn truth_set_same_set() {
     let distro = rr3_profile_parse(include_str!("../../../../../profiles/distro.toml"))
         .expect("真仓 distro 装配单必须合法");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
@@ -405,7 +405,7 @@ mux_group = []
 /// G4 装配段扫描直测（ADR-0019 修订 1 ③）：缺文件/坏形/注入缺逐条点名，
 /// 无 atoms 目录与合法空数组不产生缺口
 #[test]
-fn assemble_scan_names_missing_broken_and_injection_gaps() {
+fn injection_miss_scan() {
     let root = Root::new("assemble-scan");
     // 无 atoms/ 目录 → 空（夹具树/两件式形态）
     assert!(rr3_assemble_scan(&root.dir.join("no-atoms")).1.is_empty());

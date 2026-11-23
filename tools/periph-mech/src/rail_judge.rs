@@ -99,13 +99,13 @@ mod tests {
     const SEVERE: u16 = 4_400;
 
     #[test]
-    fn rail_mv_from_pin_scales_by_divider() {
+    fn rail_mv_pin_divider() {
         assert_eq!(rr3_rail_mv_from_pin(2_605, 2, 1), 5_210);
         assert_eq!(rr3_rail_mv_from_pin(2_605, 1, 1), 2_605);
     }
 
     #[test]
-    fn raw_validity_rejects_zero_and_saturation() {
+    fn raw_rej_saturation() {
         assert!(!rr3_rail_raw_valid(0));
         assert!(rr3_rail_raw_valid(1));
         assert!(rr3_rail_raw_valid(3_100));
@@ -115,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    fn tier_boundaries_are_inclusive() {
+    fn tier_inclusive() {
         assert_eq!(rr3_rail_tier_of(4_401, MILD, SEVERE), RailTier::Mild);
         assert_eq!(rr3_rail_tier_of(4_400, MILD, SEVERE), RailTier::Severe);
         assert_eq!(rr3_rail_tier_of(4_600, MILD, SEVERE), RailTier::Mild);
@@ -127,7 +127,7 @@ mod tests {
     }
 
     #[test]
-    fn judge_reports_each_low_segment_once_and_rearms_on_recovery() {
+    fn judge_low_recovery() {
         let mut j = RailJudge::new(MILD, SEVERE);
         // 轻度段：首拍报、段内不重报
         assert_eq!(j.feed(4_500), (RailTier::Mild, true));
@@ -144,7 +144,7 @@ mod tests {
     }
 
     #[test]
-    fn judge_starts_armed_and_fires_on_first_low_sample() {
+    fn judge_low_sample() {
         let mut j = RailJudge::new(MILD, SEVERE);
         assert_eq!(j.feed(4_300), (RailTier::Severe, true));
         assert_eq!(j.feed(4_300), (RailTier::Severe, false));

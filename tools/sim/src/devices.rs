@@ -21,13 +21,13 @@ mod tests {
 
     /// 1600 帧 @16kHz = 100ms：换算走 rr-hal 的实现，sim 不自己算一遍
     #[test]
-    fn silence_stream_reports_expected_duration() {
+    fn silence_duration() {
         assert_eq!(rr3_sim_silence(1600).rr3_pcm_duration_ms(), 100);
         assert_eq!(rr3_sim_silence(1600).samples.len(), 1600);
     }
 
     #[test]
-    fn zero_frames_are_empty_not_phantom() {
+    fn zero_not_phantom() {
         let s = rr3_sim_silence(0);
         assert!(s.samples.is_empty());
         assert_eq!(s.rr3_pcm_duration_ms(), 0);

@@ -119,7 +119,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn store_is_atomic_and_cleans_tmp_on_success() {
+    fn store_cleans_tmp_ok() {
         let dir = std::env::temp_dir().join(format!("rr3-persist-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("t.json");
@@ -138,7 +138,7 @@ mod tests {
     /// 目录 fsync 机制：真实目录可刷，缺目录回错误（策略由调用方选）。
     #[cfg(unix)]
     #[test]
-    fn sync_dir_reports_missing_parent() {
+    fn sync_dir_miss_parent() {
         let dir = std::env::temp_dir().join(format!("rr3-persist-sync-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let f = dir.join("x.json");
@@ -152,7 +152,7 @@ mod tests {
     /// 写口不得因同机可写目录里的链接变成任意文件截断器。
     #[cfg(unix)]
     #[test]
-    fn store_does_not_follow_tmp_symlink() {
+    fn store_not_symlink() {
         use std::os::unix::fs::symlink;
         let dir = std::env::temp_dir().join(format!("rr3-persist-link-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
@@ -175,7 +175,7 @@ mod tests {
     /// 两段式候选落盘：独占建 + 定权（0600），残留链接同样被换掉不写穿。
     #[cfg(unix)]
     #[test]
-    fn stage_excl_is_symlink_safe_and_mode_restricted() {
+    fn stage_restricted() {
         use std::os::unix::fs::{symlink, PermissionsExt};
         let dir = std::env::temp_dir().join(format!("rr3-persist-stage-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
@@ -195,7 +195,7 @@ mod tests {
     /// 残留都不给同机他用户读的机会（umask 只会收紧不会放宽）。
     #[cfg(unix)]
     #[test]
-    fn perm_store_lands_restricted_mode() {
+    fn perm_lands_mode() {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("rr3-persist-perm-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);

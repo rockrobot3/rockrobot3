@@ -100,7 +100,7 @@ mod tests {
 
     /// 命令帧与桥帧字节级同形（payload 逐字节；帧头位形同值，时间戳不参与对拍）。
     #[test]
-    fn cmd_frame_matches_bridge_shape() {
+    fn cmd_frame_shape() {
         let frame = rr3_esp32_cmd_frame(7, &Rr3PeriphCmd::ServoPan(105));
         assert_eq!(frame.header.src_task, RR3_TASK_HOST);
         assert_eq!(frame.header.dst_task, crate::consts::RR3_PERIPH_TASK);
@@ -130,7 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn classify_routes_reply_and_event() {
+    fn classify_reply_event() {
         let ok = board_reply_frame(7, None);
         match rr3_board_classify(&ok.header, &ok.payload) {
             Ok(Rr3BoardFrame::Reply { id, err }) => {

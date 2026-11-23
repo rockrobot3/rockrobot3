@@ -221,7 +221,7 @@ mod tests {
     /// A9 舵机命令面：单轴门 + 非桥主 fail-closed（无 cmd_tx 不许另开 UART）。
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
-    fn servo_axis_gate_and_owner_gate() {
+    fn servo_axis_gate_gate() {
         assert_eq!(rr3_axis_deg(&json!({"pan": 90}), "pan").unwrap(), Some(90));
         assert_eq!(rr3_axis_deg(&json!({"tilt": 0}), "tilt").unwrap(), Some(0));
         assert_eq!(rr3_axis_deg(&json!({}), "pan").unwrap(), None);
@@ -236,7 +236,7 @@ mod tests {
 
     /// 节拍抖动：只保留历史最大，上报增量 = 新最大 − 旧最大（rrd 聚合即峰值）。
     #[test]
-    fn jitter_step_keeps_running_max() {
+    fn jitter_step_max() {
         assert_eq!(rr3_jitter_step(0, 20, 20), (0, 0), "刚好标称不算抖动");
         assert_eq!(rr3_jitter_step(0, 27, 20), (7, 7), "首超 7ms 全量上报");
         assert_eq!(rr3_jitter_step(7, 23, 20), (7, 0), "未刷新最大不重复计");
@@ -247,7 +247,7 @@ mod tests {
     /// 流级下混：channels 归 1、rate 不动、samples 收缩；单麦原样返回（零改动）。
     /// 随下混函数自 capture/mech.rs 迁入（0.0.5 批I 深挖收口）。
     #[test]
-    fn downmix_stream_rewrites_cfg_to_mono() {
+    fn downmix_cfg_mono() {
         let stereo = Rr3PcmStream {
             cfg: Rr3AudioCfg {
                 sample_rate_hz: 16000,
@@ -277,7 +277,7 @@ mod tests {
     /// 反射环全量判据：未启用 / 门开 / 死区内三路不转头；过判据的换算
     /// = 中位 90 + clamp(deg, ±30)，左右号直通、双端限幅。
     #[test]
-    fn reflex_pan_target_respects_enable_gate_and_deadband() {
+    fn reflex_pan_deadband() {
         assert_eq!(rr3_reflex_pan(false, 10, -60, false), None, "未启用");
         assert_eq!(rr3_reflex_pan(true, 10, -60, true), None, "门开");
         assert_eq!(rr3_reflex_pan(true, 10, 5, false), None, "死区内");
@@ -292,7 +292,7 @@ mod tests {
     /// 点头计划：nod_deg=0 不生成（旧版逐点等价）；两段目标 = 中位 → 中位+deg，
     /// 时刻按 delay/hold 排定；越出舵机全域不生成（板侧行程仍 fail-closed 裁决）。
     #[test]
-    fn reflex_nod_plan_derives_two_segments_and_skips_disabled() {
+    fn reflex_two_disabled() {
         let now = Instant::now();
         assert_eq!(rr3_reflex_nod_plan(90, 0, 500, 200, now), None, "手势关");
         let st = rr3_reflex_nod_plan(90, 8, 500, 200, now).expect("手势开必生成");
@@ -316,7 +316,7 @@ mod tests {
     /// 采集缓冲池：每拍拿到的都是"长度 need、全零"的可写缓冲；容量够就复用
     /// （稳态零分配），不够则丢弃重分配——与逐拍 `vec![0; need]` 语义等价。
     #[test]
-    fn frame_pool_reuses_capacity_and_hands_zeroed_buffer() {
+    fn frame_pool_hands_buf() {
         let mut pool = Rr3FrameBuf::default();
         let mut buf = pool.rr3_take(8);
         assert_eq!(buf.len(), 8, "长度 = 帧×声道");

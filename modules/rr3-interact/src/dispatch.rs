@@ -250,7 +250,7 @@ mod tests {
     /// 弃帧留痕闸门（B17 审计）：首帧必留、其后每 64 帧一条，中间帧只进计数——
     /// 坏源连续弃帧时日志不爆、证据不断。
     #[test]
-    fn bad_log_gate_keeps_first_then_samples() {
+    fn bad_log_then_samples() {
         assert!(rr3_bad_log_due(1), "第一帧必须留痕");
         assert!(!rr3_bad_log_due(2));
         assert!(!rr3_bad_log_due(RR3_TTS_BAD_LOG_EVERY - 1));
@@ -261,7 +261,7 @@ mod tests {
 
     /// 收流缓冲：解码追加 + 排空清零（残流不跨轮滞留），坏帧 fail-closed
     #[test]
-    fn tts_pcm_buf_pushes_frames_and_takes_all() {
+    fn tts_pcm_buf_takes() {
         let mut buf = Rr3TtsPcmBuf::default();
         buf.rr3_tts_buf_push(&rr_ipc::rr3_base64_encode(&[1, 2, 3, 4]))
             .unwrap();
@@ -284,7 +284,7 @@ mod tests {
     /// 首样点 sin(0)=0、峰值幅内不削顶（|s| ≤ 12000）且实达半幅以上（可听）、
     /// 两跑逐样本相等
     #[test]
-    fn beep_samples_are_deterministic_sine_without_clipping() {
+    fn beep_det_clipping() {
         let s = rr3_beep_samples();
         assert_eq!(s.len(), 3200, "200ms × 16k 样点");
         assert_eq!(s[0], 0, "首样点 sin(0)=0");
@@ -298,7 +298,7 @@ mod tests {
     /// played_ms=200，播出流 = 合成样点过同径增益（100% 恒等档对拍）；0% 档
     /// 播出全零流但时长如实 200ms（时长由样点数导出，与 tts 同一口径）
     #[test]
-    fn beep_play_feeds_sink_through_gain_path() {
+    fn beep_play_sink_gain() {
         use rr_hal_api::{Rr3AudioSink, RR3_AUDIO_CFG_16K_MONO16};
         let mut sink = rr_hal::sim::Rr3SimAudioSink::rr3_sim_sink_new(16_000 * 2);
         sink.open(RR3_AUDIO_CFG_16K_MONO16).unwrap();

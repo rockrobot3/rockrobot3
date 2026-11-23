@@ -204,7 +204,7 @@ fn capability_role_shape(t: &Rr3RoleTable) {
 
 /// 契约必须解析成 14 条角色，逐条点名断言（与 contract.rs 的形状 pin 同源、彼此独立）
 #[test]
-fn contract_text_parses_into_expected_shape() {
+fn contract_text_shape() {
     let table = rr3_role_parse(CONTRACT);
     role_names_shape(&table);
     act_role_shape(&table);
@@ -221,7 +221,7 @@ fn contract_text_parses_into_expected_shape() {
 
 /// kind=logic 的 requires 显式 [] 合法；signal 角色留空仍必须红（形状放宽的边界）
 #[test]
-fn empty_requires_is_logical_only() {
+fn empty_logical() {
     let logic = rr3_role_parse(
         "[[role]]\nname = \"a.b\"\nslot = \"net.wifi\"\nkind = \"logic\"\niface = \"Rr3Link\"\nrequires = []\nderives = []\ndirection = \"io\"\n",
     );
@@ -242,7 +242,7 @@ fn empty_requires_is_logical_only() {
 
 /// 坏文本给空表，空表必须报错（fail-open 护栏）
 #[test]
-fn unparsable_text_is_not_a_pass_port() {
+fn unparsable_not_port() {
     let table = rr3_role_parse("this = is not = valid = toml");
     assert!(table.rr3_role_is_empty());
     assert!(!table.rr3_role_check().is_empty());
@@ -252,7 +252,7 @@ fn unparsable_text_is_not_a_pass_port() {
 /// 逐条点名（§4.1 字段域封闭判据的装载侧实现；derives 空 = 显式不派生合法，
 /// 批N3 件八放宽——见 rr3_role_check 注记，无对应红例）
 #[test]
-fn shape_violations_are_named() {
+fn shape_named() {
     let bad = rr3_role_parse(
         r#"
 [[role]]

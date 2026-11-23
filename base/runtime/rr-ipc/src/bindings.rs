@@ -195,7 +195,7 @@ mod tests {
 
     /// GPIO 编号取值域：十进制 u8、trim 宽容；负数/越域/非十进制全拒。
     #[test]
-    fn gpio_number_parse_domain() {
+    fn gpio_parse_domain() {
         assert_eq!(rr3_gpio_num_parse("21"), Some(21));
         assert_eq!(rr3_gpio_num_parse(" 34 "), Some(34));
         assert_eq!(rr3_gpio_num_parse("0"), Some(0));
@@ -213,7 +213,7 @@ mod tests {
     /// 单条目写入：十一键逐个入位（批N4 三键 + 批N9 件五七键 + 批N17 件一
     /// cred_store）；键出域/坏值点名即红，且红条目不半写入。
     #[test]
-    fn entry_fills_known_keys_and_names_unknown() {
+    fn entry_keys_unknown() {
         let mut b = Rr3BoardBindings::default();
         rr3_board_bind_entry(&mut b, RR3_BOARD_BINDING_I2C_SDA, "21").expect("sda 必须入位");
         rr3_board_bind_entry(&mut b, RR3_BOARD_BINDING_I2C_SCL, " 22 ").expect("trim 宽容必须入位");
@@ -260,7 +260,7 @@ mod tests {
     /// 宽容，namespace 原样不 trim；前缀大小写敏感、空 namespace/无前缀/空值
     /// 全拒（fail-closed）。
     #[test]
-    fn cred_store_parse_domain() {
+    fn cred_parse_domain() {
         assert_eq!(rr3_cred_store_parse("nvs:rr3").as_deref(), Some("nvs:rr3"));
         assert_eq!(
             rr3_cred_store_parse(" nvs:rr3 ").as_deref(),
@@ -289,7 +289,7 @@ mod tests {
     /// I2C 成对语义：sda/scl 缺一即 None（半份配置不成对——消费面 fail-closed 的
     /// 前件裁决），两侧齐才 Some。
     #[test]
-    fn i2c_pair_requires_both_sides() {
+    fn i2c_pair_sides() {
         let mut b = Rr3BoardBindings::default();
         assert_eq!(b.rr3_board_i2c_binds(), None);
         b.i2c_sda = Some(21);
@@ -301,7 +301,7 @@ mod tests {
     /// 在册表覆盖十一常量且恰十一键（键域封闭的表级锚——扩键先扩本表再扩消费面；
     /// 批N4 件七(b) 三键 + 批N9 件五七键 + 批N17 件一 cred_store，次序 = 批史）。
     #[test]
-    fn keys_table_is_exactly_the_eleven_consts() {
+    fn keys_table_consts() {
         assert_eq!(
             RR3_BOARD_BINDING_KEYS,
             [

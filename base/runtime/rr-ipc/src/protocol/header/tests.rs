@@ -42,7 +42,7 @@ fn contract_off_len(name: &str) -> (usize, usize) {
 
 /// IPC-T-001：Rust 偏移常量逐字段等于契约，偏移连续无空洞，长度合计 128
 #[test]
-fn header_offsets_match_contract() {
+fn header_contract() {
     let rust = [
         ("magic", OFF_MAGIC, LEN_MAGIC),
         ("opcode", OFF_OPCODE, LEN_OPCODE),
@@ -69,7 +69,7 @@ fn header_offsets_match_contract() {
 
 /// IPC-T-002：magic 不符必须被拒（含标准注释那套字节）
 #[test]
-fn header_rejects_bad_magic() {
+fn header_rej_bad_magic() {
     let hdr = Rr3Header::rr3_hdr_broadcast(opcode::SEND, 96);
     let mut bytes = hdr.to_bytes();
     assert_eq!(
@@ -90,7 +90,7 @@ fn header_rejects_bad_magic() {
 /// 由契约外对拍脚本 `tools/ci/ipct003.sh` 承载（CI ipct003 job `--strict` 四路全绿，
 /// 2026-10-11 起 IPC-T-003 已移入 `contracts/envelope.schema.json` 的 coverage）。
 #[test]
-fn header_matches_golden_vector() {
+fn header_golden_vector() {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../../contracts/golden/event-header-128.hex"
@@ -116,7 +116,7 @@ fn header_matches_golden_vector() {
 
 /// reserved 非全 0 必须拒绝（ADR-0006：扩展只允许写 reserved 且需 flags 标记）
 #[test]
-fn header_rejects_dirty_reserved() {
+fn header_rej_reserved() {
     let mut bytes = Rr3Header::rr3_hdr_broadcast(opcode::SEND, 0).to_bytes();
     assert_eq!(bytes[OFF_RESERVED..].len(), LEN_RESERVED);
     bytes[OFF_RESERVED + LEN_RESERVED - 1] = 0xFF;
@@ -147,7 +147,7 @@ fn crc32_known_vectors() {
 
 /// 分段 CRC32 组合律：任意切点续算必须与整段一次算逐位一致（flash spool 依赖）。
 #[test]
-fn crc32_incremental_matches_oneshot() {
+fn crc32_oneshot() {
     let data = b"RR3S-spool-payload-0123456789";
     for cut in 0..=data.len() {
         let split = rr3_crc32_update(rr3_crc32_init(), &data[..cut]);
@@ -159,7 +159,7 @@ fn crc32_incremental_matches_oneshot() {
 
 /// IPC-T-010：未知 flags 位不得报错（前向兼容）；已定义位组合正常解析
 #[test]
-fn header_ignores_unknown_flags() {
+fn header_unknown_flags() {
     let base = Rr3Header::rr3_hdr_broadcast(opcode::SEND, 0);
     for f in [
         flags::NOWAIT,
@@ -180,7 +180,7 @@ fn header_ignores_unknown_flags() {
 
 /// payload_len 超 64 MiB 必须拒绝（AOS-STD-IPC-021）
 #[test]
-fn header_rejects_oversize_payload_len() {
+fn header_rej_len() {
     let mut h = Rr3Header::rr3_hdr_broadcast(opcode::SEND, 0);
     h.payload_len = MAX_PAYLOAD_LEN;
     assert!(Rr3Header::from_bytes(&h.to_bytes()).is_ok());
@@ -203,7 +203,7 @@ fn header_too_short() {
 
 /// payload 类型枚举值 L1 冻结：改任一值该测试即红
 #[test]
-fn payload_type_values_are_frozen() {
+fn payload_type_frozen() {
     assert_eq!(Rr3PayloadType::Request as u16, 0x0001);
     assert_eq!(Rr3PayloadType::Response as u16, 0x0002);
     assert_eq!(Rr3PayloadType::Event as u16, 0x0003);
@@ -221,7 +221,7 @@ fn payload_type_values_are_frozen() {
 
 /// 错误码子集与契约逐值一致（ADR-0006 §3）
 #[test]
-fn status_codes_match_contract() {
+fn status_contract() {
     let ec = &schema_json()["properties"]["error_codes"];
     let pairs = [
         (Rr3StatusCode::Ok as i32, "AIRY_EOK"),
@@ -248,7 +248,7 @@ fn contract_int_entries(obj: &serde_json::Value) -> std::collections::BTreeMap<S
 /// magic 是本仓最 contested 字段：契约 `x-offset-table` 的 magic 条目
 /// value / hex / wire_bytes_hex 三种表示必须全部钉在 Rust `MAGIC` 常量上（ADR-0006）
 #[test]
-fn magic_contract_entries_match_rust() {
+fn magic_match_rust() {
     let json = schema_json();
     let tbl = json["properties"]["header"]["properties"]["fields"]["x-offset-table"]
         .as_array()
@@ -319,7 +319,7 @@ fn flags_match_contract() {
 
 /// 契约 `properties.opcode` 与 Rust `opcode::` 双向逐值一致（同 flags 的两向集合检查）
 #[test]
-fn opcode_values_match_contract() {
+fn opcode_contract() {
     let rust: std::collections::BTreeMap<&str, u16> = [
         ("SEND", opcode::SEND),
         ("RECV", opcode::RECV),
@@ -352,7 +352,7 @@ fn opcode_values_match_contract() {
 
 /// 传输路径与环境键逐字对齐 ADR-0006 §6 / naming.md
 #[test]
-fn transport_path_matches_adr() {
+fn trans_matches_adr() {
     assert_eq!(
         crate::transport::RR3_UDS_PATH_DEFAULT,
         "/var/run/rock3-ipc.sock"

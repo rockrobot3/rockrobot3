@@ -20,7 +20,7 @@ gnd_common = "star-1"
 "#;
 
 #[test]
-fn good_text_parses_field_by_field() {
+fn good_text_field() {
     let w = rr3_wiring_from_text(GOOD).expect("应能解析");
     assert_eq!(w.wires.len(), 1);
     let wire = &w.wires[0];
@@ -44,7 +44,7 @@ fn good_text_parses_field_by_field() {
 
 /// 缺 [[wire]] / 空表 / TOML 坏文逐条点名（fail-closed：没有"无线的机器"）
 #[test]
-fn empty_and_broken_text_are_fatal() {
+fn empty_text_fatal() {
     for (text, want) in [
         ("", "缺少 [[wire]]"),
         ("wire = []\n", "接线档为空"),
@@ -57,7 +57,7 @@ fn empty_and_broken_text_are_fatal() {
 
 /// 形状反例：缺键/坏类型/未知键/位序不等/位号重复一次收集完
 #[test]
-fn shape_errors_are_all_collected_and_named() {
+fn shape_errors_named() {
     let text = format!(
         "{GOOD}\n[[wire]]\nhdr_pin = [1, 2]\nsignal = [\"vcc\"]\nfeeds = []\n\
              mate = \"none\"\nkeyed = \"yes\"\nrated_a = 0\ngnd_common = \"\"\nghost = 1\n\
@@ -81,7 +81,7 @@ fn shape_errors_are_all_collected_and_named() {
 
 /// feeds 缺键即红（§5 缺失语义列），显式 [] 合法
 #[test]
-fn feeds_missing_is_fatal_but_empty_array_is_legal() {
+fn feeds_miss_legal() {
     let text = GOOD.replace("feeds = []\n", "");
     let errs = rr3_wiring_from_text(&text).expect_err("feeds 缺失必须报错");
     assert!(errs.iter().any(|e| e.contains("feeds 缺失")), "{errs:?}");
@@ -90,7 +90,7 @@ fn feeds_missing_is_fatal_but_empty_array_is_legal() {
 
 /// 闭合面：feeds 指向同文件位号；悬空引用与自环都红
 #[test]
-fn feeds_must_close_within_the_file() {
+fn feeds_must_file() {
     let text = format!(
         "{GOOD}\n[[wire]]\nconnector = \"J2\"\nhdr_pin = [1, 2]\nsignal = [\"vcc\", \"gnd\"]\n\
              net = \"rail5v\"\nfeeds = [\"J9\"]\nmate = \"none\"\nkeyed = false\nrated_a = 1.0\n\
@@ -113,7 +113,7 @@ fn feeds_must_close_within_the_file() {
 /// 底稿 GOOD 的 net 先置换成 none（纯信号/地线组合法显式值）——反例集只携
 /// 三条越界噪声，条数断言才钉得住"一次收集、不短路"。
 #[test]
-fn wiring_check_names_each_cross_file_violation() {
+fn wiring_violation() {
     let base = GOOD.replace("net = \"rail5v\"", "net = \"none\"");
     let text = format!(
         "{base}\n[[wire]]\nconnector = \"J2\"\nhdr_pin = [1, 2, 3]\n\
@@ -162,7 +162,7 @@ fn wiring_check_names_each_cross_file_violation() {
 /// 接线路径推导：profiles/<机>.toml → hardware/<机>/wiring.toml；
 /// 装配单不存在 = 路径不可推导（canonicalize 的 ENOENT 口径）
 #[test]
-fn wiring_path_follows_install_layout() {
+fn wiring_layout() {
     let dir = std::env::temp_dir().join(format!("rr3-wiring-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("profiles")).unwrap();

@@ -8,7 +8,7 @@ mod profile;
 /// 源码仓身份零泄漏：缺省维护者必须是 RFC 2606 保留域（发版由环境变量
 /// 注入真实身份，不在树内落任何个人/单位地址）。
 #[test]
-fn control_text_defaults_to_reserved_domain() {
+fn control_text_domain() {
     assert!(RR3_DEB_MAINTAINER.ends_with(".invalid>"));
     let text = rr3_control_text("arm64");
     assert!(text.contains("Maintainer: "));
@@ -197,7 +197,7 @@ fn assert_modules(root: &std::path::Path, payload: &std::path::Path) {
 }
 
 #[test]
-fn stage_tree_lays_out_deb_layout_and_rewrites_entry_only() {
+fn stage_out_deb_entry() {
     let (payload, repo) = fixture();
     let (cfg, out) = cfg_of(&payload, &repo);
     let stage = rr3_stage(&cfg).unwrap();
@@ -211,7 +211,7 @@ fn stage_tree_lays_out_deb_layout_and_rewrites_entry_only() {
 
 /// staging 复用必须先清空：上一次遗留的模块/配置不得进入本次包。
 #[test]
-fn stage_reset_removes_stale_files() {
+fn stage_stale_files() {
     let (payload, repo) = fixture();
     let (cfg, out) = cfg_of(&payload, &repo);
     let stage = out.with_file_name("rockrobot3.deb.stage");
@@ -227,7 +227,7 @@ fn stage_reset_removes_stale_files() {
 /// 板级资产：boards/<profile>/ 存在即整树随装，postinst 按 profile 落 /etc
 /// （systemd 段覆盖、其余只铺缺失件）。
 #[test]
-fn stage_copies_board_assets_and_postinst() {
+fn stage_board_postinst() {
     let (payload, repo) = fixture();
     let etc = repo.join("base/os/distro/boards/distro/etc");
     fs::create_dir_all(etc.join("systemd/system/rrd.service.d")).unwrap();
@@ -253,7 +253,7 @@ fn stage_copies_board_assets_and_postinst() {
 }
 
 #[test]
-fn stage_copies_whole_declaration_tree_for_g4() {
+fn stage_whole_tree_g4() {
     let (payload, repo) = fixture();
     // rr3-act 给齐声明树：组合件编排 + 两原子件（含子文件，证递归纯副本）
     let repo_act = repo.join("modules/rr3-act");
@@ -301,7 +301,7 @@ fn stage_copies_whole_declaration_tree_for_g4() {
 }
 
 #[test]
-fn missing_payload_pieces_are_named() {
+fn miss_pieces_named() {
     let (payload, repo) = fixture();
     fs::remove_file(payload.join("rrd")).unwrap();
     let (cfg, _) = cfg_of(&payload, &repo);
@@ -348,7 +348,7 @@ fn missing_payload_pieces_are_named() {
 }
 
 #[test]
-fn uninstallable_entries_are_rejected_by_name() {
+fn uninstallable_name() {
     let (payload, repo) = fixture();
     let manifest = payload.join("rr3-modules/rr3-act/manifest.toml");
     fs::write(
@@ -377,7 +377,7 @@ fn uninstallable_entries_are_rejected_by_name() {
 }
 
 #[test]
-fn module_dir_and_manifest_name_must_agree() {
+fn module_dir_mft_agree() {
     let (payload, repo) = fixture();
     fs::rename(
         payload.join("rr3-modules/rr3-act"),
@@ -392,7 +392,7 @@ fn module_dir_and_manifest_name_must_agree() {
 /// python 模块（批F1）：entry 装机产物 = 打包器生成的 shim（PYTHONPATH 装机绝对），
 /// pkg 树落位、entry 改写为装机绝对路径、config 随包、shim 可执行。
 #[test]
-fn python_module_stages_generated_shim_and_pkg_tree() {
+fn python_shim_pkg_tree() {
     let (payload, repo) = fixture();
     let (cfg, _) = cfg_of(&payload, &repo);
     let stage = rr3_stage(&cfg).unwrap();
@@ -431,7 +431,7 @@ fn python_module_stages_generated_shim_and_pkg_tree() {
 
 /// python 模块缺 pkg 树 → 点名拒绝（不是含糊的 "bin 缺席"）
 #[test]
-fn python_module_without_pkg_is_rejected_by_name() {
+fn python_pkg_rej_name() {
     let (payload, repo) = fixture();
     fs::remove_dir_all(payload.join("rr3-modules/rr3-brain/pkg")).unwrap();
     let (cfg, _) = cfg_of(&payload, &repo);
@@ -440,7 +440,7 @@ fn python_module_without_pkg_is_rejected_by_name() {
 }
 
 #[test]
-fn parse_requires_flags_and_knows_stage_only() {
+fn parse_knows_stage() {
     assert!(rr3_pack_parse(&[]).is_err());
     let v = |s: &[&str]| -> Vec<String> { s.iter().map(|x| x.to_string()).collect() };
     let cfg = rr3_pack_parse(&v(&[

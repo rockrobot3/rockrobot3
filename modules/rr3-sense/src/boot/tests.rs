@@ -4,7 +4,7 @@
 use super::*;
 
 #[test]
-fn config_parse_defaults_on_empty_and_fills_partial() {
+fn cfg_empty_fills_part() {
     // 空文本 = 全默认
     assert_eq!(rr3_sense_cfg_parse("").unwrap(), Rr3SenseConfig::default());
     // 只给部分键：给的生效，缺的回落默认
@@ -31,7 +31,7 @@ fn config_parse_defaults_on_empty_and_fills_partial() {
 }
 
 #[test]
-fn config_parse_rejects_wrong_types_and_broken_toml() {
+fn cfg_rej_types_toml() {
     // 类型错显式报错，不静默吞
     assert!(rr3_sense_cfg_parse("[rr3-sense.vad]\nrms_start = \"loud\"\n").is_err());
     assert!(rr3_sense_cfg_parse("[rr3-sense.audio]\nframe_ms = -20\n").is_err());
@@ -42,7 +42,7 @@ fn config_parse_rejects_wrong_types_and_broken_toml() {
 /// 0.0.5 批I S-1：frame_ms=0 无节拍意义，收敛 20 留痕（eprintln 进测试输出无害）；
 /// 负值仍被 rr3_cfg_u64 显式拒收，不参与收敛。
 #[test]
-fn config_parse_clamps_zero_frame_ms_to_registered_20() {
+fn cfg_zero_ms_reg_20() {
     let cfg = rr3_sense_cfg_parse("[rr3-sense.audio]\nframe_ms = 0\n").unwrap();
     assert_eq!(cfg.audio.frame_ms, 20);
     assert!(rr3_sense_cfg_parse("[rr3-sense.audio]\nframe_ms = -5\n").is_err());
@@ -51,7 +51,7 @@ fn config_parse_clamps_zero_frame_ms_to_registered_20() {
 /// 采集/判据域（本轮审计）：0 采样率/声道=假活，巨型 frame/window=溢出或
 /// 吃内存，负阈值/越界档界=语义反转——一律 fail-closed。
 #[test]
-fn config_rejects_degenerate_audio_and_doa_domains() {
+fn cfg_rej_doa_domains() {
     for text in [
         "[rr3-sense.audio]\nsample_rate = 0\n",
         "[rr3-sense.audio]\nsample_rate = 384001\n",
@@ -85,7 +85,7 @@ fn config_rejects_degenerate_audio_and_doa_domains() {
 /// reflex 段解析：缺段 = enable 缺省 false（不开与旧版逐点等价）；全量注入
 /// 生效；类型错显式拒收（bool 有专属 helper，字符串 "on" 不认）。
 #[test]
-fn config_parse_reflex_section_defaults_disabled() {
+fn cfg_parse_disabled() {
     let cfg = rr3_sense_cfg_parse("").unwrap();
     assert!(!cfg.reflex.enable);
     assert_eq!(cfg.reflex.deadband_deg, 10);
@@ -114,7 +114,7 @@ fn config_parse_reflex_section_defaults_disabled() {
 /// （与 audio.frame_ms 同口径）；异常值显式拒收（window_rms_min 越界 /
 /// mic_baseline_mm=0 无几何），类型错走 rr3_cfg_* 通用报错。
 #[test]
-fn config_parse_doa_section_defaults_full_and_rejects() {
+fn cfg_doa_full_rej() {
     let cfg = rr3_sense_cfg_parse("").unwrap();
     assert_eq!(cfg.doa.bin_threshold_deg, 30);
     assert_eq!(cfg.doa.window_ms, 1000);
@@ -142,7 +142,7 @@ fn config_parse_doa_section_defaults_full_and_rejects() {
 /// 出厂策略优先——注释自证与 vad.rms_start 同口径 1500；方案「不一致先修
 /// config.toml」前提已消灭，登记不改）。
 #[test]
-fn config_toml_matches_registered_values() {
+fn cfg_toml_reg_values() {
     let text = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/config.toml"));
     let cfg = rr3_sense_cfg_parse(text).unwrap();
     assert_eq!(cfg.audio.sample_rate, 16000);

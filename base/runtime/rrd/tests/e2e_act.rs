@@ -105,7 +105,7 @@ saturate_notice_ms = 500
 // 轴档案的 stage 在 `phases::stage_profile` 内紧跟 `rr3_write_profile` 落盘。
 
 #[test]
-fn act_module_full_face_end_to_end() {
+fn act_face_end_end() {
     // 夹具：真二进制 + 真 manifest（entry 绝对化）+ config 同树
     let bin = rr3_build_module_bin("rr3-act");
     let root = E2eRoot::rr3_new("act", "act");

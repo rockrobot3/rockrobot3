@@ -106,7 +106,7 @@ fn settle() {
 /// 交接槽语义：只保留最新一条，旧句柄在换手瞬间关闭（防"接了就关"的
 /// 反复重连把 fd 攒到耗尽）。旧句柄关闭用对端 EOF 证明。
 #[test]
-fn slot_keeps_latest_and_closes_previous() {
+fn slot_keeps_previous() {
     let slot = Rr3LinkSlot::new();
     assert!(slot.take().is_none(), "空槽取走必须为 None");
     let (a, mut a_peer) = UnixStream::pair().expect("pair 失败");
@@ -182,7 +182,7 @@ fn read_exact_timeout<R: Read>(s: &mut R, buf: &mut [u8]) {
 /// 双向透传逐字节恒等（含坏 magic 垃圾——桥不认识帧是零策略的字节面证据）。
 /// 1000B 载荷跨 512B 块边界，顺带证明分块重组不丢不改。
 #[test]
-fn relay_is_byte_identical_both_directions() {
+fn relay_directions() {
     watchdog();
     let (mut master, _keep, dev) = pty_with_path();
     let sock = sock_path("relay");
@@ -218,7 +218,7 @@ fn relay_is_byte_identical_both_directions() {
 /// 三态之一：UDS 未就绪期间上行丢弃且**不缓冲**——先写的字节在连接建立后
 /// 不得冒出来，后写的照常透传。
 #[test]
-fn upstream_discarded_while_uds_absent_not_buffered() {
+fn upstream_buffered() {
     watchdog();
     let (mut master, _keep, dev) = pty_with_path();
     let sock = sock_path("discard");
@@ -249,7 +249,7 @@ fn upstream_discarded_while_uds_absent_not_buffered() {
 /// 三态之三：UDS 断链而 UART 存活——rrd 侧断开后，桥保住 UART 并重连，
 /// 第二条连接上透传恢复。
 #[test]
-fn uds_death_keeps_uart_and_reconnects() {
+fn uds_uart_reconnects() {
     watchdog();
     let (mut master, _keep, dev) = pty_with_path();
     let sock = sock_path("heal");

@@ -226,7 +226,7 @@ mod tests {
     /// net/link 事件体逐字对齐契约：seq 自计数、断链时 ssid/rssi 必为 null
     /// （§9 红线：up=false 不许从死链读身份）、0.0.4 批D append 的 mode 随流
     #[test]
-    fn link_body_carries_full_state_with_own_seq() {
+    fn link_full_own_seq() {
         let v = rr3_link_body(3, &st(true), "station");
         assert_eq!(v["seq"], 3);
         assert_eq!(v["up"], true);
@@ -247,7 +247,7 @@ mod tests {
     /// 等号下限是边界（§8 打折过的边界用例，本批补上）；下限数据化（批N4 件五
     /// N-11①）：传 8 = legacy 档，传 6 = 现场放宽档，文案数字随值走
     #[test]
-    fn wifi_connect_args_parse_legacy_semantics() {
+    fn wifi_args_semantics() {
         let (ssid, pass) =
             rr3_wifi_conn_args(&json!({"ssid": " home ", "pass": "password8"}), 8).unwrap();
         assert_eq!(
@@ -281,7 +281,7 @@ mod tests {
     /// wifi/scan|forget 无参裁决 + 结果形状：sim 诚实标注、items 三行、
     /// 元素三字段（legacy panel.c h_scan 形状）；forget 回执 ap。
     #[test]
-    fn wifi_scan_and_forget_shapes() {
+    fn wifi_scan_shapes() {
         assert_eq!(rr3_wifi_scan_args(&Value::Null), Ok(()));
         assert_eq!(rr3_wifi_scan_args(&json!({})), Ok(()));
         assert!(
@@ -306,7 +306,7 @@ mod tests {
     /// wifi/connect 结果：connected 如实透传链路读数（不 fake"连上了"），
     /// mode 恒 station、ssid 回显。
     #[test]
-    fn wifi_connect_result_reports_link_honestly() {
+    fn wifi_link_honestly() {
         let v = rr3_wifi_conn_result(&st(true), "home");
         assert_eq!(v["ok"], true);
         assert_eq!(v["connected"], true);
@@ -322,7 +322,7 @@ mod tests {
     /// 同向；"重启仍在册"的承载半边在 rr-hal::provision_store 用例钉（本处只
     /// 钉编排顺序与状态机同向）。
     #[test]
-    fn connect_and_forget_handlers_move_store_and_state_together() {
+    fn connect_together() {
         let dev = rr_hal::sim::Rr3SimLink::rr3_sim_link_new(true, "rock-sim", -50);
         let store = rr_hal::provision_store::Rr3SimWifiStore::default();
         let mut prov = wifi::Rr3Provision::rr3_provision_new();
@@ -358,7 +358,7 @@ mod tests {
     /// fail-closed：存储失败时状态机**不动**、错误点名——不许"存储没成功却
     /// 当作配上网了"（存储是持久化真值，状态机跟着它走）。
     #[test]
-    fn store_failure_leaves_provision_state_untouched() {
+    fn store_fail_untouched() {
         struct Rr3FailingStore;
         impl Rr3WifiStore for Rr3FailingStore {
             fn rr3_wifi_connect(

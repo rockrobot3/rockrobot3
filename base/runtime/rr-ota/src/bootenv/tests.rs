@@ -15,7 +15,7 @@ fn rr3_env_build(vars: &[(&str, &str)], size: usize) -> Vec<u8> {
 }
 
 #[test]
-fn env_roundtrip_through_raw_bytes() {
+fn env_raw_bytes() {
     let raw = rr3_env_build(
         &[("bootcmd", "run distro_bootcmd"), ("bootcount", "0")],
         128,
@@ -29,7 +29,7 @@ fn env_roundtrip_through_raw_bytes() {
 }
 
 #[test]
-fn env_crc_corruption_is_rejected() {
+fn env_crc_rej() {
     let mut raw = rr3_env_build(&[("a", "1")], 64);
     raw[10] ^= 0x01;
     let err = Rr3BootEnv::rr3_env_parse(&raw).expect_err("坏 CRC 必须拒");
@@ -37,7 +37,7 @@ fn env_crc_corruption_is_rejected() {
 }
 
 #[test]
-fn env_bad_shapes_are_named() {
+fn env_bad_shapes_named() {
     // 过短
     assert!(Rr3BootEnv::rr3_env_parse(&[0, 0, 0, 0]).is_err());
     // 载荷缺收尾 \0：手工造 CRC 正确但不带收尾的区
@@ -57,7 +57,7 @@ fn env_bad_shapes_are_named() {
 }
 
 #[test]
-fn env_duplicate_key_is_rejected() {
+fn env_key_rej() {
     let mut payload = b"a=1\0a=2\0\0".to_vec();
     payload.resize(32, 0);
     let mut raw = rr3_crc32(&payload).to_le_bytes().to_vec();
@@ -67,7 +67,7 @@ fn env_duplicate_key_is_rejected() {
 }
 
 #[test]
-fn env_set_unset_are_idempotent() {
+fn env_set_idempotent() {
     let mut env = Rr3BootEnv::default();
     env.rr3_env_set("k", "1").unwrap();
     env.rr3_env_set("k", "2").unwrap();
@@ -81,7 +81,7 @@ fn env_set_unset_are_idempotent() {
 }
 
 #[test]
-fn env_render_rejects_small_area() {
+fn env_rej_small_area() {
     let mut env = Rr3BootEnv::default();
     env.rr3_env_set("bootcmd", "run distro_bootcmd").unwrap();
     let err = env.rr3_env_render(8).expect_err("容量不够必须拒");
@@ -89,7 +89,7 @@ fn env_render_rejects_small_area() {
 }
 
 #[test]
-fn rollback_arm_then_ok_cycle() {
+fn rollback_ok_cycle() {
     let mut env = Rr3BootEnv::default();
     env.rr3_rollback_arm(3, "run rr3_altboot").unwrap();
     assert_eq!(env.rr3_env_get("upgrade_available"), Some("1"));
@@ -110,7 +110,7 @@ fn rollback_arm_then_ok_cycle() {
 }
 
 #[test]
-fn env_overwrite_keeps_single_entry() {
+fn env_keeps_entry() {
     // 覆盖已有键不得追加第二条（U-Boot 读到重复键行为未定义）
     let mut env = Rr3BootEnv::default();
     env.rr3_env_set("bootcount", "1").unwrap();
@@ -121,7 +121,7 @@ fn env_overwrite_keeps_single_entry() {
 }
 
 #[test]
-fn cfg_parse_accepts_hex_and_comments() {
+fn cfg_ok_hex_comments() {
     let text = "# 板侧 env 布局\n/dev/mmcblk0 0x400000 0x8000\n\
                 /dev/mtd1 0x0 0x2000 # 尾注释\n";
     let devs = rr3_env_cfg_parse(text).expect("合法 config");
@@ -136,7 +136,7 @@ fn cfg_parse_accepts_hex_and_comments() {
 /// 区外字节不动、读回逐键等值——不是"只编过"，是这一份 fs 代码真跑过。
 #[cfg(unix)]
 #[test]
-fn env_dev_roundtrip_through_file() {
+fn env_dev_through_file() {
     use std::io::Write;
     let pid = std::process::id();
     let ns = std::time::SystemTime::now()
@@ -173,7 +173,7 @@ fn env_dev_roundtrip_through_file() {
 }
 
 #[test]
-fn cfg_parse_rejects_bad_lines() {
+fn cfg_rej_bad_lines() {
     assert!(rr3_env_cfg_parse("").is_err(), "空册必须拒");
     assert!(rr3_env_cfg_parse("# only comments\n").is_err());
     assert!(rr3_env_cfg_parse("/dev/x 0\n").is_err(), "字段不足");

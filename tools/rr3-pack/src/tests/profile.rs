@@ -80,7 +80,7 @@ fn check_named_stage(stage: &std::path::Path) {
 /// "换板只改装配单"在装机路径真走通（staging 按 --profile 名零改写落位；
 /// 缺席点名到具体机型文件，不静默回落 distro）。
 #[test]
-fn profile_flag_stages_named_profile_and_names_it_when_absent() {
+fn profile_flag_absent() {
     // 正例：--profile esp32-mini → 装机位 profiles/esp32-mini.toml，字节零改写
     //（真仓文本：rtos 档装配单过打包预验 = 过装载同判据，chip=esp32）
     let (payload, repo) = fixture();
@@ -100,7 +100,7 @@ fn profile_flag_stages_named_profile_and_names_it_when_absent() {
 /// 基-25 清单判等反例面：平台事实表缺席 → 打包拒出包并点名册位（清单真值 =
 /// rrd rr3_truth_set，打包面不自带第二份清单）。
 #[test]
-fn stage_refuses_when_truth_set_file_missing() {
+fn stage_refuses_miss() {
     let (payload, repo) = fixture();
     fs::remove_file(repo.join("contracts/platform/rk3566.toml")).unwrap();
     let (cfg, _) = cfg_of(&payload, &repo);
@@ -112,7 +112,7 @@ fn stage_refuses_when_truth_set_file_missing() {
 /// 基-25 打包预验判据（与装载同判据单点）：装配单坏形 → 拒出包，出包时红早于
 /// 装机 boot 红（块-15：装载必需件缺席而装机验证全绿才是最贵的洞）。
 #[test]
-fn stage_rejects_malformed_profile_by_loader_criteria() {
+fn stage_rej_criteria() {
     let (payload, repo) = fixture();
     let bad = DISTRO_PROFILE.replace(
         &format!("schema_version = {}", 5),

@@ -99,7 +99,7 @@ mod tests {
 
     /// cleanup 对不存在的路径不报错；对存在的 socket 文件删干净
     #[test]
-    fn uds_cleanup_is_idempotent() {
+    fn uds_idempotent() {
         let p = tmp_sock("cleanup");
         Rr3UdsListener::rr3_cleanup(&p).expect("不存在也须 Ok");
         std::fs::write(&p, b"stale").expect("造残留文件");
@@ -109,7 +109,7 @@ mod tests {
 
     /// bind → accept → 客户端 send_buf / 服务端 recv_buf：整帧往返，所有权随值移交
     #[test]
-    fn uds_round_trip_over_traits() {
+    fn uds_trip_traits() {
         let p = tmp_sock("roundtrip");
         Rr3UdsListener::rr3_cleanup(&p).unwrap();
         let listener = Rr3UdsListener::rr3_bind(&p).expect("bind 应成功");
@@ -134,7 +134,7 @@ mod tests {
 
     /// 值视图（Rr3Frame）→ 缓冲 → uds → 读回：与既有帧层互操作
     #[test]
-    fn uds_carries_value_frames_unchanged() {
+    fn uds_value_unchanged() {
         let p = tmp_sock("valueframe");
         Rr3UdsListener::rr3_cleanup(&p).unwrap();
         let listener = Rr3UdsListener::rr3_bind(&p).unwrap();
@@ -157,7 +157,7 @@ mod tests {
 
     /// 对端先写半帧头再关闭：recv 报 TornHeader，不得当新帧起始
     #[test]
-    fn uds_recv_rejects_torn_header() {
+    fn uds_rej_torn_header() {
         let p = tmp_sock("torn");
         Rr3UdsListener::rr3_cleanup(&p).unwrap();
         let listener = Rr3UdsListener::rr3_bind(&p).unwrap();
@@ -181,7 +181,7 @@ mod tests {
 
     /// 对端干净关闭：recv 报 Closed
     #[test]
-    fn uds_recv_reports_closed() {
+    fn uds_recv_closed() {
         let p = tmp_sock("closed");
         Rr3UdsListener::rr3_cleanup(&p).unwrap();
         let listener = Rr3UdsListener::rr3_bind(&p).unwrap();
@@ -201,7 +201,7 @@ mod tests {
     /// ——若把 listener 移进线程只 accept 一次，闭包结束即 drop listener，第 209 行
     /// 的新连接会与"监听端已关闭"竞态（macOS 上实锤 ConnectionRefused 偶发）。
     #[test]
-    fn bind_exclusive_refuses_live_listener() {
+    fn bind_listener() {
         let p = tmp_sock("excl-live");
         Rr3UdsListener::rr3_cleanup(&p).unwrap();
         let live = Rr3UdsListener::rr3_bind(&p).expect("先起一个活实例");
@@ -220,7 +220,7 @@ mod tests {
 
     /// B-9：残留死 socket（实例已亡、文件还在）= 清掉后正常 bind（接续原 cleanup 语义）
     #[test]
-    fn bind_exclusive_recovers_stale_socket() {
+    fn bind_stale_socket() {
         let p = tmp_sock("excl-stale");
         {
             let _s = Rr3UdsListener::rr3_bind(&p).expect("先绑一次");

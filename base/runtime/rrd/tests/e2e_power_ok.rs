@@ -41,7 +41,7 @@ fn is_power_frame(f: &rr_ipc::Rr3Frame, reason: &str) -> bool {
 }
 
 #[test]
-fn battery_ok_clears_low_power_flag_and_names_the_recovery_once() {
+fn batt_ok_low_once() {
     let mut rrd = RrdTest::rr3_start("power-ok");
     // ---------- 化身连接 + 旁观者 ----------
     let (mut obs, mut p, power_task) = actors_connect(&mut rrd);

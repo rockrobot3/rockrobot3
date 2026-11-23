@@ -117,7 +117,7 @@ mod tests {
     /// 用例随迁）——本地只钉"re-export 可用"：cfg→窗方案→喂窗→结算走通
     /// rr-core 面。
     #[test]
-    fn saturation_truth_is_rr_core_reexport() {
+    fn saturation_reexport() {
         let cfg = Rr3ReflexCfg {
             loop_hz: 1000,
             saturate_notice_ms: 500,
@@ -147,7 +147,7 @@ mod tests {
     /// 绝对截止定时：晚醒的时差由下一拍少睡补回，落后超一拍则重置不追帧。
     /// 2026-11-16 真板实测的相对睡眠欠账（1000Hz→888Hz）由本函数的补回语义消掉。
     #[test]
-    fn next_wait_absorbs_oversleep_and_never_catches_up_storms() {
+    fn next_wait_up_storms() {
         let period = Duration::from_micros(1000);
         let t0 = Instant::now();
         let mut next = t0;

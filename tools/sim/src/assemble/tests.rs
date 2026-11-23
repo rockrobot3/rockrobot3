@@ -15,7 +15,7 @@ entry = \"rr3-x\" # 行尾注释随原值保留\n\n[provides]\ncapabilities = [\
 watchdog_timeout_ms = 5000\n";
 
 #[test]
-fn rewrite_changes_only_the_entry_value() {
+fn rewrite_entry_value() {
     let out = rr3_entry_rewrite(
         GOOD,
         Path::new("/usr/lib/rr3/modules/rr3-x/rr3-x"),
@@ -46,7 +46,7 @@ fn rewrite_changes_only_the_entry_value() {
 }
 
 #[test]
-fn rewrite_gates_reject_the_bad_shapes() {
+fn rewrite_bad_shapes() {
     // 多条 entry 行
     let t = format!("{GOOD}entry = \"other\"\n");
     assert!(
@@ -79,7 +79,7 @@ fn rewrite_gates_reject_the_bad_shapes() {
 }
 
 #[test]
-fn sim_profile_transform_rewrites_hal_and_drops_face_overrides() {
+fn sim_hal_overrides() {
     let t = "[runtime]\nlog_ring_cap = 512\nhal_backend = \"linux\"\n\
                  audio_backend = \"esp32\"\nservo_backend = \"esp32\"\n\n\
                  [platform]\ntier = \"host\"\nnote = \"hal_backend 字样在段外不受影响\"\n";
@@ -200,7 +200,7 @@ fn layout_asserts(
 }
 
 #[test]
-fn layout_stages_install_shape_from_a_fixture_repo() {
+fn layout_shape_repo() {
     let repo = stage_fixture_repo();
     let work = std::env::temp_dir().join(format!("rr3-assemble-w-{}", std::process::id()));
     let (profile_dst, entries) =
@@ -214,7 +214,7 @@ fn layout_stages_install_shape_from_a_fixture_repo() {
 /// entry 可装机（仓相对）、config 在；接线档在（校验⑦ 装机档必在）——
 /// 契约/目录漂移让单测红，不是演练跑一半红
 #[test]
-fn repo_default_enabled_slots_are_assembly_ready() {
+fn repo_def_slots_ready() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let profile_text = std::fs::read_to_string(repo.join("profiles/default.toml")).unwrap();
     let profile = rr3_profile_parse(&profile_text).expect("default 装配单可解析");

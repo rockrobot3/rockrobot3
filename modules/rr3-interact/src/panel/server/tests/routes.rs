@@ -5,7 +5,7 @@ use super::*;
 
 /// BusCall 应答状态码裁定（I-21③）：载荷含 error = 422 业务失败，其余 200
 #[test]
-fn bus_reply_status_splits_business_error_from_success() {
+fn bus_reply_error_ok() {
     assert_eq!(
         rr3_bus_reply_status(&json!({ "played_ms": 120 })),
         (200, "OK"),
@@ -162,7 +162,7 @@ fn routes_assembly() {
 }
 
 #[test]
-fn route_covers_all_table_entries() {
+fn route_table_entries() {
     // 端点逐一点名（全集 = RR3_PANEL_ROUTES，表↔分派漂移由下一条门钉）：
     routes_read_shape();
     routes_act_post();
@@ -175,7 +175,7 @@ fn route_covers_all_table_entries() {
 /// 404/405），表长 pin 与自述文案同源（端点数由 len() 推导）——新增端点 =
 /// 加表 + 改本 pin + 过本门，文案零改动。
 #[test]
-fn route_table_matches_dispatch() {
+fn route_table_dispatch() {
     assert_eq!(
             RR3_PANEL_ROUTES.len(),
             28,
@@ -220,7 +220,7 @@ fn route_table_matches_dispatch() {
 /// 都是申报面错，当场红（fail-closed；check.sh 步 ⑩ 侧另以同一词表导出复验，
 /// 两处真值同源都是本常量）。
 #[test]
-fn covers_use_declared_vocabulary_only() {
+fn covers_vocabulary() {
     for (method, path, covers, _applies) in RR3_PANEL_ROUTES {
         for c in *covers {
             let (set, field) = c
@@ -301,7 +301,7 @@ fn applies_declared_pin() {
 /// （covers 非空）则 applies 必填——缺失即红。今日 covers 全空 ⇒ 判据
 /// 后半 vacuous，但门先建：件九三面扩端点写 covers 的当场被兜住。
 #[test]
-fn applies_use_declared_vocabulary_only() {
+fn applies_vocabulary() {
     applies_vocab_shape();
     applies_declared_pin();
 }
@@ -309,7 +309,7 @@ fn applies_use_declared_vocabulary_only() {
 /// 越权拒的静态形态：路由器里没有"发布"这种产物——relay 只能以
 /// BusCall（rr3.call 经 rrd 归属门）出去。这是类型级断言，不是约定。
 #[test]
-fn hardware_control_is_bus_call_only_never_publish() {
+fn hardware_bus_pub() {
     match rr3_panel_route("POST", "/api/relay", br#"{"on":false}"#) {
         Rr3PanelDispatch::BusCall { topic, .. } => {
             assert_eq!(topic, "rr3-act/relay/set", "面板控制走 act 既有 exposes");
@@ -319,7 +319,7 @@ fn hardware_control_is_bus_call_only_never_publish() {
 }
 
 #[test]
-fn route_rejects_unknown_path_wrong_method_and_bad_body() {
+fn route_rej_bad_body() {
     assert_eq!(
         rr3_panel_route("GET", "/api/none", b""),
         Rr3PanelDispatch::NotFound
@@ -349,7 +349,7 @@ fn route_rejects_unknown_path_wrong_method_and_bad_body() {
 }
 
 #[test]
-fn http_read_request_reads_full_body_and_rejects_half() {
+fn http_req_rej_half() {
     // 全量：声明 12B 读满 12B
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();

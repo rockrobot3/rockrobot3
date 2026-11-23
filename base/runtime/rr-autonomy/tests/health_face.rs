@@ -30,7 +30,7 @@ fn armed() -> Rr3Supervisor {
 
 /// 30 s 稳态：四任务按各自节拍续命，零超时、零超拍、闸门不放行。
 #[test]
-fn steady_state_has_no_timeouts_for_30s() {
+fn steady_has_no_30s() {
     let mut sup = armed();
     // 构造即栅格点：先补起点拍，之后的 150 拍才是"准点"序列（否则首拍记一次超拍）。
     let _ = sup.rr3_sup_tick(0);
@@ -60,7 +60,7 @@ fn steady_state_has_no_timeouts_for_30s() {
 
 /// 停摆 → 判死 → 抖闸 → 恢复：健康面按 1.5 s 判死，闸门连续 2 拍才放行。
 #[test]
-fn stall_is_visible_and_recovers_without_restart() {
+fn stall_restart() {
     let mut sup = armed();
     let mut gate = Rr3RestartGate::rr3_gate_new(2);
     let mut now = 0u64;
@@ -94,7 +94,7 @@ fn stall_is_visible_and_recovers_without_restart() {
 
 /// 从未起过的已接线任务：判死并留痕；首次真实心跳到达才恢复（不伪造 Running）。
 #[test]
-fn never_beaten_task_goes_dead_until_first_beat() {
+fn never_goes_dead_beat() {
     let mut sup = armed();
     let mut now = 0u64;
     for _ in 0..10 {

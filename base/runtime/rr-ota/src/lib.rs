@@ -86,14 +86,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ota_slot_peer_roundtrip() {
+    fn ota_peer_roundtrip() {
         assert_eq!(Rr3Slot::SlotA.rr3_slot_peer(), Rr3Slot::SlotB);
         assert_eq!(Rr3Slot::SlotB.rr3_slot_peer(), Rr3Slot::SlotA);
         assert_eq!(Rr3Slot::Factory.rr3_slot_peer(), Rr3Slot::Factory);
     }
 
     #[test]
-    fn ota_labels_match_partition_plan() {
+    fn ota_match_plan() {
         assert_eq!(
             RR3_OTA_SLOT_NAMES,
             [
@@ -105,7 +105,7 @@ mod tests {
     }
 
     #[test]
-    fn ota_slot_peer_is_involutive() {
+    fn ota_peer_involutive() {
         // peer() 必须是对合（切两次回到原位），且 Factory 无对侧自映射；
         // 若 A/B 映射被调换或 Factory 误指向 A/B，此测试即失败
         for s in [Rr3Slot::SlotA, Rr3Slot::SlotB, Rr3Slot::Factory] {
@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn ota_slot_from_label_roundtrip() {
+    fn ota_slot_roundtrip() {
         // slot → label → slot 全槽 roundtrip；杂牌与空串必须 None
         for s in [Rr3Slot::SlotA, Rr3Slot::SlotB, Rr3Slot::Factory] {
             assert_eq!(Rr3Slot::rr3_slot_from_label(s.rr3_slot_label()), Some(s));
@@ -130,7 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn ota_slot_labels_are_injective() {
+    fn ota_slot_injective() {
         // 三槽位标签两两不同且逐一钉死：表被调换或标签重复即失败
         let all = [Rr3Slot::SlotA, Rr3Slot::SlotB, Rr3Slot::Factory];
         let mut labels: Vec<&str> = all.map(|s| s.rr3_slot_label()).to_vec();
@@ -149,7 +149,7 @@ mod tests {
     /// 的分家在结构上不可能发生（base/ota/README.md 的承诺由此兑现）。
     /// 容量是构建期占位符（post-image.sh 注入），不在本用例关心范围内。
     #[test]
-    fn ota_labels_match_genimage_cfg() {
+    fn ota_labels_match_cfg() {
         const GENIMAGE: &str =
             include_str!("../../../../base/os/buildroot/board/radxa-zero3/genimage.cfg");
 

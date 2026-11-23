@@ -4,7 +4,7 @@
 use super::*;
 
 #[test]
-fn depends_chain_boots_providers_first_with_priority_tie_break() {
+fn depends_tie_break() {
     // 链式：c 依赖 b 提供的能力、b 依赖 a 提供的能力 → a、b 必须排在 c 前；
     // 就绪集合里 priority 小者先行（d=40 先于 a=50），同层排序与装载顺序无关
     let order = rr_registry::rr3_boot_order(&facts_of(&[
@@ -18,7 +18,7 @@ fn depends_chain_boots_providers_first_with_priority_tie_break() {
 }
 
 #[test]
-fn depends_cycle_rejects_whole_batch() {
+fn depends_rej_batch() {
     // 环（loop1↔loop2）+ 环下游（down）→ 整批拒且逐个点名；无辜者不得被点名
     let errs = rr_registry::rr3_boot_order(&facts_of(&[
         depends_manifest("rr3-loop1", &["cap.p"], &["cap.q"], 100),
@@ -36,7 +36,7 @@ fn depends_cycle_rejects_whole_batch() {
 }
 
 #[test]
-fn depends_base_capability_needs_no_module_provider() {
+fn depends_no_provider() {
     // base_capabilities 永远在位（基座不在 boot 序里），不建边、不需要提供者
     let order = rr_registry::rr3_boot_order(&facts_of(&[depends_manifest(
         "rr3-solo",
@@ -49,7 +49,7 @@ fn depends_base_capability_needs_no_module_provider() {
 }
 
 #[test]
-fn depends_multiple_providers_all_boot_before_consumer() {
+fn depends_consumer() {
     // 两个提供者并存：启动期全部排前（裁定 2 的保守全序），层内按 priority
     let order = rr_registry::rr3_boot_order(&facts_of(&[
         depends_manifest("rr3-use", &[], &["cap.x"], 10),
@@ -61,7 +61,7 @@ fn depends_multiple_providers_all_boot_before_consumer() {
 }
 
 #[test]
-fn every_module_dependency_set_is_satisfiable_and_acyclic() {
+fn every_set_acyclic() {
     // CI 全集补位：单件校验不再判"未知能力"（ADR-0009 裁定 1），modules/ 六模块
     // 的整体依赖面必须在仲裁层过——否则要等 rrd boot 才暴露
     let modules = repo_root().join("modules");

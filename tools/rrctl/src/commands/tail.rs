@@ -269,7 +269,7 @@ mod imp {
         }
 
         #[test]
-        fn opts_defaults_and_flags_any_order() {
+        fn opts_flags_any_order() {
             let a = rr3_tail_opts(&v(&["rr3-sense/audio/vad_start"])).unwrap();
             assert_eq!(a.topic, "rr3-sense/audio/vad_start");
             assert_eq!(a.count, RR3_TAIL_COUNT);
@@ -287,7 +287,7 @@ mod imp {
         }
 
         #[test]
-        fn opts_rejects_bad_input() {
+        fn opts_rej_bad_input() {
             assert!(rr3_tail_opts(&v(&[])).is_err(), "缺主题");
             assert!(rr3_tail_opts(&v(&["a", "b"])).is_err(), "多余的参数");
             assert!(rr3_tail_opts(&v(&["--nope"])).is_err(), "未知选项");
@@ -305,7 +305,7 @@ mod imp {
         }
 
         #[test]
-        fn manifest_declares_subscription_only() {
+        fn mft_declares_sub() {
             let m = rr3_tail_manifest("rr3-sense/audio/vad_start");
             assert!(m.contains("name = \"rr3-tail\""));
             assert!(m.contains("publishes = []"));
@@ -315,7 +315,7 @@ mod imp {
         }
 
         #[test]
-        fn line_filters_topic_and_wraps_body() {
+        fn line_wraps_body() {
             let f = event_frame("rr3-sense/audio/vad_start");
             let line = rr3_tail_line(&f, "rr3-sense/audio/vad_start").expect("应命中");
             let v: Value = serde_json::from_str(&line).unwrap();
@@ -329,7 +329,7 @@ mod imp {
         }
 
         #[test]
-        fn line_ignores_non_event_payload() {
+        fn line_non_payload() {
             let mut f = event_frame("rr3-sense/audio/vad_start");
             let body = json!({"topic": "rr3-sense/audio/vad_start"}).to_string();
             f.payload = rr3_body_encode(Rr3PayloadType::Response, body.as_bytes());

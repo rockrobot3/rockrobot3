@@ -448,7 +448,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn err_pct_is_zero_safe_and_rounds_down() {
+    fn err_pct_safe_down() {
         assert_eq!(err_pct(1000, 1000), 0);
         assert_eq!(err_pct(1000, 1050), 5);
         assert_eq!(err_pct(1000, 950), 5);

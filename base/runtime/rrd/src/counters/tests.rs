@@ -21,7 +21,7 @@ fn tmpdir(tag: &str) -> PathBuf {
 
 /// 路径判定三态：env 优先、linux 缺省、皆无不持久化
 #[test]
-fn path_decision_prefers_env_then_platform_default() {
+fn path_env_then_def() {
     // 期望值由 `Path::join` 生成：分隔符随平台（Windows 是 `\`），硬编码 `/`
     // 在 Windows 上假红（2026-11-16 平台腿实证）。
     let want = |dir: &str| {
@@ -50,7 +50,7 @@ fn path_decision_prefers_env_then_platform_default() {
 /// 存取 round-trip：键序确定（BTreeMap）、值逐键一致
 #[cfg(unix)]
 #[test]
-fn store_then_load_round_trips() {
+fn store_load_trips() {
     let dir = tmpdir("round");
     let path = dir.join(COUNTERS_FILE);
     let mut t = BTreeMap::new();
@@ -71,7 +71,7 @@ fn store_then_load_round_trips() {
 /// 原子写序覆盖旧值：rename 之后读到的是新表，不存在半新半旧
 #[cfg(unix)]
 #[test]
-fn store_overwrites_atomically() {
+fn store_atomically() {
     let dir = tmpdir("over");
     let path = dir.join(COUNTERS_FILE);
     let mut t1 = BTreeMap::new();
@@ -89,7 +89,7 @@ fn store_overwrites_atomically() {
 
 /// 加载的容错：首启（不存在）= 空表无怨言；坏文件 = 空表 + 原因
 #[test]
-fn load_tolerates_missing_and_corrupt_files() {
+fn load_miss_files() {
     let dir = tmpdir("tol");
     let (t, note) = rr3_counters_load(&dir.join("nope.json"));
     assert!(t.is_empty() && note.is_none(), "首启静默起空账");
@@ -116,7 +116,7 @@ fn load_tolerates_missing_and_corrupt_files() {
 /// ≤ ceil(1000×间隔/M)+1 = 101（首拍即刷是那个 +1）。合并写的量化收益
 /// 就钉在这条上：1000 → 100 次 fsync 整文件写。
 #[test]
-fn gate_respects_window_across_thousand_heartbeats() {
+fn gate_heartbeats() {
     let mut g = Rr3CountersGate::rr3_new(10_000, 64);
     let mut flushes = 0;
     for beat in 0..1000u64 {
@@ -135,7 +135,7 @@ fn gate_respects_window_across_thousand_heartbeats() {
 /// N 拍兜底：10ms 高频拍下 M 窗口（10s）拦不住，pending 攒到 64 强制透一次
 /// （首拍 + 每 64 拍一次 = ceil 语义；兜底路径与窗口路径独立成立）。
 #[test]
-fn gate_flushes_by_pending_floor_under_burst() {
+fn gate_floor_burst() {
     let mut g = Rr3CountersGate::rr3_new(10_000, 64);
     let mut flushes = 0;
     for beat in 0..1000u64 {
@@ -150,7 +150,7 @@ fn gate_flushes_by_pending_floor_under_burst() {
 
 /// 落盘失败不记账：窗口判据下一拍仍成立（自然重试），成功才推进 last_flush
 #[test]
-fn gate_failed_flush_keeps_retrying_next_beat() {
+fn gate_fail_next_beat() {
     let mut g = Rr3CountersGate::rr3_new(10_000, 64);
     assert!(g.rr3_on_change(0), "首拍必刷");
     // 模拟 store 失败：不调 rr3_on_flushed → 下一拍仍在窗口内也照刷
@@ -170,7 +170,7 @@ fn gate_failed_flush_keeps_retrying_next_beat() {
 /// 单写者互斥，否则 create/truncate/rename 交错会留下半截 JSON（下次 boot 空账）。
 #[cfg(unix)]
 #[test]
-fn concurrent_stores_leave_parseable_file() {
+fn concurrent_file() {
     let dir = tmpdir("conc");
     let path = dir.join("counters.json");
     let mut hs = Vec::new();
@@ -196,7 +196,7 @@ fn concurrent_stores_leave_parseable_file() {
 /// 在飞位（续轮十三）：投递与回执之间不排新的一轮——否则落盘期间到达的
 /// 每一拍都会再触发一次 fsync，R26 的窗口节流被打回逐拍写。
 #[test]
-fn gate_inflight_coalesces_until_receipt() {
+fn gate_until_receipt() {
     let mut g = Rr3CountersGate::rr3_new(10_000, 64);
     assert!(g.rr3_on_change(0), "首拍该排一轮");
     g.rr3_mark_inflight();
@@ -208,7 +208,7 @@ fn gate_inflight_coalesces_until_receipt() {
 
 /// 失败回执：清在飞位但不推进窗口——下一拍立即重试，不白等一个窗口
 #[test]
-fn gate_failed_receipt_releases_inflight_without_advancing_window() {
+fn gate_fail_window() {
     let mut g = Rr3CountersGate::rr3_new(10_000, 64);
     assert!(g.rr3_on_change(0));
     g.rr3_mark_inflight();
@@ -220,7 +220,7 @@ fn gate_failed_receipt_releases_inflight_without_advancing_window() {
 /// 永远不再排新一轮，账本静默停写（panic 文案由 daemon 的 panic hook 负责）。
 #[cfg(unix)]
 #[test]
-fn round_panic_releases_inflight_and_keeps_thread_alive() {
+fn round_keeps_alive() {
     let mut g = Rr3CountersGate::rr3_new(10_000, 64);
     assert!(g.rr3_on_change(0), "首拍该排一轮");
     g.rr3_mark_inflight();
@@ -236,7 +236,7 @@ fn round_panic_releases_inflight_and_keeps_thread_alive() {
 /// 回执。快照在投递之后取，故落的是最新表而不是投递时刻的副本。
 #[cfg(unix)]
 #[test]
-fn async_store_writes_snapshot_and_marks_gate() {
+fn async_marks_gate() {
     use std::sync::{Arc, Mutex};
     let dir = tmpdir("async");
     let path = dir.join(COUNTERS_FILE);

@@ -27,7 +27,7 @@ fn with_contract(root: &Path) {
 }
 
 #[test]
-fn rr3_mkmod_rejects_bad_name() {
+fn rr3_rej_bad_name() {
     let root = tmp("bad");
     // 方案 §4：manifest.name 必须匹配 ^rr3-[a-z]+$，词干只许小写字母
     for n in [
@@ -50,7 +50,7 @@ fn rr3_mkmod_rejects_bad_name() {
 }
 
 #[test]
-fn rr3_mkmod_creates_five_files() {
+fn rr3_mkmod_five_files() {
     let root = tmp("files");
     with_contract(&root);
     let made = rr3_mkmod_generate("rr3-demo", &root).expect("生成失败");
@@ -79,7 +79,7 @@ fn rr3_mkmod_creates_five_files() {
 }
 
 #[test]
-fn rr3_mkmod_generated_manifest_passes_contract() {
+fn rr3_passes_contract() {
     let root = tmp("manifest");
     with_contract(&root);
     rr3_mkmod_generate("rr3-tmpdemo", &root).unwrap();
@@ -93,7 +93,7 @@ fn rr3_mkmod_generated_manifest_passes_contract() {
 }
 
 #[test]
-fn rr3_mkmod_refuses_existing_dir() {
+fn rr3_refuses_dir() {
     let root = tmp("dup");
     with_contract(&root);
     rr3_mkmod_generate("rr3-demo", &root).unwrap();
@@ -105,7 +105,7 @@ fn rr3_mkmod_refuses_existing_dir() {
 }
 
 #[test]
-fn rr3_mkmod_accepts_short_name_and_stamps_manifest_fields() {
+fn rr3_ok_mft_fields() {
     let root = tmp("short");
     with_contract(&root);
     rr3_mkmod_generate("arm", &root).unwrap();

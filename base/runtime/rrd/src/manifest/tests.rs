@@ -48,7 +48,7 @@ fn facts_are_extracted() {
 /// 装机改写（B45 起打包与演练布局共用本实现）：只动 entry 引号内的值，其余
 /// 字节（行尾注释、段序、尾换行）原样；四道门各自的坏形拒且点名。
 #[test]
-fn rewrite_touches_only_the_entry_value() {
+fn rewrite_entry_value() {
     let text = GOOD.replace(
         "entry = \"/usr/bin/sim_peer\"",
         "entry = \"/usr/bin/sim_peer\" # 行尾注释随原值保留",
@@ -92,7 +92,7 @@ fn rewrite_touches_only_the_entry_value() {
 
 /// 缺字段逐条点名且继续检查其余字段（不是遇一个就返回）
 #[test]
-fn missing_fields_are_all_reported_with_paths() {
+fn miss_fields_reported() {
     let text = GOOD
         .replace("entry = \"/usr/bin/sim_peer\"\n", "")
         .replace("restart_policy = \"always\"\n", "");
@@ -111,7 +111,7 @@ fn missing_fields_are_all_reported_with_paths() {
 
 /// 类型错与空串都是错误
 #[test]
-fn wrong_types_and_empty_values_are_errors() {
+fn wrong_empty_errors() {
     let t = GOOD.replace("heartbeat_ms = 200", "heartbeat_ms = \"200\"");
     let errs = rr3_manifest_parse(&t).expect_err("类型错必须报错");
     assert_eq!(errs, vec!["health.heartbeat_ms 应为整数"], "{errs:?}");
@@ -133,7 +133,7 @@ fn wrong_types_and_empty_values_are_errors() {
 
 /// 坏 TOML 只报一条解析错，不继续瞎猜
 #[test]
-fn unparsable_toml_is_single_error() {
+fn unparsable_error() {
     let errs = rr3_manifest_parse("[manifest\nname = ").expect_err("必须报错");
     assert_eq!(errs.len(), 1, "{errs:?}");
     assert!(errs[0].starts_with("manifest TOML 解析失败"), "{errs:?}");
@@ -141,7 +141,7 @@ fn unparsable_toml_is_single_error() {
 
 /// rrd 侧的 heartbeat>=watchdog 拦截（与 rr-registry 同规则，纵深防御）
 #[test]
-fn heartbeat_must_stay_below_watchdog_here_too() {
+fn heartbeat_here_too() {
     let errs = rr3_manifest_parse(&GOOD.replace("heartbeat_ms = 200", "heartbeat_ms = 1000"))
         .expect_err("相等也不行");
     assert_eq!(
@@ -153,7 +153,7 @@ fn heartbeat_must_stay_below_watchdog_here_too() {
 
 /// depends.required 取出来，供 boot 仲裁判能力是否就位；start_priority 缺省 100
 #[test]
-fn depends_and_default_priority() {
+fn depends_def_priority() {
     let text = GOOD.replace(
         "[resources]",
         "[depends]\nrequired = [\"bus.publish\", \"bus.rpc\"]\n\n[resources]",
@@ -172,7 +172,7 @@ fn depends_and_default_priority() {
 /// 类型错必须报错（与 depends.required 同一条纪律——旧代码对非字符串项
 /// filter_map 静默吞掉是 fail-open，随 ADR-0009 落地改判错误）
 #[test]
-fn provides_is_optional_and_typed() {
+fn provides_typed() {
     let with = GOOD.replace(
         "[health]",
         "[provides]\ncapabilities = [\"audio.capture\"]\n\n[health]",
@@ -202,7 +202,7 @@ fn provides_is_optional_and_typed() {
 
 /// [rpc].exposes：可选段（缺省空 vec = 不接 rr3.call），给了就逐项进 facts
 #[test]
-fn rpc_exposes_is_optional_and_typed() {
+fn rpc_exposes_typed() {
     // 缺省：GOOD 没有 [rpc] 段
     assert!(rr3_manifest_parse(GOOD).unwrap().rpc_exposes.is_empty());
     // 合法声明
@@ -237,7 +237,7 @@ fn rpc_exposes_is_optional_and_typed() {
 /// [events].subscribes：可选段（缺省空 vec），类型错/空项 fail-closed；
 /// 运行期消费面 = 广播影子统计（不改投递行为）
 #[test]
-fn subscribes_is_optional_and_typed() {
+fn subscribes_typed() {
     assert!(rr3_manifest_parse(GOOD).unwrap().subscribes.is_empty());
     let with = GOOD.replace("subscribes = []", "subscribes = [\"rr3-sense/audio/pcm\"]");
     let f = rr3_manifest_parse(&with).expect("带 subscribes 的 manifest 应能读取");
@@ -276,7 +276,7 @@ fn entry_absoluteness() {
 /// 模块名形状：路径分量（per-unit 日志落盘）不得带分隔符或 `..`；
 /// 非 ASCII/空白/超长同拒——名字从线上注册与 boot 两路进同一解析器。
 #[test]
-fn module_name_shape_rejects_path_components() {
+fn module_components() {
     let long = "x".repeat(65);
     for bad in ["../x", "a/b", ".", "..", "名字", "a b", long.as_str()] {
         let text = GOOD.replace("name = \"rr3-sima\"", &format!("name = \"{bad}\""));

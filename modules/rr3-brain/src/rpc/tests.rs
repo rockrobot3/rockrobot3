@@ -20,7 +20,7 @@ fn write_llm_model(cfg: &mut Rr3BrainCfg, v: serde_json::Value) {
 /// 白名单组体：四组六槽逐键在册、**零多余键**（密钥/api_key_ref 不进应答，
 /// B-12 值零回显守脑面）
 #[test]
-fn ops_snapshot_whitelist_groups_exactly() {
+fn ops_groups_exactly() {
     let cfg = repo_cfg();
     let v = rr3_ops_snapshot(&cfg).unwrap();
     assert_eq!(
@@ -51,7 +51,7 @@ fn ops_snapshot_whitelist_groups_exactly() {
 
 /// dialog 键缺席 → 快照缺省 8000（Python .get("max_utterance_ms", 8000) 同形状）
 #[test]
-fn ops_snapshot_dialog_defaults_8000_when_key_absent() {
+fn ops_dlg_key_absent() {
     let mut cfg = repo_cfg();
     cfg.doc["rr3-brain"]
         .as_object_mut()
@@ -65,7 +65,7 @@ fn ops_snapshot_dialog_defaults_8000_when_key_absent() {
 /// llm 组回显随 boot 投影（Python base_url/model_id 局部变量同形状）：live 写
 /// 模型行后快照**不回填**、重启回新值——B-14① 双源分裂的如实镜像，本测钉死
 #[test]
-fn ops_snapshot_llm_group_stays_at_boot_projection_after_live_write() {
+fn ops_llm_live_write() {
     let mut cfg = repo_cfg();
     // live 写模型行 model_id（写源 = active 行）
     write_llm_model(&mut cfg, json!("deepseek-reasoner"));
@@ -84,7 +84,7 @@ fn ops_snapshot_llm_group_stays_at_boot_projection_after_live_write() {
 
 /// asr/tts/dialog 组快照随 live 写即见（读源在 cloud/dialog 段）
 #[test]
-fn ops_snapshot_asr_tts_dialog_reflect_live_writes() {
+fn ops_tts_dlg_writes() {
     let mut cfg = repo_cfg();
     rr3_ops_write(&mut cfg.doc, "asr", "asr_model", &json!("new-asr")).unwrap();
     rr3_ops_write(&mut cfg.doc, "dialog", "max_utterance_ms", &json!(9000)).unwrap();
@@ -97,7 +97,7 @@ fn ops_snapshot_asr_tts_dialog_reflect_live_writes() {
 
 /// 组/槽白名单两红（文案逐字对位 Python，含 Python 列表 repr 形状）
 #[test]
-fn ops_set_rejects_unknown_group_and_slot() {
+fn ops_set_rej_slot() {
     let mut cfg = repo_cfg();
     let e = rr3_ops_write(&mut cfg.doc, "memory", "x", &json!(1)).unwrap_err();
     assert_eq!(
@@ -113,7 +113,7 @@ fn ops_set_rejects_unknown_group_and_slot() {
 
 /// 字符串槽三径：非串点名（Python 类型词）、空白拒、strip 落值
 #[test]
-fn ops_set_string_slots_validate() {
+fn ops_set_slots_val() {
     let mut cfg = repo_cfg();
     let e = rr3_ops_write(&mut cfg.doc, "asr", "asr_model", &json!(42)).unwrap_err();
     assert_eq!(
@@ -138,7 +138,7 @@ fn ops_set_string_slots_validate() {
 /// timeout_s 槽：布尔拒（先于数值——Python isinstance(bool) 同序）、非数点名、
 /// ≤0 拒、数值转 float 落盘（写源 = cloud 段，四组任一组的 timeout_s 同路）
 #[test]
-fn ops_set_timeout_s_validates_and_writes_cloud() {
+fn ops_set_s_cloud() {
     let mut cfg = repo_cfg();
     let e = rr3_ops_write(&mut cfg.doc, "asr", "timeout_s", &json!(true)).unwrap_err();
     assert_eq!(
@@ -170,7 +170,7 @@ fn ops_set_timeout_s_validates_and_writes_cloud() {
 
 /// max_utterance_ms 槽：布尔拒、非整数拒、≤0 拒、整数落盘（写源 = dialog 段）
 #[test]
-fn ops_set_max_utterance_validates_and_writes_dialog() {
+fn ops_set_max_dlg() {
     let mut cfg = repo_cfg();
     let e = rr3_ops_write(&mut cfg.doc, "dialog", "max_utterance_ms", &json!(false)).unwrap_err();
     assert_eq!(e, "槽 dialog.max_utterance_ms 须数值，收到 bool");
@@ -194,7 +194,7 @@ fn ops_set_max_utterance_validates_and_writes_dialog() {
 
 /// old 键缺席 = Null（Python dict.get 同形状）：dialog 段无键时首写 old=null
 #[test]
-fn ops_set_old_is_null_when_key_absent() {
+fn ops_old_key_absent() {
     let mut cfg = repo_cfg();
     cfg.doc["rr3-brain"]["dialog"]
         .as_object_mut()
@@ -212,7 +212,7 @@ fn ops_set_old_is_null_when_key_absent() {
 
 /// dialog 段整段缺席 → setdefault 建段后照写（Python setdefault 同义）
 #[test]
-fn ops_set_creates_missing_dialog_section() {
+fn ops_miss_dlg_section() {
     let mut cfg = repo_cfg();
     cfg.doc["rr3-brain"]
         .as_object_mut()
@@ -229,7 +229,7 @@ fn ops_set_creates_missing_dialog_section() {
 /// llm 组写源两态：行表在 → 写 active 行（llm_model → model_id 键名换算）；
 /// 行表缺 → 写 cloud 段（fallback 路径）
 #[test]
-fn ops_set_llm_write_source_two_states() {
+fn ops_llm_two_states() {
     let mut cfg = repo_cfg();
     let (old, new) = rr3_ops_write(
         &mut cfg.doc,
@@ -268,7 +268,7 @@ fn ops_set_llm_write_source_two_states() {
 /// 行表结构坏（active 数≠1）写面点名拒（"写面不修结构错误"——直造文档树，
 /// 绕开 boot 校验，钉写面自身防线）
 #[test]
-fn ops_set_llm_rejects_broken_row_structure() {
+fn ops_rej_structure() {
     let mut doc: Value = serde_json::from_str(
         r#"{"rr3-brain": {"cloud": {"base_url": "u"}, "model": [
             {"name": "甲", "active": true}, {"name": "乙", "active": true}]}}"#,
@@ -284,7 +284,7 @@ fn ops_set_llm_rejects_broken_row_structure() {
 /// ops/set 臂应答六键体（ok/group/slot/old/new/persisted/applies——live 内存
 /// 生效不落盘如实申报）
 #[test]
-fn ops_set_arm_reply_shape() {
+fn ops_set_arm_shape() {
     let mut cfg = repo_cfg();
     let v = rr3_ops_set_arm(
         &mut cfg,
@@ -313,7 +313,7 @@ fn ops_set_arm_reply_shape() {
 /// group/slot 的 str() coercion（Python str(args.get(key, "")) 同形状）：缺字段
 /// 回落空串 → 组不认点名
 #[test]
-fn ops_set_arm_coerces_group_slot_like_python_str() {
+fn ops_set_arm_like_str() {
     let mut cfg = repo_cfg();
     let e = rr3_ops_set_arm(&mut cfg, &json!({})).unwrap_err();
     assert_eq!(

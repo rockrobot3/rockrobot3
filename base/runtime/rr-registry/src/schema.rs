@@ -67,7 +67,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn schema_get_by_path_resolves_nested_list() {
+    fn schema_get_list() {
         let v: Value =
             toml::from_str("[events]\npublishes = [\"rr3-sense/audio/vad_start\"]\n").unwrap();
         let got = rr3_get_by_path(&v, "events.publishes").expect("嵌套路径必须解析到");
@@ -75,14 +75,14 @@ mod tests {
     }
 
     #[test]
-    fn schema_get_by_path_rejects_missing_segment() {
+    fn schema_rej_segment() {
         let v: Value = toml::from_str("[manifest]\nname = \"rr3-x\"\n").unwrap();
         assert!(rr3_get_by_path(&v, "manifest.nope").is_none());
         assert!(rr3_get_by_path(&v, "nope.deep.deeper").is_none());
     }
 
     #[test]
-    fn schema_rule_lists_are_present() {
+    fn schema_rule_present() {
         assert_eq!(rr3_rule_list("type").unwrap(), ["module", "brain"]);
         assert_eq!(rr3_rule_list("lang").unwrap(), ["rust", "python"]);
         assert_eq!(rr3_rule_list("restart_policy").unwrap().len(), 3);
@@ -93,7 +93,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_field_paths_are_all_unique_and_prefixed_by_section() {
+    fn schema_field_section() {
         let specs = rr3_field_specs();
         let mut seen: Vec<&str> = specs.iter().map(|s| s.path.as_str()).collect();
         let before = seen.len();

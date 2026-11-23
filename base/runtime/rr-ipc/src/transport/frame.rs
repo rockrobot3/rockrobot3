@@ -109,7 +109,7 @@ mod tests {
     /// B-7（0.0.8b 审计）：策略帽在**分配之前**拒超限 plen——合法头、长度过帽，
     /// 错误形复用 PayloadTooLarge；帽内同帧照常通过。
     #[test]
-    fn read_cap_rejects_plen_over_cap_before_alloc() {
+    fn read_rej_cap_alloc() {
         let f = Rr3Frame {
             header: hdr(1024),
             payload: vec![7u8; 1024],
@@ -167,7 +167,7 @@ mod tests {
 
     /// 帧头部必须与 golden 向量逐字节一致（Task 12 的跨架构对比用的就是这个不变量）
     #[test]
-    fn frame_header_is_byte_identical_to_golden() {
+    fn frame_byte_golden() {
         let g = golden();
         let pure = rr3_golden_pure(&g);
 
@@ -210,7 +210,7 @@ mod tests {
     /// 压在构造路径（`rr3_hdr_broadcast` + 显式字段赋值）上，而不是压在 golden 的读回上。
     /// 输出必须**纯确定性**：固定输入、固定字段值、无时间无随机，否则两侧比对没有意义。
     #[test]
-    fn rr3_xarch_encode_emits_deterministic_header() {
+    fn rr3_emits_det_header() {
         let bytes = hdr(5).to_bytes();
         assert_eq!(bytes.len(), RR3_IPC_HDR_SIZE, "发射的必须是完整 128B 头");
         // 偏移断言直接压在契约的 OFF_*/LEN_* 常量上（与 `x-offset-table` 同源，见本文件
@@ -286,7 +286,7 @@ mod tests {
 
     /// payload_len = 0 合法（无 payload 的心跳/应答形状）
     #[test]
-    fn frame_empty_payload_is_allowed() {
+    fn frame_empty_allowed() {
         let mut buf = Vec::new();
         rr3_frame_write(
             &mut buf,
@@ -303,7 +303,7 @@ mod tests {
 
     /// 空输入 = 对端关闭
     #[test]
-    fn frame_read_closed_connection() {
+    fn frame_read_conn() {
         let empty: [u8; 0] = [];
         assert_eq!(
             rr3_frame_read(Cursor::new(&empty[..])),
@@ -313,7 +313,7 @@ mod tests {
 
     /// 半帧头（64B 后 EOF）不得被当成新帧起始
     #[test]
-    fn frame_rejects_torn_header() {
+    fn frame_rej_header() {
         let mut buf = hdr(3).to_bytes().to_vec();
         buf.truncate(64);
         assert_eq!(
@@ -324,7 +324,7 @@ mod tests {
 
     /// 头说 10 字节，payload 只到 3 字节（payload 含 0 也必须如实报 got=3）
     #[test]
-    fn frame_rejects_torn_payload_with_zero_bytes_inside() {
+    fn frame_rej_inside() {
         let mut buf = hdr(10).to_bytes().to_vec();
         buf.extend_from_slice(&[b'a', 0, 0]);
         assert_eq!(
@@ -336,7 +336,7 @@ mod tests {
 
     /// 坏 magic 把头层错误原样上抛
     #[test]
-    fn frame_propagates_header_error() {
+    fn frame_header_error() {
         let mut buf = hdr(0).to_bytes().to_vec();
         buf[0..4].copy_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
         assert!(matches!(
@@ -347,7 +347,7 @@ mod tests {
 
     /// 写侧自校验：长度不符就一个字都不许发出去
     #[test]
-    fn frame_write_rejects_length_mismatch() {
+    fn frame_rej_mismatch() {
         let f = Rr3Frame {
             header: hdr(9),
             payload: b"123"[..].to_vec(),

@@ -6,7 +6,7 @@ use super::*;
 /// 基础层 = base_capabilities 的表内化（ADR-0012 裁定 1）：
 /// 两份名单逐条钉死等价——第二份白名单不存在，仲裁与查册共用同一 base 真值。
 #[test]
-fn slots_base_layer_is_pinned_to_base_capabilities() {
+fn slots_capabilities() {
     let mut base = rr_registry::rr3_slot_parse(&slots_toml()).rr3_slot_base();
     base.sort();
     let mut caps = rr_registry::rr3_rule_list("base_capabilities")
@@ -46,7 +46,7 @@ const RR3_PINNED_SLOTS: [(&str, &str); 23] = [
 ];
 
 #[test]
-fn slots_registry_shape_is_pinned() {
+fn slots_shape_pinned() {
     use std::collections::BTreeMap;
 
     let table = rr_registry::rr3_slot_parse(&slots_toml());
@@ -81,7 +81,7 @@ fn slots_registry_shape_is_pinned() {
 /// 门禁②（manifest 侧）：provides 与 depends.* 引用的每个能力必须命中格位表。
 /// 单件校验只保语法（ADR-0009 裁定 1），"是否在册"只在全集层判——本用例就是那道全集门。
 #[test]
-fn every_manifest_capability_is_a_registered_slot() {
+fn every_mft_reg_slot() {
     let table = rr_registry::rr3_slot_parse(&slots_toml());
     let manifests = module_manifest_values();
     assert_eq!(manifests.len(), 6, "modules/ 模块集合漂移");

@@ -261,7 +261,7 @@ mod tests {
     /// B-10（本轮审计）：超长且无换行的请求行/头行必须在读取过程中被上界截停，
     /// 不允许先把整行分配进内存再判长度（慢速客户端可借此顶穿面板线程内存）。
     #[test]
-    fn read_line_cap_stops_before_unbounded_growth() {
+    fn read_line_cap_growth() {
         let mut c = std::io::Cursor::new(vec![b'a'; 4096]);
         let mut out = String::new();
         let e = rr3_read_line_cap(&mut c, 64, "请求行", &mut out).unwrap_err();
@@ -271,7 +271,7 @@ mod tests {
 
     /// 正常行/EOF 语义：按行截断、返回追加字节数，EOF 返回 0
     #[test]
-    fn read_line_cap_returns_line_and_eof() {
+    fn read_cap_line_eof() {
         let mut c = std::io::Cursor::new(b"GET /x HTTP/1.1\r\nHost: a\r\n".to_vec());
         let mut out = String::new();
         assert_eq!(
@@ -293,7 +293,7 @@ mod tests {
     /// 写侧耐心（B16 审计）：对端只连不读时，应答写必须在耐心窗内放弃——不允许
     /// 把连接线程永久钉在"发送缓冲已满"的写调用上（8 槽位耗尽＝面板失联）。
     #[test]
-    fn patience_bounds_write_when_peer_never_reads() {
+    fn patience_peer_reads() {
         use std::net::TcpListener;
         use std::time::Instant;
 
@@ -317,7 +317,7 @@ mod tests {
     /// 若按 `Content-Length` 直接 `vec![0; n]`，一个 `999999999999` 的声明就是一次
     /// 必然 OOM/abort。本用例钉"先判上界、再分配"这条顺序。
     #[test]
-    fn oversized_content_length_is_rejected_before_alloc() {
+    fn oversized_rej_alloc() {
         use std::net::TcpListener;
 
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -336,7 +336,7 @@ mod tests {
 
     /// 三段解析各自的坏形判据：缺路径、非法 Content-Length、头区超界
     #[test]
-    fn req_stages_reject_bad_shapes() {
+    fn req_rej_bad_shapes() {
         let mut c = std::io::Cursor::new(b"GET\r\n".to_vec());
         assert!(rr3_req_line(&mut c, 64).unwrap_err().contains("缺路径"));
 

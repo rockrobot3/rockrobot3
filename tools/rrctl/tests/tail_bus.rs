@@ -160,7 +160,7 @@ fn stdout_lines(out: &Output) -> Vec<String> {
 }
 
 #[test]
-fn tail_filters_topic_and_exits_after_count() {
+fn tail_exits_count() {
     let topic = "rr3-sense/audio/vad_start";
     let bus = fake_on(
         "count",
@@ -189,7 +189,7 @@ fn tail_filters_topic_and_exits_after_count() {
 }
 
 #[test]
-fn tail_exits_nonzero_on_timeout() {
+fn tail_exits_timeout() {
     let bus = fake_on("timeout", Mode::Timeout);
     let out = run_tail(
         &bus,
@@ -207,7 +207,7 @@ fn tail_exits_nonzero_on_timeout() {
 }
 
 #[test]
-fn tail_exits_nonzero_on_disconnect() {
+fn tail_exits_disc() {
     let bus = fake_on("disc", Mode::Disconnect);
     let out = run_tail(
         &bus,
@@ -224,7 +224,7 @@ fn tail_exits_nonzero_on_disconnect() {
 }
 
 #[test]
-fn tail_reports_registration_failure() {
+fn tail_reg_fail() {
     let bus = tmp_bus("no-listener");
     let out = run_tail(&bus, &["rr3-sense/audio/vad_start"]);
     std::fs::remove_file(&bus).ok();

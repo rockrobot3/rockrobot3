@@ -62,7 +62,7 @@ fn rr3_elapsed_from_log(line: &str) -> u64 {
 
 /// W1 — 静默即判死，且判死内容与广播都到位
 #[test]
-fn watchdog_expires_a_silent_peer_and_broadcasts_failed() {
+fn watchdog_peer_fail() {
     let (mut rrd, m) = rr3_watched("wd-expire");
     let mut b = rr3_bystander(&rrd, "rr3-simb");
     let mut peer = SimPeer::rr3_start(&rrd.socket, &m, "go_silent");
@@ -107,7 +107,7 @@ fn watchdog_expires_a_silent_peer_and_broadcasts_failed() {
 
 /// W2 — 健康模块不受牵连（正反两路同框）
 #[test]
-fn watchdog_leaves_a_beating_peer_alone() {
+fn watchdog_peer_alone() {
     let (mut rrd, ma) = rr3_watched("wd-healthy");
     let mb = rr3_fixture_manifest("wd-healthy-b", "simb");
     // 两个身份、两种结局，只差"喂不喂狗"这一维——所以这条抓的是"watchdog 会不会一律判死"。
@@ -128,7 +128,7 @@ fn watchdog_leaves_a_beating_peer_alone() {
 
 /// W3 — 恰好一条 failed 广播、一条判死日志（跨 ≥3 tick 不重复回报）
 #[test]
-fn watchdog_broadcasts_exactly_one_failed_state() {
+fn watchdog_fail_state() {
     let (mut rrd, m) = rr3_watched("wd-once");
     let mut b = rr3_bystander(&rrd, "rr3-simb");
     let mut peer = SimPeer::rr3_start(&rrd.socket, &m, "go_silent");
@@ -165,7 +165,7 @@ fn watchdog_broadcasts_exactly_one_failed_state() {
 
 /// W4 — 判死后喂狗一律被拒、且不复活：计划照策略给，但**不执行**（E-1）
 #[test]
-fn beats_after_expiry_are_rejected_and_do_not_revive() {
+fn beats_rej_not_revive() {
     let (mut rrd, m) = rr3_watched("wd-revive");
     let mut peer = SimPeer::rr3_start(&rrd.socket, &m, "silent_then_beat");
     // 判据只取**最后一次**（第 1300ms 的那颗）：那一刻已静默 ≥780ms，远超到期上界 520ms，

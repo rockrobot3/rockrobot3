@@ -289,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn state_words_cover_all_variants() {
+    fn state_cover_variants() {
         assert_eq!(
             rr_autonomy::rr3_state_word(Rr3TaskState::Starting),
             "starting"
@@ -306,14 +306,14 @@ mod tests {
     }
 
     #[test]
-    fn sntp_words_cover_three_states() {
+    fn sntp_three_states() {
         assert_eq!(sntp_word(SNTP_SYNCED), "synced");
         assert_eq!(sntp_word(SNTP_FAILED), "failed");
         assert_eq!(sntp_word(SNTP_UNKNOWN), "unknown");
     }
 
     #[test]
-    fn health_json_without_snapshot_reports_shell_off() {
+    fn health_json_off() {
         let j = rr3_health_json();
         assert!(j.contains("\"shell\":\"off\""), "{j}");
         assert!(!j.contains("tasks"), "无快照不得虚构任务状态");
@@ -325,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn dead_bits_only_cover_wired_tasks_with_real_beat() {
+    fn dead_bits_real_beat() {
         let h = health_with(Rr3TaskState::Dead, 1);
         let all = rr3_dead_bits(&h, &[true; RR3_TASK_COUNT]);
         assert_eq!(all, wired_mask());
@@ -338,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn dead_gate_needs_two_consecutive_ticks() {
+    fn dead_two_cons_ticks() {
         let h = health_with(Rr3TaskState::Dead, 1);
         let ever = [true; RR3_TASK_COUNT];
         let mut gate = Rr3RestartGate::rr3_gate_new(DEAD_TICKS);

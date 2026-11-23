@@ -4,7 +4,7 @@
 use super::*;
 
 #[test]
-fn every_declared_command_is_dispatchable() {
+fn every_dispatchable() {
     for cmd in COMMANDS {
         // 连不上假套接字也应该得到"连接失败"而非"未知命令"——命令面在查询之前已放行
         let err = run(cmd, "/tmp/rr3-ctl-no-such.sock").unwrap_err();
@@ -13,7 +13,7 @@ fn every_declared_command_is_dispatchable() {
 }
 
 #[test]
-fn unknown_command_names_the_alternatives() {
+fn unknown_alternatives() {
     let err = run("nope", "/tmp/t.sock").unwrap_err();
     assert!(
         err.contains("status") && err.contains("reboot"),
@@ -24,7 +24,7 @@ fn unknown_command_names_the_alternatives() {
 /// 拒应答渲染（B44 拆件后的单点）：code/message 都在文案里；字段缺失也要保住
 /// "被拒"这一事实；成功信封不干预（走各自 format_*）。
 #[test]
-fn rejection_envelope_names_code_and_message() {
+fn rejection_code_msg() {
     let env = json!({"error": {"code": 7, "message": "ota 在 M6 前恒拒"}});
     let msg = rr3_ctl_reject("ota", &env).expect("有 error 必渲染");
     assert!(msg.contains("ota 被拒"), "{msg}");
@@ -37,7 +37,7 @@ fn rejection_envelope_names_code_and_message() {
 }
 
 #[test]
-fn command_list_matches_the_rrd_ctl_whitelist() {
+fn command_whitelist() {
     // 八方法同名对齐（ADR-0010 裁定 2/4/6；续轮十五补 wiring/contracts）：方法名
     // 漂移在此变红；domain.set 是写口，按安全链评审单列，不在此表
     assert_eq!(
@@ -56,7 +56,7 @@ fn command_list_matches_the_rrd_ctl_whitelist() {
 }
 
 #[test]
-fn status_table_is_aligned_and_counts_denied_publish() {
+fn status_denied_pub() {
     let env = json!({"result": {"modules": [
             {"name": "rr3-long-name", "task": 2, "phase": "running"},
             {"name": "rr3-a", "task": 3, "phase": "registered"}
@@ -92,7 +92,7 @@ fn status_table_is_aligned_and_counts_denied_publish() {
 }
 
 #[test]
-fn status_boot_null_renders_question_mark() {
+fn status_null_mark() {
     let env = json!({"result": {"modules": [], "denied_publish": 0, "boot": null}});
     let out = format_status(&env).unwrap();
     assert!(
@@ -102,7 +102,7 @@ fn status_boot_null_renders_question_mark() {
 }
 
 #[test]
-fn status_table_says_empty_when_no_module_is_registered() {
+fn status_says_no_reg() {
     let env = json!({"result": {"modules": [], "denied_publish": 0}});
     let out = format_status(&env).unwrap();
     assert_eq!(
@@ -112,7 +112,7 @@ fn status_table_says_empty_when_no_module_is_registered() {
 }
 
 #[test]
-fn health_table_carries_the_three_heartbeat_numbers() {
+fn health_three_numbers() {
     let env = json!({"result": {
         "modules": [
             {"name": "rr3-sima", "task": 2, "phase": "running",
@@ -140,7 +140,7 @@ fn health_table_carries_the_three_heartbeat_numbers() {
 }
 
 #[test]
-fn health_boot_ms_null_renders_question_mark() {
+fn health_ms_null_mark() {
     let env = json!({"result": {"modules": [{"name": "rr3-x", "boot_ms": null}]}});
     let out = format_health(&env).unwrap();
     let line = out.lines().nth(1).unwrap();
@@ -148,7 +148,7 @@ fn health_boot_ms_null_renders_question_mark() {
 }
 
 #[test]
-fn logs_are_printed_verbatim_without_json_plumbing() {
+fn logs_json_plumbing() {
     let env = json!({"result": {"lines": ["rrd: 监听 /tmp/a.sock", "rrd: 注册 rr3-sima task=2"]}});
     let out = format_logs(&env).unwrap();
     assert!(out.contains("rrd: 监听 /tmp/a.sock"), "{out}");
@@ -160,7 +160,7 @@ fn logs_are_printed_verbatim_without_json_plumbing() {
 }
 
 #[test]
-fn missing_fields_render_as_question_mark_not_null() {
+fn miss_as_not_null() {
     let env = json!({"result": {"modules": [{"name": "rr3-x"}]}});
     let out = format_status(&env).unwrap();
     assert!(out.contains("?"), "缺失字段应渲染 ?：{out}");
@@ -168,7 +168,7 @@ fn missing_fields_render_as_question_mark_not_null() {
 }
 
 #[test]
-fn malformed_envelope_is_an_error_not_a_panic() {
+fn malformed_not_panic() {
     assert!(format_status(&json!({})).is_err());
     assert!(format_health(&json!({"result": {}})).is_err());
     assert!(format_logs(&json!({"result": {"lines": 3}})).is_err());
@@ -185,7 +185,7 @@ fn malformed_envelope_is_an_error_not_a_panic() {
 }
 
 #[test]
-fn counters_group_by_module_prefix_and_render_sorted() {
+fn counters_sorted() {
     let env = json!({"result": {"counters": {
         "rr3-brain/asr_fail": 1, "rr3-brain/asr_ok": 8,
         "rr3-act/relay_on": 1, "boots": 2
@@ -215,19 +215,19 @@ fn counters_group_by_module_prefix_and_render_sorted() {
 }
 
 #[test]
-fn counters_empty_table_says_no_counters() {
+fn counters_no_counters() {
     let env = json!({"result": {"counters": {}}});
     assert_eq!(format_counters(&env).unwrap(), "（无计数）");
 }
 
 #[test]
-fn counters_non_u64_value_is_an_error_not_a_question_mark() {
+fn counters_not_mark() {
     // 与 status 的 cell 不同：计数是 u64 全表，形状坏了报错而不是渲染 ?
     assert!(format_counters(&json!({"result": {"counters": {"boots": "x"}}})).is_err());
 }
 
 #[test]
-fn reboot_success_renders_acknowledgement() {
+fn reboot_acknowled() {
     let env = json!({"result": {"reboot": true}});
     let out = format_reboot(&env).unwrap();
     assert!(out.contains("重启"), "{out}");
@@ -236,7 +236,7 @@ fn reboot_success_renders_acknowledgement() {
 /// `wiring` 渲染（续轮十五）：六段齐全、判果 FAIL 显形、角色数组按逗号拼接；
 /// 空段打 `（无）` 不输出只有表头的噪声。
 #[test]
-fn wiring_renders_all_sections_and_flags_failed_checks() {
+fn wiring_fail_checks() {
     let env = json!({"result": {
         "available": true,
         "pins": [{"pin_id": "servo.pwm", "role": "servo", "instance": "main",
@@ -278,7 +278,7 @@ fn wiring_renders_all_sections_and_flags_failed_checks() {
 
 /// 快照未在册（`--manifest` 调试路径）：如实报不可得与原因，不造表。
 #[test]
-fn wiring_unavailable_reports_the_reason_without_tables() {
+fn wiring_reason_tables() {
     let env = json!({"result": {"available": false, "reason": "未以 --profile 启动"}});
     let out = format_wiring(&env).unwrap();
     assert!(out.contains("不可得") && out.contains("--profile"), "{out}");
@@ -287,7 +287,7 @@ fn wiring_unavailable_reports_the_reason_without_tables() {
 
 /// `contracts` 渲染：四册账、真值集账与判果三段；sha256 全量可对账。
 #[test]
-fn contracts_renders_books_truth_set_and_checks() {
+fn contracts_set_checks() {
     let env = json!({"result": {
         "available": true,
         "contracts": [{"file": "topics.toml", "sha256": "ab12", "bytes": 321}],
@@ -362,7 +362,7 @@ mod unix_tests {
     }
 
     #[test]
-    fn status_roundtrip_renders_the_fake_rrds_reply() {
+    fn status_rrds_reply() {
         let bus = spawn_fake_rrd(
             json!({"result": {"modules": [{"name": "rr3-sima", "task": 2, "phase": "running"}],
                       "denied_publish": 0}})
@@ -373,7 +373,7 @@ mod unix_tests {
     }
 
     #[test]
-    fn error_envelope_from_rrd_becomes_a_cli_error() {
+    fn error_rrd_cli_error() {
         let bus = spawn_fake_rrd(
                 json!({"error": {"code": -22, "message": "OTA（含模块级 staging 更新）随 M6 落地，当前拒绝执行"}})
                     .to_string(),
@@ -386,7 +386,7 @@ mod unix_tests {
     }
 
     #[test]
-    fn counters_roundtrip_renders_the_fake_rrds_reply() {
+    fn counters_rrds_reply() {
         let bus = spawn_fake_rrd(
             json!({"result": {"counters": {"rr3-sima/beat_ok": 3, "boots": 1}}}).to_string(),
         );
@@ -399,7 +399,7 @@ mod unix_tests {
     }
 
     #[test]
-    fn reboot_rejection_from_rrd_becomes_a_cli_error() {
+    fn reboot_rrd_cli_error() {
         let bus = spawn_fake_rrd(
                 json!({"error": {"code": -22, "message": "reboot 执行面未解锁（需 cfg(linux) 且 env RR3_REBOOT_OK=1，缺省恒拒）"}})
                     .to_string(),
@@ -413,7 +413,7 @@ mod unix_tests {
 
     /// wiring 真往返：协议面与渲染面各钉一半（空快照也须给出六段标题）。
     #[test]
-    fn wiring_roundtrip_renders_the_fake_rrds_reply() {
+    fn wiring_rrds_reply() {
         let bus = spawn_fake_rrd(
             json!({"result": {"available": true, "pins": [], "domains": [], "wires": [],
                               "axis": [], "roles": [], "checks": []}})

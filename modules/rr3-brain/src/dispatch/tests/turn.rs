@@ -7,7 +7,7 @@ use super::*;
 
 /// played_ms>0：两本账各记一次、点名超时经 config 注入（B-13①）、意图照发
 #[test]
-fn played_rounds_counted_in_both_ledgers_and_timeout_injected() {
+fn played_injected() {
     let (mut dp, _g) = mock_dispatcher(cfg_call_timeout(12.5));
     let bus = FakeTurnBus::reply(json!({"played_ms": 120}));
     dp.dialog.rr3_feed_vad("onset", 0);
@@ -30,7 +30,7 @@ fn played_rounds_counted_in_both_ledgers_and_timeout_injected() {
 /// 播放点名失败：只进应答账，听见账不动——"完成一轮"与"用户听见"自此可分
 /// （不许一个词盖两件事）；意图照发（动作不丢）
 #[test]
-fn call_failure_counts_replied_only_and_intent_still_published() {
+fn call_fail_intent_pub() {
     let (mut dp, _g) = mock_dispatcher(cfg());
     let bus = FakeTurnBus::failing_call("tts 播出 0ms（…），不得记 ok（I-21①）");
     dp.dialog.rr3_feed_vad("onset", 0);
@@ -48,7 +48,7 @@ fn call_failure_counts_replied_only_and_intent_still_published() {
 
 /// played_ms=0 不算听见（interact 修后 0ms 折 error；此处防御异常形状仍不进账）
 #[test]
-fn zero_played_ms_does_not_count_audible() {
+fn zero_ms_not_audible() {
     let (mut dp, _g) = mock_dispatcher(cfg());
     let bus = FakeTurnBus::reply(json!({"played_ms": 0}));
     dp.dialog.rr3_feed_vad("onset", 0);
@@ -63,7 +63,7 @@ fn zero_played_ms_does_not_count_audible() {
 /// 云端 ASR 失败弃轮：两本账都不动（既有 asr_fail 计数语义不变）——real 档
 /// 缺密钥即 ASR 确定性失败（不触网）
 #[test]
-fn asr_failure_counts_neither_ledger() {
+fn asr_fail_ledger() {
     let (mut dp, g) = mock_dispatcher(cfg());
     // 整装后换 real 档并撤密钥：mock 判据现读 env，半途换档即生效
     std::env::set_var(crate::cloud::RR3_CLOUD_MODE_ENV, "real");
@@ -83,7 +83,7 @@ fn asr_failure_counts_neither_ledger() {
 
 /// 固定唤醒应答在启动时预合成；第一轮 Ack 只请求 ASR，不再请求 TTS。
 #[test]
-fn wake_ack_pcm_prewarmed_and_reused() {
+fn wake_ack_pcm_reused() {
     let _g = env_lock();
     let srv = crate::cloud::testkit::FakeCloud::start();
     std::env::set_var(crate::cloud::RR3_CLOUD_MODE_ENV, "real");
@@ -126,7 +126,7 @@ fn wake_ack_pcm_prewarmed_and_reused() {
 /// 不走 LLM；唤醒后窗内追问 → 正常应答；唤醒带命令 → 去掉唤醒词后的
 /// 命令进 LLM。四条路径一轮内跑完。
 #[test]
-fn wake_gate_ack_ignore_followup_and_command() {
+fn wake_ack_command() {
     let (mut dp, _g) = mock_dispatcher(cfg_wake(15_000));
     let bus = FakeTurnBus::reply(json!({"played_ms": 120}));
     let feed = |dp: &mut Rr3BrainDispatcher| {

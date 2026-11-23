@@ -237,7 +237,7 @@ mod tests {
     /// 收敛到容量以内（批N5 件二笔1 的 while 循环是钉这条的——只丢一个的写法
     /// 会让"cap 从 512 改 8"之后环永远缩不回 8）
     #[test]
-    fn ring_push_keeps_last_cap_lines_and_converges_on_shrink() {
+    fn ring_last_cap_shrink() {
         let mut ring = VecDeque::new();
         for i in 0..4 {
             rr3_ring_push(&mut ring, format!("l{i}"), 2);
@@ -259,7 +259,7 @@ mod tests {
     /// 日志查询核（ctl.logs）：前缀过滤 + 尾行裁剪；0 = 不限，空前缀 = 不过滤。
     #[cfg(unix)]
     #[test]
-    fn log_filter_prefix_and_tail() {
+    fn log_prefix_tail() {
         let lines: VecDeque<String> = [
             "rrd: 启动摘要 x",
             "rrd: 轮次 1: ASR 失败",
@@ -294,7 +294,7 @@ mod tests {
     /// 容量定格一次（首份胜出）：重复 set 不覆盖——容量是 boot 期事实，运行期不改。
     /// 全 crate 单测只有本用例 set（OnceLock 进程级单次，别处再 set 会互相污染）。
     #[test]
-    fn log_ring_cap_sets_once_and_first_wins() {
+    fn log_cap_once_wins() {
         assert!(!rr3_log_ring_cap_set(0), "0 容量拒定格（入环会持锁死转）");
         assert!(rr3_log_ring_cap_set(8), "首次 set 必须成功");
         assert!(!rr3_log_ring_cap_set(999), "重复 set 必须失败（首份胜出）");
@@ -304,7 +304,7 @@ mod tests {
     /// 日志目录落位与收紧（0750）：other 无份，与 socket 0o660 的组模型对齐。
     #[cfg(unix)]
     #[test]
-    fn log_dir_ensure_locks_mode() {
+    fn log_dir_locks_mode() {
         use std::os::unix::fs::PermissionsExt;
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -322,7 +322,7 @@ mod tests {
     /// 回填行集（批N5 件二笔2）：取尾 cap 行、push_front 消费序（最新在前）；
     /// drop_first 只丢块首可能截断的半行；空文本回填空。
     #[test]
-    fn backfill_lines_take_tail_in_front_push_order() {
+    fn backfill_push_order() {
         let text = "l0\nl1\nl2\nl3";
         assert_eq!(
             rr3_backfill_lines(text, false, 2),
@@ -360,7 +360,7 @@ mod tests {
     /// 的 per-unit 文件与 rrd 自身落盘共用同一条路径规则（一处定形）。
     #[cfg(unix)]
     #[test]
-    fn unit_log_dir_appends_log_suffix() {
+    fn unit_dir_log_suffix() {
         use std::path::Path;
         assert_eq!(
             rr3_unit_log_dir(Path::new("/tmp/rr3-a.sock")),
@@ -371,7 +371,7 @@ mod tests {
     /// stdout 写失败必须降级为 false 而不是 panic：观测通道（管道关闭/EPIPE）
     /// 不得把守护进程带走（与落盘臂的降级纪律同源）。
     #[test]
-    fn log_emit_returns_false_on_broken_channel() {
+    fn log_emit_channel() {
         struct Broken;
         impl Write for Broken {
             fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
@@ -390,7 +390,7 @@ mod tests {
     /// 行必须一次 write 落整（B40 审计）：分行两次 write 在多线程下会交错，
     /// 落盘档出现"两行头 + 两个换行"的坏行；单次 O_APPEND 写才保证行完整。
     #[test]
-    fn log_line_is_single_write() {
+    fn log_line_write() {
         struct Counting {
             bytes: Vec<u8>,
             calls: usize,

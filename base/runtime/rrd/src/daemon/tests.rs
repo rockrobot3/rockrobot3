@@ -16,7 +16,7 @@ use super::tick::rr3_power_frame;
 
 /// 并发连接槽（本轮审计）：到上限拒新、释放后可再申请、Drop 归还计数。
 #[test]
-fn conn_slots_reject_over_limit_and_recover_on_drop() {
+fn conn_rej_limit_drop() {
     let live = Arc::new(AtomicUsize::new(0));
     let a = rr3_conn_acquire(&live, 2).expect("第 1 条");
     let b = rr3_conn_acquire(&live, 2).expect("第 2 条");
@@ -32,7 +32,7 @@ fn conn_slots_reject_over_limit_and_recover_on_drop() {
 /// 满员拒连日志节流：首条即时、窗口内只计数、窗口到点汇总带被压次数。
 /// 拒连退避本身（50ms）不进单测——它是时间行为，由这里的状态机覆盖"不刷屏"。
 #[test]
-fn refuse_gate_logs_first_then_summarizes() {
+fn refuse_summarizes() {
     let mut g = Rr3RefuseGate::default();
     let t0 = Instant::now();
     let first = g.rr3_refuse_note(t0, 64, 64).expect("首条必须即时打印");
@@ -69,7 +69,7 @@ fn refuse_gate_logs_first_then_summarizes() {
 /// 帧级形状只有这里能钉——e2e 钉日志侧的触发与拦截，两半拼成完整证据链。
 /// reason 两值各钉（批N5 件二笔3）：置旗 battery-low / 解除 battery-ok。
 #[test]
-fn system_power_frame_shape_is_pinned() {
+fn system_shape_pinned() {
     let f = rr3_power_frame("battery-low", 5, 3250);
     assert_eq!(f.header.src_task, RR3_TASK_RRD, "点名是 rrd 自己发的");
     assert_eq!(f.header.dst_task, RR3_BROADCAST_DST_TASK, "全量扇出");
@@ -104,7 +104,7 @@ fn system_power_frame_shape_is_pinned() {
 /// （属主不动），chmod 位仍成立——两环境测试都绿；板上组在位时 chown 生效，
 /// 属主组断言归板上 cargo test 面，此处不断言 gid 以免开发机红。
 #[test]
-fn socket_acl_grant_sets_group_rw_mode() {
+fn socket_acl_rw_mode() {
     let dir = std::env::temp_dir().join(format!("rr3-rrd-acl-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let sock = dir.join("acl.sock");
@@ -125,7 +125,7 @@ fn socket_acl_grant_sets_group_rw_mode() {
 
 /// 启动摘要：后门路径空档/芯片必须显式 `-`（不造假值），规模数字来自装配面。
 #[test]
-fn boot_summary_marks_backdoor_and_counts() {
+fn boot_marks_counts() {
     let b = rr3_backend_summary("", None, None, None);
     let s = rr3_boot_summary("", "", "--manifest", 3, 1, 2, &b);
     assert!(s.contains("tier=-") && s.contains("chip=-"), "{s}");
@@ -151,7 +151,7 @@ fn boot_summary_marks_backdoor_and_counts() {
 
 /// 降级原因：空表照实 `[]`；两类原因逐条带模块/类别/文案，顺序即入表顺序。
 #[test]
-fn degrade_notes_carry_kind_and_detail() {
+fn degrade_kind_detail() {
     assert_eq!(rr3_degrade_json(&[]), json!([]));
     let notes = vec![
         (

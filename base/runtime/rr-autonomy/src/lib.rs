@@ -336,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn new_starts_all_tasks_in_starting_state() {
+    fn new_tasks_state() {
         let sup = Rr3Supervisor::rr3_sup_new(cfg(), 0);
         let h = sup.rr3_sup_health();
         assert_eq!(h.state, [Rr3TaskState::Starting; RR3_TASK_COUNT]);
@@ -345,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    fn beat_within_window_keeps_task_alive() {
+    fn beat_task_alive() {
         let mut sup = Rr3Supervisor::rr3_sup_new(cfg_only(Rr3Task::AudioIn, 1_000), 0);
         beat_all(&mut sup, 0);
         assert!(!sup.rr3_sup_beat(Rr3Task::AudioIn, 100));
@@ -357,7 +357,7 @@ mod tests {
     }
 
     #[test]
-    fn silence_past_timeout_marks_dead_and_counts_restart() {
+    fn silence_dead_restart() {
         let mut sup = Rr3Supervisor::rr3_sup_new(cfg_only(Rr3Task::AudioIn, 1_000), 0);
         beat_all(&mut sup, 0);
         sup.rr3_sup_beat(Rr3Task::AudioIn, 100);
@@ -370,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn beat_after_timeout_reports_recovered() {
+    fn beat_recovered() {
         let mut sup = Rr3Supervisor::rr3_sup_new(cfg_only(Rr3Task::Motion, 1_000), 0);
         beat_all(&mut sup, 0);
         sup.rr3_sup_tick(1_200);
@@ -382,7 +382,7 @@ mod tests {
     }
 
     #[test]
-    fn early_tick_is_skipped() {
+    fn early_tick_skipped() {
         let mut sup = Rr3Supervisor::rr3_sup_new(cfg(), 0);
         assert!(sup.rr3_sup_tick(0).is_empty());
         assert_eq!(sup.rr3_sup_health().ticks, 1);
@@ -393,7 +393,7 @@ mod tests {
     }
 
     #[test]
-    fn late_tick_counts_overruns_without_catch_up() {
+    fn late_tick_catch_up() {
         let mut sup = Rr3Supervisor::rr3_sup_new(cfg(), 0);
         sup.rr3_sup_tick(1_000); // 晚 5 拍：missed = 5
         let h = sup.rr3_sup_health();
@@ -406,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn degraded_task_is_not_reaped() {
+    fn degraded_not_reaped() {
         let mut sup = Rr3Supervisor::rr3_sup_new(cfg(), 0);
         sup.rr3_sup_beat(Rr3Task::Ui, 0);
         sup.rr3_sup_degrade(Rr3Task::Ui);
@@ -417,7 +417,7 @@ mod tests {
     }
 
     #[test]
-    fn arm_moves_degraded_to_starting_without_faking_running() {
+    fn arm_moves_running() {
         let mut sup = Rr3Supervisor::rr3_sup_new(cfg_only(Rr3Task::AudioIn, 1_000), 0);
         sup.rr3_sup_degrade(Rr3Task::AudioIn);
         sup.rr3_sup_arm(Rr3Task::AudioIn, 500);
@@ -434,7 +434,7 @@ mod tests {
     }
 
     #[test]
-    fn arm_does_not_revive_dead_task() {
+    fn arm_not_dead_task() {
         let mut sup = Rr3Supervisor::rr3_sup_new(cfg_only(Rr3Task::Net, 1_000), 0);
         beat_all(&mut sup, 0);
         sup.rr3_sup_tick(1_200);
@@ -446,7 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn restart_gate_fires_once_after_hold_ticks() {
+    fn restart_hold_ticks() {
         let mut g = Rr3RestartGate::rr3_gate_new(2);
         assert!(!g.rr3_gate_step(true));
         assert!(g.rr3_gate_step(true));
@@ -458,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    fn health_json_is_shape_stable() {
+    fn health_json_stable() {
         let mut sup = Rr3Supervisor::rr3_sup_new(cfg(), 0);
         beat_all(&mut sup, 0);
         sup.rr3_sup_degrade(Rr3Task::Dialog);
@@ -476,7 +476,7 @@ mod tests {
     }
 
     #[test]
-    fn state_words_cover_all_variants() {
+    fn state_cover_variants() {
         assert_eq!(rr3_state_word(Rr3TaskState::Starting), "starting");
         assert_eq!(rr3_state_word(Rr3TaskState::Running), "running");
         assert_eq!(rr3_state_word(Rr3TaskState::Degraded), "degraded");
@@ -484,7 +484,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_dead_counts_restart_once() {
+    fn explicit_dead_once() {
         let mut sup = Rr3Supervisor::rr3_sup_new(cfg(), 0);
         sup.rr3_sup_dead(Rr3Task::Net);
         sup.rr3_sup_dead(Rr3Task::Net);

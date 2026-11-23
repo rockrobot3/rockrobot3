@@ -10,7 +10,7 @@ use rr_periph_proto::consts::RR3_TRACE_DIRECT;
 
 /// 轴 env 取值裁决：两档内放行，trim 宽容；其余全拒（落缺省 pan 的正门）。
 #[test]
-fn periph_axis_parse_accepts_pan_tilt_only() {
+fn periph_ok_pan_tilt() {
     assert_eq!(rr3_axis_parse("pan"), Some("pan"));
     assert_eq!(rr3_axis_parse("tilt"), Some("tilt"));
     assert_eq!(rr3_axis_parse(" pan "), Some("pan"));
@@ -22,7 +22,7 @@ fn periph_axis_parse_accepts_pan_tilt_only() {
 /// 波特率 env 取值裁决（批D②）：档位表内放行、trim 宽容；档位外/垃圾全拒
 /// （真值单点在 rr-ipc 档位表，本侧只做解析）。
 #[test]
-fn periph_baud_parse_accepts_whitelist_only() {
+fn periph_ok_whitelist() {
     assert_eq!(rr3_baud_parse("115200"), Some(115200));
     assert_eq!(rr3_baud_parse(" 921600 "), Some(921600));
     assert_eq!(rr3_baud_parse("9600"), Some(9600));
@@ -38,7 +38,7 @@ fn periph_baud_parse_accepts_whitelist_only() {
 /// 原 `rr3_bridge_request_body` 已并入）：method 恒 rr3.call、主题在
 /// params.topic、args 原样内嵌（conn.rs 转发形状的分发依据；漂移此处即红）。
 #[test]
-fn bridge_request_body_is_rr3_call_with_topic_in_params() {
+fn bridge_rr3_params() {
     let frame = rr3_bridge_call(7, RR3_SERVO_TOPIC, &json!({ "angle_deg": 90 }));
     assert_eq!(frame.header.src_task, RR3_TASK_HOST);
     assert_eq!(frame.header.dst_task, RR3_PERIPH_TASK);
@@ -56,7 +56,7 @@ fn bridge_request_body_is_rr3_call_with_topic_in_params() {
 /// method 面请求体信封：method/params 原样内嵌（rr3.set_bindings 的协议形状
 /// 锚——载荷住 params.args，rr-ipc bindings 模块定形）。
 #[test]
-fn bridge_request_body_params_is_generic_method_envelope() {
+fn bridge_req_envelope() {
     let s = rr3_bridge_req_body(9, "rr3.set_bindings", &json!({ "args": {} }));
     let v: Value = serde_json::from_str(&s).unwrap();
     assert_eq!(v["jsonrpc"], "2.0");
@@ -69,7 +69,7 @@ fn bridge_request_body_params_is_generic_method_envelope() {
 /// 纪律）；全缺 = None（无板侧配置可注）；部分注入只带已有键；cred_store
 /// 字符串键随键（批N17 件二）。
 #[test]
-fn board_bindings_payload_carries_string_values_only() {
+fn board_string_values() {
     let mut b = Rr3HalBindings::default();
     assert_eq!(rr3_board_payload(&b), None, "三键全缺 = 无载荷");
     b.i2c_sda = Some(21);
@@ -90,7 +90,7 @@ fn board_bindings_payload_carries_string_values_only() {
 /// 应答门序：Response + id 回显 + result 在位放行；类型错/id 错/缺 result/
 /// result.error 四路全点名（板侧业务性失败折形状的协议面锚）。
 #[test]
-fn bridge_parse_response_gates() {
+fn bridge_resp_gates() {
     let ok = json!({"jsonrpc": "2.0", "id": 3, "result": {"angle_deg": 90}});
     let (ty, raw) = (
         Rr3PayloadType::Response,
@@ -119,7 +119,7 @@ fn bridge_parse_response_gates() {
 /// 真值锚定：宿主/板上 task 位形与 rr-core 的机制真值逐值一致（本 crate
 /// 不加依赖边的补偿断言——漂移即红，防两处常量静默分叉）。
 #[test]
-fn task_and_trace_constants_match_rr_core_truth() {
+fn task_rr_core_truth() {
     assert_eq!(RR3_TASK_HOST, 1, "宿主位形=rrd（rr-core::RR3_TASK_RRD）");
     assert_eq!(
         RR3_TRACE_DIRECT, 0,

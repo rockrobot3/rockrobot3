@@ -34,7 +34,7 @@ fn tmp(tag: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn manifest_roundtrip_is_byte_stable() {
+fn mft_byte_stable() {
     let text = manifest_text();
     let m = rr3_manifest_parse(text.as_bytes()).expect("合法 manifest");
     assert_eq!(rr3_manifest_render(&m), text);
@@ -43,7 +43,7 @@ fn manifest_roundtrip_is_byte_stable() {
 }
 
 #[test]
-fn sign_then_verify_roundtrip() {
+fn sign_then_roundtrip() {
     let text = manifest_text();
     let sig = rr3_sign(text.as_bytes(), &SEED);
     let sig_hex = rr3_hex_encode(&sig);
@@ -56,7 +56,7 @@ fn sign_then_verify_roundtrip() {
 }
 
 #[test]
-fn tampered_manifest_is_rejected() {
+fn tampered_mft_rej() {
     let text = manifest_text();
     let sig = rr3_hex_encode(&rr3_sign(text.as_bytes(), &SEED));
     let tampered = text.replace("version=0.0.8", "version=0.0.9");
@@ -66,7 +66,7 @@ fn tampered_manifest_is_rejected() {
 }
 
 #[test]
-fn wrong_key_and_key_id_are_rejected() {
+fn wrong_key_key_id_rej() {
     let text = manifest_text();
     let sig = rr3_hex_encode(&rr3_sign(text.as_bytes(), &SEED));
     let other = rr3_pubkey(&[9u8; 32]);
@@ -84,7 +84,7 @@ fn wrong_key_and_key_id_are_rejected() {
 }
 
 #[test]
-fn bad_signature_hex_is_rejected() {
+fn bad_hex_rej() {
     let text = manifest_text();
     let pub_hex = rr3_hex_encode(&pubkey());
     for bad in ["", "00", &"0".repeat(126), &"G".repeat(128)] {
@@ -97,7 +97,7 @@ fn bad_signature_hex_is_rejected() {
 }
 
 #[test]
-fn strict_manifest_grammar_rejects_each_deformation() {
+fn strict_deformation() {
     let good = manifest_text();
     let cases = [
         good.replacen(RR3_OTA_MANIFEST_HEADER, "rr3-ota-manifest 2", 1),
@@ -132,7 +132,7 @@ fn strict_manifest_grammar_rejects_each_deformation() {
 }
 
 #[test]
-fn version_grammar_and_order_are_strict() {
+fn version_order_strict() {
     assert_eq!(
         rr3_version_parse("1.2.3").unwrap(),
         Rr3Version {
@@ -219,7 +219,7 @@ fn expect_downgrade(m: &Rr3OtaManifest) {
 }
 
 #[test]
-fn expect_checks_target_and_downgrade_policy() {
+fn expect_target_policy() {
     let text = manifest_text();
     let m = rr3_manifest_parse(text.as_bytes()).unwrap();
     expect_upgrade_ok(&m);
@@ -228,7 +228,7 @@ fn expect_checks_target_and_downgrade_policy() {
 }
 
 #[test]
-fn image_digest_and_check_are_bound_to_manifest() {
+fn image_bound_mft() {
     let dir = tmp("image");
     let img = dir.join("rr3-rootfs-rk3566-0.0.8.img");
     std::fs::write(&img, IMAGE_BYTES).unwrap();
@@ -266,7 +266,7 @@ fn image_digest_and_check_are_bound_to_manifest() {
 }
 
 #[test]
-fn key_id_is_derived_and_stable() {
+fn key_id_stable() {
     assert_eq!(rr3_key_id(&pubkey()), key_id());
     assert_ne!(rr3_key_id(&pubkey()), rr3_key_id(&[9u8; 32]));
     assert_eq!(rr3_hex_encode(&key_id()).len(), 16);

@@ -52,7 +52,7 @@ mod tests {
     /// ASR 输入增益（2026-10-31 实机板麦电平偏低）：×1 逐字节等同、×2 翻倍、
     /// 钳位不溢出、奇数尾字节丢弃。
     #[test]
-    fn asr_boost_scales_clips_and_keeps_gain_one_identical() {
+    fn asr_gain_identical() {
         let pcm = [0x10u8, 0x00, 0xF0, 0xFF, 0x00, 0x80]; // 16, -16, -32768
         assert_eq!(rr3_asr_boost_pcm(&pcm, 1), pcm.to_vec());
         let x2 = rr3_asr_boost_pcm(&pcm, 2);
@@ -67,7 +67,7 @@ mod tests {
     /// 语言策略段（2026-10-31 实机：短中文被误判韩语）：Some 落 language 字段、
     /// None 不落（旧体逐字节等价）。
     #[test]
-    fn asr_multipart_language_field_optional() {
+    fn asr_field_optional() {
         let none = rr3_multipart_body("m", b"\x01\x02", 16000, "bd1", None);
         assert!(
             !none.windows(15).any(|w| w == b"name=\"language\""),

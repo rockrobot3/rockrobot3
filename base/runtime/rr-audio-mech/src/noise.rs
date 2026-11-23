@@ -128,7 +128,7 @@ mod tests {
     }
 
     #[test]
-    fn percentiles_are_exact_on_a_known_ramp() {
+    fn percentiles_ramp() {
         let mut n = Rr3NoiseEst::rr3_new();
         assert_eq!(n.rr3_median(), None, "空窗无统计");
         assert!(!n.rr3_ready());
@@ -143,7 +143,7 @@ mod tests {
     }
 
     #[test]
-    fn ring_keeps_only_the_latest_window() {
+    fn ring_keeps_window() {
         let mut n = Rr3NoiseEst::rr3_new();
         for v in 0..200 {
             n.rr3_feed(v);
@@ -153,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn tune_scales_clamps_and_keeps_tail_below_start() {
+    fn tune_tail_start() {
         let t = tune();
         let quiet = rr3_vad_tune(600, &t, base());
         assert_eq!((quiet.rms_start, quiet.rms_tail), (900, 750));

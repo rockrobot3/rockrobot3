@@ -4,7 +4,7 @@ use super::*;
 
 /// 同名在册必须拒，且不留影子条目
 #[test]
-fn duplicate_name_is_rejected() {
+fn duplicate_name_rej() {
     let mut r = RrdRegistry::new(1000);
     let t = r
         .rr3_reg_add(&facts("rr3-sima", 200, 1000, "always"), chan().0, 0)
@@ -34,7 +34,7 @@ fn duplicate_name_is_rejected() {
 
 /// rr3-runtime 是 rrd 自己的号段，模块冒充即最危险的伪造面
 #[test]
-fn reserved_module_name_is_rejected() {
+fn reserved_name_rej() {
     let mut r = RrdRegistry::new(1000);
     assert_eq!(
         r.rr3_reg_add(&facts("rr3-runtime", 200, 1000, "always"), chan().0, 0),
@@ -46,7 +46,7 @@ fn reserved_module_name_is_rejected() {
 }
 
 #[test]
-fn capacity_limit_is_enforced() {
+fn capacity_enforced() {
     let mut r = RrdRegistry::new(1000);
     for i in 0..RR3_REG_MAX_MODULES {
         r.rr3_reg_add(
@@ -135,7 +135,7 @@ fn re_register_m0(r: &mut RrdRegistry) -> u64 {
 /// 这里就把那个组合钉住，并带上两个对照：新名字在满表上仍被拒（门没被整条删掉），
 /// 未 Failed 的同名仍是 `Duplicate` 而不是容量错（门的序也没换）。
 #[test]
-fn full_table_still_allows_re_registering_a_failed_module() {
+fn full_fail_module() {
     let mut r = full_registry();
     check_capacity_gate(&mut r);
     check_duplicate_gate(&mut r);
@@ -176,7 +176,7 @@ fn full_table_still_allows_re_registering_a_failed_module() {
 /// 这个旋钮），由 `manifest.rs` 的 `req_int` 在文本读取期拦住（Task 4 已落，debug/release 都拦）。
 #[cfg(debug_assertions)]
 #[test]
-fn zero_watchdog_is_caught_at_register_time() {
+fn zero_caught_reg_time() {
     let mut r = RrdRegistry::new(1000);
     let mut f = facts("rr3-sima", 100, 500, "always");
     f.watchdog_ms = 0; // 绕过 manifest.rs 校验的唯一途径：pub 字段直接改
@@ -197,7 +197,7 @@ fn zero_watchdog_is_caught_at_register_time() {
 /// 三条门各给一个"坏 watchdog + 该拒"的输入，缺一条就抓不到。
 #[cfg(debug_assertions)]
 #[test]
-fn register_gates_run_before_the_watchdog_assertion() {
+fn reg_run_assertion() {
     let mut r = RrdRegistry::new(1000);
     let t = r
         .rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
@@ -250,7 +250,7 @@ fn register_gates_run_before_the_watchdog_assertion() {
 /// 仅 debug 构建（`debug_assert` 在 release 被编译掉，这条窗口在 release 不存在）。
 #[cfg(debug_assertions)]
 #[test]
-fn caught_panic_leaves_the_failed_entry_registered() {
+fn caught_fail_reg() {
     let mut r = RrdRegistry::new(1000);
     let t = r
         .rr3_reg_add(&facts("rr3-sima", 100, 500, "never"), chan().0, 0)

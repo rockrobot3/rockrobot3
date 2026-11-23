@@ -72,7 +72,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn parse_extracts_envelope_from_host_call_frame() {
+    fn parse_call_frame() {
         let frame = rr3_bridge_call(11, RR3_SERVO_TOPIC, &json!({ "angle_deg": 95 }));
         let req = rr3_req_parse(&frame).expect("宿主桥帧必须过全部门");
         assert_eq!(req.id, 11);
@@ -84,7 +84,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_gates_reject_dst_type_and_missing_id() {
+    fn parse_rej_miss_id() {
         let frame = rr3_bridge_call(1, RR3_SERVO_TOPIC, &json!({}));
         // dst 门
         let mut wrong_dst = frame.clone();
@@ -110,7 +110,7 @@ mod tests {
     /// 缺 params 的请求：topic/method 落空串、args 落 Null（分发面据此拒收，
     /// 解析面不猜形状）。
     #[test]
-    fn parse_tolerates_missing_params_with_empty_view() {
+    fn parse_miss_view() {
         let body = br#"{"jsonrpc":"2.0","id":5}"#;
         let payload = rr3_body_encode(Rr3PayloadType::Request, body);
         let mut hdr = Rr3Header::rr3_hdr_broadcast(opcode::SEND, payload.len() as u32);

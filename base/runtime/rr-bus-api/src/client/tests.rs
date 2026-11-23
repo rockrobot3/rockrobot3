@@ -150,7 +150,7 @@ fn connect_on(tag: &str, log: Arc<Mutex<Vec<(String, Value)>>>) -> (Rr3BusClient
 /// 显式端点入口：与 `rr3_connect` 同一套注册/心跳，只是路径不经环境变量
 /// （`rr3-ctl tail --bus-path` 的唯一落点）。
 #[test]
-fn connect_at_registers_on_explicit_path() {
+fn connect_explicit() {
     let log = Arc::new(Mutex::new(Vec::new()));
     let path = fake_on("at", log.clone());
     let client =
@@ -165,7 +165,7 @@ fn connect_at_registers_on_explicit_path() {
 }
 
 #[test]
-fn manifest_identity_takes_name_and_heartbeat() {
+fn mft_name_heartbeat() {
     let id = rr3_manifest_ident(MANIFEST).unwrap();
     assert_eq!(id.name, "rr3-bus-t");
     assert_eq!(id.heartbeat_ms, 50);
@@ -177,7 +177,7 @@ fn manifest_identity_takes_name_and_heartbeat() {
 }
 
 #[test]
-fn entry_absolutize_rewrites_entry_and_keeps_rest() {
+fn entry_keeps_rest() {
     let out = rr3_entry_absolutize(MANIFEST, Path::new("/opt/rr3/rr3-sense")).unwrap();
     let root: toml::Value = out.parse().unwrap();
     assert_eq!(
@@ -190,7 +190,7 @@ fn entry_absolutize_rewrites_entry_and_keeps_rest() {
 }
 
 #[test]
-fn connect_registers_and_call_round_trips() {
+fn connect_call_trips() {
     let log = Arc::new(Mutex::new(Vec::new()));
     let (client, path) = connect_on("call", log.clone());
     assert_eq!(client.rr3_task(), 7);
@@ -212,7 +212,7 @@ fn connect_registers_and_call_round_trips() {
 /// B-8（本轮审计）：载荷超总线读侧策略帽时写侧必须先拒——旧行为是把帧写进
 /// socket，rrd 读侧拒收后断链，模块只看到"总线已断开"，根因丢失。
 #[test]
-fn publish_rejects_payload_over_bus_cap() {
+fn pub_rej_bus_cap() {
     let log = Arc::new(Mutex::new(Vec::new()));
     let (client, path) = connect_on("cap", log);
     let big = "x".repeat(RR3_FRAMING_PLEN_CAP_DEFAULT);
@@ -228,7 +228,7 @@ fn publish_rejects_payload_over_bus_cap() {
 /// 且失败路径关 socket 收掉 reader——旧写法只置 stop 再 join，reader 卡在
 /// read 上会把启动超时拖成永久挂死。
 #[test]
-fn connect_times_out_and_aborts_reader_when_peer_is_silent() {
+fn connect_out_silent() {
     use std::time::Instant;
     let path = tmp_bus_path("silent");
     let listener = UnixListener::bind(&path).unwrap();
@@ -258,7 +258,7 @@ fn connect_times_out_and_aborts_reader_when_peer_is_silent() {
 }
 
 #[test]
-fn publish_reaches_bus_and_broadcast_lands_in_inbox() {
+fn pub_bus_lands_inbox() {
     let log = Arc::new(Mutex::new(Vec::new()));
     let (client, path) = connect_on("pub", log.clone());
     client.rr3_publish("rr3-t/pcm", json!({"seq": 1})).unwrap();
@@ -350,7 +350,7 @@ fn wait_incr_hb(log: &Arc<Mutex<Vec<(String, Value)>>>, observed_len: usize) -> 
 /// 之后跨拍只发新增量——rrd 归并按增量累加，聚合表才是生命周期累计而非
 /// 二次方膨胀）。有界轮询不猜时刻（hb=50ms，2s 上界足够）。
 #[test]
-fn heartbeat_carries_counters_only_after_bump() {
+fn heartbeat_bump() {
     let log = Arc::new(Mutex::new(Vec::new()));
     let (client, path) = connect_on("cnt", log.clone());
     // 第一段：等一个不带 counters 的心跳（空增量 → params = {}）
@@ -380,7 +380,7 @@ fn heartbeat_carries_counters_only_after_bump() {
 
 /// topic 参数的写入形状钉死：rrd 的 rr3.call 解析器按 params.topic/args 取值
 #[test]
-fn call_topic_sends_method_and_params_shape() {
+fn call_sends_shape() {
     let log = Arc::new(Mutex::new(Vec::new()));
     let (client, path) = connect_on("ct", log.clone());
     // 假 rrd 对 rr3.call 不回标准应答（走 _ 分支回了 {"noop":true}）——够用来核对线上形状
@@ -423,7 +423,7 @@ fn spawn_dead_rrd(listener: UnixListener, close_rx: mpsc::Receiver<()>) {
 /// `rr3_poll_wait` 立即返回空。心跳用大间隔（3600s）：否则心跳线程先撞上
 /// 断连走 `exit(1)`，测试进程自己先死，探针根本轮不到被观察。
 #[test]
-fn disconnect_flips_connected_false_and_poll_wait_returns_promptly() {
+fn disc_wait_promptly() {
     use std::time::Instant;
     let path = tmp_bus_path("dead");
     let listener = UnixListener::bind(&path).unwrap();

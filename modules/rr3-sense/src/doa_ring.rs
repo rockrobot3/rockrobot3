@@ -71,7 +71,7 @@ mod tests {
     /// 判向窗 ring：未满窗快照只有已积累帧（原序）；满窗回绕后快照 = 最旧在前
     /// 最新在后的线性化；不足一帧的余数丢弃（帧交错纪律）。
     #[test]
-    fn doa_ring_accumulates_and_linearizes_snapshot() {
+    fn doa_ring_snapshot() {
         let mut ring = Rr3DoaRing::rr3_ring_new(4, 2);
         ring.rr3_ring_feed(&[1, 2, 3, 4, 5, 6]);
         assert_eq!(
@@ -94,7 +94,7 @@ mod tests {
     /// ring → snapshot → 判向机制的组合件侧集成形状：τ=+4 声源在右、τ=−4 在左
     /// （确定性宽带源与 mech 侧 golden 同构；此处只证管线通，算法逐位由 mech 钉）。
     #[test]
-    fn doa_ring_snapshot_feeds_tdoa_pipeline() {
+    fn doa_tdoa_pipeline() {
         fn xs_next(x: &mut u32) -> i16 {
             *x ^= *x << 13;
             *x ^= *x >> 17;

@@ -13,7 +13,7 @@ use super::{repo_cfg, write_llm_model};
 
 /// 模型行实效重解析（迁移件三客户端重建的取数口）：live 写后读新值
 #[test]
-fn model_row_of_reflects_live_write() {
+fn model_row_live_write() {
     let mut cfg = repo_cfg();
     write_llm_model(&mut cfg, json!("deepseek-reasoner"));
     let row = rr3_model_row_of(&cfg).unwrap();
@@ -47,7 +47,7 @@ fn temp_cfg() -> (std::path::PathBuf, std::path::PathBuf, Rr3BrainCfg) {
 
 /// 列表快照：逐键形状齐备、只回 key_ref/key_set（无密钥明文）、active 点名
 #[test]
-fn model_list_snapshot_reports_rows_without_secret() {
+fn model_rows_secret() {
     let cfg = repo_cfg();
     let v = rr3_model_list(&cfg).unwrap();
     assert_eq!(v["active"], json!("DeepSeek官方"));
@@ -64,7 +64,7 @@ fn model_list_snapshot_reports_rows_without_secret() {
 
 /// 空行表：models 空、active = null（cloud fallback 无行可点名）
 #[test]
-fn model_list_snapshot_empty_table_has_null_active() {
+fn model_has_active() {
     let mut cfg = repo_cfg();
     cfg.doc["rr3-brain"]
         .as_object_mut()
@@ -76,7 +76,7 @@ fn model_list_snapshot_empty_table_has_null_active() {
 
 /// upsert：新行落盘（.bak 备份 + 正式文件新值）、内存同步、应答 persisted/live
 #[test]
-fn model_set_upsert_persists_and_hot_swaps_active() {
+fn model_set_hot_active() {
     let (dir, path, mut cfg) = temp_cfg();
     let reply = rr3_model_set_arm(
         &mut cfg,
@@ -118,7 +118,7 @@ fn model_set_upsert_persists_and_hot_swaps_active() {
 
 /// activate 切行 / active 行拒删 / 删后剩行仍恰一 active
 #[test]
-fn model_set_activate_and_delete_rules() {
+fn model_set_rules() {
     let (dir, _path, mut cfg) = temp_cfg();
     rr3_model_set_arm(
         &mut cfg,
@@ -148,7 +148,7 @@ fn model_set_activate_and_delete_rules() {
 
 /// 写面自守两红：base_url 非完整 API 根 / 未注入 config 路径（都不动文件）
 #[test]
-fn model_set_rejects_bad_root_and_missing_path() {
+fn model_rej_bad_miss() {
     let (dir, _path, mut cfg) = temp_cfg();
     let e = rr3_model_set_arm(
         &mut cfg,
@@ -180,7 +180,7 @@ fn model_set_rejects_bad_root_and_missing_path() {
 
 /// 连通性测试：mock 档回 ok:true + mock:true（业务失败走 ok:false，不折 Err）
 #[test]
-fn model_test_arm_mock_and_unknown_row() {
+fn model_arm_mock_row() {
     std::env::set_var(crate::cloud::RR3_CLOUD_MODE_ENV, "mock");
     let cfg = repo_cfg();
     let v = rr3_model_test_arm(&cfg, &json!({"name": "DeepSeek官方"})).unwrap();

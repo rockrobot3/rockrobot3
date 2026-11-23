@@ -313,7 +313,7 @@ mod tests {
 
     /// 超时/非零错误里的 argv 必须脱敏：ssid 与非凭据值保留，psk 值打码。
     #[test]
-    fn redact_hides_wifi_psk() {
+    fn redact_wifi_psk() {
         let args = [
             "con",
             "modify",
@@ -339,7 +339,7 @@ mod tests {
 
     /// 读帽：源源不断的输入也只收到 1MiB（deadline 管时间，帽管字节量）。
     #[test]
-    fn read_stops_at_byte_cap() {
+    fn read_stops_byte_cap() {
         let mut src = std::io::repeat(b'x').take((RR3_NM_OUT_CAP as u64) * 4);
         let out = capped_loop(&mut src, Instant::now() + Duration::from_secs(5));
         assert_eq!(out.len(), RR3_NM_OUT_CAP, "超帽即截断");

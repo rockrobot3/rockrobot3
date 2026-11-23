@@ -327,7 +327,7 @@ mod tests {
     /// I2C_SLAVE ioctl 号钉死 i2c-dev.h 定值 `_IO(0x07, 0x03)` = 0x0703
     /// （libc 0.2 musl 面不导出，自定义常量的 ABI 参考锚）
     #[test]
-    fn i2c_slave_ioctl_matches_i2c_dev_h() {
+    fn i2c_ioctl_i2c_dev_h() {
         assert_eq!(I2C_SLAVE_IOCTL, 0x0703);
         // _IO 编码自洽：无方向无 size，type=0x07 nr=0x03
         assert_eq!(I2C_SLAVE_IOCTL, (0x07 << 8) | 0x03);
@@ -336,7 +336,7 @@ mod tests {
     /// 设备名形状（i2c-dev.h `i2c-%d`）：漏连字符会打开不存在的路径——真机
     /// OLED 换装首启暴露本缺陷，INA219 档同源同修，纯函数钉死命名。
     #[test]
-    fn bus_path_uses_i2c_dash_bus_naming() {
+    fn bus_i2c_bus_naming() {
         let p = Rr3LinuxIna219::rr3_linux_power_new(Path::new("/dev"), 1, 0x40, None);
         assert_eq!(p.bus_dev_path(), PathBuf::from("/dev/i2c-1"));
     }
@@ -344,7 +344,7 @@ mod tests {
     /// INA219 bus voltage 换算钉死：13-bit [15:3] + LSB 4mV——真件档 i2cget
     /// 对拍的换算基准（标定超差先查这里）
     #[test]
-    fn bus_mv_decodes_13bit_lsb4mv() {
+    fn bus_mv_13bit_lsb4mv() {
         assert_eq!(ina219_bus_mv(0x0000), 0);
         assert_eq!(ina219_bus_mv(0x0008), 4, "LSB 4mV");
         assert_eq!(
@@ -361,7 +361,7 @@ mod tests {
     /// percent 与 sim 曲线同一条线：3200–4200mV ↔ 0–100，越界 clamp，
     /// 中点 3700 → 50
     #[test]
-    fn cell_percent_matches_sim_voltage_curve() {
+    fn cell_sim_volt_curve() {
         assert_eq!(cell_percent(0), 0);
         assert_eq!(cell_percent(3199), 0);
         assert_eq!(cell_percent(3200), 0);
@@ -378,7 +378,7 @@ mod tests {
     /// 错误传播路径（确定性，不触真硬件）：temp 树放普通文件冒充 i2c 总线——
     /// open 成功但 ioctl 非字符设备必 ENOTTY，ensure 显式回 InvalidParam
     #[test]
-    fn ensure_on_non_chardev_fails_loudly() {
+    fn ensure_fail_loudly() {
         let root = std::env::temp_dir().join(format!("rr3-hal-pwr-{}-err", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("i2c-1"), "").unwrap();
@@ -394,7 +394,7 @@ mod tests {
 
     /// 占位实例（从未 ensure）Drop 不碰任何 fd
     #[test]
-    fn drop_without_ensure_is_noop() {
+    fn drop_ensure_noop() {
         let root = std::env::temp_dir().join(format!("rr3-hal-pwr-{}-drop", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let dev = Rr3LinuxIna219::rr3_linux_power_new(&root, 1, 0x40, None);
@@ -405,7 +405,7 @@ mod tests {
     /// 器件 ID 判据钉死 `contracts/devices.toml` 的 `id_reg`（0x00 / 0x399F）：
     /// 契约与代码分家时这条先红
     #[test]
-    fn id_judge_matches_devices_contract() {
+    fn id_judge_contract() {
         assert_eq!(INA219_REG_CONFIG, 0x00, "id_reg.addr");
         assert_eq!(RR3_INA219_ID_EXPECT, 0x399F, "id_reg.expect（上电复位值）");
     }
@@ -413,7 +413,7 @@ mod tests {
     /// 校准公式算例（手册式 CAL = 0.04096/(R×I_lsb) 的毫欧/微安折算）：
     /// 0.1Ω × 100µA → 0x1000；2mΩ × 1mA → 0x5000
     #[test]
-    fn cal_reg_nominal_examples() {
+    fn cal_reg_examples() {
         let cal = Rr3InaCal {
             r_mohm: 100,
             i_lsb_ua: 100,
@@ -428,7 +428,7 @@ mod tests {
 
     /// 零参（除零）与超 16 位各点名拒——不静默截断成"看起来能用"的值
     #[test]
-    fn cal_reg_rejects_zero_and_overflow() {
+    fn cal_reg_rej_overflow() {
         for cal in [
             Rr3InaCal {
                 r_mohm: 0,
@@ -452,7 +452,7 @@ mod tests {
 
     /// 校准寄存器帧 = 指针 + 原生大端两字节（写相位编码单测）
     #[test]
-    fn cal_frame_is_pointer_then_big_endian() {
+    fn cal_then_big_endian() {
         assert_eq!(INA219_REG_CALIBRATION, 0x05);
         assert_eq!(
             rr3_reg_frame(INA219_REG_CALIBRATION, 0x1000),

@@ -408,7 +408,7 @@ pub mod parity {
         /// 期望腿守门：runner 实跑必须逐位等于契约期望（宿主面上的第一道门，
         /// 板上对拍之前的预检——期望推错或原语语义漂移都在这里先红）。
         #[test]
-        fn parity_runner_matches_contract_expected() {
+        fn parity_expected() {
             assert_eq!(
                 rr3_parity_run(),
                 RR3_PARITY_EXPECTED,

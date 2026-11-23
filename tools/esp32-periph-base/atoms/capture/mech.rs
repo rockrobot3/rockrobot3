@@ -118,7 +118,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gain_i16_clamps_at_saturation() {
+    fn gain_i16_saturation() {
         assert_eq!(gain_i16(100, 8), 800);
         assert_eq!(gain_i16(0, 8), 0);
         assert_eq!(gain_i16(4095, 8), 32760, "顶格不饱和");
@@ -127,7 +127,7 @@ mod tests {
     }
 
     #[test]
-    fn frame32_to_pair_sign_extends_24bit() {
+    fn frame32_sign_24bit() {
         // L = 0x00123456（24bit 值 0x123456）>>8 = 0x1234 = 4660；
         // R = 0xFFEDCBA9（24bit 值 0xFFEDCB 负值）>>8 = 符号扩展 0xFFFFEDCB = -4661
         let (l, r) = frame32_to_pair(&[0x00, 0x12, 0x34, 0x56, 0xFF, 0xED, 0xCB, 0xA9]);
@@ -136,7 +136,7 @@ mod tests {
     }
 
     #[test]
-    fn chunk_to_pcm_interleaves_s16le_in_pairs() {
+    fn chunk_pcm_pairs() {
         // 首帧只做状态置位（y=0）；随后 x 恒定 → y 恒 0，输出全 0（DC 被阻断）
         let chunk = [1_000_000i32; 8];
         let mut dc = Rr3DcBlocker::new();
@@ -151,7 +151,7 @@ mod tests {
     /// 与次片都会归零、但片间基线跳变会造出 31/47/62/78Hz 拉链噪声；连续
     /// 阻断器的第二片必须同样收敛到 0）。
     #[test]
-    fn dc_blocker_is_continuous_across_chunk_boundaries() {
+    fn dc_chunk_boundaries() {
         let mut dc = Rr3DcBlocker::new();
         let chunk = [1_000_000i32; 4000]; // 2000 帧 ×2ch = 两片 1000 帧
         let a = chunk_to_pcm(&chunk[..2000], 1, &mut dc);
@@ -169,7 +169,7 @@ mod tests {
 
     /// 分片切法不改变结果：同一序列一次喂与分两次喂输出逐字节相同（状态跨片）
     #[test]
-    fn dc_blocker_chunking_does_not_change_output() {
+    fn dc_not_change_output() {
         let samples: Vec<i32> = (0..4000).map(|i| 500_000 + (i % 32) * 1000).collect();
         let mut whole = Rr3DcBlocker::new();
         let a = chunk_to_pcm(&samples, 1, &mut whole);
@@ -181,7 +181,7 @@ mod tests {
 
     /// 空分片不推进状态；reset 回到首帧置位语义
     #[test]
-    fn dc_blocker_empty_and_reset_keep_state_discipline() {
+    fn dc_keep_discipline() {
         let samples: Vec<i32> = (0..800).map(|i| i * 7 - 3000).collect();
         let mut dc = Rr3DcBlocker::new();
         let first = chunk_to_pcm(&samples[..400], 1, &mut dc);
@@ -201,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn chunk_to_pcm_empty_and_half_frame_are_empty() {
+    fn chunk_pcm_half_empty() {
         let mut dc = Rr3DcBlocker::new();
         assert!(chunk_to_pcm(&[], 8, &mut dc).is_empty());
         // 残半帧（单采样）按整帧取（len/2=0）→ 空，与组帧面 frames==0 拒收同口径
@@ -209,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn push_bounded_drops_oldest_when_full() {
+    fn push_drops_full() {
         let mut q = VecDeque::new();
         assert!(!push_bounded(&mut q, vec![1], 2));
         assert!(!push_bounded(&mut q, vec![2], 2));

@@ -249,7 +249,7 @@ mod tests {
 
     /// 契约必须解析成 6 条器件，逐条点名断言（与 contract.rs 的形状 pin 同源、彼此独立）
     #[test]
-    fn contract_text_parses_into_expected_shape() {
+    fn contract_text_shape() {
         let table = rr3_dev_parse(CONTRACT);
         assert_eq!(
             table.devices.len(),
@@ -286,7 +286,7 @@ mod tests {
 
     /// 解析失败给空表，空表是契约事故——check 点名不静默放行
     #[test]
-    fn unparsable_text_yields_empty_table_and_check_is_fatal() {
+    fn unparsable_fatal() {
         assert!(rr3_dev_parse("not [ toml").devices.is_empty());
         let errs = rr3_dev_parse("").rr3_dev_check();
         assert_eq!(errs.len(), 1);
@@ -295,7 +295,7 @@ mod tests {
 
     /// 形状反例：bus 越域 / I2C 缺地址集 / baud_ok 缺 / peak_ma ≤ 0 逐条点名
     #[test]
-    fn shape_errors_are_named() {
+    fn shape_errors_named() {
         let table = rr3_dev_parse(
             r#"
 [[device]]

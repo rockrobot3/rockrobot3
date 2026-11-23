@@ -107,7 +107,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tone_pcm_has_expected_length_and_no_clipping() {
+    fn tone_has_no_clipping() {
         let pcm = tone_pcm();
         assert_eq!(pcm.len(), (SPK_SR_HZ * SPK_TONE_MS / 1000) as usize * 4);
         let peak = pcm

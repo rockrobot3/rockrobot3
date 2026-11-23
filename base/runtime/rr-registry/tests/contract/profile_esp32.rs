@@ -212,7 +212,7 @@ fn mini_tier_scope(
 /// [slots].present 升序且恰为三格；[hardware] 缺省（九键是宿主侧语义，板侧描述符归
 /// 0.0.7 批G/批D1，进位同批改本断言）；看门狗在板且由板侧运行环喂（桥断仍守护）。
 #[test]
-fn esp32_mini_profile_binds_bridged_minimal_shape() {
+fn esp32_mini_shape() {
     let root = repo_root();
     let table = rr_registry::rr3_slot_parse(&slots_toml());
     let manifests: std::collections::BTreeMap<String, toml::Value> =
@@ -326,7 +326,7 @@ fn s3_harness(v: &toml::Value, root: &std::path::Path) {
 }
 
 #[test]
-fn esp32s3_mini_profile_pins_s3_harness() {
+fn esp32s3_s3_harness() {
     let root = repo_root();
     let text = std::fs::read_to_string(root.join("profiles/esp32s3-mini.toml"))
         .expect("profiles/esp32s3-mini.toml 必须存在（W1/T2）");

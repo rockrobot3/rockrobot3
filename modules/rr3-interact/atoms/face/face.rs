@@ -124,7 +124,7 @@ mod tests {
 
     /// 白名单全集逐个查得回；非在册名返回 None（I-11：config 注入值的对账点）
     #[test]
-    fn expression_lookup_covers_whitelist() {
+    fn expr_whitelist() {
         for e in RR3_FACE_EXPRESSIONS {
             assert_eq!(rr3_face_expr_lookup(e), Some(e), "在册名必须查得回: {e}");
         }
@@ -133,7 +133,7 @@ mod tests {
 
     /// 不可点名集展示串：常规集 / 单元素 / 空集（空集是合法数据选择，非错）
     #[test]
-    fn non_pointable_join_renders_set_and_empty() {
+    fn non_join_set_empty() {
         assert_eq!(rr3_unpointable_join(&["talk"]), "talk");
         assert_eq!(rr3_unpointable_join(&["talk", "blink"]), "talk/blink");
         assert_eq!(rr3_unpointable_join(&[]), "(空)");
@@ -142,7 +142,7 @@ mod tests {
     /// 连接串常量投影对账（批N24 件四）：投影与 `join("/")` 输出逐字一致——
     /// 白名单扩员时本测红，提示同步扩投影（错误文案面不再运行时 join 落堆）。
     #[test]
-    fn joined_projection_matches_whitelist_join() {
+    fn joined_proj_join() {
         assert_eq!(
             RR3_FACE_EXPRESSIONS_JOINED,
             RR3_FACE_EXPRESSIONS.join("/"),
@@ -155,7 +155,7 @@ mod tests {
     /// 副本。本测试把真值点文本逐名比对钉死：扩态须契约文件与本常量同批，
     /// 单改一侧即红（板侧副本由 rr3-codegen 生成，门 f 拟 ⑨-d 重跑 diff 为空）。
     #[test]
-    fn expressions_match_contract_truth_point() {
+    fn exprs_truth_point() {
         let contract = include_str!("../../../../contracts/face-expressions.toml");
         // 提取 TOML 数组（跨行）内的字符串项——契约文件形状由门 f 与真值点
         // 自身钉死，此处只做最小文本提取，不引 toml 解析依赖。

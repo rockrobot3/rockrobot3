@@ -50,7 +50,7 @@ mod tests {
     /// 真值锚定：位形/直连 trace/缺省波特率与 rr-core、rr-ipc 逐值一致，
     /// magic 首字节与帧头 LE 线上字节一致（漂移即红）。
     #[test]
-    fn consts_match_protocol_truth() {
+    fn consts_proto_truth() {
         assert_eq!(RR3_TASK_HOST, 1, "宿主位形=rrd（rr-core::RR3_TASK_RRD）");
         assert_eq!(
             RR3_TRACE_DIRECT, 0,

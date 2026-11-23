@@ -41,7 +41,7 @@ mod tests {
     /// 白名单口径：七核心态在前（帧表下标锚点，契约字面量不动），char 单字符
     /// 档 36 个随后（charA..charZ + char0..char9），末尾 9 情绪/彩蛋态，全集 52。
     #[test]
-    fn whitelist_covers_core_and_char_expressions() {
+    fn whitelist_char_exprs() {
         assert_eq!(RR3_FACE_EXPRESSIONS.len(), 52);
         assert_eq!(
             &RR3_FACE_EXPRESSIONS[..7],
@@ -83,7 +83,7 @@ mod tests {
     /// 各回落点（end_talk 无挂起、begin_talk 幂等分支、切换前值）取注入值
     /// 而非硬编码 idle——机制零策略载荷的 mech 侧钉子。
     #[test]
-    fn default_expression_injection_drives_fallbacks() {
+    fn injection_def_expr() {
         let mut f = Rr3Face::rr3_face_default("happy");
         // 初态即兜底表情：首次切换的"切换前"就是注入值
         assert_eq!(f.rr3_face_set("blink", NON_TALK).unwrap().1, "happy");
@@ -98,7 +98,7 @@ mod tests {
     /// char 单字符档：帧表映射对得上 + 点名成功 + 单帧恒报 0（charH 横杠行钉死，
     /// 字模转换走偏在此最先响）
     #[test]
-    fn char_expression_is_pointable_single_frame() {
+    fn char_expr_frame() {
         assert_eq!(rr3_face_frames("charH"), RR3_FRAMES_CHAR_H.as_slice());
         assert_eq!(
             RR3_FRAMES_CHAR_H[0][3], 0b0111_1100,
@@ -116,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn new_states_are_point_namable() {
+    fn new_point_namable() {
         let mut f = Rr3Face::default();
         assert_eq!(
             f.rr3_face_set("listen", NON_TALK).unwrap(),
@@ -129,7 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn single_frame_state_ticks_in_place() {
+    fn single_ticks_place() {
         let mut f = Rr3Face::default();
         for _ in 0..3 {
             assert_eq!(f.rr3_face_tick(), ("idle", 0), "单帧态恒报帧 0");
@@ -137,7 +137,7 @@ mod tests {
     }
 
     #[test]
-    fn multi_frame_state_cycles() {
+    fn multi_state_cycles() {
         let mut f = Rr3Face::default();
         f.rr3_face_set("blink", NON_TALK).unwrap();
         assert_eq!(f.rr3_face_tick(), ("blink", 0));
@@ -147,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn switch_resets_frame_pointer() {
+    fn switch_frame_pointer() {
         let mut f = Rr3Face::default();
         f.rr3_face_set("blink", NON_TALK).unwrap();
         f.rr3_face_tick(); // 指针已推到 1
@@ -156,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn talk_window_ticks_talk_frames() {
+    fn talk_talk_frames() {
         let mut f = Rr3Face::default();
         f.rr3_face_set("happy", NON_TALK).unwrap();
         f.rr3_face_begin_talk();
@@ -167,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn frame_table_shape_is_sound() {
+    fn frame_shape_sound() {
         assert_eq!(RR3_FACE_EXPRESSIONS.len(), RR3_FACE_FRAME_TABLE.len());
         // 双帧态帧间互异（有动画可言）；全表序列两两互异（状态→帧映射无歧义）
         assert_ne!(RR3_FRAMES_BLINK[0], RR3_FRAMES_BLINK[1]);
@@ -194,7 +194,7 @@ mod tests {
     }
 
     #[test]
-    fn set_accepts_whitelist_and_reports_transition() {
+    fn set_ok_reports_trans() {
         let mut f = Rr3Face::default();
         assert_eq!(
             f.rr3_face_set("happy", NON_TALK).unwrap(),
@@ -207,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn set_rejects_unknown_and_point_named_talk() {
+    fn set_rej_named_talk() {
         let mut f = Rr3Face::default();
         assert!(f.rr3_face_set("wink", NON_TALK).is_err());
         assert!(f.rr3_face_set("", NON_TALK).is_err());
@@ -224,7 +224,7 @@ mod tests {
 
     /// I-11：排除规则从件内 if 迁出为注入集——改数据即改行为，件内无 `match` 分支
     #[test]
-    fn injected_non_pointable_narrows_surface() {
+    fn injected_non_surface() {
         // 空集：本形态不排除任何表情点名，连 talk 都可点名
         let mut open = Rr3Face::default();
         assert_eq!(open.rr3_face_set("talk", &[]).unwrap(), ("talk", "idle"));
@@ -245,7 +245,7 @@ mod tests {
     /// 两拒因分变体（批N24 件四）：不认 → UnknownExpression 携原始输入、
     /// 排除集命中 → NonPointable 携在册名——枚举映射是编排层渲染的依据。
     #[test]
-    fn set_rejects_split_into_two_variants() {
+    fn set_rej_two_variants() {
         let mut f = Rr3Face::default();
         assert_eq!(
             f.rr3_face_set("wink", NON_TALK).unwrap_err(),
@@ -261,7 +261,7 @@ mod tests {
 
     /// I-11：拒因文案点名"本形态不可点名集"（空集渲染 `(空)`，见 face.rs 用例）
     #[test]
-    fn non_pointable_reject_names_the_set() {
+    fn non_rej_names_set() {
         let mut f = Rr3Face::default();
         assert_eq!(
             f.rr3_face_set("talk", NON_TALK).unwrap_err(),
@@ -271,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn talk_suspends_and_restores_previous() {
+    fn talk_previous() {
         let mut f = Rr3Face::default();
         f.rr3_face_set("think", NON_TALK).unwrap();
         assert_eq!(f.rr3_face_begin_talk(), "think", "挂起前的表情");
@@ -293,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn talk_without_suspend_restores_idle_and_is_idempotent() {
+    fn talk_idle_idempotent() {
         let mut f = Rr3Face::default();
         // 无挂起态的 end_talk 回 idle
         assert_eq!(f.rr3_face_end_talk(), "idle");
@@ -310,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_set_interrupts_talk_suspend() {
+    fn explicit_set_suspend() {
         let mut f = Rr3Face::default();
         f.rr3_face_set("blink", NON_TALK).unwrap();
         f.rr3_face_begin_talk();

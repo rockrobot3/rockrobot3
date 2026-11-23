@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 
 /// 构造即 Registering：无心跳、无拍点、net.online 为假
 #[test]
-fn new_starts_registering_with_no_heartbeat() {
+fn new_no_heartbeat() {
     let rt = Rr3ModuleRuntime::rr3_runtime_new(50);
     assert_eq!(rt.rr3_link_state(), Rr3LinkState::Registering);
     assert!(!rt.rr3_link_online());
@@ -21,14 +21,14 @@ fn new_starts_registering_with_no_heartbeat() {
 
 /// 心跳间隔保底 ≥1ms（std 驱动器 `hb_ms.max(1)` 同一条规则进机制核）
 #[test]
-fn heartbeat_interval_floors_at_one_ms() {
+fn heartbeat_floors_ms() {
     assert_eq!(Rr3ModuleRuntime::rr3_runtime_new(0).rr3_heartbeat_ms(), 1);
     assert_eq!(Rr3ModuleRuntime::rr3_runtime_new(50).rr3_heartbeat_ms(), 50);
 }
 
 /// 注册转移：Online + 首拍 = 注册时刻 + 间隔（拍点序列与 std 心跳线程逐拍一致）
 #[test]
-fn registered_schedules_first_beat_one_interval_out() {
+fn reg_first_beat_out() {
     let mut rt = Rr3ModuleRuntime::rr3_runtime_new(50);
     rt.rr3_mark_registered(7, 1_000);
     assert_eq!(rt.rr3_link_state(), Rr3LinkState::Online { task: 7 });
@@ -43,7 +43,7 @@ fn registered_schedules_first_beat_one_interval_out() {
 /// 相对节拍：下一拍 = 本拍发出时刻 + 间隔（drift 语义，与 std 行为一致；
 /// 迟到的一拍不追拍）
 #[test]
-fn heartbeat_sent_advances_relative_beat() {
+fn heartbeat_sent_beat() {
     let mut rt = Rr3ModuleRuntime::rr3_runtime_new(50);
     rt.rr3_mark_registered(7, 1_000);
     rt.rr3_heartbeat_sent(1_060); // 迟到 10ms 才发出
@@ -55,7 +55,7 @@ fn heartbeat_sent_advances_relative_beat() {
 
 /// 断开转移（幂等）：Down 后无节拍、net.online 翻假、sent 是无操作
 #[test]
-fn mark_down_is_terminal_and_idempotent() {
+fn mark_down_idempotent() {
     let mut rt = Rr3ModuleRuntime::rr3_runtime_new(50);
     rt.rr3_mark_registered(7, 1_000);
     rt.rr3_mark_down();
@@ -71,7 +71,7 @@ fn mark_down_is_terminal_and_idempotent() {
 /// 逐拍一致性：注入时钟推进，拍点序列 = 注册点 + k·间隔（std 心跳线程的
 /// sleep 间隔序列的机制核镜像）
 #[test]
-fn beat_train_is_periodic_under_injected_clock() {
+fn beat_train_clock() {
     let mut rt = Rr3ModuleRuntime::rr3_runtime_new(20);
     rt.rr3_mark_registered(7, 0);
     let mut fired = Vec::new();
@@ -88,7 +88,7 @@ fn beat_train_is_periodic_under_injected_clock() {
 
 /// 分发分类表：Response → 等待者路由；其余四类 → inbox
 #[test]
-fn dispatch_class_routes_only_response_to_pending() {
+fn dispatch_pending() {
     assert_eq!(
         rr3_dispatch_class(Rr3PayloadType::Response),
         Rr3Dispatch::Pending
@@ -116,7 +116,7 @@ fn dispatch_class_routes_only_response_to_pending() {
 /// 腿一（确定性）：同一事件序列两次格式化，行序列逐字节相同——
 /// 同一输入在 Linux 实时环与裸机定时器上产出同一输出序列（§12.5 逐拍一致）。
 #[test]
-fn guard_line_train_is_deterministic() {
+fn guard_line_train_det() {
     let events = [
         Rr3GuardEvent::Boot(Rr3LinkState::Registering),
         Rr3GuardEvent::Boot(Rr3LinkState::Online { task: 7 }),
@@ -146,7 +146,7 @@ fn guard_line_train_is_deterministic() {
 /// 腿二（契约）：每类事件的行形状与 [`Rr3GuardEvent`] 文法逐字节一致
 /// （期望值来自注释钉死的文法，不来自实现）。
 #[test]
-fn guard_line_matches_contract_grammar() {
+fn guard_line_grammar() {
     let mut g = Rr3GuardBuf::rr3_guard_buf_new();
     assert_eq!(
         g.rr3_guard_format(&Rr3GuardEvent::Boot(Rr3LinkState::Registering)),
@@ -199,7 +199,7 @@ fn guard_line_matches_contract_grammar() {
 /// 容量上界：u64::MAX 的最长行（42 字节）完整落行不截断；空缓冲读出空串
 /// （RR3_GUARD_LINE_CAP = 48 的定容依据，改文法先改此数与注释）。
 #[test]
-fn guard_line_fits_worst_case_task_number() {
+fn guard_task_number() {
     let mut g = Rr3GuardBuf::rr3_guard_buf_new();
     assert_eq!(g.rr3_guard_as_str(), "");
     let worst = g.rr3_guard_format(&Rr3GuardEvent::Boot(Rr3LinkState::Online {

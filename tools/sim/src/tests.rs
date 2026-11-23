@@ -8,7 +8,7 @@ fn v(items: &[&str]) -> Vec<String> {
 }
 
 #[test]
-fn args_parse_defaults_and_overrides() {
+fn args_parse_overrides() {
     let a = rr3_sim_args_parse(&v(&[])).unwrap();
     assert!(!a.keep);
     assert!(a.socket.is_none() && a.repo.is_none() && a.rrd.is_none());
@@ -26,7 +26,7 @@ fn args_parse_defaults_and_overrides() {
 }
 
 #[test]
-fn brain_flags_parse_whitelist_and_fail_closed() {
+fn brain_fail_closed() {
     // 合法组合：mac 真麦 + 真云 + 端点
     let a = rr3_sim_args_parse(&v(&[
         "--brain",
@@ -75,7 +75,7 @@ fn brain_flags_parse_whitelist_and_fail_closed() {
 }
 
 #[test]
-fn sink_backend_flag_fails_closed() {
+fn sink_fail_closed() {
     // 缺省 None（既有链路零改动）；合法取值入库
     let a = rr3_sim_args_parse(&v(&["--brain"])).unwrap();
     assert!(a.sink_backend.is_none());
@@ -107,7 +107,7 @@ fn sink_backend_flag_fails_closed() {
 }
 
 #[test]
-fn hold_ms_is_chain_only_and_bounded() {
+fn hold_ms_bounded() {
     let a = rr3_sim_args_parse(&v(&["--chain", "--hold-ms", "60000"])).unwrap();
     assert_eq!(a.hold_ms, Some(60_000));
     let e = rr3_sim_args_parse(&v(&["--hold-ms", "60000"])).unwrap_err();
@@ -119,7 +119,7 @@ fn hold_ms_is_chain_only_and_bounded() {
 }
 
 #[test]
-fn repo_root_found_upward_by_contract_marker() {
+fn repo_root_marker() {
     let base = std::env::temp_dir().join(format!("rr3-sim-root-{}", std::process::id()));
     let deep = base.join("a/b/c");
     std::fs::create_dir_all(deep.join("contracts")).unwrap();
@@ -134,7 +134,7 @@ fn repo_root_found_upward_by_contract_marker() {
 }
 
 #[test]
-fn default_bins_share_target_dir() {
+fn def_bins_share_dir() {
     // target-dir 由仓根配置移出源码区：三个缺省产物必须同层且同名，
     // 不得再按 `<crate>/target/debug` 推（源码区没有产物）。
     let (rrd, peer, rrctl) = rr3_default_bins(std::path::Path::new("/repo"));
@@ -165,7 +165,7 @@ fn default_bins_share_target_dir() {
 }
 
 #[test]
-fn manifest_text_has_absolute_entry_and_real_topic() {
+fn mft_has_real_topic() {
     // C14① 后演练主题 vad_start 的 owner 是 rr3-sense——名字与主题前缀同侧
     let t = rr3_manifest_text(
         "rr3-sense",
@@ -195,7 +195,7 @@ fn manifest_text_has_absolute_entry_and_real_topic() {
 }
 
 #[test]
-fn status_table_parses_and_skips_non_rows() {
+fn status_non_rows() {
     let out = "NAME          TASK  PHASE\n\
                    rr3-sense     2     running\n\
                    denied_publish = 0\n";
@@ -207,7 +207,7 @@ fn status_table_parses_and_skips_non_rows() {
 }
 
 #[test]
-fn wait_modules_polls_until_all_wanted_phases_appear() {
+fn wait_until_appear() {
     // 前两轮缺 A，第三轮齐了
     let mut calls = 0;
     rr3_wait_modules(
@@ -238,7 +238,7 @@ fn wait_modules_polls_until_all_wanted_phases_appear() {
 }
 
 #[test]
-fn sim_module_identities_exist_in_the_real_contract() {
+fn sim_real_contract() {
     // 钉住"演练用的名字/主题必须真实在契约里"——契约改名时这里红，不是演练跑到一半红。
     // 路径从 CARGO_MANIFEST_DIR 上去（tools/sim → 仓根）
     let manifest_dir = env!("CARGO_MANIFEST_DIR");

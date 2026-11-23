@@ -369,14 +369,14 @@ mod tests {
 
     /// 状态读口（续轮十七）：单测进程不定格 sink，必须是 off 而不是 on/dead。
     #[test]
-    fn sink_state_is_off_until_fixed() {
+    fn sink_off_until_fixed() {
         assert_eq!(rr3_log_sink_info().state, "off");
         assert_eq!(rr3_log_sink_info().max_us, 0, "未定格无写耗时");
     }
 
     /// 写阻塞窗（续轮二十五）：max 只记峰值、不在窗口内回落；≥50ms 才计一次慢写。
     #[test]
-    fn sink_lat_tracks_peak_and_slow_count() {
+    fn sink_lat_slow_count() {
         let mut l = Rr3SinkLat::default();
         l.observe(120);
         assert_eq!((l.max_us, l.slow), (120, 0), "低于阈只记峰值");
@@ -391,7 +391,7 @@ mod tests {
     /// 落盘冷却闸（续轮二十三）：失败后一个冷却窗内不重试（不逐行撞盘），到点
     /// 到期再试；成功即恢复；点名只在"首次转入降级"与"恢复"各一次。
     #[test]
-    fn sink_gate_cools_down_then_recovers() {
+    fn sink_then_recovers() {
         let mut g = Rr3SinkGate::default();
         assert!(g.due(0), "健康时随时可写");
         assert!(!g.down());
@@ -408,7 +408,7 @@ mod tests {
     /// 单代轮转（B-8，per-unit 面）：超上界 rename 到 `.1`（旧 `.1` 覆盖），未超界
     /// 不动；文件不存在 = 静默返回。
     #[test]
-    fn log_rotate_triggers_only_over_cap() {
+    fn log_rotate_cap() {
         let dir = tmpdir("rot");
         let f = dir.join("u.log");
         std::fs::write(&f, b"short").unwrap();
@@ -428,7 +428,7 @@ mod tests {
     /// 常持句柄（续轮十四）：一行一次写、内容逐行完整；打开时既有大小计入预算，
     /// 超界在第一行后即轮转（上一进程留下的超界文件不把无界增长带过来）。
     #[test]
-    fn sink_appends_and_rotates_by_byte_budget() {
+    fn sink_byte_budg() {
         let dir = tmpdir("append");
         let path = dir.join("rrd.log");
         std::fs::write(&path, vec![b'y'; (RR3_LOG_MAX_BYTES + 1) as usize]).unwrap();
