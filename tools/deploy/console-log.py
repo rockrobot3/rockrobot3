@@ -107,6 +107,9 @@ def main():
             buf += chunk
             if sink:
                 sink.write(chunk)
+                # 逐块落盘：文件对象默认 8KB 缓冲，采集器被 SIGTERM/中断时
+                # 最后一段日志会丢（2026-11-23 真板取证时实证），标定行不可丢。
+                sink.flush()
             sys.stdout.write(chunk.decode("utf-8", "replace"))
             sys.stdout.flush()
     finally:
