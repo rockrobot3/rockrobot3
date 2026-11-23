@@ -376,7 +376,15 @@ def measure(root):
 
 
 def _sleep_scope(rel):
-    """长睡扫面：模块生产码与 rrd 守护主循环；bin 夹具/测试面不在内。"""
+    """长睡扫面：模块生产码与 rrd 守护主循环；bin 夹具/测试面不在内。
+
+    扫面边界即工程裁定（2026-11-24 明示）：下列秒级等待属板侧启动/看门狗
+    窗口或仿真常驻，不进主循环语义，故不扫：
+    - tools/esp32-periph-base/src/boot.rs（1s 上电稳、30s 配网窗口）
+    - tools/esp32-periph-base/src/httpd/serve/start.rs（1s 监听重试退避）
+    - tools/espidf-sentinel/src/main.rs（30s 哨兵巡检周期）
+    - base/runtime/rrd/src/bin/sim_peer.rs（仿真常驻心跳）
+    """
     if rel.startswith("modules/rr3-"):
         return True
     return rel.startswith("base/runtime/rrd/src/") and "/bin/" not in rel
