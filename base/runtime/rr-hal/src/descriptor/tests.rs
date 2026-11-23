@@ -53,11 +53,8 @@ fn empty_text_is_empty_bindings() {
     );
 }
 
-/// fail-closed 点名：未知键、坏值（十进制域/裸十六进制/空串/越 u8/非 nvs:
-/// 前缀）、非字符串值，一次全收集不静默放行。
-#[test]
-fn unknown_keys_and_bad_values_are_all_named() {
-    let text = concat!(
+fn bad_value_text() -> &'static str {
+    concat!(
         "pwm_chip = \"abc\"\n",
         "i2c_bus = \"-1\"\n",
         "ina219_addr = \"40\"\n", // 裸写有十进制歧义，只认 0x 前缀
@@ -67,8 +64,14 @@ fn unknown_keys_and_bad_values_are_all_named() {
         "link_ifname = 3\n",             // 非字符串标量
         "i2c_sda = \"256\"\n",           // 板侧键取值域 = u8，越域即红
         "cred_store = \"flash:boot\"\n", // 非 nvs: 前缀，批N17 件二
-    );
-    let errs = rr3_bindings_parse(text).expect_err("坏值必须报错");
+    )
+}
+
+/// fail-closed 点名：未知键、坏值（十进制域/裸十六进制/空串/越 u8/非 nvs:
+/// 前缀）、非字符串值，一次全收集不静默放行。
+#[test]
+fn unknown_keys_and_bad_values_are_all_named() {
+    let errs = rr3_bindings_parse(bad_value_text()).expect_err("坏值必须报错");
     assert_eq!(errs.len(), 9, "{errs:?}");
     assert!(
         errs.iter().any(|e| e.contains("pwm_chip 取值不认")),
