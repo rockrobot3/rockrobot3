@@ -25,10 +25,10 @@ fn noise_below_threshold_never_opens() {
     let bus = bus();
     let mut v = VoiceRun::rr3_new_mode(Rr3VoiceMode::Mem);
     for i in 0..100 {
-        v.block(&block(1000), &bus);
+        v.block(&block(300), &bus);
         assert!(
             !v.recording,
-            "第 {i} 块底噪 1000 低于 rms_start=1500，不得起音"
+            "第 {i} 块底噪 300 低于 rms_start=450，不得起音"
         );
     }
 }

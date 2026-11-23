@@ -8,10 +8,10 @@
 //! 半双工（W4-2 语义）：`gated`（播放面 `tts_gate`）期间整段重置——扬声器回授
 //! 不进 VAD，也不进云端 ASR。
 //!
-//! 判据参数：2026-11-23 S3 真板实测房间底噪 `voice mono_rms≈500`，原 500 阈值
-//! 与底噪重合导致 VAD 长期停在进行态、每段拖到 8 s，云端 ASR 8 s 超时；
-//! 阈值抬到 1500。silence_tail=400 ms、min_speech=200 ms、DoA 阈值 30°、
-//! 麦间距 150 mm 不变。
+//! 判据参数：2026-11-23 S3 真板实测空闲 `voice mono_rms≈380–407`、正常说话
+//! 10 s 窗≈427（反推语音块≈470）；1500 完全收不到，500 在旧噪声环境会卡死。
+//! 取 450 并输出峰值诊断，换环境按实测回填。silence_tail=400 ms、
+//! min_speech=200 ms、DoA 阈值 30°、麦间距 150 mm 不变。
 
 use std::sync::{Arc, Mutex};
 
@@ -24,11 +24,12 @@ use crate::board::MIC_SR_HZ;
 use crate::capture::{chunk_to_pcm, frame32_to_pair, Rr3DcBlocker};
 use crate::state::{lock_bus, push_job, rr3_expr_set, Bus, Job};
 
-/// VAD 判据（2026-11-23 S3 真板订正：底噪≈500，原 500 阈值使 VAD 长期停在
-/// 进行态、段段 8 s，ASR 8 s 超时；抬到 1500。max_utter 收 6 s，给云端
-/// ASR 8 s 预算留上传余量）。
+/// VAD 判据（2026-11-23 S3 真板实测：空闲 voice mono_rms≈380–407，正常说话
+/// 10 s 窗均值抬到≈427，反推语音块 RMS≈470；1500 阈值完全收不到。取 450：
+/// 高于当前底噪、低于语音块电平。峰值诊断随 `voice mono_rms` 行输出，便于
+/// 换环境后按实测回填。max_utter 6 s，给云端 ASR 8 s 预算留上传余量）。
 const VAD_CFG: Rr3VadConfig = Rr3VadConfig {
-    rms_start: 1500,
+    rms_start: 450,
     silence_tail_ms: 400,
     min_speech_ms: 200,
 };
@@ -37,7 +38,7 @@ const DOA_CFG: Rr3DoaCfg = Rr3DoaCfg {
     sample_rate_hz: MIC_SR_HZ,
     frame_ms: 20,
     mic_baseline_mm: 150,
-    window_rms_min: 1500,
+    window_rms_min: 450,
     bin_threshold_deg: 30,
 };
 /// 采集块节拍（20 ms）与每块采样数（320 帧 × 2 声道 / 单声道）。
@@ -97,6 +98,7 @@ pub(crate) struct VoiceRun {
     /// 诊断窗（100 块 = 2 s）：VAD 域 mono RMS 均值 + 最近一次播放门状态。
     blocks: u32,
     rms_acc: u64,
+    rms_peak: i64,
     last_gate: bool,
 }
 
@@ -175,6 +177,7 @@ impl VoiceRun {
             dropped: 0,
             blocks: 0,
             rms_acc: 0,
+            rms_peak: 0,
             last_gate: false,
         }
     }
@@ -234,14 +237,17 @@ impl VoiceRun {
     /// 采集统计行叠加后 12s 出 15 行，压掉关键启动行；10s 窗均值更稳且够用。
     fn voice_stats(&mut self, mono: &[i16]) {
         self.blocks = self.blocks.wrapping_add(1);
-        self.rms_acc += rr3_frame_rms(mono).max(0) as u64;
+        let rms = rr3_frame_rms(mono).max(0);
+        self.rms_acc += rms as u64;
+        self.rms_peak = self.rms_peak.max(rms);
         if self.blocks % 500 != 0 {
             return;
         }
         let avg = self.rms_acc / 500;
         self.rms_acc = 0;
+        let peak = std::mem::take(&mut self.rms_peak);
         println!(
-            "[mic] voice mono_rms={avg} gate={} blocks={}",
+            "[mic] voice mono_rms={avg} peak={peak} gate={} blocks={}",
             self.last_gate, self.blocks
         );
     }
