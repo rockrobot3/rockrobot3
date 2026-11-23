@@ -8,13 +8,65 @@ use rr_ipc::{
     Rr3PayloadType, RR3_FRAMING_PLEN_CAP_DEFAULT,
 };
 use serde_json::{json, Value};
-use std::os::unix::net::UnixListener;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const MANIFEST: &str = "[manifest]\nschema_version = 1\nname = \"rr3-bus-t\"\nversion = \"0.0.1\"\ntype = \"module\"\nlang = \"rust\"\nentry = \"/bin/true\"\n\n[events]\npublishes = []\nsubscribes = []\n\n[health]\nheartbeat_ms = 50\n";
+
+/// 假 rrd 的 Request 支路：注册回 src_task=7、心跳回 accepted，别的回 noop；
+/// 点名 Request 原样记账，其余回标准应答。返回 false 表示写失败、连接该收尾。
+fn fake_rrd_request(
+    stream: &mut UnixStream,
+    v: &Value,
+    log: &Arc<Mutex<Vec<(String, Value)>>>,
+) -> bool {
+    let method = v["method"].as_str().unwrap_or("").to_string();
+    let id = v["id"].as_u64().unwrap_or(0);
+    let (result, ok): (Value, bool) = match method.as_str() {
+        "rr3.register" => (json!({"src_task": 7}), true),
+        "rr3.heartbeat" => (json!({"beat": "accepted"}), true),
+        _ => (json!({"noop": true}), true),
+    };
+    log.lock()
+        .unwrap()
+        .push((method.clone(), v["params"].clone()));
+    if method != RR3_METHOD_CALL {
+        let reply = if ok {
+            json!({"jsonrpc": "2.0", "id": id, "result": result})
+        } else {
+            v.clone()
+        };
+        let payload = rr3_body_encode(Rr3PayloadType::Response, reply.to_string().as_bytes());
+        let out = frame_send(payload);
+        if rr3_frame_write(stream, &out).is_err() {
+            return false;
+        }
+    }
+    true
+}
+
+/// 假 rrd 的 Event 支路：记账并回播一条广播。返回 false 表示写失败、连接该收尾。
+fn fake_rrd_event(
+    stream: &mut UnixStream,
+    v: &Value,
+    log: &Arc<Mutex<Vec<(String, Value)>>>,
+) -> bool {
+    log.lock().unwrap().push(("EVENT".into(), v.clone()));
+    let payload = rr3_body_encode(
+        Rr3PayloadType::Event,
+        json!({"topic": "rr3-fake/echo", "echo": true})
+            .to_string()
+            .as_bytes(),
+    );
+    let out = frame_send(payload);
+    if rr3_frame_write(stream, &out).is_err() {
+        return false;
+    }
+    true
+}
 
 /// 假 rrd：收注册回 src_task=7；心跳回 accepted；Event 记账并回播一条广播；
 /// 点名 Request 原样记账。行为写死（测试夹具，不是通用服务器）。
@@ -35,40 +87,12 @@ fn fake_rrd(listener: UnixListener, log: Arc<Mutex<Vec<(String, Value)>>>) {
         };
         match ty {
             Rr3PayloadType::Request => {
-                let method = v["method"].as_str().unwrap_or("").to_string();
-                let id = v["id"].as_u64().unwrap_or(0);
-                let (result, ok): (Value, bool) = match method.as_str() {
-                    "rr3.register" => (json!({"src_task": 7}), true),
-                    "rr3.heartbeat" => (json!({"beat": "accepted"}), true),
-                    _ => (json!({"noop": true}), true),
-                };
-                log.lock()
-                    .unwrap()
-                    .push((method.clone(), v["params"].clone()));
-                if method != RR3_METHOD_CALL {
-                    let reply = if ok {
-                        json!({"jsonrpc": "2.0", "id": id, "result": result})
-                    } else {
-                        v.clone()
-                    };
-                    let payload =
-                        rr3_body_encode(Rr3PayloadType::Response, reply.to_string().as_bytes());
-                    let out = frame_send(payload);
-                    if rr3_frame_write(&mut stream, &out).is_err() {
-                        return;
-                    }
+                if !fake_rrd_request(&mut stream, &v, &log) {
+                    return;
                 }
             }
             Rr3PayloadType::Event => {
-                log.lock().unwrap().push(("EVENT".into(), v.clone()));
-                let payload = rr3_body_encode(
-                    Rr3PayloadType::Event,
-                    json!({"topic": "rr3-fake/echo", "echo": true})
-                        .to_string()
-                        .as_bytes(),
-                );
-                let out = frame_send(payload);
-                if rr3_frame_write(&mut stream, &out).is_err() {
+                if !fake_rrd_event(&mut stream, &v, &log) {
                     return;
                 }
             }
@@ -261,17 +285,9 @@ fn publish_reaches_bus_and_broadcast_lands_in_inbox() {
     let _ = std::fs::remove_file(&path);
 }
 
-/// 计数自报 → 心跳载荷（0.0.4 批B，Q1 裁定的双端兼容面；b3c 2026-10-21
-/// 增量语义钉死）：无上报的拍 params 维持 `{}`；bump 后的拍 params 带非空
-/// `counters`，值是「自上一拍以来」的增量（首拍水位 0，增量恰为累计值；
-/// 之后跨拍只发新增量——rrd 归并按增量累加，聚合表才是生命周期累计而非
-/// 二次方膨胀）。有界轮询不猜时刻（hb=50ms，2s 上界足够）。
-#[test]
-fn heartbeat_carries_counters_only_after_bump() {
+/// 第一段：等一个不带 counters 的心跳（空增量 → params = {}）
+fn wait_empty_hb(log: &Arc<Mutex<Vec<(String, Value)>>>) {
     use std::time::Instant;
-    let log = Arc::new(Mutex::new(Vec::new()));
-    let (client, path) = connect_on("cnt", log.clone());
-    // 第一段：等一个不带 counters 的心跳（空增量 → params = {}）
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         let has_empty = log
@@ -288,11 +304,11 @@ fn heartbeat_carries_counters_only_after_bump() {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    // bump 两次同键（累加）+ 一次异键
-    client.rr3_counter_bump("relay_on", 2);
-    client.rr3_counter_bump("relay_on", 1);
-    client.rr3_counter_bump("chat_rounds", 1);
-    // 第二段：等带 counters 的心跳，值逐键核对（首拍增量 = 累计值）
+}
+
+/// 第二段：等带 counters 的心跳，返回首见的 counters 快照
+fn wait_counters_hb(log: &Arc<Mutex<Vec<(String, Value)>>>) -> Value {
+    use std::time::Instant;
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         let hit = {
@@ -302,18 +318,17 @@ fn heartbeat_carries_counters_only_after_bump() {
                 .map(|(_, p)| p["counters"].clone())
         };
         if let Some(c) = hit {
-            assert_eq!(c["relay_on"], 3, "首拍增量 = 水位 0 起的累计");
-            assert_eq!(c["chat_rounds"], 1);
-            break;
+            return c;
         }
         assert!(Instant::now() < deadline, "bump 后应出现带 counters 的心跳");
         std::thread::sleep(Duration::from_millis(10));
     }
-    // 观测点游标：第三段只看此后的新增日志（旧拍仍在账上，整表倒查会撞旧值）
-    let observed_len = log.lock().unwrap().len();
-    // 第三段（b3c 语义钉）：水位已到 3，再 bump 1 → 下一拍只发增量 1（旧
-    // 快照语义会发全量 4，被 rrd 当增量再收一遍即 40 亿病灶）
-    client.rr3_counter_bump("relay_on", 1);
+}
+
+/// 第三段：只看观测点之后的新增日志（旧拍仍在账上，整表倒查会撞旧值），
+/// 等下一次带 counters 的心跳并返回其快照
+fn wait_incr_hb(log: &Arc<Mutex<Vec<(String, Value)>>>, observed_len: usize) -> Value {
+    use std::time::Instant;
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         let hit = {
@@ -325,16 +340,43 @@ fn heartbeat_carries_counters_only_after_bump() {
                 .map(|(_, p)| p["counters"].clone())
         };
         if let Some(c) = hit {
-            assert_eq!(c["relay_on"], 1, "跨拍只发自上一拍以来的增量，不发全量快照");
-            assert!(
-                c.get("chat_rounds").is_none(),
-                "零增量键不上线（空闲键不刷拍）: {c}"
-            );
-            break;
+            return c;
         }
         assert!(Instant::now() < deadline, "再 bump 后应出现带增量的心跳");
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+/// 计数自报 → 心跳载荷（0.0.4 批B，Q1 裁定的双端兼容面；b3c 2026-10-21
+/// 增量语义钉死）：无上报的拍 params 维持 `{}`；bump 后的拍 params 带非空
+/// `counters`，值是「自上一拍以来」的增量（首拍水位 0，增量恰为累计值；
+/// 之后跨拍只发新增量——rrd 归并按增量累加，聚合表才是生命周期累计而非
+/// 二次方膨胀）。有界轮询不猜时刻（hb=50ms，2s 上界足够）。
+#[test]
+fn heartbeat_carries_counters_only_after_bump() {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let (client, path) = connect_on("cnt", log.clone());
+    // 第一段：等一个不带 counters 的心跳（空增量 → params = {}）
+    wait_empty_hb(&log);
+    // bump 两次同键（累加）+ 一次异键
+    client.rr3_counter_bump("relay_on", 2);
+    client.rr3_counter_bump("relay_on", 1);
+    client.rr3_counter_bump("chat_rounds", 1);
+    // 第二段：等带 counters 的心跳，值逐键核对（首拍增量 = 累计值）
+    let c = wait_counters_hb(&log);
+    assert_eq!(c["relay_on"], 3, "首拍增量 = 水位 0 起的累计");
+    assert_eq!(c["chat_rounds"], 1);
+    // 观测点游标：第三段只看此后的新增日志（旧拍仍在账上，整表倒查会撞旧值）
+    let observed_len = log.lock().unwrap().len();
+    // 第三段（b3c 语义钉）：水位已到 3，再 bump 1 → 下一拍只发增量 1（旧
+    // 快照语义会发全量 4，被 rrd 当增量再收一遍即 40 亿病灶）
+    client.rr3_counter_bump("relay_on", 1);
+    let c = wait_incr_hb(&log, observed_len);
+    assert_eq!(c["relay_on"], 1, "跨拍只发自上一拍以来的增量，不发全量快照");
+    assert!(
+        c.get("chat_rounds").is_none(),
+        "零增量键不上线（空闲键不刷拍）: {c}"
+    );
     drop(client);
     let _ = std::fs::remove_file(&path);
 }
@@ -357,17 +399,8 @@ fn call_topic_sends_method_and_params_shape() {
     let _ = std::fs::remove_file(&path);
 }
 
-/// 总线死亡探针：对端在注册后掉线 → reader EOF → `rr3_connected` 翻假、
-/// `rr3_poll_wait` 立即返回空。心跳用大间隔（3600s）：否则心跳线程先撞上
-/// 断连走 `exit(1)`，测试进程自己先死，探针根本轮不到被观察。
-#[test]
-fn disconnect_flips_connected_false_and_poll_wait_returns_promptly() {
-    use std::time::Instant;
-    let path = tmp_bus_path("dead");
-    let listener = UnixListener::bind(&path).unwrap();
-    // 假 rrd：完成注册握手后**挂起等信号**，测试先观察"活着"，再 drop 发送端
-    // 让 stream 掉线（FIN）——直接退场会和 connect 返回赛跑，探针的初值就成了赌运气
-    let (close_tx, close_rx) = mpsc::channel::<()>();
+/// 假 rrd：完成注册握手后挂起等信号，测试发令后才退场（drop stream → 对端 EOF）。
+fn spawn_dead_rrd(listener: UnixListener, close_rx: mpsc::Receiver<()>) {
     std::thread::spawn(move || {
         let Ok(mut stream) = listener.accept().map(|(s, _)| s) else {
             return;
@@ -387,6 +420,20 @@ fn disconnect_flips_connected_false_and_poll_wait_returns_promptly() {
         }
         let _ = close_rx.recv(); // 挂到测试发令再退场（drop stream → 对端 EOF）
     });
+}
+
+/// 总线死亡探针：对端在注册后掉线 → reader EOF → `rr3_connected` 翻假、
+/// `rr3_poll_wait` 立即返回空。心跳用大间隔（3600s）：否则心跳线程先撞上
+/// 断连走 `exit(1)`，测试进程自己先死，探针根本轮不到被观察。
+#[test]
+fn disconnect_flips_connected_false_and_poll_wait_returns_promptly() {
+    use std::time::Instant;
+    let path = tmp_bus_path("dead");
+    let listener = UnixListener::bind(&path).unwrap();
+    // 假 rrd：完成注册握手后**挂起等信号**，测试先观察"活着"，再 drop 发送端
+    // 让 stream 掉线（FIN）——直接退场会和 connect 返回赛跑，探针的初值就成了赌运气
+    let (close_tx, close_rx) = mpsc::channel::<()>();
+    spawn_dead_rrd(listener, close_rx);
     // 心跳用大间隔：否则心跳线程先撞上断连走 exit(1)，测试进程自己先死
     let manifest = MANIFEST.replace("heartbeat_ms = 50", "heartbeat_ms = 3600000");
     let client = Rr3BusClient::rr3_connect_with(
