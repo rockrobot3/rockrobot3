@@ -69,9 +69,11 @@ fn rr3_root_scan(line: &str, base: usize, out: &mut Vec<Rr3RootSpan>) {
 
 /// 根定位 token 恰好一处、标签在册——否则报形状漂移（配置烂了不许猜）
 fn rr3_root_span_unique(text: &str) -> Result<Rr3RootSpan, String> {
-    let spans = rr3_root_spans(text);
+    let mut spans = rr3_root_spans(text);
     match spans.len() {
-        1 => Ok(spans.into_iter().next().expect("len==1 已断言")),
+        1 => spans
+            .pop()
+            .ok_or_else(|| "root token 定位自相矛盾：len==1 但取不到".to_string()),
         0 => Err("引导配置没有 root=LABEL=rr_ token（append 行缺失或形状漂移）".into()),
         n => Err(format!(
             "引导配置有 {n} 处 root=LABEL=rr_ token——形状歧义，拒改写"
