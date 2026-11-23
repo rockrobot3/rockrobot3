@@ -14,7 +14,7 @@ use rr_registry::{rr3_topic_parse, Rr3TopicSet};
 /// 内建命名空间：`rr3-runtime/*` 两个主题属 rrd 的下行广播，模块上行冒充必须被拒（spec §5.0）。
 /// 强制点在装载处：`rr3_topics_load` 对叠加层任一名命中
 /// `rr3_topics_reserved` 的条目即拒启动并点名（见
-/// `overlay_declaring_reserved_namespace_is_rejected`）；运行时注册路径上的同一判定随 Task 5/6 落地。
+/// `overlay_ns_rej`）；运行时注册路径上的同一判定随 Task 5/6 落地。
 pub const RR3_RESERVED_OWNER: &str = "rr3-runtime";
 
 /// 契约主题的编译期定位（与 rr-ipc 测试同深度：base/runtime/<crate> → 仓库根）
@@ -79,7 +79,7 @@ pub fn rr3_topics_abs(path: &Path) -> Result<PathBuf, String> {
 ///
 /// **为什么这里用 `fs::canonicalize`，而套接字路径（`cli::rr3_socket_abs`）用的是
 /// `std::path::absolute`**：契约主题表**必须已经存在**——它是 spec §6 的生产真相，
-/// `missing_contract_is_fatal` 钉死了"文件丢了就拒启动"。"不存在"在这条路径上是错误，
+/// `miss_contract_fatal` 钉死了"文件丢了就拒启动"。"不存在"在这条路径上是错误，
 /// 不是像待创建套接字那样的合法常态，所以 ENOENT 正是该如实报的那一条；反过来在套接字那边
 /// 用 canonicalize 就会误拒一个 bind 前必然不存在的合法值（两个入口的分工由此而定，别互换）。
 ///

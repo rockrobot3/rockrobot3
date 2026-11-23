@@ -23,7 +23,7 @@ impl RrdRegistry {
 
     /// 投给除 `exclude_task` 外的所有**活**连接；返回成功入队数。接收者已 drop 不算错。
     /// **只做广播，不看 `frame.header.dst_task`**：该字段原样带上、本函数不读它，所以
-    /// 它**不是**单播入口（`expired_module_is_excluded_from_fanout` 就把这条事实编码了：
+    /// 它**不是**单播入口（`expired_fanout` 就把这条事实编码了：
     /// 帧的 dst 写的是已判死的 simb，实际收到的是 sima）。要点名发给某一个模块，请由
     /// conn 层直接用那条连接的 `Sender`，别指望本函数过滤。
     ///

@@ -30,7 +30,7 @@
 //!   host `RR3_PANEL_ROUTES` 同构，第五列处理臂）＋查表函数
 //!   [`rr3_route_lookup`]＋快照 JSON 组包纯函数＋写口 body 解析/应答组包纯函数。
 //!   表即分派真值（无表↔臂第二份），method/path 交叉拒由
-//!   `route_table_is_dispatch_truth` 单测钉死。
+//!   `route_table_truth` 单测钉死。
 //! - **unsafe 壳层**（[`rr3_httpd_spawn`]）：WiFi STA 起栈（裸 sys——
 //!   [`wifi_init_config_t`] 手抄 v5.2.2 `WIFI_INIT_CONFIG_DEFAULT()` 宏展开，
 //!   字段真值逐项对表本项目生成 sdkconfig，见 [`wifi_default_config`]）＋

@@ -233,7 +233,7 @@ pub fn rr3_phase_for_exit(clean_exit: bool) -> &'static str {
 /// `ForeignPrefix.owner` 的回显唯一写法：在册但登记文本没写 owner 键（解析成空串）与
 /// 根本不在册（None）都渲染 `?`。`rr3_reg_pub_check` 的两处 `ForeignPrefix` 构造点
 /// 都必须经它——任何一处绕过它就会把"同一种未知"写成两种回显（由
-/// `foreign_prefix_owner_echo_is_question_mark_on_both_construction_sites` 钉住）。
+/// `foreign_mark_ctor` 钉住）。
 pub(super) fn owner_for_echo(registered: Option<String>) -> String {
     registered
         .filter(|o| !o.is_empty())

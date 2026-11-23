@@ -103,7 +103,7 @@ fn ops_arm_via_rpc_arm() {
 }
 
 /// ops/set 臂写后按组重建：llm 组写 model_id 后重建不红（重建取数在
-/// rpc.rs model_row_of_reflects_live_write 钉真值），mock 档 complete 照走
+/// rpc.rs model_row_live_write 钉真值），mock 档 complete 照走
 #[test]
 fn ops_arm_llm_write() {
     let mut c = cfg();

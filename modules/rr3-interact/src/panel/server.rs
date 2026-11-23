@@ -124,9 +124,9 @@ pub const RR3_PANEL_APPLY_MODES: [&str; 3] = ["live", "reboot", "reflash"];
 /// [`RR3_PANEL_APPLY_MODES`]，空串 = 无可配置量写入，读口/动作口皆空）。与件
 /// `handles`/`ops` 同一申报范式：**未申报就不计入门 d 分子**（不是"默认全算"，
 /// 端点数 ≠ 面板项数）。自述文案与 serve 行的端点数由本表长度推导（文案不手写
-/// 数字），match 分派与本表的漂移由 `route_table_matches_dispatch` 单测钉死，
-/// covers 词表形制由 `covers_use_declared_vocabulary_only` 单测钉死，applies 词表
-/// 由 `applies_use_declared_vocabulary_only` 单测钉死——新增端点 = 加表 + 过三门，
+/// 数字），match 分派与本表的漂移由 `route_table_dispatch` 单测钉死，
+/// covers 词表形制由 `covers_vocabulary` 单测钉死，applies 词表
+/// 由 `applies_vocabulary` 单测钉死——新增端点 = 加表 + 过三门，
 /// 不再改第三处文案。
 ///
 /// 今日实况（ADR-0023 模型面后）：28 端点（26 + 2026-10-31 新增存活/版本两探针

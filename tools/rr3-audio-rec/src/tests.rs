@@ -72,7 +72,7 @@ fn parse_event_gates() {
 // 垃圾跳过/坏头弃 magic 续扫/plen 越栏），本件不再持第二份。
 
 // ON 应答判据用例已随机制上提 rr-ipc（`rr_ipc::audio_session` tests：
-// ok_reply_line_accepts_stream_prefixed_mixed_line），本件不再持第二份。
+// ok_line_ok_line），本件不再持第二份。
 
 #[test]
 fn seq_gap_accounting() {

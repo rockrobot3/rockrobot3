@@ -3,7 +3,7 @@
 //!
 //! 端点真值单点 = [`super::RR3_PANEL_ROUTES`]；本文件只切判读面（sys/mod/cfg/act
 //! 四组，每条路径只在一组出现），不复制申报列——漂移由
-//! `route_table_matches_dispatch` 逐表项钉死。面板不当发布者：分派类型里没有
+//! `route_table_dispatch` 逐表项钉死。面板不当发布者：分派类型里没有
 //! Publish 变体（ADR-0006 裁定 3 的静态形态）。
 //!
 //! 拆分动因：`server.rs` 550 行，路由纯函数 ~240 行与连接/监听面分属两簇。
@@ -82,7 +82,7 @@ fn rr3_route_writes(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatch {
 /// 系统读面：静态页、状态/存活/版本/计数/日志、装配快照。
 /// 四条路由组（sys/mod/cfg/act）按资源归属划面，每条路径**只在一组**出现；
 /// 端点真值仍是 [`RR3_PANEL_ROUTES`]（本组表不复制申报列），漂移由
-/// `route_table_matches_dispatch` 逐表项钉死。
+/// `route_table_dispatch` 逐表项钉死。
 fn rr3_route_sys(method: &str, path: &str) -> Option<Rr3PanelDispatch> {
     let d = match path {
         "/" => Rr3PanelDispatch::Html,

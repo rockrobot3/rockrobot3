@@ -53,10 +53,8 @@ use rrd::manifest::rr3_manifest_parse;
 /// 第二份字面量；2026-11-23 部署链实录：缺省值曾长期落后板上版本，裸跑产出的包
 /// 被判降级并静默回退）。发版用 [`RR3_DEB_VERSION_ENV`] 覆盖，包名与控制字段同源。
 const RR3_DEB_PACKAGE: &str = "rockrobot3";
-const RR3_PRODUCT_VERSION: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../VERSION"
-));
+const RR3_PRODUCT_VERSION: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../VERSION"));
 const RR3_INSTALL_ROOT: &str = "/usr/lib/rockrobot3";
 /// 版本覆盖环境变量：发版流水线与部署脚本同读一处，避免"包名 0.0.6 / control
 /// 0.0.5"这类两处真值漂移。

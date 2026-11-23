@@ -32,10 +32,10 @@ impl RrdRegistry {
         // 重启后同身份重注册：旧条目整体替换，旧 task 号作废但不回收。
         // `crash_streak` 是**表级**、按 name 计的账（D-1），不随旧条目一起作废——"连续 5 次"
         // 的预算正是靠这一条才跨得起重注册；旧代码把 `restarts` 写进 Entry 又被这次替换归零，
-        // 是 5 次上限今天撞不到的根因（见 `crash_budget_survives_reregistration_and_caps_after_five_incarnations`）。
+        // 是 5 次上限今天撞不到的根因（见 `crash_caps_five_inc`）。
         // 这里只**记下**待替换条目的 task 号，真正的摘除延后到门+断言全过之后：
         // 被 catch_unwind 吞掉的 debug panic（坏 watchdog）不许留下已改一半的表
-        // （`caught_panic_leaves_the_failed_entry_registered` 钉住）。
+        // （`caught_fail_reg` 钉住）。
         let superseded = self.rr3_add_superseded(facts)?; // 容量门认 superseded：表满但同名条目是 Failed 时，旧条目即将腾出槽位，
                                                           // 这是合法的 Failed 重注册，不得被容量拒（与移位前的现行行为一致）。
         if superseded.is_none() && self.modules.len() >= RR3_REG_MAX_MODULES {

@@ -133,7 +133,7 @@ fn thread_spawn(bus: Arc<Mutex<Bus>>, cred_source: &'static str, ssid: Vec<u8>, 
 /// httpd 起 + 白名单注册（手填 config：HTTPD_DEFAULT_CONFIG 真值——宏默认也是
 /// false/null/0 的字段由全零起底等价覆盖，差异字段逐项对表 esp_http_server.h :53；
 /// OnceLock 先写——handler 可达即 bus 在位；method 映射随表行 GET/POST，表内词表
-/// 由 covers_wordform_shape 单测钉死，词表外 panic 不可达）。
+/// 由 covers_shape 单测钉死，词表外 panic 不可达）。
 ///
 /// # Safety
 ///

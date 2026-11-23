@@ -329,7 +329,7 @@ mod tests {
     // 序列喂两台新表情机，(调用结果, 相位, 帧指针轨迹) 逐拍相等。腿二·正确性：
     // 期望值引自裁定语义（interact 册 §2 权威序：挂起期被显式点名则挂起作废、
     // end_talk 回默认态、连续 begin 幂等）+ §5 载荷腿（应答体两字段，
-    // additionalProperties=false 口径——形状断言在承载层 args_and_result_shapes，
+    // additionalProperties=false 口径——形状断言在承载层 args_result_shapes，
     // 此处钉机制侧的转移与帧轨迹）。
 
     /// 腿一：权威序序列两跑轨迹相等

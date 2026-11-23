@@ -265,7 +265,7 @@ fn surviving_crash_budg() {
     assert_ne!(t2, t, "重注册必须换新 task，否则本条测的是同一世");
     survive_second_life(&mut r, t2);
     // 简报冲突（见实施报告）：第 2 世全程喂狗、健康存活，`rr3_reg_add` 对**在册非 Failed**
-    // 的同名条目按 Duplicate 拒（这是既有不变量，`duplicate_name_is_rejected` 钉着，不许为
+    // 的同名条目按 Duplicate 拒（这是既有不变量，`duplicate_name_rej` 钉着，不许为
     // 本条让步）。故 t3 那句"第 3 世"必须先让第 2 世退场——最小忠实实现：insert 一行 remove
     // 把条目摘掉，再重注册。判据的语义（归零后第 3 世从 0 重计）不变。
     let _ = r.rr3_reg_remove("rr3-sima");

@@ -157,7 +157,7 @@ mod tests {
 
     // ---------- 两腿对拍（architecture §4.0.3 判据②，0.0.5 批K H1） ----------
     // 腿一·确定性：同一效果/时钟序列喂两台新状态机，输出序列逐拍相等（无
-    // 时钟、无线程，范式 = rr-core `same_control_graph_beat_for_beat_identical`）。
+    // 时钟、无线程，范式 = rr-core `same_beat_identical`）。
     // 腿二·正确性：期望值引自裁定语义（act 册 §8 led 行：翻转序列白名单、
     // 半周期收敛 1、off 停翻），不由件自产。
 
