@@ -47,7 +47,7 @@ fn cfg_wake(followup_ms: u64) -> Rr3BrainCfg {
 fn mock_clients(cfg: &Rr3BrainCfg) -> (Rr3CloudClients, std::sync::MutexGuard<'static, ()>) {
     let g = env_lock();
     std::env::set_var(crate::cloud::RR3_CLOUD_MODE_ENV, "mock");
-    (Rr3CloudClients::from_cfg(cfg), g)
+    (Rr3CloudClients::from_cfg(cfg).unwrap(), g)
 }
 
 /// mock 档整装 Dispatcher 夹具（编排面测试用：三客户端 mock 档＋config 话轮
@@ -55,7 +55,7 @@ fn mock_clients(cfg: &Rr3BrainCfg) -> (Rr3CloudClients, std::sync::MutexGuard<'s
 fn mock_dispatcher(cfg: Rr3BrainCfg) -> (Rr3BrainDispatcher, std::sync::MutexGuard<'static, ()>) {
     let g = env_lock();
     std::env::set_var(crate::cloud::RR3_CLOUD_MODE_ENV, "mock");
-    (Rr3BrainDispatcher::new(cfg), g)
+    (Rr3BrainDispatcher::new(cfg).unwrap(), g)
 }
 
 /// rr3-sense/audio/pcm 事件体夹具（rr3_pcm_event_body 同形状）

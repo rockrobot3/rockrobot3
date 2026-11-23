@@ -44,10 +44,12 @@ pub(crate) struct Rr3CloudClients {
 
 impl Rr3CloudClients {
     /// 装配构造（main.rs 装配段与测试共用）：cloud 段四键＋模型行实效入表。
-    /// boot 校验保证在册，取数失败 panic 点名（不可达路径 fail-closed）。
-    pub(crate) fn from_cfg(cfg: &Rr3BrainCfg) -> Self {
-        let cloud = rr3_cloud_cfg_of(&cfg.doc).expect("config [rr3-brain.cloud] 段 boot 校验在册");
-        Self {
+    /// boot 校验保证在册；取数失败回 Err（装配段点名后退出，不 panic）。
+    pub(crate) fn from_cfg(cfg: &Rr3BrainCfg) -> Result<Self, String> {
+        let cloud = rr3_cloud_cfg_of(&cfg.doc).ok_or_else(|| {
+            "config [rr3-brain.cloud] 段缺失或形状坏（boot 校验在册）".to_string()
+        })?;
+        Ok(Self {
             asr: Rr3AsrClient::new(&cloud.base_url, &cloud.asr_model, cloud.timeout_s),
             llm: Rr3LlmClient::new(
                 &cfg.model.base_url,
@@ -57,7 +59,7 @@ impl Rr3CloudClients {
                 cfg.model.mode,
             ),
             tts: Rr3TtsClient::new(&cloud.base_url, &cloud.tts_model, cloud.timeout_s),
-        }
+        })
     }
 }
 

@@ -63,6 +63,6 @@ fn rr3_brain_run() -> Result<(), String> {
     );
 
     // 机制层注册面构造 + 主循环骨架（rr3mod serve：死亡探针/分帧/RPC/订阅/节拍）
-    let mut dispatcher = dispatch::Rr3BrainDispatcher::new(cfg);
+    let mut dispatcher = dispatch::Rr3BrainDispatcher::new(cfg)?;
     serve(bus, &mut dispatcher, RR3_POLL_WAIT)
 }

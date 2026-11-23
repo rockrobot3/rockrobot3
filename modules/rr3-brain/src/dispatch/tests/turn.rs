@@ -101,7 +101,7 @@ fn wake_ack_pcm_reused() {
             srv.base
         ))
         .unwrap();
-    let mut dp = Rr3BrainDispatcher::new(cfg);
+    let mut dp = Rr3BrainDispatcher::new(cfg).unwrap();
     assert!(dp.wake_ack_pcm.is_some(), "启动即备好固定应答 PCM");
     assert_eq!(srv.requests.lock().unwrap().len(), 1, "预合成只打一次 TTS");
 

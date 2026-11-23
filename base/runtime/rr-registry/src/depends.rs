@@ -202,10 +202,10 @@ fn rr3_kahn(
     let (mut indegree, dependents) = rr3_kahn_tables(edges);
     let mut ready = rr3_kahn_ready(facts, excluded, &indegree);
     let mut order = Vec::with_capacity(facts.len());
-    while let Some(&(prio, name)) = ready.iter().next() {
-        ready.remove(&(prio, name));
+    while let Some(&(prio, name, idx)) = ready.iter().next() {
+        ready.remove(&(prio, name, idx));
         order.push(name.to_string());
-        rr3_kahn_release(facts, &dependents, &mut indegree, &mut ready, name);
+        rr3_kahn_release(facts, &dependents, &mut indegree, &mut ready, idx);
     }
     order
 }
@@ -228,11 +228,11 @@ fn rr3_kahn_ready<'a>(
     facts: &'a [Rr3DependsFacts],
     excluded: &BTreeSet<String>,
     indegree: &BTreeMap<usize, usize>,
-) -> BTreeSet<(i64, &'a str)> {
-    let mut ready: BTreeSet<(i64, &str)> = BTreeSet::new();
+) -> BTreeSet<(i64, &'a str, usize)> {
+    let mut ready: BTreeSet<(i64, &str, usize)> = BTreeSet::new();
     for (idx, f) in facts.iter().enumerate() {
         if rr3_ready_at(f, idx, excluded, indegree) {
-            ready.insert((f.start_priority, f.name.as_str()));
+            ready.insert((f.start_priority, f.name.as_str(), idx));
         }
     }
     ready
@@ -253,13 +253,9 @@ fn rr3_kahn_release<'a>(
     facts: &'a [Rr3DependsFacts],
     dependents: &BTreeMap<usize, Vec<usize>>,
     indegree: &mut BTreeMap<usize, usize>,
-    ready: &mut BTreeSet<(i64, &'a str)>,
-    name: &str,
+    ready: &mut BTreeSet<(i64, &'a str, usize)>,
+    idx: usize,
 ) {
-    let idx = facts
-        .iter()
-        .position(|f| f.name == name)
-        .expect("名字已在 facts 里");
     let Some(deps) = dependents.get(&idx) else {
         return;
     };
@@ -272,14 +268,14 @@ fn rr3_kahn_release<'a>(
 fn rr3_release_one<'a>(
     facts: &'a [Rr3DependsFacts],
     indegree: &mut BTreeMap<usize, usize>,
-    ready: &mut BTreeSet<(i64, &'a str)>,
+    ready: &mut BTreeSet<(i64, &'a str, usize)>,
     d: usize,
 ) {
     let e = indegree.get_mut(&d).expect("边表里出现过的消费者必有入度");
     *e -= 1;
     if *e == 0 {
         let f = &facts[d];
-        ready.insert((f.start_priority, f.name.as_str()));
+        ready.insert((f.start_priority, f.name.as_str(), d));
     }
 }
 

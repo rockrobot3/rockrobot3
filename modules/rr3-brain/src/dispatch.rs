@@ -145,9 +145,10 @@ pub(crate) struct Rr3BrainDispatcher {
 
 impl Rr3BrainDispatcher {
     /// 装配构造（main.rs 装配段调用）：config 解析产物整体入表＋三客户端装配＋
-    /// 状态机以 config 话轮封顶起轮（Python Rr3Dialog(max_utterance_ms=…) 同形状）。
-    pub(crate) fn new(cfg: Rr3BrainCfg) -> Self {
-        let clients = Rr3CloudClients::from_cfg(&cfg);
+    /// 状态机以 config 话轮封顶起轮（Python Rr3Dialog(max_utterance_ms=…) 同形状）；
+    /// 客户端装配失败回 Err，由装配段点名退出。
+    pub(crate) fn new(cfg: Rr3BrainCfg) -> Result<Self, String> {
+        let clients = Rr3CloudClients::from_cfg(&cfg)?;
         let dialog = Rr3Dialog::rr3_new(cfg.max_utterance_ms);
         let mut dispatcher = Self {
             cfg,
@@ -160,7 +161,7 @@ impl Rr3BrainDispatcher {
             wake_ack_pcm: None,
         };
         dispatcher.rr3_prewarm_wake_ack();
-        dispatcher
+        Ok(dispatcher)
     }
 
     /// 固定唤醒语只合成一次；失败不阻断模块启动，首个唤醒轮仍会按需重试。

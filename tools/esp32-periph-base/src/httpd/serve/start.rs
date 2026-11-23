@@ -117,7 +117,7 @@ fn net_watch_spawn() {
 /// 起栈线程（与控制/运行面同 16KB 口径；短命——起完 httpd 即退；
 /// `cred_source`＝凭据来源点名串（"nvs"/"编译期"），boot 日志用，永不出值）。
 fn thread_spawn(bus: Arc<Mutex<Bus>>, cred_source: &'static str, ssid: Vec<u8>, pass: Vec<u8>) {
-    std::thread::Builder::new()
+    let spawned = std::thread::Builder::new()
         .name("periph-httpd".into())
         .stack_size(crate::board::THREAD_STACK)
         // SAFETY：闭包体整段是 unsafe 壳层调用（start_httpd），线程独占起栈链；
@@ -126,8 +126,10 @@ fn thread_spawn(bus: Arc<Mutex<Bus>>, cred_source: &'static str, ssid: Vec<u8>, 
             if let Err(e) = start_httpd(&bus, cred_source, &ssid, &pass) {
                 println!("[periph] 配置腿启动失败 esp_err={e}（缺席照常；负值＝IDF 错误码）");
             }
-        })
-        .expect("起配置腿线程失败");
+        });
+    if let Err(e) = spawned {
+        println!("[periph] 配置腿线程起失败: {e:?}（配置面缺席，既有链路照常）");
+    }
 }
 
 /// httpd 起 + 白名单注册（手填 config：HTTPD_DEFAULT_CONFIG 真值——宏默认也是
@@ -169,7 +171,9 @@ unsafe fn httpd_register(bus: &Arc<Mutex<Bus>>) -> Result<(), i32> {
     let true = r == ESP_OK else { return Err(r) };
     let _ = HTTPD_BUS.set(Arc::clone(bus));
     for (method, path, _, _, _) in RR3_BOARD_ROUTES {
-        let cpath = CString::new(*path).expect("白名单 path 不含 NUL");
+        let Ok(cpath) = CString::new(*path) else {
+            return Err(esp_idf_sys::ESP_ERR_INVALID_ARG);
+        };
         let m = match *method {
             "GET" => http_method_HTTP_GET,
             "POST" => http_method_HTTP_POST,

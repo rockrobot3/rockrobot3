@@ -76,7 +76,7 @@ fn completion_arm_str() {
 fn completion_key_error() {
     let mut c = cfg();
     let _g = env_lock();
-    let mut cl = Rr3CloudClients::from_cfg(&c);
+    let mut cl = Rr3CloudClients::from_cfg(&c).unwrap();
     let mut d = Rr3Dialog::rr3_new(8000);
     std::env::set_var(crate::cloud::RR3_CLOUD_MODE_ENV, "real");
     std::env::remove_var(crate::cloud::RR3_API_KEY_ENV);
