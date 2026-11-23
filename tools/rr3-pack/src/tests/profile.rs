@@ -8,14 +8,8 @@ use std::fs;
 use super::{cfg_of, fixture, DISTRO_PROFILE, ESP32_MINI_PROFILE};
 use crate::rr3_stage;
 
-/// H4/C2（0.0.5 批K）：--profile 参数化——出包链不再只认 distro 一份装配单，
-/// "换板只改装配单"在装机路径真走通（staging 按 --profile 名零改写落位；
-/// 缺席点名到具体机型文件，不静默回落 distro）。
-#[test]
-fn profile_flag_stages_named_profile_and_names_it_when_absent() {
-    // 正例：--profile esp32-mini → 装机位 profiles/esp32-mini.toml，字节零改写
-    //（真仓文本：rtos 档装配单过打包预验 = 过装载同判据，chip=esp32）
-    let (payload, repo) = fixture();
+// 指定机型装配单及其随装件的仓储侧铺料（--profile 正例前置）
+fn seed_named_profile(repo: &std::path::Path) {
     fs::write(repo.join("profiles/esp32-mini.toml"), ESP32_MINI_PROFILE).unwrap();
     // chip 选册的平台事实表随 --profile 机型（基-25 清单成员）
     fs::write(
@@ -34,9 +28,10 @@ fn profile_flag_stages_named_profile_and_names_it_when_absent() {
     fs::create_dir_all(repo.join("hardware/esp32-mini/axis")).unwrap();
     fs::write(repo.join("hardware/esp32-mini/axis/pan.toml"), "# pan\n").unwrap();
     fs::write(repo.join("hardware/esp32-mini/axis/tilt.toml"), "# tilt\n").unwrap();
-    let (mut cfg, _) = cfg_of(&payload, &repo);
-    cfg.profile = "esp32-mini".to_string();
-    let stage = rr3_stage(&cfg).unwrap();
+}
+
+// 指定机型装机位落位与 distro 不夹带的断言面（--profile 正例）
+fn check_named_stage(stage: &std::path::Path) {
     assert_eq!(
         fs::read_to_string(stage.join("usr/lib/rockrobot3/profiles/esp32-mini.toml")).unwrap(),
         ESP32_MINI_PROFILE,
@@ -78,6 +73,21 @@ fn profile_flag_stages_named_profile_and_names_it_when_absent() {
         !staged_unit.contains("profiles/distro.toml"),
         "非 distro 机型的单元不得残留 distro 装机位"
     );
+}
+
+/// H4/C2（0.0.5 批K）：--profile 参数化——出包链不再只认 distro 一份装配单，
+/// "换板只改装配单"在装机路径真走通（staging 按 --profile 名零改写落位；
+/// 缺席点名到具体机型文件，不静默回落 distro）。
+#[test]
+fn profile_flag_stages_named_profile_and_names_it_when_absent() {
+    // 正例：--profile esp32-mini → 装机位 profiles/esp32-mini.toml，字节零改写
+    //（真仓文本：rtos 档装配单过打包预验 = 过装载同判据，chip=esp32）
+    let (payload, repo) = fixture();
+    seed_named_profile(&repo);
+    let (mut cfg, _) = cfg_of(&payload, &repo);
+    cfg.profile = "esp32-mini".to_string();
+    let stage = rr3_stage(&cfg).unwrap();
+    check_named_stage(&stage);
     // 反例：指定机型缺席 → 点名到具体文件
     let (payload, repo) = fixture();
     let (mut cfg, _) = cfg_of(&payload, &repo);
