@@ -165,34 +165,9 @@ impl VoiceRun {
 
     /// 按承载方式定型（分配策略见 [`crate::psram`]）。
     fn rr3_new_cfg(mode: Rr3VoiceMode) -> Self {
-        let pre_blocks = if mode == Rr3VoiceMode::Flash {
-            PRE_ROLL_SPOOL
-        } else {
-            PRE_ROLL_MEM
-        };
-        let (raw, pending, pre, utter) = match mode {
-            Rr3VoiceMode::Mem => (
-                crate::psram::rr3_psram_vec(2048),
-                crate::psram::rr3_psram_vec(BLOCK_SAMPLES * 2),
-                crate::psram::rr3_psram_vec(pre_blocks * BLOCK_SAMPLES + BLOCK_SAMPLES),
-                crate::psram::rr3_psram_vec(MAX_UTTER_SAMPLES + BLOCK_SAMPLES),
-            ),
-            Rr3VoiceMode::Flash => (
-                crate::psram::rr3_psram_vec(2048),
-                crate::psram::rr3_psram_vec(BLOCK_SAMPLES * 2),
-                crate::psram::rr3_psram_vec(pre_blocks * BLOCK_SAMPLES + BLOCK_SAMPLES),
-                Vec::new(),
-            ),
-            Rr3VoiceMode::Off => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
-        };
-        crate::mem::rr3_heap_mark(
-            "mic-voice",
-            match mode {
-                Rr3VoiceMode::Mem => "psram",
-                Rr3VoiceMode::Flash => "spool",
-                Rr3VoiceMode::Off => "off",
-            },
-        );
+        let pre_blocks = rr3_pre_blocks(mode);
+        let (raw, pending, pre, utter) = rr3_bufs(mode, pre_blocks);
+        crate::mem::rr3_heap_mark("mic-voice", rr3_mode_tag(mode));
         Self {
             vad: Rr3VadState::rr3_vad_new(VAD_BASE, FRAME_MS),
             vad_cfg: VAD_BASE,
@@ -256,11 +231,7 @@ impl VoiceRun {
     /// spool 路径起音后固定 `sel`，避免段内声道跳变。
     fn block(&mut self, block: &[i16], bus: &Arc<Mutex<Bus>>) {
         let mut mono = [0i16; BLK_MONO];
-        let sel = if self.recording && self.mode == Rr3VoiceMode::Flash {
-            self.sel
-        } else {
-            rr3_chan_pick(block, 2)
-        };
+        let sel = self.block_sel(block);
         rr3_chan_take(block, 2, sel, &mut mono);
         let rms = self.voice_stats(&mono);
         self.pre_extend(block);
@@ -271,11 +242,23 @@ impl VoiceRun {
         match self.vad.rr3_vad_feed(&mono) {
             Some(Rr3VadEdge::Onset { .. }) => self.onset(bus),
             Some(Rr3VadEdge::Offset { .. }) => self.finish(bus, "offset"),
-            None if self.recording => self.append(bus, &mono, block),
-            None => {}
+            None => {
+                if self.recording {
+                    self.append(bus, &mono, block);
+                }
+            }
         }
         if self.recording {
             self.doa_tick(bus);
+        }
+    }
+
+    /// 本块择声道：spool 起音后固定段内声道，其余按块能量择高。
+    fn block_sel(&self, block: &[i16]) -> usize {
+        if self.recording && self.mode == Rr3VoiceMode::Flash {
+            self.sel
+        } else {
+            rr3_chan_pick(block, 2)
         }
     }
 
@@ -330,6 +313,43 @@ impl VoiceRun {
         self.pending.clear();
         self.pre.clear();
         self.utter.clear();
+    }
+}
+
+/// 预滚窗块数：spool 受内部 SRAM 约束只留起音窗（10 块），内存路径 30 块。
+fn rr3_pre_blocks(mode: Rr3VoiceMode) -> usize {
+    if mode == Rr3VoiceMode::Flash {
+        PRE_ROLL_SPOOL
+    } else {
+        PRE_ROLL_MEM
+    }
+}
+
+/// 按承载方式分配四块缓冲（PSRAM 优先；Off 全空）。
+fn rr3_bufs(mode: Rr3VoiceMode, pre_blocks: usize) -> (Vec<i32>, Vec<i16>, Vec<i16>, Vec<i16>) {
+    match mode {
+        Rr3VoiceMode::Mem => (
+            crate::psram::rr3_psram_vec(2048),
+            crate::psram::rr3_psram_vec(BLOCK_SAMPLES * 2),
+            crate::psram::rr3_psram_vec(pre_blocks * BLOCK_SAMPLES + BLOCK_SAMPLES),
+            crate::psram::rr3_psram_vec(MAX_UTTER_SAMPLES + BLOCK_SAMPLES),
+        ),
+        Rr3VoiceMode::Flash => (
+            crate::psram::rr3_psram_vec(2048),
+            crate::psram::rr3_psram_vec(BLOCK_SAMPLES * 2),
+            crate::psram::rr3_psram_vec(pre_blocks * BLOCK_SAMPLES + BLOCK_SAMPLES),
+            Vec::new(),
+        ),
+        Rr3VoiceMode::Off => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+    }
+}
+
+/// 承载方式诊断标签（`rr3_heap_mark` 用）。
+fn rr3_mode_tag(mode: Rr3VoiceMode) -> &'static str {
+    match mode {
+        Rr3VoiceMode::Mem => "psram",
+        Rr3VoiceMode::Flash => "spool",
+        Rr3VoiceMode::Off => "off",
     }
 }
 

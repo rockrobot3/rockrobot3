@@ -302,18 +302,7 @@ fn play_run(
             return;
         };
         match action {
-            Action::Idle { running } => {
-                crate::autonomy::rr3_beat(Rr3Task::AudioOut);
-                if running {
-                    thread::sleep(Duration::from_millis(5));
-                } else {
-                    // 阻塞写按 DMA 消费自然节流（≈32ms/块）：既不断流也不空转，
-                    // 新数据最多等一块时延。写失败退避 5ms，避免错误路径紧循环。
-                    if tx.write_all(&PLAY_SILENCE, PLAY_TIMEOUT).is_err() {
-                        thread::sleep(Duration::from_millis(5));
-                    }
-                }
-            }
+            Action::Idle { running } => play_idle(&mut tx, running),
             Action::Data(n) => {
                 if play_write(&mut tx, &bus, &state, &buf[..n]) {
                     t0.get_or_insert_with(Instant::now);
@@ -327,6 +316,19 @@ fn play_run(
                 src_bytes,
             } => play_done(&bus, abort, want_ms, src_bytes, &mut t0),
         }
+    }
+}
+
+/// 空闲拍：续心跳；有流未开播时轻睡，无流时用静音块按 DMA 消费自然节流
+/// （写失败退避 5 ms，避免错误路径紧循环）。
+fn play_idle(tx: &mut I2sDriver<'static, I2sTx>, running: bool) {
+    crate::autonomy::rr3_beat(Rr3Task::AudioOut);
+    if running {
+        thread::sleep(Duration::from_millis(5));
+        return;
+    }
+    if tx.write_all(&PLAY_SILENCE, PLAY_TIMEOUT).is_err() {
+        thread::sleep(Duration::from_millis(5));
     }
 }
 

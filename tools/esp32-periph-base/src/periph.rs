@@ -110,6 +110,19 @@ impl RtPeriph {
             Axis::Pan => Rr3PwmChannel::Pan,
             Axis::Tilt => Rr3PwmChannel::Tilt,
         };
+        let wrote = self.servo_slew(ch, deg)?;
+        if !wrote {
+            // 同角度请求：servo_release 已把通道 duty 拉 0，空步进序列不会重新激磁。
+            // 必须落一次目标 duty，否则舵机保持松脱（2026-11-23 真板：连续判右 110° 回读 0）。
+            self.rr3_pwm_duty(ch, deg_to_duty(deg, DUTY_MIN, DUTY_MAX))?;
+        }
+        self.servo.commit(ch, deg);
+        Ok(deg)
+    }
+
+    /// 步进写到目标角；同角度返回 `false`（空步进序列不会重新激磁，调用方补一次
+    /// 目标 duty）。
+    fn servo_slew(&mut self, ch: Rr3PwmChannel, deg: u32) -> Result<bool, String> {
         let mut wrote = false;
         for step in rr3_slew_steps(self.servo.deg(ch), deg, SERVO_SLEW_STEP_DEG) {
             self.rr3_pwm_duty(ch, deg_to_duty(step, DUTY_MIN, DUTY_MAX))?;
@@ -118,13 +131,7 @@ impl RtPeriph {
                 thread::sleep(Duration::from_millis(SERVO_SLEW_STEP_MS));
             }
         }
-        if !wrote {
-            // 同角度请求：servo_release 已把通道 duty 拉 0，空步进序列不会重新激磁。
-            // 必须落一次目标 duty，否则舵机保持松脱（2026-11-23 真板：连续判右 110° 回读 0）。
-            self.rr3_pwm_duty(ch, deg_to_duty(deg, DUTY_MIN, DUTY_MAX))?;
-        }
-        self.servo.commit(ch, deg);
-        Ok(deg)
+        Ok(wrote)
     }
 
     /// 下调一档 OLED 亮度（**整板电压降级**：见 [`OLED_CONTRAST_LEVELS`]）。已到地板
