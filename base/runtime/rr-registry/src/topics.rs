@@ -17,10 +17,10 @@ const RR3_TOPIC_STATUS: [&str; 3] = ["normal", "placeholder", "retired"];
 /// 契约主题总数（`contracts/topics.toml` 的钉数单点）。增删主题必须同批改这里；
 /// 三处消费面（本文件单测、`tests/contract.rs`、rrd `topics_load` 单测）共读同一
 /// 常量——此前三份字面量各抄一份，改表必漏一处（2026-11-09 B18）。
-pub const RR3_CONTRACT_TOPIC_COUNT: usize = 43;
+pub const RR3_CONTRACT_TOPIC_COUNT: usize = 44;
 
 /// 契约 `kind = "request"` 条数（同上，单点钉数）。
-pub const RR3_CONTRACT_REQUEST_COUNT: usize = 23;
+pub const RR3_CONTRACT_REQUEST_COUNT: usize = 24;
 
 /// 一册主题集（不可变快照）
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

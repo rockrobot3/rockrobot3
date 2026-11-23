@@ -105,7 +105,7 @@ name = "rr3-interact/face/expression"
 kind = "request"
 owner = "rr3-interact"
 stable = "L1"
-note = "表情切换（idle/blink/talk/think/happy；批F3 增 listen/turn；2026-10-15 板上批增 char 单字符档 36 态 charA..charZ/char0..char9；talk 由 TTS 播放自动驱动）"
+note = "表情切换（idle/blink/talk/think/happy；批F3 增 listen/turn；2026-10-15 板上批增 char 单字符档 36 态 charA..charZ/char0..char9；2026-10-25 增 4 情绪态 sleepy/surprised/angry/sad + 5 彩蛋态 confused/focus/love/dizzy/scared，全集 52 态；talk 由 TTS 播放自动驱动）"
 
 [[topic]]
 name = "rr3-interact/tts/text"
@@ -345,3 +345,10 @@ kind = "request"
 owner = "rr3-sense"
 stable = "L2"
 note = "ops 槽快照只读点名（批N4 件九二）：白名单七槽应答（audio/doa/vad 三组）；面板 /api/sense/ops 读口"
+
+[[topic]]
+name = "rr3-sentinel/diag/parity"
+kind = "request"
+owner = "rr3-sentinel"
+stable = "L2"
+note = "哨兵安全核对拍点名（批G ⑤ 列板上腿）：跑真实原语回 JSON、不回显期望向量；与 diag/probe 同 owner 同 request 语义，供 rpc.exposes 契约校验"

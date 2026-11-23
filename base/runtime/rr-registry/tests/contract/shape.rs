@@ -1,12 +1,12 @@
-//! append-only 形状守护：42 条主题三元组 pin、退役主题、全量 manifest 过契约。
+//! append-only 形状守护：44 条主题三元组 pin、退役主题、全量 manifest 过契约。
 
 use super::*;
 
 // ---------- 最终整枝评审 C2：append-only 的形状守护 ----------
 
-/// 注册表的全部 42 条 `(name, owner, kind)` 三元组。
+/// 注册表的全部 44 条 `(name, owner, kind)` 三元组。
 /// 顺序即 `contracts/topics.toml` 的登记顺序。
-const RR3_PINNED_TOPICS: [(&str, &str, &str); 42] = [
+const RR3_PINNED_TOPICS: [(&str, &str, &str); 44] = [
     ("rr3-sense/audio/pcm", "rr3-sense", "stream"),
     ("rr3-sense/audio/vad_start", "rr3-sense", "event"),
     ("rr3-sense/env/temperature", "rr3-sense", "event"),
@@ -33,6 +33,7 @@ const RR3_PINNED_TOPICS: [(&str, &str, &str); 42] = [
     ),
     ("rr3-runtime/module/state", "rr3-runtime", "notification"),
     ("rr3-sense/capture/dump", "rr3-sense", "request"),
+    ("rr3-sense/servo/set", "rr3-sense", "request"),
     ("rr3-act/relay/set", "rr3-act", "request"),
     ("rr3-power/battery/low", "rr3-power", "event"),
     ("rr3-power/battery/ok", "rr3-power", "event"),
@@ -56,6 +57,7 @@ const RR3_PINNED_TOPICS: [(&str, &str, &str); 42] = [
     ("rr3-brain/model/set", "rr3-brain", "request"),
     ("rr3-brain/model/test", "rr3-brain", "request"),
     ("rr3-sense/ops/list", "rr3-sense", "request"),
+    ("rr3-sentinel/diag/parity", "rr3-sentinel", "request"),
 ];
 
 /// 从 topics.toml 文本解析出的 (name, owner, kind) 三元组
@@ -139,7 +141,7 @@ fn pin_kind_shape(topics: &[(String, String, String)]) {
 }
 
 fn pin_triples(topics: &[(String, String, String)]) {
-    // 4) 39 条三元组逐条在册；配合上面的等长与唯一性，等价于"不多不少"
+    // 4) 44 条三元组逐条在册；配合下面的等长与唯一性，等价于"不多不少"
     for (name, owner, kind) in RR3_PINNED_TOPICS {
         assert!(
             topics
@@ -153,10 +155,17 @@ fn pin_triples(topics: &[(String, String, String)]) {
                 .collect::<Vec<_>>()
         );
     }
+    // pin 数组自身也要与契约等长：只做逐条"在册"检查时，漏登一条不会被发现
+    // （2026-11-23 审计：`rr3-sense/servo/set` 已入契约但漏出本数组）。
+    assert_eq!(
+        RR3_PINNED_TOPICS.len(),
+        topics.len(),
+        "pin 数组条数必须与契约等长（漏登一条不会被逐条循环抓到）"
+    );
 }
 
 /// C2：把 `contracts/topics.toml` 的**形状**钉死——owner 数、topic 数、kind 分布，
-/// 以及全部 39 条 `(name, owner, kind)` 三元组逐条在册（且不多不少）。
+/// 以及全部 44 条 `(name, owner, kind)` 三元组逐条在册（且不多不少）。
 ///
 /// 计数做成硬 pin 是**故意**的，不是"禁止 append"：契约只增不改，新增主题合法，
 /// 但必须是一次**有意识的编辑**——同一次改动里既要改 `contracts/topics.toml`，

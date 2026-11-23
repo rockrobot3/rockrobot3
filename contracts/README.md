@@ -15,7 +15,7 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
 | `roles.toml` | 角色词表（增补轮六 §4.1 新建）：`[[role]]`（name/slot/kind/iface/requires/derives/direction/droppable/input_only_ok/per_instance/note）——profiles `[pins]` 的 role 外键、rrd 派生器（derives）与门 a 六表对账的真值源；slot 外键必须命中 `slots.toml`，iface 外键必须命中 `RR3_ASSEMBLE_HANDLE_TRAITS`（两者由 ⑨-a 报告模式执法——2026-10-18 批N2 件六建步：红账三段对低水位基线 `tools/ci/gate-a-baseline.txt`，转红随基-39 全刀落完） | L2 |
 | `devices.toml` | 器件型号词表（增补轮六 §4.1b 新立，sense S-13）：`[[device]]`（model/bus/addrs/baud_ok/id_reg/peak_ma/mate）——门 o 在册对账、门 i 前件、§12.1 器件级在位探测（id_reg，缺省时探测面只许报 reachable/absent）与校验⑨ 电流互校的真值源；装载期不认型号（D10a），评审期与出厂自检必须认 | L2 |
 | `platform/<平台>.toml` | 平台事实登记表（增补轮六 §4.6 新立，基-22），每平台一份四段：`[[controller]]` 在册控制器词表（name/kind/channels，kind 封闭七值 pwm/gpio/i2c/spi/vspi/adc/uart）、`[capabilities]` 能力集（adc_pins/input_only_pins/no_open_drain/output_capable_pins，空集必须显式写并带行级注记）、`[[conflict]]` 冲突矩阵（group/pins/controllers/why，无冲突显式写 `conflict = []`）、`[construction]` 具名构造表（键 = `controller:role:instance` 三元串，值 = 平台侧构造路径）——校验 ③-b/④-b/⑤-a/⑤-b/⑧ 的判据前件；**不是器件型号**（D10a：装载期不认型号，器件能力住 devices.toml）、不与 profiles `[supplies]` 并表（三份数据三个主人）；rr-registry `src/platform.rs` fail-closed 读表（任一段缺即红，宽容 = F-6 病）。当前在册 esp32（真形态，board.rs 直读）、rk3566 与 raspberry-pi-4（**演练实例**，取值待器件/真板核对，敞口见 docs/status.md） | L2 |
-| `face-expressions.toml` | 表情白名单契约（增补轮六 §4.5 新立，批N1 n1-8）：`expressions` 全集 43 态（7 基态 + char 单字符档 36 态，顺序即帧表序）+ `board_subset` 板侧可渲染七态——白名单唯一事实源；宿主投影 = atoms/face `RR3_FACE_EXPRESSIONS`（include_str! 逐名对账），板侧副本 = `topics_gen.rs`（tools/rr3-codegen 生成，重跑 diff 为空 = 门 f 拟 ⑨-d）；扩态走契约级评审并三处同批 | L2 |
+| `face-expressions.toml` | 表情白名单契约（增补轮六 §4.5 新立，批N1 n1-8）：`expressions` 全集 52 态（7 基态 + char 单字符档 36 态 + 9 情绪/彩蛋态，顺序即帧表序）+ `board_subset` 板侧可渲染 16 态——白名单唯一事实源；宿主投影 = atoms/face `RR3_FACE_EXPRESSIONS`（include_str! 逐名对账），板侧副本 = `topics_gen.rs`（tools/rr3-codegen 生成，重跑 diff 为空 = 门 f 拟 ⑨-d）；扩态走契约级评审并三处同批 | L2 |
 | `events/*.schema.json` | 各模块事件负载 schema（命名规则与模板见 [`events/README.md`](events/README.md)） | L2 |
 
 > **golden 向量的效力边界**：它钉住的是"本机 Rust 编解码与契约字节逐位一致"（IPC-T-001 侧），
@@ -151,7 +151,7 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   `events/power-battery-low.schema.json`（形状最小：seq / percent / voltage_mv；
   生产者 rr3-power 的 battery 实装落地后为形状唯一事实源）。同批更新 rr-registry 形状 pin
   （24 条三元组、kind 8-9-3-4、格位 21 / 层分布 5-12-4）。**2026-10-15 注**：本行是该批次的历史记录，
-  不改写；**现值为 39 条主题（event 12 / request 19 / notification 4 / stream 4，8 owner，2 条 retired）
+  不改写；**现值为 44 条主题（event 12 / request 24 / notification 4 / stream 4，8 owner，2 条 retired）
   与 23 格（normal 20 / placeholder 3 / retired 0）**（2026-10-20 批N5 件二笔3 随 append 更新）——
   计数唯一事实源是 `topics.toml` 与 `slots.toml` 本身，
   任何文档复述这个数字都必须以两份表为准（本 README 下文 ③ 段已按现值更新，两处并存即是漂移教训，

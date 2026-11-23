@@ -370,7 +370,7 @@ rock3/
 │   ├── README.md                  ← 歧义裁定与"契约只增不改"的演进规则
 │   ├── envelope.schema.json       ← A-IPC 128B 消息头 + 5 种 payload 类型契约（ADR-0006）
 │   ├── topics.toml                ← 主题所有权注册表（前缀归属与校验入口见 §6.3）
-│   ├── face-expressions.toml      ← 表情白名单真值点（43 态全集 + board_subset 七态，§4.5/批N1 n1-8）
+│   ├── face-expressions.toml      ← 表情白名单真值点（52 态全集 + board_subset 16 态，§4.5/批N1 n1-8）
 │   ├── roles.toml                 ← 角色词表（`[pins].role` 外键；iface/requires/derives/input_only_ok，批N1 n1-1）
 │   ├── devices.toml               ← 器件词表（速率档/合法地址集/峰值电流/id_reg，门 ⑨-o 与 L-14 比对源，批N1 n1-2）
 │   ├── slots.toml                 ← 能力格坐标系总表（查册门真值，§4.3、ADR-0012 裁定 1）
