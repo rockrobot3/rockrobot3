@@ -83,27 +83,11 @@ fn registry_triples(text: &str) -> Vec<(String, String, String)> {
         .collect()
 }
 
-/// C2：把 `contracts/topics.toml` 的**形状**钉死——owner 数、topic 数、kind 分布，
-/// 以及全部 39 条 `(name, owner, kind)` 三元组逐条在册（且不多不少）。
-///
-/// 计数做成硬 pin 是**故意**的，不是"禁止 append"：契约只增不改，新增主题合法，
-/// 但必须是一次**有意识的编辑**——同一次改动里既要改 `contracts/topics.toml`，
-/// 也要更新这里的 `RR3_PINNED_TOPICS` / 四个计数期望，以及把这些形状当事实来写的
-/// 文档（`docs/architecture/architecture.md` §6.3、`docs/architecture/naming.md` §3、`contracts/README.md`）。
-/// 少改任何一处，本用例即红。
-///（注：本数组在批N4 件六二/九二/九三只改了计数 pin、漏了随批补条——批N5 件二笔3
-/// 补齐七条后重新与 topics.toml 等长，"不多不少"的等价自此恢复。）
-///
-/// 反过来说，删一条主题、改一条 kind、改一个 owner 数同样会红——评审证明这正是
-/// 此前门禁的空洞（只有 owner 数与 fixture 引用的四条主题被钉住）。
-#[test]
-fn registry_shape_is_pinned() {
+fn pin_owner_shape(text: &str) {
     use std::collections::HashSet;
 
-    let text = topics_toml();
-
     // 1) owner 侧：8 个，且不重名
-    let owners = rr_registry::rr3_topics_owners(&text);
+    let owners = rr_registry::rr3_topics_owners(text);
     assert_eq!(
         owners.len(),
         8,
@@ -115,9 +99,13 @@ fn registry_shape_is_pinned() {
         owners.len(),
         "owner 名不得重复登记: {owners:?}"
     );
+}
+
+fn pin_topic_shape(text: &str) -> Vec<(String, String, String)> {
+    use std::collections::HashSet;
 
     // 2) topic 侧：与钉数单点一致，且不重名（重名会让下面的子集论证失去意义）
-    let topics = registry_triples(&text);
+    let topics = registry_triples(text);
     assert_eq!(
         topics.len(),
         rr_registry::RR3_CONTRACT_TOPIC_COUNT,
@@ -125,7 +113,10 @@ fn registry_shape_is_pinned() {
     );
     let names: HashSet<&str> = topics.iter().map(|t| t.0.as_str()).collect();
     assert_eq!(names.len(), topics.len(), "topic 名不得重复登记");
+    topics
+}
 
+fn pin_kind_shape(topics: &[(String, String, String)]) {
     // 3) kind 分布：钉数 request，其余三类按契约现状
     let count = |want: &str| topics.iter().filter(|t| t.2 == want).count();
     assert_eq!(
@@ -145,7 +136,9 @@ fn registry_shape_is_pinned() {
         topics.len(),
         "存在四类之外的 kind: {topics:?}"
     );
+}
 
+fn pin_triples(topics: &[(String, String, String)]) {
     // 4) 39 条三元组逐条在册；配合上面的等长与唯一性，等价于"不多不少"
     for (name, owner, kind) in RR3_PINNED_TOPICS {
         assert!(
@@ -160,6 +153,29 @@ fn registry_shape_is_pinned() {
                 .collect::<Vec<_>>()
         );
     }
+}
+
+/// C2：把 `contracts/topics.toml` 的**形状**钉死——owner 数、topic 数、kind 分布，
+/// 以及全部 39 条 `(name, owner, kind)` 三元组逐条在册（且不多不少）。
+///
+/// 计数做成硬 pin 是**故意**的，不是"禁止 append"：契约只增不改，新增主题合法，
+/// 但必须是一次**有意识的编辑**——同一次改动里既要改 `contracts/topics.toml`，
+/// 也要更新这里的 `RR3_PINNED_TOPICS` / 四个计数期望，以及把这些形状当事实来写的
+/// 文档（`docs/architecture/architecture.md` §6.3、`docs/architecture/naming.md` §3、`contracts/README.md`）。
+/// 少改任何一处，本用例即红。
+///（注：本数组在批N4 件六二/九二/九三只改了计数 pin、漏了随批补条——批N5 件二笔3
+/// 补齐七条后重新与 topics.toml 等长，"不多不少"的等价自此恢复。）
+///
+/// 反过来说，删一条主题、改一条 kind、改一个 owner 数同样会红——评审证明这正是
+/// 此前门禁的空洞（只有 owner 数与 fixture 引用的四条主题被钉住）。
+#[test]
+fn registry_shape_is_pinned() {
+    let text = topics_toml();
+
+    pin_owner_shape(&text);
+    let topics = pin_topic_shape(&text);
+    pin_kind_shape(&topics);
+    pin_triples(&topics);
 }
 
 /// C14（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：retired 主题**号位保留、义务解除**——
