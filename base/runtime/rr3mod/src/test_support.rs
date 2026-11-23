@@ -166,64 +166,92 @@ fn rr3_prime_frames(stream: &mut UnixStream) {
     );
 }
 
-/// 假 rrd：收注册回 src_task=7；心跳回 accepted；上行 Event / Response 记账；
-/// 行为按 [`FakeMode`] 三形状（测试夹具写死，不是通用服务器）。
-fn fake_rrd(listener: UnixListener, log: Arc<Mutex<Vec<Value>>>, mode: FakeMode) {
-    let drop_after_register = matches!(mode, FakeMode::DropAfterRegister);
-    let primed = matches!(mode, FakeMode::Primed);
-    let Ok((mut stream, _)) = listener.accept() else {
-        return;
+fn fake_rrd_stream(listener: UnixListener) -> Option<UnixStream> {
+    let Ok((stream, _)) = listener.accept() else {
+        return None;
     };
     if stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .is_err()
     {
-        return;
+        return None;
     }
-    loop {
-        let Some(frame) = rr3_frame_read(&mut stream).ok() else {
-            return;
-        };
-        let Ok((ty, body)) = rr3_body_split(&frame.payload) else {
-            return;
-        };
-        let Ok(v) = serde_json::from_slice::<Value>(&body) else {
-            return;
-        };
-        match ty {
+    Some(stream)
+}
+
+fn fake_read_frame(stream: &mut UnixStream) -> Option<(Rr3PayloadType, Value)> {
+    let frame = rr3_frame_read(stream).ok()?;
+    let (ty, body) = rr3_body_split(&frame.payload).ok()?;
+    serde_json::from_slice::<Value>(&body).ok().map(|v| (ty, v))
+}
+
+fn fake_on_request(
+    stream: &mut UnixStream,
+    log: &Arc<Mutex<Vec<Value>>>,
+    v: &Value,
+    drop_after_register: bool,
+    primed: bool,
+) -> bool {
+    let method = v["method"].as_str().unwrap_or("").to_string();
+    let id = v["id"].as_u64().unwrap_or(0);
+    log.lock().unwrap().push(json!({
+        "kind": "req", "method": method, "id": id, "params": v["params"],
+    }));
+    if method == "rr3.register" {
+        rr3_write(
+            stream,
+            Rr3PayloadType::Response,
+            0,
+            json!({"jsonrpc": "2.0", "id": id, "result": {"src_task": 7}}),
+        );
+        if drop_after_register {
+            return false; // 关流 → reader EOF → stop 位 → serve 探针返
+        }
+        if primed {
+            rr3_prime_frames(stream);
+        }
+    }
+    // 心跳与其他上行方法只记账不应答（heartbeat_ms=50000 测试窗口内不拍）
+    true
+}
+
+fn fake_record_response(log: &Arc<Mutex<Vec<Value>>>, v: &Value) {
+    log.lock().unwrap().push(json!({
+        "kind": "response", "id": v["id"], "result": v["result"],
+    }));
+}
+
+fn fake_record_event(log: &Arc<Mutex<Vec<Value>>>, v: &Value) {
+    log.lock().unwrap().push(json!({
+        "kind": "event", "topic": v["topic"], "body": v,
+    }));
+}
+
+/// 假 rrd：收注册回 src_task=7；心跳回 accepted；上行 Event / Response 记账；
+/// 行为按 [`FakeMode`] 三形状（测试夹具写死，不是通用服务器）。
+fn fake_rrd(listener: UnixListener, log: Arc<Mutex<Vec<Value>>>, mode: FakeMode) {
+    let drop_after_register = matches!(mode, FakeMode::DropAfterRegister);
+    let primed = matches!(mode, FakeMode::Primed);
+    let Some(mut stream) = fake_rrd_stream(listener) else {
+        return;
+    };
+    while let Some((ty, v)) = fake_read_frame(&mut stream) {
+        let keep = match ty {
             Rr3PayloadType::Request => {
-                let method = v["method"].as_str().unwrap_or("").to_string();
-                let id = v["id"].as_u64().unwrap_or(0);
-                log.lock().unwrap().push(json!({
-                    "kind": "req", "method": method, "id": id, "params": v["params"],
-                }));
-                if method == "rr3.register" {
-                    rr3_write(
-                        &mut stream,
-                        Rr3PayloadType::Response,
-                        0,
-                        json!({"jsonrpc": "2.0", "id": id, "result": {"src_task": 7}}),
-                    );
-                    if drop_after_register {
-                        return; // 关流 → reader EOF → stop 位 → serve 探针返
-                    }
-                    if primed {
-                        rr3_prime_frames(&mut stream);
-                    }
-                }
-                // 心跳与其他上行方法只记账不应答（heartbeat_ms=50000 测试窗口内不拍）
+                fake_on_request(&mut stream, &log, &v, drop_after_register, primed)
             }
             Rr3PayloadType::Response => {
-                log.lock().unwrap().push(json!({
-                    "kind": "response", "id": v["id"], "result": v["result"],
-                }));
+                fake_record_response(&log, &v);
+                true
             }
             Rr3PayloadType::Event => {
-                log.lock().unwrap().push(json!({
-                    "kind": "event", "topic": v["topic"], "body": v,
-                }));
+                fake_record_event(&log, &v);
+                true
             }
-            _ => return,
+            _ => false,
+        };
+        if !keep {
+            return;
         }
     }
 }
