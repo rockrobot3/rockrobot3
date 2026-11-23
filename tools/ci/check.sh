@@ -65,8 +65,21 @@ run() {
     printf 'PASS  %s\n' "$*"
   else
     printf 'FAIL  %s\n' "$*"
+    ci_note "$*"
     fail=1
   fi
+}
+
+# CI 注解（仅 GitHub Actions）：失败命令与测试首现场压成单行——job 日志匿名
+# 不可读，注解是公开取数面；只靠工作流侧 tail 会把真因挤出 900 字符上限。
+ci_note() {
+  [ "${GITHUB_ACTIONS:-}" = "true" ] || return 0
+  local why=""
+  if [ -s "$tmpout" ]; then
+    why=$(grep -aE '^test .* FAILED|panicked at|^error(\[|:)' "$tmpout" 2>/dev/null \
+            | tail -5 | tr '\n' ' ')
+  fi
+  printf '::error title=check.sh::FAIL %s%s\n' "$*" "${why:+ —— $why}"
 }
 
 # 跑测试的步骤：cargo 退出码为首要信号；退出码 0 时还须同时出现行首的
@@ -76,12 +89,14 @@ run() {
 run_tests() {
   if ! "$@" 2>&1 | tee "$tmpout"; then
     printf 'FAIL  %s\n' "$*"
+    ci_note "$*"
     fail=1
     return
   fi
   if ! grep -qE '^running [1-9][0-9]* tests?' "$tmpout" \
      || ! grep -qE '^test result: ok\. [1-9][0-9]* passed' "$tmpout"; then
     printf 'FAIL  %s ——命令成功但 0 个测试通过（过滤器打空或测试集丢失），视为门禁失效\n' "$*"
+    ci_note "$*（0 个测试通过）"
     fail=1
     return
   fi
