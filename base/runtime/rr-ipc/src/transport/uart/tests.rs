@@ -344,40 +344,42 @@ fn uart_open_same_process_pair_reentrant() {
     );
 }
 
-/// 排他开口·跨进程被拒（批G G0 守门用例，批E E7 实锤）：另一进程持锁时本
-/// 进程 open 必须以文案点名拒绝——E7 "残留旧桥静默截流" 的现场形状。
-/// 子进程探针：复用本测试二进制，holder 模式下按父进程传入的 pty 路径 open，
-/// 就绪文件握手（harness 自身的 stdout 输出不可作握手信道），父进程关 stdin
-/// 即收兵。
-#[test]
-fn uart_excl_cross_process_second_process_rejected() {
-    let (_master, _slave_keepalive, slave_path) = pty_pair_with_path();
-    if std::env::var("RR3_UART_EXCL_PROBE").as_deref() == Ok("holder") {
-        let path = std::env::var("RR3_UART_EXCL_PATH").expect("holder 必须拿到 pty 路径");
-        let conn = Rr3UartConn::open(std::path::Path::new(&path)).expect("holder open 必须成功");
-        let ready = std::env::var("RR3_UART_EXCL_READY").expect("holder 必须拿到就绪文件路径");
-        std::fs::write(&ready, b"R").expect("holder 写就绪文件失败");
-        let mut b = [0u8; 1];
-        let _ = std::io::stdin().read(&mut b); // 父进程关 stdin 即收兵
-        drop(conn);
-        return;
+fn excl_holder_probe() -> bool {
+    if std::env::var("RR3_UART_EXCL_PROBE").as_deref() != Ok("holder") {
+        return false;
     }
-    let ready = std::env::temp_dir().join(format!("rr3-excl-probe-{}.r", std::process::id()));
-    let _ = std::fs::remove_file(&ready);
-    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+    let path = std::env::var("RR3_UART_EXCL_PATH").expect("holder 必须拿到 pty 路径");
+    let conn = Rr3UartConn::open(std::path::Path::new(&path)).expect("holder open 必须成功");
+    let ready = std::env::var("RR3_UART_EXCL_READY").expect("holder 必须拿到就绪文件路径");
+    std::fs::write(&ready, b"R").expect("holder 写就绪文件失败");
+    let mut b = [0u8; 1];
+    let _ = std::io::stdin().read(&mut b); // 父进程关 stdin 即收兵
+    drop(conn);
+    true
+}
+
+fn spawn_excl_holder(slave_path: &std::path::Path, ready: &std::path::Path) -> std::process::Child {
+    std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "transport::uart::tests::uart_excl_cross_process_second_process_rejected",
             "--exact",
             "--nocapture",
         ])
         .env("RR3_UART_EXCL_PROBE", "holder")
-        .env("RR3_UART_EXCL_PATH", &slave_path)
-        .env("RR3_UART_EXCL_READY", &ready)
+        .env("RR3_UART_EXCL_PATH", slave_path)
+        .env("RR3_UART_EXCL_READY", ready)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .expect("spawn 自身测试二进制失败");
+        .expect("spawn 自身测试二进制失败")
+}
+
+fn wait_excl_ready(
+    child: &mut std::process::Child,
+    ready: &std::path::Path,
+    slave_path: &std::path::Path,
+) {
     // 等就绪文件（holder 持锁成功的信号），10s 上限。
     let mut ready_seen = false;
     for _ in 0..200 {
@@ -388,9 +390,39 @@ fn uart_excl_cross_process_second_process_rejected() {
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
     if matches!(child.try_wait(), Ok(Some(_))) || !ready_seen {
-        let _ = std::fs::remove_file(&ready);
+        let _ = std::fs::remove_file(ready);
         panic!("holder 子进程 10s 内未就绪（pty 路径：{slave_path:?}）");
     }
+}
+
+fn assert_excl_error(err: std::io::Error) {
+    let msg = format!("{err}");
+    assert_eq!(
+        err.kind(),
+        std::io::ErrorKind::Other,
+        "跨进程被拒必须 Other+文案点名（实得 {msg}）"
+    );
+    assert!(
+        msg.contains("flock 排他"),
+        "错误文案必须点名 flock 排他：{msg}"
+    );
+}
+
+/// 排他开口·跨进程被拒（批G G0 守门用例，批E E7 实锤）：另一进程持锁时本
+/// 进程 open 必须以文案点名拒绝——E7 "残留旧桥静默截流" 的现场形状。
+/// 子进程探针：复用本测试二进制，holder 模式下按父进程传入的 pty 路径 open，
+/// 就绪文件握手（harness 自身的 stdout 输出不可作握手信道），父进程关 stdin
+/// 即收兵。
+#[test]
+fn uart_excl_cross_process_second_process_rejected() {
+    let (_master, _slave_keepalive, slave_path) = pty_pair_with_path();
+    if excl_holder_probe() {
+        return;
+    }
+    let ready = std::env::temp_dir().join(format!("rr3-excl-probe-{}.r", std::process::id()));
+    let _ = std::fs::remove_file(&ready);
+    let mut child = spawn_excl_holder(&slave_path, &ready);
+    wait_excl_ready(&mut child, &ready, &slave_path);
     match Rr3UartConn::open(&slave_path) {
         Ok(_) => {
             drop(child.stdin.take());
@@ -398,18 +430,7 @@ fn uart_excl_cross_process_second_process_rejected() {
             let _ = std::fs::remove_file(&ready);
             panic!("跨进程二次 open 必须被拒（flock 排他）");
         }
-        Err(err) => {
-            let msg = format!("{err}");
-            assert_eq!(
-                err.kind(),
-                std::io::ErrorKind::Other,
-                "跨进程被拒必须 Other+文案点名（实得 {msg}）"
-            );
-            assert!(
-                msg.contains("flock 排他"),
-                "错误文案必须点名 flock 排他：{msg}"
-            );
-        }
+        Err(err) => assert_excl_error(err),
     }
     drop(child.stdin.take()); // 关 stdin 收兵
     let _ = child.wait();
