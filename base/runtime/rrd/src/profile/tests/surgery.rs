@@ -212,6 +212,55 @@ fn rr3_dom_int(v: &toml::Value, name: &str, key: &str) -> i64 {
         .unwrap_or_else(|| panic!("域 {name:?} 缺整型键 {key}"))
 }
 
+fn dom_names(base: &toml::Value) -> Vec<String> {
+    rr3_domains(base)
+        .into_iter()
+        .filter_map(|d| {
+            d.get("name")
+                .and_then(toml::Value::as_str)
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+fn domain_variants(text: &str, names: &[String]) -> [String; 3] {
+    let mut quoted = text.to_string();
+    for name in names {
+        quoted = quoted.replace(&format!("name = \"{name}\""), &format!("name = '{name}'"));
+    }
+    [
+        text.replace("[[supplies.domain]]", "[[ supplies.domain ]]"),
+        text.replace("[[supplies.domain]]", "[[supplies.domain]]  # 域"),
+        quoted,
+    ]
+}
+
+fn check_variant(f: &std::path::Path, vtext: &str, vi: usize, names: &[String]) -> usize {
+    let v: toml::Value = toml::from_str(vtext)
+        .unwrap_or_else(|e| panic!("{} 变体 {vi} 不是合法 TOML: {e}", f.display()));
+    let mut checked = 0;
+    for name in names {
+        let out = rr3_domain_apply(vtext, name, &[("severe_mv", "1")])
+            .unwrap_or_else(|e| panic!("{} 域 {name} 变体 {vi}: {e}", f.display()));
+        let after: toml::Value = toml::from_str(&out).expect("手术产物须合法 TOML");
+        for other in names {
+            let want = if other == name {
+                1
+            } else {
+                rr3_dom_int(&v, other, "severe_mv")
+            };
+            assert_eq!(
+                rr3_dom_int(&after, other, "severe_mv"),
+                want,
+                "{} 域 {other} 在 {name} 手术、变体 {vi} 下漂移",
+                f.display()
+            );
+        }
+        checked += 1;
+    }
+    checked
+}
+
 /// 变体矩阵（B43）：对每份真实装配单的每个在册域，做三种合法书写变体
 /// （括号内空白 / 块头行内注释 / 单引号名），逐变体断言三件事：变体仍是合法
 /// TOML、手术能定位、手术后重解析**只有目标域变**（其余域逐键零漂移）。
@@ -224,48 +273,12 @@ fn repo_domain_variants_survive_surgery() {
     for f in rr3_repo_files(&root.join("profiles")) {
         let text = std::fs::read_to_string(&f).expect("读装配单");
         let base: toml::Value = toml::from_str(&text).expect("仓内装配单须合法 TOML");
-        let names: Vec<String> = rr3_domains(&base)
-            .into_iter()
-            .filter_map(|d| {
-                d.get("name")
-                    .and_then(toml::Value::as_str)
-                    .map(str::to_string)
-            })
-            .collect();
+        let names = dom_names(&base);
         if names.is_empty() {
             continue;
         }
-        let mut quoted = text.clone();
-        for name in &names {
-            quoted = quoted.replace(&format!("name = \"{name}\""), &format!("name = '{name}'"));
-        }
-        let variants = [
-            text.replace("[[supplies.domain]]", "[[ supplies.domain ]]"),
-            text.replace("[[supplies.domain]]", "[[supplies.domain]]  # 域"),
-            quoted,
-        ];
-        for (vi, vtext) in variants.iter().enumerate() {
-            let v: toml::Value = toml::from_str(vtext)
-                .unwrap_or_else(|e| panic!("{} 变体 {vi} 不是合法 TOML: {e}", f.display()));
-            for name in &names {
-                let out = rr3_domain_apply(vtext, name, &[("severe_mv", "1")])
-                    .unwrap_or_else(|e| panic!("{} 域 {name} 变体 {vi}: {e}", f.display()));
-                let after: toml::Value = toml::from_str(&out).expect("手术产物须合法 TOML");
-                for other in &names {
-                    let want = if other == name {
-                        1
-                    } else {
-                        rr3_dom_int(&v, other, "severe_mv")
-                    };
-                    assert_eq!(
-                        rr3_dom_int(&after, other, "severe_mv"),
-                        want,
-                        "{} 域 {other} 在 {name} 手术、变体 {vi} 下漂移",
-                        f.display()
-                    );
-                }
-                checked += 1;
-            }
+        for (vi, vtext) in domain_variants(&text, &names).iter().enumerate() {
+            checked += check_variant(&f, vtext, vi, &names);
         }
     }
     assert!(checked > 0, "变体矩阵不得空转（仓内装配单至少一份有域）");
