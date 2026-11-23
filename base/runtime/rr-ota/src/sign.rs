@@ -8,13 +8,16 @@
 //! `bytes`/`sha256` 两个字段约束。字段顺序固定、ASCII、LF 结尾；任何缺字段、
 //! 重复、未知、CRLF、非 ASCII、超长都 fail-closed 拒。
 
-use std::cmp::Ordering;
 use std::fmt::Write as _;
 use std::io::Read;
 use std::path::Path;
 
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use sha2::{Digest, Sha256};
+
+mod version;
+
+pub use version::{rr3_version_cmp, rr3_version_parse, Rr3Version};
 
 /// manifest 首行（schema 1）。
 pub const RR3_OTA_MANIFEST_HEADER: &str = "rr3-ota-manifest 1";
@@ -416,7 +419,7 @@ fn rr3_image_name_check(s: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn rr3_u64_parse(s: &str, what: &str) -> Result<u64, String> {
+pub(super) fn rr3_u64_parse(s: &str, what: &str) -> Result<u64, String> {
     if !s.bytes().all(|b| b.is_ascii_digit()) {
         return Err(format!("{what} 只收十进制无符号整数（实得 {s:?}）"));
     }
@@ -452,38 +455,8 @@ fn rr3_hex_nibble(b: u8, what: &str) -> Result<u8, String> {
     }
 }
 
-/// 严格三段式版本：`major.minor.patch`，无前导零、无预发布/构建元数据。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Rr3Version {
-    pub major: u64,
-    pub minor: u64,
-    pub patch: u64,
-}
-
-/// 解析版本；失败点名段位，不猜。
-pub fn rr3_version_parse(s: &str) -> Result<Rr3Version, String> {
-    let parts: Vec<&str> = s.split('.').collect();
-    if parts.len() != 3 {
-        return Err(format!("version 必须是 major.minor.patch（实得 {s:?}）"));
-    }
-    let mut nums = [0u64; 3];
-    for (i, p) in parts.iter().enumerate() {
-        nums[i] = rr3_u64_parse(p, ["major", "minor", "patch"][i])?;
-    }
-    Ok(Rr3Version {
-        major: nums[0],
-        minor: nums[1],
-        patch: nums[2],
-    })
-}
-
 fn cur_text(v: Rr3Version) -> String {
     format!("{}.{}.{}", v.major, v.minor, v.patch)
-}
-
-/// 版本比较（供调用方与测试共用）。
-pub fn rr3_version_cmp(a: &str, b: &str) -> Result<Ordering, String> {
-    Ok(rr3_version_parse(a)?.cmp(&rr3_version_parse(b)?))
 }
 
 #[cfg(test)]
