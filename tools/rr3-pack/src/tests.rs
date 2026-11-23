@@ -3,7 +3,10 @@
 
 use super::*;
 
+mod fixture;
 mod profile;
+
+use fixture::*;
 
 /// 源码仓身份零泄漏：缺省维护者必须是 RFC 2606 保留域（发版由环境变量
 /// 注入真实身份，不在树内落任何个人/单位地址）。
@@ -14,100 +17,6 @@ fn control_text_domain() {
     assert!(text.contains("Maintainer: "));
     assert!(text.contains(RR3_DEB_MAINTAINER) || std::env::var(RR3_DEB_MAINTAINER_ENV).is_ok());
     assert!(text.ends_with('\n'));
-}
-
-/// 真仓装配单（基-25：打包预验走 rrd 解析器，夹具必须给合法装配单——空文本过不了
-/// 解析器。include_str! 相对源文件 src/，到仓根四级）。distro chip=rk3566、
-/// esp32-mini chip=esp32，平台事实表册位随之。
-const DISTRO_PROFILE: &str = include_str!("../../../profiles/distro.toml");
-const ESP32_MINI_PROFILE: &str = include_str!("../../../profiles/esp32-mini.toml");
-
-/// 夹具根唯一序号：并行测试各占一个目录（ZST 指针恒同、pid 同批相同，都当不得唯一键）
-fn fixture_seq() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    SEQ.fetch_add(1, Ordering::Relaxed)
-}
-
-/// 夹具：临时 payload + repo。
-fn fixture() -> (PathBuf, PathBuf) {
-    let base =
-        std::env::temp_dir().join(format!("rr3-pack-{}-{}", std::process::id(), fixture_seq()));
-    let _ = fs::remove_dir_all(&base);
-    let payload = base.join("payload");
-    let repo = base.join("repo");
-    fs::create_dir_all(payload.join("rr3-modules/rr3-act")).unwrap();
-    fs::create_dir_all(payload.join("rr3-modules/rr3-connect")).unwrap();
-    fs::create_dir_all(repo.join("profiles")).unwrap();
-    fs::create_dir_all(repo.join("contracts")).unwrap();
-    fs::create_dir_all(repo.join("modules/rr3-act")).unwrap();
-    fs::create_dir_all(repo.join("modules/rr3-connect")).unwrap();
-    fs::write(payload.join("rrd"), "rrd-bin-bytes").unwrap();
-    fs::write(payload.join("rr3-ctl"), "ctl-bin-bytes").unwrap();
-    fs::write(payload.join("rr3-ota-ctl"), "ota-ctl-bin-bytes").unwrap();
-    let manifest = "[manifest]\nschema_version = 1\nname = \"rr3-act\"\nversion = \"0.0.1\"\ntype = \"module\"\nlang = \"rust\"\nentry = \"rr3-act\" # 在仓相对\n\n[provides]\ncapabilities = [\"act.servo\"]\n\n[depends]\nrequired = [\"bus.publish\"]\n\n[events]\npublishes = []\nsubscribes = []\n\n[health]\nheartbeat_ms = 1000\nwatchdog_timeout_ms = 5000\n\n[resources]\nrestart_policy = \"always\"\nmem_limit_mb = 16\nstart_priority = 40\n";
-    for m in ["rr3-act", "rr3-connect"] {
-        fs::write(
-            payload.join(format!("rr3-modules/{m}/manifest.toml")),
-            manifest.replace("rr3-act", m),
-        )
-        .unwrap();
-        fs::write(
-            payload.join(format!("rr3-modules/{m}/bin")),
-            format!("{m}-bin"),
-        )
-        .unwrap();
-        fs::write(repo.join(format!("modules/{m}/config.toml")), "[x]\n").unwrap();
-    }
-    // python 模块（批F1）：pkg 树 + manifest（lang=python），无 bin——
-    // entry 装机产物是打包器生成的 shim（PYTHONPATH 须装机绝对）
-    fs::create_dir_all(payload.join("rr3-modules/rr3-brain/pkg/rr3_brain")).unwrap();
-    fs::create_dir_all(repo.join("modules/rr3-brain")).unwrap();
-    fs::write(
-        payload.join("rr3-modules/rr3-brain/manifest.toml"),
-        manifest
-            .replace("rr3-act", "rr3-brain")
-            .replace("lang = \"rust\"", "lang = \"python\""),
-    )
-    .unwrap();
-    fs::write(
-        payload.join("rr3-modules/rr3-brain/pkg/rr3_brain/__init__.py"),
-        "__version__ = \"0.0.1\"\n",
-    )
-    .unwrap();
-    fs::write(repo.join("modules/rr3-brain/config.toml"), "[rr3-brain]\n").unwrap();
-    fs::write(repo.join("profiles/distro.toml"), DISTRO_PROFILE).unwrap();
-    fs::write(repo.join("contracts/topics.toml"), "# topics\n").unwrap();
-    fs::write(repo.join("contracts/slots.toml"), "# slots\n").unwrap();
-    // boot 真值集（基-25 清单 files 成员）：roles/devices 契约 + 平台事实表
-    //（按装配单 [platform].chip 选册）+ 机型接线档
-    fs::write(repo.join("contracts/roles.toml"), "# roles\n").unwrap();
-    fs::write(repo.join("contracts/devices.toml"), "# devices\n").unwrap();
-    fs::create_dir_all(repo.join("contracts/platform")).unwrap();
-    fs::write(
-        repo.join("contracts/platform/rk3566.toml"),
-        "# platform rk3566\n",
-    )
-    .unwrap();
-    fs::create_dir_all(repo.join("hardware/distro")).unwrap();
-    fs::write(repo.join("hardware/distro/wiring.toml"), "# wiring\n").unwrap();
-    (payload, repo)
-}
-
-fn cfg_of(payload: &Path, repo: &Path) -> (Rr3PackConfig, PathBuf) {
-    let out = payload.parent().unwrap().join("rockrobot3.deb");
-    (
-        Rr3PackConfig {
-            payload: payload.to_path_buf(),
-            repo: repo.to_path_buf(),
-            out: out.clone(),
-            arch: "arm64".to_string(),
-            profile: "distro".to_string(),
-            stage_only: true,
-            install_root: None,
-        },
-        out,
-    )
 }
 
 /// 三枚二进制注入位（usr/bin）。

@@ -15,7 +15,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 POST_BUILD="$REPO_ROOT/base/os/buildroot/board/radxa-zero3/post-build.sh"
 PACK="${RR3_PACK_BIN:-/tmp/rr3-build/release/rr3-pack}"
 [ -x "$PACK" ] || {
-	echo "缺宿主 rr3-pack: $PACK（先构建 tools/rr3-pack，或用 RR3_PACK_BIN 指定）" >&2
+	echo "缺宿主 rr3-pack: ${PACK}（先构建 tools/rr3-pack，或用 RR3_PACK_BIN 指定）" >&2
 	exit 2
 }
 
@@ -129,7 +129,7 @@ if TARGET_DIR="$badwork/target" BINARIES_DIR="$badwork/binaries" bash "$POST_BUI
 else
 	grep -q 'rr3-ghost' "$badout" && grep -q 'bin' "$badout" &&
 		ok "缺 bin 模块整镜像构建失败且点名 rr3-ghost" ||
-		bad "失败未点名模块/缺件（见 $badout）"
+		bad "失败未点名模块/缺件（见 ${badout}）"
 fi
 
 if [ "$fail" -ne 0 ]; then
