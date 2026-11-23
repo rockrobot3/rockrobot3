@@ -16,13 +16,12 @@ mod support;
 
 use support::{
     register_sima_task, rr3_ask_ctl, rr3_assert_ctl_closed, rr3_json_of, rr3_manifest,
-    rr3_read_rpc, rr3_read_where, rr3_register_frame, rr3_rpc_frame, rr3_send, RrdTest,
+    rr3_read_rpc, rr3_read_where, rr3_register_frame, rr3_rpc_frame, rr3_send, RrdClient, RrdTest,
 };
 
 use rr_ipc::{rr3_body_split, Rr3PayloadType, Rr3StatusCode};
 
-#[test]
-fn ctl_status_lists_registered_modules_and_does_not_register_itself() {
+fn ctl_status_setup() -> (RrdTest, RrdClient, u64) {
     let t = RrdTest::rr3_start_no_overlay("ctl-status");
     let mut a = t.rr3_connect();
     rr3_send(
@@ -33,20 +32,16 @@ fn ctl_status_lists_registered_modules_and_does_not_register_itself() {
     let task = reg["result"]["src_task"]
         .as_u64()
         .expect("注册应答带 src_task");
+    (t, a, task)
+}
 
-    let mut ctl = t.rr3_connect();
-    let v = rr3_ask_ctl(&mut ctl, "rr3.ctl.status", 1);
-    let modules = v["result"]["modules"]
-        .as_array()
-        .expect("status 应带 result.modules");
-    assert_eq!(
-        modules.len(),
-        1,
-        "只有 rr3-sima 在册——ctl 连接自己不得进快照: {v}"
-    );
+fn assert_status_module(modules: &[serde_json::Value], task: u64) {
     assert_eq!(modules[0]["name"], "rr3-sima");
     assert_eq!(modules[0]["task"], task);
     assert_eq!(modules[0]["phase"], "registered");
+}
+
+fn assert_status_cols(v: &serde_json::Value) {
     assert!(
         v["result"]["denied_publish"].is_u64(),
         "denied_publish 计数必须在场: {v}"
@@ -85,6 +80,23 @@ fn ctl_status_lists_registered_modules_and_does_not_register_itself() {
             .is_some_and(|s| s.contains("启动摘要")),
         "boot 装配摘要必须在场（远程诊断不翻日志）: {v}"
     );
+}
+
+#[test]
+fn ctl_status_lists_registered_modules_and_does_not_register_itself() {
+    let (t, _a, task) = ctl_status_setup();
+    let mut ctl = t.rr3_connect();
+    let v = rr3_ask_ctl(&mut ctl, "rr3.ctl.status", 1);
+    let modules = v["result"]["modules"]
+        .as_array()
+        .expect("status 应带 result.modules");
+    assert_eq!(
+        modules.len(),
+        1,
+        "只有 rr3-sima 在册——ctl 连接自己不得进快照: {v}"
+    );
+    assert_status_module(modules, task);
+    assert_status_cols(&v);
     rr3_assert_ctl_closed(&mut ctl);
 }
 
