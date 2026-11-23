@@ -209,14 +209,7 @@ fn expiry_of_a_never_module_reports_no_restart() {
     assert_eq!(r.rr3_reg_expire(700).remove(0).restart, None);
 }
 
-/// 活过一整条窗口 = 上一世的账到此为止（spec"仍在 watchdog 超时内死亡"的正向写法）。
-/// 两颗基准不许混：归零看 **registered_at_ms**（这一世活了多久），判死看 **last_beat_ms**
-/// （多久没喂狗）。所以本条一直喂狗（永不判死），只在"注册后第 521ms"那一刻等归零。
-#[test]
-fn surviving_a_watchdog_window_clears_the_crash_budget() {
-    let mut r = RrdRegistry::new(1000);
-    let f = || facts("rr3-sima", 100, 500, "always");
-    let t = r.rr3_reg_add(&f(), chan().0, 0).unwrap();
+fn charge_first_crash(r: &mut RrdRegistry) {
     assert_eq!(
         r.rr3_reg_death("rr3-sima", false, 10)
             .rr3_plan()
@@ -228,9 +221,9 @@ fn surviving_a_watchdog_window_clears_the_crash_budget() {
         1,
         "第 1 世崩过，账上记着 1"
     );
+}
 
-    let t2 = r.rr3_reg_add(&f(), chan().0, 100).unwrap();
-    assert_ne!(t2, t, "重注册必须换新 task，否则本条测的是同一世");
+fn survive_second_life(r: &mut RrdRegistry, t2: u64) {
     for at in [120u64, 220, 320, 420, 520] {
         // 只有第一颗是升级；后面四颗必须是"只续命"（D-6 的另一半判据）
         let want = if at == 120 {
@@ -255,6 +248,21 @@ fn surviving_a_watchdog_window_clears_the_crash_budget() {
         0,
         "第 2 世已活满 521ms ≥ 500ms 窗口"
     );
+}
+
+/// 活过一整条窗口 = 上一世的账到此为止（spec"仍在 watchdog 超时内死亡"的正向写法）。
+/// 两颗基准不许混：归零看 **registered_at_ms**（这一世活了多久），判死看 **last_beat_ms**
+/// （多久没喂狗）。所以本条一直喂狗（永不判死），只在"注册后第 521ms"那一刻等归零。
+#[test]
+fn surviving_a_watchdog_window_clears_the_crash_budget() {
+    let mut r = RrdRegistry::new(1000);
+    let f = || facts("rr3-sima", 100, 500, "always");
+    let t = r.rr3_reg_add(&f(), chan().0, 0).unwrap();
+    charge_first_crash(&mut r);
+
+    let t2 = r.rr3_reg_add(&f(), chan().0, 100).unwrap();
+    assert_ne!(t2, t, "重注册必须换新 task，否则本条测的是同一世");
+    survive_second_life(&mut r, t2);
     // 简报冲突（见实施报告）：第 2 世全程喂狗、健康存活，`rr3_reg_add` 对**在册非 Failed**
     // 的同名条目按 Duplicate 拒（这是既有不变量，`duplicate_name_is_rejected` 钉着，不许为
     // 本条让步）。故 t3 那句"第 3 世"必须先让第 2 世退场——最小忠实实现：insert 一行 remove
