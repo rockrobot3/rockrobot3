@@ -98,6 +98,12 @@ where
         None::<AnyOutputPin>,
         &config,
     )
+    .map_err(|e| {
+        eprintln!(
+            "[periph] UART2 驱动安装失败 GPIO{RR3_BIND_UART2_TX}/GPIO{RR3_BIND_UART2_RX} @{UART2_BAUD_HZ}: {e:?}"
+        );
+        e
+    })
     .expect("UART2 驱动安装失败");
     println!("[periph] UART2 ✓ 指令面 {UART2_BAUD_HZ} @ GPIO{RR3_BIND_UART2_TX}(TX)/GPIO{RR3_BIND_UART2_RX}(RX)（对账锚，board.rs）");
     uart_tx_drive();
@@ -193,7 +199,14 @@ where
         .baudrate(Hertz(I2C_BAUD_HZ))
         .sda_enable_pullup(true)
         .scl_enable_pullup(true);
-    let mut i2c = I2cDriver::new(i2c0, sda, scl, &config).expect("I2C0 驱动安装失败");
+    let mut i2c = I2cDriver::new(i2c0, sda, scl, &config)
+        .map_err(|e| {
+            eprintln!(
+                "[periph] I2C0 驱动安装失败 @{I2C_BAUD_HZ}Hz: {e:?}（查 SDA/SCL 引脚与上拉）"
+            );
+            e
+        })
+        .expect("I2C0 驱动安装失败");
     // 扫描点名 → init 重试 → boot 画面（真板诊断面纪律：失败打印 Err 明细不 panic）
     oled_boot(&mut i2c);
     i2c
@@ -236,9 +249,24 @@ where
     let config = TimerConfig::new()
         .frequency(Hertz(LEDC_FREQ_HZ))
         .resolution(LEDC_RES_BITS);
-    let timer = LedcTimerDriver::new(timer0, &config).expect("LEDC timer0 配置失败");
-    let pan = LedcDriver::new(ch0, &timer, pan).expect("LEDC channel0(PAN) 安装失败");
-    let tilt = LedcDriver::new(ch1, &timer, tilt).expect("LEDC channel1(TILT) 安装失败");
+    let timer = LedcTimerDriver::new(timer0, &config)
+        .map_err(|e| {
+            eprintln!("[periph] LEDC timer0 配置失败 {LEDC_FREQ_HZ}Hz/{LEDC_RES_BITS:?}: {e:?}");
+            e
+        })
+        .expect("LEDC timer0 配置失败");
+    let pan = LedcDriver::new(ch0, &timer, pan)
+        .map_err(|e| {
+            eprintln!("[periph] LEDC channel0(PAN) 安装失败 GPIO{RR3_BIND_LEDC_PAN}: {e:?}");
+            e
+        })
+        .expect("LEDC channel0(PAN) 安装失败");
+    let tilt = LedcDriver::new(ch1, &timer, tilt)
+        .map_err(|e| {
+            eprintln!("[periph] LEDC channel1(TILT) 安装失败 GPIO{RR3_BIND_LEDC_TILT}: {e:?}");
+            e
+        })
+        .expect("LEDC channel1(TILT) 安装失败");
     (timer, pan, tilt)
 }
 
@@ -302,12 +330,20 @@ fn spawn_planes(ctl: CtlUart, rt: RtPeriph, bus: Arc<Mutex<Bus>>) {
             .name("periph-runtime".into())
             .stack_size(THREAD_STACK)
             .spawn(move || runtime_loop(rt, bus))
+            .map_err(|e| {
+                eprintln!("[periph] 起运行面线程失败（stack={THREAD_STACK}）: {e}");
+                e
+            })
             .expect("起运行面线程失败");
     }
     thread::Builder::new()
         .name("periph-ctl".into())
         .stack_size(THREAD_STACK)
         .spawn(move || cmd_loop(ctl, bus))
+        .map_err(|e| {
+            eprintln!("[periph] 起控制面线程失败（stack={THREAD_STACK}）: {e}");
+            e
+        })
         .expect("起控制面线程失败");
 }
 
