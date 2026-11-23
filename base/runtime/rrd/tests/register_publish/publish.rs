@@ -253,14 +253,8 @@ fn event_without_topic_key_replies_error_and_keeps_connection() {
     rrd.rr3_assert_no_log("连接收尾", Duration::from_millis(150));
 }
 
-/// 同一条连接上现在同时有**应答 / 状态广播 / 发布转发**三类帧（Task 8 之后才成立），
-/// 所以"挑帧"必须按内容而不是按到达序。这条是 Task 7 顺序无关性的第二型反例（遗留 ⑤）：
-/// sima 连发两条不同 seq 的 Event，b 侧**先挑 seq=2 再挑 seq=1**（逆着到达序），
-/// 之后再回头挑一条 Response —— 证明"先挑 Event"不会把后面的读法饿掉。
-/// 夹具若退回"不匹配的帧即丢"，第二、三次读法就等不到帧。
-#[test]
-fn forwarded_events_are_read_by_content_not_arrival_order() {
-    let rrd = RrdTest::rr3_start("pub-order");
+fn rr3_pub_order_pair(name: &str) -> (RrdTest, RrdClient, RrdClient) {
+    let rrd = RrdTest::rr3_start(name);
     let (mut a, mut b) = (rrd.rr3_connect(), rrd.rr3_connect());
     register_sima(&mut a);
     rr3_send(
@@ -270,6 +264,17 @@ fn forwarded_events_are_read_by_content_not_arrival_order() {
     // 必须先把 simb 的注册应答读掉再让 sima 发：在册是"应答写出去之前"发生的，
     // 不读就等于把两条 Event 的转发和第二条连接的入库放在一起赛跑。
     assert_eq!(rr3_read_rpc(&mut b)["result"]["src_task"], 3);
+    (rrd, a, b)
+}
+
+/// 同一条连接上现在同时有**应答 / 状态广播 / 发布转发**三类帧（Task 8 之后才成立），
+/// 所以"挑帧"必须按内容而不是按到达序。这条是 Task 7 顺序无关性的第二型反例（遗留 ⑤）：
+/// sima 连发两条不同 seq 的 Event，b 侧**先挑 seq=2 再挑 seq=1**（逆着到达序），
+/// 之后再回头挑一条 Response —— 证明"先挑 Event"不会把后面的读法饿掉。
+/// 夹具若退回"不匹配的帧即丢"，第二、三次读法就等不到帧。
+#[test]
+fn forwarded_events_are_read_by_content_not_arrival_order() {
+    let (_rrd, mut a, mut b) = rr3_pub_order_pair("pub-order");
 
     for seq in [1u64, 2] {
         rr3_send(
