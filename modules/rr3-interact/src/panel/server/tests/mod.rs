@@ -84,6 +84,61 @@ fn rr3_i4_fake_rrd(
     }
 }
 
+#[cfg(test)]
+fn rr3_i4_fake_result(
+    v: &Value,
+    beats: &Arc<Mutex<Vec<Value>>>,
+    wiring: &Value,
+    contracts: &Value,
+) -> Value {
+    let method = v["method"].as_str().unwrap_or("");
+    match method {
+        "rr3.register" => json!({ "src_task": 7 }),
+        "rr3.heartbeat" => {
+            beats.lock().unwrap().push(v["params"].clone());
+            json!({ "beat": "accepted" })
+        }
+        "rr3.ctl.wiring" => wiring.clone(),
+        "rr3.ctl.contracts" => contracts.clone(),
+        // 夹具按 classic 形态在册 rr3-act：relay 腿应走 on/off 真调用；
+        // host-only 的 n-a 分支由纯函数单测覆盖。
+        "rr3.ctl.status" => json!({
+            "modules": [{"name": "rr3-act", "task": 5, "phase": "running"}],
+            "denied_publish": 0,
+        }),
+        _ => json!({ "noop": true }),
+    }
+}
+
+#[cfg(test)]
+fn rr3_i4_fake_reply(
+    stream: &mut std::os::unix::net::UnixStream,
+    v: &Value,
+    result: Value,
+) -> bool {
+    let id = v["id"].as_u64().unwrap_or(0);
+    let payload = rr3_body_encode(
+        Rr3PayloadType::Response,
+        json!({"jsonrpc": "2.0", "id": id, "result": result})
+            .to_string()
+            .as_bytes(),
+    );
+    let out = Rr3Frame {
+        header: Rr3Header {
+            opcode: opcode::SEND,
+            flags: 0,
+            trace_id: 0,
+            timestamp_ns: rr3_now_ns(),
+            src_task: rr_core::RR3_TASK_RRD,
+            dst_task: 7,
+            payload_len: payload.len() as u32,
+            payload_crc32: rr_ipc::rr3_crc32(&payload),
+        },
+        payload,
+    };
+    rr3_frame_write(stream, &out).is_ok()
+}
+
 /// 假 rrd 单连接处理体（注册回 src_task=7、心跳回 accepted，并把每拍心跳
 /// params 原样记账；ctl.wiring / ctl.contracts 回各自预置应答）
 #[cfg(test)]
@@ -104,44 +159,8 @@ fn rr3_i4_fake_rrd_conn(
         if ty != Rr3PayloadType::Request {
             continue;
         }
-        let method = v["method"].as_str().unwrap_or("");
-        let result = match method {
-            "rr3.register" => json!({ "src_task": 7 }),
-            "rr3.heartbeat" => {
-                beats.lock().unwrap().push(v["params"].clone());
-                json!({ "beat": "accepted" })
-            }
-            "rr3.ctl.wiring" => wiring.clone(),
-            "rr3.ctl.contracts" => contracts.clone(),
-            // 夹具按 classic 形态在册 rr3-act：relay 腿应走 on/off 真调用；
-            // host-only 的 n-a 分支由纯函数单测覆盖。
-            "rr3.ctl.status" => json!({
-                "modules": [{"name": "rr3-act", "task": 5, "phase": "running"}],
-                "denied_publish": 0,
-            }),
-            _ => json!({ "noop": true }),
-        };
-        let id = v["id"].as_u64().unwrap_or(0);
-        let payload = rr3_body_encode(
-            Rr3PayloadType::Response,
-            json!({"jsonrpc": "2.0", "id": id, "result": result})
-                .to_string()
-                .as_bytes(),
-        );
-        let out = Rr3Frame {
-            header: Rr3Header {
-                opcode: opcode::SEND,
-                flags: 0,
-                trace_id: 0,
-                timestamp_ns: rr3_now_ns(),
-                src_task: rr_core::RR3_TASK_RRD,
-                dst_task: 7,
-                payload_len: payload.len() as u32,
-                payload_crc32: rr_ipc::rr3_crc32(&payload),
-            },
-            payload,
-        };
-        if rr3_frame_write(&mut stream, &out).is_err() {
+        let result = rr3_i4_fake_result(&v, &beats, &wiring, &contracts);
+        if !rr3_i4_fake_reply(&mut stream, &v, result) {
             break;
         }
     }
