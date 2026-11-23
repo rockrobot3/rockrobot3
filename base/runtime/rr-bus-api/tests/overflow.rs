@@ -43,57 +43,48 @@ fn frame_send(payload: Vec<u8>) -> Rr3Frame {
     }
 }
 
-/// 主循环被长动作（ASR 超时重试、整段 TTS 播放）占住、inbox 被广播帧填满时，
-/// reader 不能卡在 send 上——否则心跳应答读不到，模块被自己的心跳宽限判死。
-#[test]
-fn inbox_full_keeps_heartbeat() {
-    let path = tmp_bus_path();
-    let listener = UnixListener::bind(&path).unwrap();
-    let (hb_tx, hb_rx) = mpsc::channel::<Value>();
-    std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("假 rrd 应接受到连接");
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        loop {
-            let Ok(frame) = rr3_frame_read(&mut stream) else {
-                return;
-            };
-            let Ok((ty, body)) = rr3_body_split(&frame.payload) else {
-                return;
-            };
-            let Ok(v) = serde_json::from_slice::<Value>(&body) else {
-                return;
-            };
-            if ty != Rr3PayloadType::Request {
-                continue;
-            }
-            let id = v["id"].as_u64().unwrap_or(0);
-            let method = v["method"].as_str().unwrap_or("");
-            if method == "rr3.register" {
-                let reply = json!({"jsonrpc":"2.0","id":id,"result":{"src_task":7}});
-                let payload =
-                    rr3_body_encode(Rr3PayloadType::Response, reply.to_string().as_bytes());
-                rr3_frame_write(&mut stream, &frame_send(payload)).unwrap();
-                // 灌 >256 帧广播（当前线上全是 Event）：客户端不 poll，
-                // 旧实现 reader 会卡在第 257 帧
-                for i in 0..320u32 {
-                    let body = json!({"topic":"rr3-fake/pcm","seq":i,"pcm_b64":"AA=="});
-                    let payload =
-                        rr3_body_encode(Rr3PayloadType::Event, body.to_string().as_bytes());
-                    rr3_frame_write(&mut stream, &frame_send(payload)).unwrap();
-                }
-            } else if method == "rr3.heartbeat" {
-                hb_tx.send(v["params"].clone()).unwrap();
-                let reply = json!({"jsonrpc":"2.0","id":id,"result":{}});
-                let payload =
-                    rr3_body_encode(Rr3PayloadType::Response, reply.to_string().as_bytes());
-                rr3_frame_write(&mut stream, &frame_send(payload)).unwrap();
-            }
+/// 假 rrd：接受连接、应答注册后灌 320 帧广播，心跳转发到测试侧。
+fn fake_rrd(listener: UnixListener, hb_tx: mpsc::Sender<Value>) {
+    let (mut stream, _) = listener.accept().expect("假 rrd 应接受到连接");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    loop {
+        let Ok(frame) = rr3_frame_read(&mut stream) else {
+            return;
+        };
+        let Ok((ty, body)) = rr3_body_split(&frame.payload) else {
+            return;
+        };
+        let Ok(v) = serde_json::from_slice::<Value>(&body) else {
+            return;
+        };
+        if ty != Rr3PayloadType::Request {
+            continue;
         }
-    });
-    let client =
-        Rr3BusClient::rr3_connect_at(path.to_str().unwrap(), MANIFEST).expect("连假 rrd 应成功");
+        let id = v["id"].as_u64().unwrap_or(0);
+        let method = v["method"].as_str().unwrap_or("");
+        if method == "rr3.register" {
+            let reply = json!({"jsonrpc":"2.0","id":id,"result":{"src_task":7}});
+            let payload = rr3_body_encode(Rr3PayloadType::Response, reply.to_string().as_bytes());
+            rr3_frame_write(&mut stream, &frame_send(payload)).unwrap();
+            // 灌 >256 帧广播（当前线上全是 Event）：客户端不 poll，旧实现 reader 会卡在第 257 帧
+            for i in 0..320u32 {
+                let body = json!({"topic":"rr3-fake/pcm","seq":i,"pcm_b64":"AA=="});
+                let payload = rr3_body_encode(Rr3PayloadType::Event, body.to_string().as_bytes());
+                rr3_frame_write(&mut stream, &frame_send(payload)).unwrap();
+            }
+        } else if method == "rr3.heartbeat" {
+            hb_tx.send(v["params"].clone()).unwrap();
+            let reply = json!({"jsonrpc":"2.0","id":id,"result":{}});
+            let payload = rr3_body_encode(Rr3PayloadType::Response, reply.to_string().as_bytes());
+            rr3_frame_write(&mut stream, &frame_send(payload)).unwrap();
+        }
+    }
+}
+
+/// 有界等待心跳自报的 inbox_backlog_drop 越过 64（3s 上界）。
+fn await_drops(hb_rx: &mpsc::Receiver<Value>) -> u64 {
     let deadline = Instant::now() + Duration::from_secs(3);
     let mut drops = 0u64;
     while Instant::now() < deadline {
@@ -107,6 +98,20 @@ fn inbox_full_keeps_heartbeat() {
             break;
         }
     }
+    drops
+}
+
+/// 主循环被长动作（ASR 超时重试、整段 TTS 播放）占住、inbox 被广播帧填满时，
+/// reader 不能卡在 send 上——否则心跳应答读不到，模块被自己的心跳宽限判死。
+#[test]
+fn inbox_full_keeps_heartbeat() {
+    let path = tmp_bus_path();
+    let listener = UnixListener::bind(&path).unwrap();
+    let (hb_tx, hb_rx) = mpsc::channel::<Value>();
+    std::thread::spawn(move || fake_rrd(listener, hb_tx));
+    let client =
+        Rr3BusClient::rr3_connect_at(path.to_str().unwrap(), MANIFEST).expect("连假 rrd 应成功");
+    let drops = await_drops(&hb_rx);
     assert!(
         drops >= 64,
         "320 帧灌入 256 上限后应至少丢 64 帧事件面广播，实得 {drops}"
