@@ -86,6 +86,7 @@ fn http_post_endpoint() {
         b"x",
         "text/plain",
         1.0,
+        false,
     )
     .unwrap_err();
     assert!(e.contains("云端不可达"), "传输失败折固定文案: {e}");
@@ -99,7 +100,7 @@ fn http_post_conn() {
     let srv = FakeCloud::start_keep_alive();
     let url = format!("{}/v1/chat/completions", srv.base);
     for _ in 0..2 {
-        let (status, _) = rr3_http_post(&url, "k", b"{}", "application/json", 5.0).unwrap();
+        let (status, _) = rr3_http_post(&url, "k", b"{}", "application/json", 5.0, false).unwrap();
         assert_eq!(status, 200);
     }
     assert_eq!(srv.requests.lock().unwrap().len(), 2, "两请求都应到达");

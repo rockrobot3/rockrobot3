@@ -76,8 +76,8 @@ ci_note() {
   [ "${GITHUB_ACTIONS:-}" = "true" ] || return 0
   local why=""
   if [ -s "$tmpout" ]; then
-    why=$(grep -aE '^test .* FAILED|panicked at|^error(\[|:)' "$tmpout" 2>/dev/null \
-            | tail -5 | tr '\n' ' ')
+    why=$(grep -aE '^test .* FAILED|panicked at|^error(\[|:)|ASR 失败|轮次 ' "$tmpout" 2>/dev/null \
+            | tail -6 | tr '\n' ' ')
   fi
   printf '::error title=check.sh::FAIL %s%s\n' "$*" "${why:+ —— $why}"
 }

@@ -54,15 +54,23 @@ fn rr3_http_agent() -> &'static ureq::Agent {
 /// 先报错，不在此静默放行。传输异常（连接拒绝/超时/读断——Python OSError 族对位）
 /// 与读体失败统一折「云端不可达 {url}: …」（URL 不含密钥——Authorization 只进
 /// header，文案可安全带出）。
+///
+/// `fresh = true` 强制新 Agent（空连接池）：重试专用——池里可能躺着对端已关的
+/// 连接，"写成功、读 EOF"在 macOS/Linux 调度下都可复现，复用同一池重试会二次踩雷。
 pub(crate) fn rr3_http_post(
     url: &str,
     key: &str,
     body: &[u8],
     content_type: &str,
     timeout_s: f64,
+    fresh: bool,
 ) -> Result<(u16, Vec<u8>), String> {
-    let req = rr3_http_agent()
-        .post(url)
+    let agent_req = if fresh {
+        ureq::post(url)
+    } else {
+        rr3_http_agent().post(url)
+    };
+    let req = agent_req
         .set("Content-Type", content_type)
         .timeout(Duration::from_secs_f64(timeout_s));
     let req = if key.is_empty() {
@@ -153,7 +161,7 @@ impl Rr3AsrClient {
         // （首调全额、重试减半），见 [`rr3_retry_budget`]。
         rr3_http_try("识别接口", "ASR", |attempt| {
             let budget = rr3_retry_budget(self.timeout_s, attempt);
-            rr3_http_post(&url, &key, &body, &content_type, budget)
+            rr3_http_post(&url, &key, &body, &content_type, budget, attempt > 1)
                 .and_then(|(status, resp)| rr3_ok_resp("识别接口", status, resp))
         })
     }
@@ -236,7 +244,8 @@ impl Rr3LlmClient {
         let body = rr3_ping_body(&self.model_id);
         let url = format!("{}/chat/completions", self.base_url);
         let started = std::time::Instant::now();
-        let (status, _resp) = rr3_http_post(&url, &key, &body, "application/json", self.timeout_s)?;
+        let (status, _resp) =
+            rr3_http_post(&url, &key, &body, "application/json", self.timeout_s, false)?;
         let latency_ms = started.elapsed().as_millis() as u64;
         if !(200..300).contains(&status) {
             return Err(format!("连通性测试 HTTP {status}"));
@@ -283,7 +292,7 @@ impl Rr3LlmClient {
     fn rr3_llm_post(&self, url: &str, key: &str, body: &[u8]) -> Result<Vec<u8>, String> {
         rr3_http_try("大模型接口", "LLM", |attempt| {
             let budget = rr3_retry_budget(self.timeout_s, attempt);
-            rr3_http_post(url, key, body, "application/json", budget)
+            rr3_http_post(url, key, body, "application/json", budget, attempt > 1)
                 .and_then(|(status, resp)| rr3_ok_resp("大模型接口", status, resp))
         })
     }
@@ -347,7 +356,7 @@ impl Rr3TtsClient {
         // 是瞬时态，一次即弃会让唤醒 Ack 静默（用户喊了没应答）。
         rr3_http_try("合成接口", "TTS", |attempt| {
             let budget = rr3_retry_budget(self.timeout_s, attempt);
-            rr3_http_post(&url, &key, &body, "application/json", budget)
+            rr3_http_post(&url, &key, &body, "application/json", budget, attempt > 1)
                 .and_then(|(status, resp)| rr3_ok_resp("合成接口", status, resp))
         })
     }
