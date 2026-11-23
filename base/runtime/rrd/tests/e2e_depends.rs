@@ -21,7 +21,8 @@
 mod support;
 
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use support::*;
@@ -172,11 +173,8 @@ fn boot_order_follows_dependency_not_priority() {
     rr3_read_state(&mut b, "rr3-chaind", "running");
 }
 
-/// D2 — 环拒整个 boot：两个互依赖的 manifest，rrd 非 0 退出且逐条点名。
-/// 直接 `Command` 起 rrd 读 stdout 到 EOF——这条用例里 rrd 的生命结束方式**就是被测行为**，
-/// `RrdTest` 的"等就绪行"框架用不上（永远等不到监听后的正常运行）。
-#[test]
-fn dependency_cycle_rejects_the_whole_boot() {
+/// D2 夹具：两个互依赖 manifest + 唯一套接字路。
+fn cycle_fixture() -> (SimManifest, SimManifest, PathBuf) {
     let a = rr3_dep_manifest(
         "dep-d2",
         "rr3-loopa",
@@ -195,10 +193,14 @@ fn dependency_cycle_rejects_the_whole_boot() {
     );
     let socket = PathBuf::from(format!("/tmp/rr3-f2-cycle-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&socket);
+    (a, b, socket)
+}
 
+/// 直接起 rrd 读 stdout：本用例里 rrd 的生命结束方式就是被测行为。
+fn cycle_spawn(a: &SimManifest, b: &SimManifest, socket: &PathBuf) -> (Child, Receiver<String>) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_rrd"))
         .arg("--socket")
-        .arg(&socket)
+        .arg(socket)
         .arg("--manifest")
         .arg(&a.path)
         .arg("--manifest")
@@ -212,9 +214,11 @@ fn dependency_cycle_rejects_the_whole_boot() {
         .spawn()
         .expect("起 rrd 失败");
     let lines = rr3_spawn_line_reader(child.stdout.take().expect("stdout 必须是管道"), "rrd");
+    (child, lines)
+}
 
-    // 读到 EOF（进程自己退出）为止。20s 上界只防"拒绝路径坏了、进程照常起服务"的退化：
-    // 那时 kill 掉并 panic，而不是让整个测试目标挂到 cargo 超时。
+/// 读到 EOF（进程自己退出）为止；20s 上界只防“拒绝路径坏了、进程照常起服务”的退化。
+fn cycle_drain(mut child: Child, lines: Receiver<String>) -> (ExitStatus, String) {
     let deadline = Instant::now() + Duration::from_secs(20);
     let mut text = String::new();
     loop {
@@ -232,7 +236,11 @@ fn dependency_cycle_rejects_the_whole_boot() {
             Err(_) => {}
         }
     }
-    let status = child.wait().expect("wait rrd");
+    (child.wait().expect("wait rrd"), text)
+}
+
+/// 环拒绝判果：非 0 退出、fatal 点名两成员、一个子进程都不能起。
+fn cycle_assert(status: &ExitStatus, text: &str) {
     assert!(
         !status.success(),
         "环必须让 boot 非 0 退出（main 的 ExitCode::FAILURE）: {status}"
@@ -250,30 +258,32 @@ fn dependency_cycle_rejects_the_whole_boot() {
         !text.contains("spawn rr3-loopa") && !text.contains("spawn rr3-loopb"),
         "拒 boot 的进程一个子进程都不能起:\n{text}"
     );
+}
+
+/// D2 — 环拒整个 boot：两个互依赖的 manifest，rrd 非 0 退出且逐条点名。
+/// 直接 `Command` 起 rrd 读 stdout 到 EOF——这条用例里 rrd 的生命结束方式**就是被测行为**，
+/// `RrdTest` 的"等就绪行"框架用不上（永远等不到监听后的正常运行）。
+#[test]
+fn dependency_cycle_rejects_the_whole_boot() {
+    let (a, b, socket) = cycle_fixture();
+    let (child, lines) = cycle_spawn(&a, &b, &socket);
+    let (status, text) = cycle_drain(child, lines);
+    cycle_assert(&status, &text);
     let _ = std::fs::remove_file(&socket);
 }
 
-/// D3 — 裁定 3/4 的全链：提供者被 kill → 依赖者 Degraded（自己也能听到）→
-/// always 策略自动重生 → 依赖者解除回 Running。全程 watchdog 静默（wd=60s），
-/// "死亡时刻"由测试的 kill 决定，判据里没有时间赌注。
-#[test]
-fn provider_death_degrades_dependent_and_recovery_undegrades() {
-    let prov = rr3_dep_manifest("dep-d3", "rr3-degp", 50, &["cap.deg"], &[], "always");
-    let mut rrd = RrdTest::rr3_start_boot("dep-d3", &[&prov.path], "go_silent", E2E_TICK_MS);
-    let mut b = rr3_observer(&mut rrd, "rr3-degobs");
-
-    // 提供者第一世上线：go_silent 注册后喂一颗就静默——那一颗正好把它 Promoted 到 Running
+/// 提供者第一世上线：go_silent 注册后喂一颗就静默——那一颗正好把它 Promoted 到 Running。
+fn d3_provider(rrd: &mut RrdTest) -> (u64, u64) {
     let spawn1 = rrd.rr3_wait_log("spawn rr3-degp pid=");
     let pid1 = rr3_field_from_log(&spawn1, "pid=");
     let reg1 = rrd.rr3_wait_log("注册 rr3-degp task=");
     let task1 = rr3_field_from_log(&reg1, "task=");
     rrd.rr3_wait_log("rr3-degp → running（广播到");
+    (pid1, task1)
+}
 
-    // 依赖者线上注册并手动喂到 Running（此刻它必须已在册且 Running，降级传播才轮得到它）
-    let (mut dep_conn, dep_task) = rr3_register_dependent(&mut rrd, "rr3-degd", &["cap.deg"]);
-    rrd.rr3_wait_log("rr3-degd → running（广播到");
-
-    // 提供者死于非命（SIGKILL → 收尸那一路的退出码定性，signal: 9）
+/// 提供者死于非命（SIGKILL → 收尸那一路的退出码定性，signal: 9）。
+fn d3_kill(rrd: &mut RrdTest, pid1: u64) {
     let killed = Command::new("/bin/kill")
         .args(["-9", &pid1.to_string()])
         .status()
@@ -287,25 +297,28 @@ fn provider_death_degrades_dependent_and_recovery_undegrades() {
         exit1.contains("→ 广播 failed"),
         "owned 模块由退出码定性: {exit1}"
     );
+}
 
-    // 裁定 3 断供半边：依赖者被置 Degraded，广播**不排除依赖者自己**（E-9 理据：
-    // 它没有别的途径查自己的相位），旁观者与依赖者各自读一条
+/// 裁定 3 断供半边：依赖者被置 Degraded，广播不排除依赖者自己（E-9 理据）。
+fn d3_degrade(rrd: &mut RrdTest, dep: &mut RrdClient, dep_task: u64, b: &mut RrdClient) {
     let degraded = rrd.rr3_wait_log("rr3-degd 依赖断供 → degraded（提供者 rr3-degp 离开 Running）");
     assert!(
         degraded.contains("广播到"),
         "置位必须伴一次广播: {degraded}"
     );
-    let on = rr3_read_state(&mut dep_conn, "rr3-degd", "degraded");
+    let on = rr3_read_state(dep, "rr3-degd", "degraded");
     assert_eq!(
         on["src_task"], dep_task,
         "线上那条 degraded 必须指向依赖者自己的 task"
     );
-    rr3_read_state(&mut b, "rr3-degd", "degraded");
+    rr3_read_state(b, "rr3-degd", "degraded");
     // 裁定 4：降级不是崩溃——不产重启计划、不经 supervisor（`重启计划` 四字只出现在
     // conn 收尾那一路，是 A-5③ 批准的唯一子串）
     rrd.rr3_assert_no_log("重启计划", Duration::from_millis(200));
+}
 
-    // always 策略把提供者起回来（attempt=1 的新进程），重新注册、再次 running
+/// always 策略把提供者起回来（attempt=1 的新进程），重新注册、再次 running。
+fn d3_recover(rrd: &mut RrdTest, pid1: u64, task1: u64) -> u64 {
     let spawn2 = rrd.rr3_wait_log("spawn rr3-degp pid=");
     let pid2 = rr3_field_from_log(&spawn2, "pid=");
     assert_ne!(pid1, pid2, "重起的必须是新进程");
@@ -317,12 +330,36 @@ fn provider_death_degrades_dependent_and_recovery_undegrades() {
         "重注册必须换新 task"
     );
     rrd.rr3_wait_log("rr3-degp → running（广播到");
+    pid2
+}
 
-    // 裁定 3 恢复半边：全部 required 就位 → 解除回 Running（同样不排除依赖者自己）
+/// 裁定 3 恢复半边：全部 required 就位 → 解除回 Running（同样不排除依赖者自己）。
+fn d3_recover_check(rrd: &mut RrdTest, dep: &mut RrdClient, dep_task: u64, b: &mut RrdClient) {
     rrd.rr3_wait_log("rr3-degd 依赖恢复 → running（提供者 rr3-degp 回到 Running）");
-    let on = rr3_read_state(&mut dep_conn, "rr3-degd", "running");
+    let on = rr3_read_state(dep, "rr3-degd", "running");
     assert_eq!(on["src_task"], dep_task, "解除帧仍指向依赖者自己的 task");
-    rr3_read_state(&mut b, "rr3-degd", "running");
+    rr3_read_state(b, "rr3-degd", "running");
+}
+
+/// D3 — 裁定 3/4 的全链：提供者被 kill → 依赖者 Degraded（自己也能听到）→
+/// always 策略自动重生 → 依赖者解除回 Running。全程 watchdog 静默（wd=60s），
+/// "死亡时刻"由测试的 kill 决定，判据里没有时间赌注。
+#[test]
+fn provider_death_degrades_dependent_and_recovery_undegrades() {
+    let prov = rr3_dep_manifest("dep-d3", "rr3-degp", 50, &["cap.deg"], &[], "always");
+    let mut rrd = RrdTest::rr3_start_boot("dep-d3", &[&prov.path], "go_silent", E2E_TICK_MS);
+    let mut b = rr3_observer(&mut rrd, "rr3-degobs");
+
+    let (pid1, task1) = d3_provider(&mut rrd);
+
+    // 依赖者线上注册并手动喂到 Running（此刻它必须已在册且 Running，降级传播才轮得到它）
+    let (mut dep_conn, dep_task) = rr3_register_dependent(&mut rrd, "rr3-degd", &["cap.deg"]);
+    rrd.rr3_wait_log("rr3-degd → running（广播到");
+
+    d3_kill(&mut rrd, pid1);
+    d3_degrade(&mut rrd, &mut dep_conn, dep_task, &mut b);
+    let pid2 = d3_recover(&mut rrd, pid1, task1);
+    d3_recover_check(&mut rrd, &mut dep_conn, dep_task, &mut b);
 
     // 卫生（S4 同款）：第二世又是个静默挂死的夹具，rrd 被 Drop 杀死后没人收它
     rr3_kill_hung_fixture(pid2);
