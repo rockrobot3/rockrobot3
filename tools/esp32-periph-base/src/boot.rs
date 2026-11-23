@@ -83,7 +83,7 @@ fn open_uart2<P, Q>(
     uart2: impl Peripheral<P = UART2> + 'static,
     tx: impl Peripheral<P = P> + 'static,
     rx: impl Peripheral<P = Q> + 'static,
-) -> UartDriver<'static>
+) -> Result<UartDriver<'static>, String>
 where
     P: OutputPin + 'static,
     Q: InputPin + 'static,
@@ -100,11 +100,10 @@ where
         None::<AnyOutputPin>,
         &config,
     )
-    .map_err(diag::uart2_fail)
-    .expect("UART2 驱动安装失败");
+    .map_err(diag::uart2_fail)?;
     println!("[periph] UART2 ✓ 指令面 {UART2_BAUD_HZ} @ GPIO{RR3_BIND_UART2_TX}(TX)/GPIO{RR3_BIND_UART2_RX}(RX)（对账锚，board.rs）");
     uart_tx_drive();
-    uart
+    Ok(uart)
 }
 
 /// I2C 扫描结果点名（OLED 在列 ✓ / 不在列 ✗）。
@@ -180,7 +179,7 @@ fn open_oled<S, C>(
     i2c0: impl Peripheral<P = I2C0> + 'static,
     sda: impl Peripheral<P = S> + 'static,
     scl: impl Peripheral<P = C> + 'static,
-) -> I2cDriver<'static>
+) -> Result<I2cDriver<'static>, String>
 where
     S: InputPin + OutputPin + 'static,
     C: InputPin + OutputPin + 'static,
@@ -196,12 +195,10 @@ where
         .baudrate(Hertz(I2C_BAUD_HZ))
         .sda_enable_pullup(true)
         .scl_enable_pullup(true);
-    let mut i2c = I2cDriver::new(i2c0, sda, scl, &config)
-        .map_err(diag::i2c0_fail)
-        .expect("I2C0 驱动安装失败");
+    let mut i2c = I2cDriver::new(i2c0, sda, scl, &config).map_err(diag::i2c0_fail)?;
     // 扫描点名 → init 重试 → boot 画面（真板诊断面纪律：失败打印 Err 明细不 panic）
     oled_boot(&mut i2c);
-    i2c
+    Ok(i2c)
 }
 
 /// 5V 轨监测装配（失败不 panic，回 `None`——采样路径据此回 Err，不冒领读数）。
@@ -229,11 +226,14 @@ fn open_servos<P, Q>(
     ch1: impl Peripheral<P = CHANNEL1> + 'static,
     pan: impl Peripheral<P = P> + 'static,
     tilt: impl Peripheral<P = Q> + 'static,
-) -> (
-    LedcTimerDriver<'static, TIMER0>,
-    LedcDriver<'static>,
-    LedcDriver<'static>,
-)
+) -> Result<
+    (
+        LedcTimerDriver<'static, TIMER0>,
+        LedcDriver<'static>,
+        LedcDriver<'static>,
+    ),
+    String,
+>
 where
     P: OutputPin + 'static,
     Q: OutputPin + 'static,
@@ -241,16 +241,10 @@ where
     let config = TimerConfig::new()
         .frequency(Hertz(LEDC_FREQ_HZ))
         .resolution(LEDC_RES_BITS);
-    let timer = LedcTimerDriver::new(timer0, &config)
-        .map_err(diag::ledc_timer_fail)
-        .expect("LEDC timer0 配置失败");
-    let pan = LedcDriver::new(ch0, &timer, pan)
-        .map_err(diag::ledc_pan_fail)
-        .expect("LEDC channel0(PAN) 安装失败");
-    let tilt = LedcDriver::new(ch1, &timer, tilt)
-        .map_err(diag::ledc_tilt_fail)
-        .expect("LEDC channel1(TILT) 安装失败");
-    (timer, pan, tilt)
+    let timer = LedcTimerDriver::new(timer0, &config).map_err(diag::ledc_timer_fail)?;
+    let pan = LedcDriver::new(ch0, &timer, pan).map_err(diag::ledc_pan_fail)?;
+    let tilt = LedcDriver::new(ch1, &timer, tilt).map_err(diag::ledc_tilt_fail)?;
+    Ok((timer, pan, tilt))
 }
 
 /// 运行面装配：初始账角 = 各轴中位锚、判定核两线阈值取策略面（`RtPeriph::new` 单点）。
@@ -306,22 +300,21 @@ fn bus_seed() -> Arc<Mutex<Bus>> {
 }
 
 /// 起两平面线程：运行面先起（boot 后即可接作业 + 跑自主节拍），控制面随后。
-fn spawn_planes(ctl: CtlUart, rt: RtPeriph, bus: Arc<Mutex<Bus>>) {
+fn spawn_planes(ctl: CtlUart, rt: RtPeriph, bus: Arc<Mutex<Bus>>) -> Result<(), String> {
     {
         let bus = bus.clone();
         thread::Builder::new()
             .name("periph-runtime".into())
             .stack_size(THREAD_STACK)
             .spawn(move || runtime_loop(rt, bus))
-            .map_err(diag::rt_thread_fail)
-            .expect("起运行面线程失败");
+            .map_err(diag::rt_thread_fail)?;
     }
     thread::Builder::new()
         .name("periph-ctl".into())
         .stack_size(THREAD_STACK)
         .spawn(move || cmd_loop(ctl, bus))
-        .map_err(diag::ctl_thread_fail)
-        .expect("起控制面线程失败");
+        .map_err(diag::ctl_thread_fail)?;
+    Ok(())
 }
 
 /// 板侧服务面起序（W3-2b/W4-2b）：自治监督 → 云 TTS worker → httpd → SNTP。
@@ -343,7 +336,7 @@ fn start_services(bus: &Arc<Mutex<Bus>>) {
 }
 
 /// 主环：周期状态行（观测面）。断开复位由各线程负责，这里只打印。
-fn status_loop() {
+fn status_loop() -> ! {
     loop {
         thread::sleep(Duration::from_secs(30));
         // SAFETY：两个堆查询都是无参只读的 IDF 系统调用，不触碰 Rust 内存状态。
@@ -403,22 +396,25 @@ fn spawn_audio(face: AudioFace, bus: &Arc<Mutex<Bus>>) {
 /// 指令面、运行面与音频面外部件。timer 由调用方持有到进程终局（Drop 会复位硬件）。
 fn open_parts(
     p: Peripherals,
-) -> (
-    LedcTimerDriver<'static, TIMER0>,
-    CtlUart,
-    RtPeriph,
-    AudioFace,
-) {
+) -> Result<
+    (
+        LedcTimerDriver<'static, TIMER0>,
+        CtlUart,
+        RtPeriph,
+        AudioFace,
+    ),
+    String,
+> {
     // UART2 指令面引脚：classic 18/19；S3 N16R8 41/42（真板订正，见 pins_s3.rs 头注）。
     #[cfg(feature = "esp32")]
-    let uart = open_uart2(p.uart2, p.pins.gpio18, p.pins.gpio19);
+    let uart = open_uart2(p.uart2, p.pins.gpio18, p.pins.gpio19)?;
     #[cfg(feature = "esp32s3")]
-    let uart = open_uart2(p.uart2, p.pins.gpio41, p.pins.gpio42);
+    let uart = open_uart2(p.uart2, p.pins.gpio41, p.pins.gpio42)?;
     // I2C0 引脚：classic 21/22，S3 8/9（判据①：扫描 0x3C 应答）。
     #[cfg(feature = "esp32")]
-    let i2c = open_oled(p.i2c0, p.pins.gpio21, p.pins.gpio22);
+    let i2c = open_oled(p.i2c0, p.pins.gpio21, p.pins.gpio22)?;
     #[cfg(feature = "esp32s3")]
-    let i2c = open_oled(p.i2c0, p.pins.gpio8, p.pins.gpio9);
+    let i2c = open_oled(p.i2c0, p.pins.gpio8, p.pins.gpio9)?;
     // ADC1 5V 轨测点：classic GPIO34=CH6，S3 GPIO1=CH0（分压比/阈值见 board，待标定）。
     #[cfg(feature = "esp32")]
     let rail = rail_open(RailMonitor::new(p.adc1, p.pins.gpio34));
@@ -432,7 +428,7 @@ fn open_parts(
         p.ledc.channel1,
         p.pins.gpio32,
         p.pins.gpio33,
-    );
+    )?;
     #[cfg(feature = "esp32s3")]
     let (timer, pan, tilt) = open_servos(
         p.ledc.timer0,
@@ -440,7 +436,7 @@ fn open_parts(
         p.ledc.channel1,
         p.pins.gpio4,
         p.pins.gpio5,
-    );
+    )?;
     #[cfg(feature = "esp32")]
     let audio = AudioFace {
         i2s0: p.i2s0,
@@ -456,15 +452,25 @@ fn open_parts(
         spk: (p.pins.gpio16, p.pins.gpio18, p.pins.gpio17),
     };
     let rt = init_rt(i2c, pan, tilt, rail);
-    (timer, CtlUart { uart }, rt, audio)
+    Ok((timer, CtlUart { uart }, rt, audio))
 }
 
 /// 板级启动总序：外设开箱 → 两平面 → 音频面 → 状态环（永不返回，复位靠 BOD/复位键）。
+///
+/// 失败收口：任一步返回 Err 即打印完整诊断后显式停机（[`halt`]）——panic 档是
+/// `immediate-abort`，`expect` 文案不落地；先打印再停，现场才有可查的一条。
 pub(crate) fn rr3_boot() {
+    if let Err(e) = rr3_boot_try() {
+        halt(e);
+    }
+}
+
+fn rr3_boot_try() -> Result<(), String> {
     boot_banner();
-    let p = Peripherals::take()
-        .expect("Peripherals::take 失败：外设已被取走（启动期不应发生，查是否有二次取）");
-    let (_timer, ctl, rt, audio) = open_parts(p);
+    let p = Peripherals::take().ok_or_else(|| {
+        "Peripherals::take 失败：外设已被取走（启动期不应发生，查是否有二次取）".to_string()
+    })?;
+    let (_timer, ctl, rt, audio) = open_parts(p)?;
     let bus = bus_seed();
     ram_point("2-periph-ready");
     // W7-b3b 存储承载：仅无 PSRAM 档起 spool 写线程（启动清扫残留段；擦写读
@@ -474,7 +480,15 @@ pub(crate) fn rr3_boot() {
         crate::spool::rr3_start_spool(crate::cloud::rr3_turn_spool);
     }
     start_services(&bus);
-    spawn_planes(ctl, rt, bus.clone());
+    spawn_planes(ctl, rt, bus.clone())?;
     spawn_audio(audio, &bus);
-    status_loop();
+    status_loop()
+}
+
+/// 启动失败的统一停机：先把诊断打完整，再 abort——不进入半装配态。
+/// 不用 panic/expect：`immediate-abort` 档下 panic 文案不打印。
+fn halt(e: String) -> ! {
+    eprintln!("[periph] 启动失败：{e}");
+    eprintln!("[periph] 显式停机：不进入半装配态（查上一条诊断；复位键/BOD 重启）");
+    std::process::abort()
 }
