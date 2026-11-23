@@ -57,7 +57,7 @@ const PROFILE_MANIFEST_CONFLICT: &str = "--profile 与 --manifest 不得同给�
 /// 为什么在 CLI 就拒、而不是让 `rr3_reg_death` 的饱和乘法默默兜住：饱和成 `u64::MAX`
 /// 意思是"永不重启"，那是策略结论而不是算术意外，运维必须在启动时就听到，
 /// 而不是模块崩了之后才发现它永远不会回来（`rr3_reg_death` 的饱和仍在，作为纵深防御）。
-/// 分母 60 = `RR3_RESTART_BACKOFF` 的末档，由 `cli::tests::restart_base_ms_ceiling_is_tied_to_the_backoff_table`
+/// 分母 60 = `RR3_RESTART_BACKOFF` 的末档，由 `cli::tests::restart_ms_table`
 /// 按表重算并钉住——改表不改这里会让那条用例红，不会出现两处各说一套。
 pub const RR3_RESTART_BASE_MS_MAX: u64 = u64::MAX / 60;
 

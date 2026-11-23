@@ -173,7 +173,7 @@ pub(crate) const RR3_LOG_MAX_BYTES: u64 = 2 * 1024 * 1024;
 
 /// 常持句柄的落盘面（续轮十四）：`written` 含打开时的既有大小，越界即单代轮转。
 /// 一把锁同时保护句柄与计数——多线程 `rr3_log` 的整行写仍靠 O_APPEND + 持锁，
-/// 与旧实现"单次 write 落整行"的判据同源（见 `log::tests::log_line_is_single_write`）。
+/// 与旧实现"单次 write 落整行"的判据同源（见 `log::tests::log_line_write`）。
 static RR3_LOG_SINK_FILE: OnceLock<Mutex<Rr3LogSink>> = OnceLock::new();
 
 struct Rr3LogSink {

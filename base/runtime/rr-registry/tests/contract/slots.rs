@@ -16,7 +16,7 @@ fn slots_capabilities() {
 }
 
 /// 格位表的全部 23 条 `(name, layer)`，顺序即 `contracts/slots.toml` 登记顺序。
-/// 与 `registry_shape_is_pinned` 同一钉法：append 合法但必须是有意识的编辑——
+/// 与 `registry_pinned` 同一钉法：append 合法但必须是有意识的编辑——
 /// 同一次改动里同步更新 `contracts/slots.toml`、本常量与层分布计数、
 /// `profiles/default.toml`（如涉及绑定面），以及把这些数字当事实抄进正文的文档。
 const RR3_PINNED_SLOTS: [(&str, &str); 23] = [

@@ -259,7 +259,7 @@ fn rr3_serve_request(
 /// state，护栏都在 registry：`rr3_reg_death` 对已 failed 的条目回 `Silent`、对 owned 的回
 /// `DeferredToExitStatus`，`rr3_reg_child_exit` 对已 failed 的同样回 `Silent`——
 /// 所以"一次死亡被记两次 / 广播两次"在表上不可能（ledger R-A4 结清点，线上由
-/// `watchdog_broadcasts_exactly_one_failed_state` 与 `e2e_spawn_restart` 的 S2 各自钉住一半）。
+/// `watchdog_fail_state` 与 `e2e_spawn_restart` 的 S2 各自钉住一半）。
 ///
 /// 另两处 state 广播点（`registered` 与 `running`）不走本函数：它们与死亡无关。
 fn rr3_conn_finish(ctx: &Rr3ConnCtx, me: &Rr3Peer, clean_exit: bool, reason: &str) {

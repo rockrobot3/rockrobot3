@@ -199,7 +199,7 @@ fn rej_bad_nothing() {
 /// 绿：合法过写——armed=true + 证据四道核全过，档内 armed/evidence 联动
 /// 成对落盘，装载预核过，应答带 effective:boot。武装前提（⑥-c：有测点 +
 /// 龄期上界 > 0）由夹具覆写供齐——profile.rs 测试区
-/// armed_domain_evidence_file_check_gate 同一构造（sense 指在册 i2c 测点）。
+/// armed_file_gate 同一构造（sense 指在册 i2c 测点）。
 #[cfg(unix)]
 #[test]
 fn armed_shape_boot() {

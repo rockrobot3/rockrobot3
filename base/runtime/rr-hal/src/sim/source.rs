@@ -17,7 +17,7 @@ const RR3_SIM_NOISE_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 /// （B批 b3b TDOA 起"注入与反演同一模型"是 sim 正门前提——ILD 时代基线不进反演，
 /// 0.06 的 USB 阵列量级无人消费；TDOA 按时延反演，sim 基线与 sense 随版缺省
 /// `mic_baseline_mm=150` 必须同值，改任一侧必须同批改另一侧，判据面＝
-/// `e2e_audio_chain::audio_chain_doa_stereo_env_injection_end_to_end` 的 ±2° 容差）。
+/// `e2e_audio_chain::injection_audio_doa` 的 ±2° 容差）。
 const RR3_SIM_MIC_BASELINE_M: f64 = 0.150;
 /// 声速（m/s，20 °C 空气）：ITD（到达时间差）换算用
 const RR3_SIM_SOUND_SPEED_MPS: f64 = 343.0;

@@ -150,7 +150,7 @@ fn board_pins(v: &toml::Value, root: &std::path::Path) {
 /// （host 单轴描述符不能容纳双轴，见文件头 N43-1 审查裁定）、chip=raspberry-pi-4、
 /// [[pin]] pan/tilt 成对（pwm0 通道 0/1、GPIO12/13）、[hardware] 板侧四键、恰一格
 /// act.servo（bindings/enabled/present 三源一致）。完整装载链由 rrd 的 boot drill
-/// （pi4b_board_profile_boot_inputs_drill）覆盖，本测试只钉形状与线束。
+/// （pi4b_boot_drill）覆盖，本测试只钉形状与线束。
 #[test]
 fn pi4b_pins_w4_harness() {
     let root = repo_root();

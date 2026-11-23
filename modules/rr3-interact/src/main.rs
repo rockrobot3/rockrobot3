@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //! rr3-interact 入口（0.0.8 W-A 批4 拆分，ADR-0017 五层表装配层，≤80 行）。
-//! 装配只做启动编排：SURFACE 自述 → [`rr3mod::bootstrap`]（收敛序列前四段）→
-//! config 就绪行 → 播放面/显示面探活（[`boot`]）→ 面板线程宿主（panel 一行
-//! 装配）→ Dispatcher 构造 → [`rr3mod::serve`] 主循环。机制在 [`dispatch`]
-//! （收流缓冲＋beep＋动作排空＋表情帧节拍），协议面在 [`rpc`]（载荷组装＋错误
-//! 文案＋点名执行）；face/player 两原子与 panel 三件原位不动，功能守恒零改动。
+//! 装配只做启动编排：SURFACE 自述 → bootstrap → config 就绪行 → 播放/显示探活
+//! → 面板线程宿主 → Dispatcher 构造 → serve 主循环。机制在 dispatch（收流缓冲＋
+//! beep＋动作排空＋表情帧节拍），协议面在 rpc（载荷组装＋错误文案＋点名执行）；
+//! face/player 两原子与 panel 三件原位不动，功能守恒零改动。
 
 mod boot;
 mod dispatch;

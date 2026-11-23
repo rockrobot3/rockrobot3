@@ -130,7 +130,7 @@ pub mod flags {
     ///
     /// 实际行为（v0.0.1 不做运行时校验，也不得据此声称已强制）：
     /// `to_bytes`/`from_bytes` 对 `flags` 是**原样透传**——掩码之外的位既不报错也不清零，
-    /// 编解码两个方向都保留（见 `header_ignores_unknown_flags`）。标准对发送方"应只置已定义位"
+    /// 编解码两个方向都保留（见 `header_unknown_flags`）。标准对发送方"应只置已定义位"
     /// 的期望属调用方自律与 M2 传输层的职责，本 crate 不拦截；接收方忽略未知位正是 IPC-T-010。
     pub const DEFINED: u16 =
         NOWAIT | SIGNAL | ZEROCOPY | CAP_CARRY | COMPRESS | ENCRYPT | URGENT | NOREPLY;

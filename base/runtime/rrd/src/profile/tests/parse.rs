@@ -104,7 +104,7 @@ fn miss_slots_errors() {
     );
     // [supplies] 段缺时 [supplies.budget] 的点名不级联（budget 错误只在
     // supplies 段在场时裁）——budget 段缺的留空反例归
-    // budget_tier_consistency_errors_are_named。
+    // budg_errors_named。
 
     let errs = rr3_profile_parse("schema_version = 5\n[bindings]\n\n[enabled_slots]\n")
         .expect_err("空 enabled_slots 必须报错");
