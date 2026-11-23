@@ -41,11 +41,10 @@ fn fake_rrd_request(
         };
         let payload = rr3_body_encode(Rr3PayloadType::Response, reply.to_string().as_bytes());
         let out = frame_send(payload);
-        if rr3_frame_write(stream, &out).is_err() {
-            return false;
-        }
+        rr3_frame_write(stream, &out).is_ok()
+    } else {
+        true
     }
-    true
 }
 
 /// 假 rrd 的 Event 支路：记账并回播一条广播。返回 false 表示写失败、连接该收尾。
@@ -62,10 +61,7 @@ fn fake_rrd_event(
             .as_bytes(),
     );
     let out = frame_send(payload);
-    if rr3_frame_write(stream, &out).is_err() {
-        return false;
-    }
-    true
+    rr3_frame_write(stream, &out).is_ok()
 }
 
 /// 假 rrd：收注册回 src_task=7；心跳回 accepted；Event 记账并回播一条广播；
