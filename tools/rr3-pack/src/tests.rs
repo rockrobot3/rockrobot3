@@ -163,7 +163,7 @@ fn assert_service(stage: &std::path::Path) {
     );
     let control = fs::read_to_string(stage.join("DEBIAN/control")).unwrap();
     assert!(control.contains("Package: rockrobot3"));
-    assert!(control.contains("Version: 0.0.12"));
+    assert!(control.contains(&format!("Version: {}", RR3_PRODUCT_VERSION.trim())));
     assert!(control.contains("Architecture: arm64"));
     let postinst = fs::read_to_string(stage.join("DEBIAN/postinst")).unwrap();
     assert!(postinst.starts_with("#!/bin/sh"));

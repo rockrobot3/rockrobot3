@@ -2,7 +2,7 @@
 # 铺镜像根目录（与 deb 装机同一份 rr3-pack stage 树，避免第二套装机布局）。
 #
 # 用法：stage-image.sh <stage-out> <arch> [version]
-#   stage-image.sh /tmp/rr3-img amd64 0.0.6
+#   stage-image.sh /tmp/rr3-img amd64 <version>（缺省读仓根 VERSION）
 #
 # 前置：调用方已在**目标平台**构建好 release 产物（rrd / 六模块 / rr3-ctl /
 # rr3-ota-ctl）；交叉腿把 CARGO_TARGET_DIR 指到 `<triple>` 目录，并用
@@ -23,7 +23,7 @@ cd "$root"
 
 out="${1:-}"
 arch="${2:-}"
-ver="${3:-0.0.6}"
+ver="${3:-$(cat VERSION)}"
 if [ -z "$out" ] || [ -z "$arch" ]; then
   echo "用法: $0 <stage-out> <arch> [version]" >&2
   exit 1

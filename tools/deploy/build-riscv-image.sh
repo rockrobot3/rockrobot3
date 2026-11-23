@@ -17,7 +17,7 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 cd "$root"
 
 tag="${1:-rr3-riscv-image:local}"
-ver="${RR3_VER:-0.0.0}"
+ver="${RR3_VER:-$(cat VERSION)}"
 target="riscv64gc-unknown-linux-gnu"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/rr3-build}"
 # 交叉工具链按目标三元组命名（调用方未注入时取 apt 的规范名）。
@@ -47,6 +47,10 @@ RR3_PACK_BIN="$pack" CARGO_TARGET_DIR="$CARGO_TARGET_DIR/$target" \
 
 # 4) 镜像：Containerfile 的 apt-get 层在 QEMU 下执行（binfmt 由 setup-qemu 注册）。
 docker build --platform linux/riscv64 \
+  --label "org.opencontainers.image.title=rockrobot3" \
+  --label "org.opencontainers.image.version=$ver" \
+  --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
+  --label "org.opencontainers.image.source=${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-rockrobot/rockrobot3}" \
   -f tools/deploy/Containerfile -t "$tag" /tmp/rr3-image-riscv
 
 # 5) 两段冒烟与发布面同一脚本（判据不抄第二份）。

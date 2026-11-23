@@ -9,6 +9,8 @@
 !README.md
 !README_zh.md
 !LICENSE
+# 产品版本唯一真源（发布/deb/OCI 标签同读）
+!VERSION
 # ---- 构建与供应链配置 ----
 !.cargo/
 !.cargo/**

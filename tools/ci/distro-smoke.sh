@@ -45,7 +45,7 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
 
   echo "== ④ rr3-pack 出 deb 并安装 =="
   ARCH=$(dpkg --print-architecture)
-  VER="${RR3_DEB_VERSION:-0.0.6}"
+  VER="${RR3_DEB_VERSION:-$(cat VERSION)}"
   export RR3_DEB_VERSION="$VER"
   /tmp/rr3-target/release/rr3-pack \
     --payload "$PAY" --repo /work --arch "$ARCH" \

@@ -27,8 +27,8 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/rr3-arm64-target}"
 REL="$CARGO_TARGET_DIR/$TARGET/release"
 OUT="${1:-/tmp/rr3-arm64-deploy}"
 PAY="$OUT/payload"
-# 版本单一真值：与 rr3-pack 同读 RR3_DEB_VERSION，包名/control 不会各说各话。
-VER="${RR3_DEB_VERSION:-0.0.6}"
+# 版本单一真值：缺省读仓根 VERSION，与 rr3-pack 编译期嵌入值同源。
+VER="${RR3_DEB_VERSION:-$(cat VERSION)}"
 export RR3_DEB_VERSION="$VER"
 RR3_PACK="$CARGO_TARGET_DIR/release/rr3-pack" # 打包器本身按宿主架构跑
 
