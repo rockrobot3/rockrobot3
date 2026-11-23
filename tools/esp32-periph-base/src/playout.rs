@@ -29,7 +29,6 @@ use esp_idf_sys::TickType_t;
 use rr_audio_mech::{rr3_pcm_ms, rr3_wav_pcm, Rr3PcmStream};
 use rr_autonomy::Rr3Task;
 
-use crate::board::PLAY_IDLE_MS;
 use crate::state::{lock_bus, Bus};
 
 #[cfg(feature = "spk-tone")]
@@ -294,6 +293,9 @@ fn play_run(
         "[spk] 播放面起：I2S1 TX {PLAY_RATE_HZ}Hz 16bit stereo ring={PLAY_RING_BYTES}B（W7-b2 流式）"
     );
     let mut buf = [0u8; PLAY_CHUNK];
+    // 空闲喂养源：全零帧 = 物理静音（PCM 中点）。W7 现场根修：流结束后 TX
+    // 不停止时 DMA 空转会反复放大残留数据（真板实录：对话结束喇叭持续响）。
+    let silence = [0u8; PLAY_CHUNK];
     let mut t0: Option<Instant> = None;
     loop {
         let Some(action) = play_take(&state, &mut buf) else {
@@ -302,8 +304,13 @@ fn play_run(
         match action {
             Action::Idle { running } => {
                 crate::autonomy::rr3_beat(Rr3Task::AudioOut);
-                let ms = if running { 5 } else { PLAY_IDLE_MS };
-                thread::sleep(Duration::from_millis(ms));
+                if running {
+                    thread::sleep(Duration::from_millis(5));
+                } else {
+                    // 阻塞写按 DMA 消费自然节流（≈32ms/块）：既不断流也不空转，
+                    // 新数据最多等一块时延。写失败只留痕（下拍重试）。
+                    let _ = tx.write_all(&silence, PLAY_TIMEOUT);
+                }
             }
             Action::Data(n) => {
                 if play_write(&mut tx, &bus, &state, &buf[..n]) {

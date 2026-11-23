@@ -102,9 +102,9 @@ pub(crate) const SERVO_SLEW_STEP_MS: u64 = 20;
 pub(crate) const SCAN_POINT_MS: u64 = 1200;
 /// 运行面自主节拍（表情微动作 + 云台扫摆；无作业时空转一拍）。
 pub(crate) const RUNTIME_TICK_MS: u64 = 10;
-/// 播放线程空转心跳周期（tts 档；自治壳 audio-out 看门狗窗按它留余量）。
-/// 置策略量集中处：playout 消费它、autonomy 的编译期断言校验它——两条单向边，
-/// 不再形成 autonomy ↔ playout 双向引用。
+/// 播放面空闲心跳基准（tts 档；自治壳 audio-out 看门狗窗按它留余量）。
+/// 置策略量集中处：autonomy 的编译期断言与超时窗消费它。playout 空闲已改为
+/// 持续喂静音帧（不再长睡），本值只作"最长静默仍算活着"的判据基准。
 #[cfg(feature = "tts")]
 pub(crate) const PLAY_IDLE_MS: u64 = 1_000;
 
