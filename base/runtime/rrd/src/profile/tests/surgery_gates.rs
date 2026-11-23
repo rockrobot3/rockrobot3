@@ -247,13 +247,8 @@ fn tier_outside_slot_tier_scope_is_fatal() {
     boot_inputs(&p).expect("bare 档引用 scope 全档的 power.battery 应放行");
 }
 
-/// 校验⑦ 跨档反例（后果 = 拒；boot 链把 [pins]/domains/devices 三份真值接起来
-/// 判，wiring.rs 单测已钉判定逻辑，这里钉的是跨档接线）：signal 越出
-/// pin_id ∪ {vcc,gnd}（F-3 自造语法）、net 越出 domains（F-5）、mate 越出
-/// devices mate 集（§4.1b 门 o）逐条点名；命中集全绿由末段正例钉住。
-#[test]
-fn wiring_cross_file_gates_are_fatal() {
-    // ⑦-a：自造语法 pwm:12 既非 pin_id 也非 vcc/gnd（F-2 同款病，接线侧再现）
+// ⑦-a：自造语法 pwm:12 既非 pin_id 也非 vcc/gnd（F-2 同款病，接线侧再现）
+fn wiring_signal_gate() {
     let root = Root::new("wiring-7a");
     let p = root.write_profile("wiring-7a.toml", GOOD);
     root.write_wiring(
@@ -265,8 +260,10 @@ fn wiring_cross_file_gates_are_fatal() {
     );
     let e = boot_inputs(&p).expect_err("signal 自造语法必须致命");
     assert!(e.contains("校验⑦-a") && e.contains("pwm:12"), "{e}");
+}
 
-    // ⑦-b：自造域名（F-5：文档示例值会被装机档抄）
+// ⑦-b：自造域名（F-5：文档示例值会被装机档抄）
+fn wiring_net_gate() {
     let root = Root::new("wiring-7b");
     let p = root.write_profile("wiring-7b.toml", GOOD);
     root.write_wiring(
@@ -275,8 +272,10 @@ fn wiring_cross_file_gates_are_fatal() {
     );
     let e = boot_inputs(&p).expect_err("自造域名必须致命");
     assert!(e.contains("校验⑦-b") && e.contains("rail24"), "{e}");
+}
 
-    // ⑦-d：对端型号不在 devices.toml mate 集（词形错误——在册的是 SG90-3P）
+// ⑦-d：对端型号不在 devices.toml mate 集（词形错误——在册的是 SG90-3P）
+fn wiring_mate_gate() {
     let root = Root::new("wiring-7d");
     let p = root.write_profile("wiring-7d.toml", GOOD);
     root.write_wiring(
@@ -285,8 +284,10 @@ fn wiring_cross_file_gates_are_fatal() {
     );
     let e = boot_inputs(&p).expect_err("mate 不在册必须致命");
     assert!(e.contains("校验⑦-d") && e.contains("SG90-9G"), "{e}");
+}
 
-    // 命中集全绿：signal 写 [pins] 真值 pin_id、net/mate 写在册值——⑦ 三判据同过
+// 命中集全绿：signal 写 [pins] 真值 pin_id、net/mate 写在册值——⑦ 三判据同过
+fn wiring_all_hit_ok() {
     let root = Root::new("wiring-7-ok");
     let p = root.write_profile("wiring-7-ok.toml", GOOD);
     root.write_wiring(
@@ -305,6 +306,18 @@ gnd_common = "star-1"
 "#,
     );
     boot_inputs(&p).expect("signal/net/mate 全命中在册集必须放行");
+}
+
+/// 校验⑦ 跨档反例（后果 = 拒；boot 链把 [pins]/domains/devices 三份真值接起来
+/// 判，wiring.rs 单测已钉判定逻辑，这里钉的是跨档接线）：signal 越出
+/// pin_id ∪ {vcc,gnd}（F-3 自造语法）、net 越出 domains（F-5）、mate 越出
+/// devices mate 集（§4.1b 门 o）逐条点名；命中集全绿由末段正例钉住。
+#[test]
+fn wiring_cross_file_gates_are_fatal() {
+    wiring_signal_gate();
+    wiring_net_gate();
+    wiring_mate_gate();
+    wiring_all_hit_ok();
 }
 
 /// 接线档装载门（fail-closed，后果 = 拒）：留空反例（§5 缺失语义列——rated_a
