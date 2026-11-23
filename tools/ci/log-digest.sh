@@ -62,6 +62,9 @@ digest() {
 		# ${log} 必须带花括号：紧跟多字节标点时 $log（ 会被当成变量名的一部分。
 		msg="日志缺失：${log}（命令可能在写日志前就失败）"
 	else
+		# 是否调用方显式给了 --sig（决定随后用大小写敏感还是缺省的不敏感）
+		local caller_sig=0
+		[ -n "$sig" ] && caller_sig=1
 		if [ -n "$sig" ] && [ -n "$extra" ]; then
 			sig="$sig|$extra"
 		elif [ -z "$sig" ]; then
@@ -71,7 +74,7 @@ digest() {
 		# "test result: ok. 0 failed"，真 FAIL 行被正常测试尾巴挤出 900 字符上限
 		# （2026-11-24 gate 注解实测）。缺省 SIG_DEFAULT 仍是大小写不敏感。
 		local sflags="-aiE"
-		[ -n "$sig" ] && sflags="-aE"
+		[ "$caller_sig" -eq 1 ] && sflags="-aE"
 		if [ "$head_first" -eq 1 ]; then
 			hits=$(grep "$sflags" "$sig" "$log" | grep -aviE "$NOISE_DEFAULT" | head -12 | oneline)
 		else
