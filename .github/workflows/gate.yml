@@ -61,8 +61,10 @@ jobs:
           # 注解必须单行（多行会被拆条并只留前 10 条，真因被挤掉）。
           set -o pipefail
           if ! bash tools/ci/check.sh 2>&1 | tee /tmp/gate.log; then
+            # 失败测试名与 panic 行同样进注解：日志匿名不可读，只有注解是公开取数面；
+            # 只抓 FAIL/ERROR 会把「哪个测试挂了」挤掉（实测 brain 用例失败不可归因）。
             bash tools/ci/log-digest.sh --title check.sh --log /tmp/gate.log \
-              --sig '^FAIL|^ERROR' --tail 20
+              --sig '^FAIL|^ERROR|^test .* FAILED|panicked at' --tail 30
             exit 1
           fi
 
