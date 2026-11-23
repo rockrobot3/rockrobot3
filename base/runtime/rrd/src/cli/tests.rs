@@ -12,6 +12,63 @@ fn env_none(_: &str) -> Option<String> {
     None
 }
 
+fn boot_role_verbatim() {
+    // 各分支只关心 boot_role 的缺省与透传，统一带 --manifest 满足装配面必选门
+    let dflt = rr3_cli_parse_env(&a(&["--manifest", "/m/d.toml"]), &env_none).unwrap();
+    assert_eq!(
+        dflt.boot_role, "resident",
+        "默认必须是 resident（与夹具不传 RR3_SIM_PEER_ROLE 时的回落一致）"
+    );
+    // 原样透传：不做大小写归一、不裁剪、不映射
+    for role in ["abort", "go_silent", "publish_once", "SOME-UNKNOWN-role"] {
+        let got = rr3_cli_parse_env(
+            &a(&["--manifest", "/m/d.toml", "--boot-role", role]),
+            &env_none,
+        )
+        .unwrap();
+        assert_eq!(
+            got.boot_role, role,
+            "rrd 不校验 role 取值，必须逐字进 cfg（{role} 被改写就是它在替夹具做主）"
+        );
+    }
+}
+
+fn boot_role_rejections() {
+    // 空值拒，且文案要点名开关与理由
+    let e = rr3_cli_parse_env(
+        &a(&["--manifest", "/m/d.toml", "--boot-role", ""]),
+        &env_none,
+    )
+    .unwrap_err();
+    assert!(
+        e.contains("--boot-role") && e.contains("不得为空") && e.contains("用法"),
+        "报错要点名开关、理由与用法: {e}"
+    );
+    // 缺值走 need_value 的同一条口径（`--boot-role` 是最后一个参数）
+    let e =
+        rr3_cli_parse_env(&a(&["--manifest", "/m/d.toml", "--boot-role"]), &env_none).unwrap_err();
+    assert!(
+        e.contains("--boot-role 缺参数") && e.contains("用法"),
+        "{e}"
+    );
+    // 疑似开关的值不当 role 吞下（否则后面那个真开关就被吃了，与 need_path_value 同形）
+    let e = rr3_cli_parse_env(
+        &a(&[
+            "--manifest",
+            "/m/d.toml",
+            "--boot-role",
+            "--socket",
+            "/tmp/x.sock",
+        ]),
+        &env_none,
+    )
+    .unwrap_err();
+    assert!(
+        e.contains("--boot-role 缺参数") && e.contains("--socket"),
+        "必须点名被误当值的开关: {e}"
+    );
+}
+
 #[test]
 fn defaults_come_from_contract_constants() {
     // 装配面必选门（基-23）后"纯缺省"不再可解析：本用例只关心与装配面无关的
@@ -70,57 +127,8 @@ fn watchdog_tick_is_configurable_and_never_zero() {
 /// rrd 校验它就要跟着夹具新增的脚本一起改（第二处真值），而且真设备模块根本不读这个变量。
 #[test]
 fn boot_role_defaults_to_resident_and_is_pass_through_verbatim() {
-    // 各分支只关心 boot_role 的缺省与透传，统一带 --manifest 满足装配面必选门
-    let dflt = rr3_cli_parse_env(&a(&["--manifest", "/m/d.toml"]), &env_none).unwrap();
-    assert_eq!(
-        dflt.boot_role, "resident",
-        "默认必须是 resident（与夹具不传 RR3_SIM_PEER_ROLE 时的回落一致）"
-    );
-    // 原样透传：不做大小写归一、不裁剪、不映射
-    for role in ["abort", "go_silent", "publish_once", "SOME-UNKNOWN-role"] {
-        let got = rr3_cli_parse_env(
-            &a(&["--manifest", "/m/d.toml", "--boot-role", role]),
-            &env_none,
-        )
-        .unwrap();
-        assert_eq!(
-            got.boot_role, role,
-            "rrd 不校验 role 取值，必须逐字进 cfg（{role} 被改写就是它在替夹具做主）"
-        );
-    }
-    // 空值拒，且文案要点名开关与理由
-    let e = rr3_cli_parse_env(
-        &a(&["--manifest", "/m/d.toml", "--boot-role", ""]),
-        &env_none,
-    )
-    .unwrap_err();
-    assert!(
-        e.contains("--boot-role") && e.contains("不得为空") && e.contains("用法"),
-        "报错要点名开关、理由与用法: {e}"
-    );
-    // 缺值走 need_value 的同一条口径（`--boot-role` 是最后一个参数）
-    let e =
-        rr3_cli_parse_env(&a(&["--manifest", "/m/d.toml", "--boot-role"]), &env_none).unwrap_err();
-    assert!(
-        e.contains("--boot-role 缺参数") && e.contains("用法"),
-        "{e}"
-    );
-    // 疑似开关的值不当 role 吞下（否则后面那个真开关就被吃了，与 need_path_value 同形）
-    let e = rr3_cli_parse_env(
-        &a(&[
-            "--manifest",
-            "/m/d.toml",
-            "--boot-role",
-            "--socket",
-            "/tmp/x.sock",
-        ]),
-        &env_none,
-    )
-    .unwrap_err();
-    assert!(
-        e.contains("--boot-role 缺参数") && e.contains("--socket"),
-        "必须点名被误当值的开关: {e}"
-    );
+    boot_role_verbatim();
+    boot_role_rejections();
 }
 
 /// env 覆盖必须生效（rrd 与模块用同一个 env 键找总线，spec §4）——但覆盖的是**注入的表**：
