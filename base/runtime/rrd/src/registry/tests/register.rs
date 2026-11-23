@@ -69,14 +69,7 @@ fn capacity_limit_is_enforced() {
     );
 }
 
-/// 容量门的那半句 `superseded.is_none() &&` **承重**（Task 7 评审遗留 ②）：表满但其中一个
-/// 同名条目已是 Failed 时，它即将被整体替换、不占新槽位，这是合法的 Failed 重注册，
-/// 绝不会被容量拒。Task 5 的 17 组变异实验里，删掉这半句后"表满仍可重注册 Failed"
-/// 立刻变成 `Capacity` 拒而当时全绿 —— 因为没有任何用例把两件事同时凑齐（表满 + 同名 Failed）。
-/// 这里就把那个组合钉住，并带上两个对照：新名字在满表上仍被拒（门没被整条删掉），
-/// 未 Failed 的同名仍是 `Duplicate` 而不是容量错（门的序也没换）。
-#[test]
-fn full_table_still_allows_re_registering_a_failed_module() {
+fn full_registry() -> RrdRegistry {
     let mut r = RrdRegistry::new(1000);
     for i in 0..RR3_REG_MAX_MODULES {
         r.rr3_reg_add(
@@ -86,6 +79,10 @@ fn full_table_still_allows_re_registering_a_failed_module() {
         )
         .unwrap();
     }
+    r
+}
+
+fn check_capacity_gate(r: &mut RrdRegistry) {
     // 对照 2：满表上的**新**名字必须仍被容量拒
     assert_eq!(
         r.rr3_reg_add(&facts("rr3-over", 200, 1000, "never"), chan().0, 0),
@@ -94,6 +91,9 @@ fn full_table_still_allows_re_registering_a_failed_module() {
         }),
         "对照：容量门本身不许被整条删掉"
     );
+}
+
+fn check_duplicate_gate(r: &mut RrdRegistry) {
     // 对照 3：满表上的同名**非 Failed** 条目仍按 Duplicate 拒（三条门的序：在册先于容量）
     assert_eq!(
         r.rr3_reg_add(&facts("rr3-m0", 200, 1000, "never"), chan().0, 0),
@@ -103,8 +103,9 @@ fn full_table_still_allows_re_registering_a_failed_module() {
         }),
         "对照：同名在册该回 Duplicate，不是 Capacity"
     );
+}
 
-    let old = rr_bus::RR3_TASK_FIRST_MODULE;
+fn fail_rr3_m0(r: &mut RrdRegistry) {
     assert!(
         r.rr3_reg_death("rr3-m0", true, 10).rr3_plan().is_none(),
         "never 不给重启计划"
@@ -119,11 +120,30 @@ fn full_table_still_allows_re_registering_a_failed_module() {
         Rr3Phase::Failed,
         "用例前提：待替换条目确为 Failed"
     );
+}
+
+fn re_register_m0(r: &mut RrdRegistry) -> u64 {
+    r.rr3_reg_add(&facts("rr3-m0", 200, 1000, "never"), chan().0, 20)
+        .expect("表满时重注册 Failed 的同名条目必须放行（容量门的 superseded 半句）")
+}
+
+/// 容量门的那半句 `superseded.is_none() &&` **承重**（Task 7 评审遗留 ②）：表满但其中一个
+/// 同名条目已是 Failed 时，它即将被整体替换、不占新槽位，这是合法的 Failed 重注册，
+/// 绝不会被容量拒。Task 5 的 17 组变异实验里，删掉这半句后"表满仍可重注册 Failed"
+/// 立刻变成 `Capacity` 拒而当时全绿 —— 因为没有任何用例把两件事同时凑齐（表满 + 同名 Failed）。
+/// 这里就把那个组合钉住，并带上两个对照：新名字在满表上仍被拒（门没被整条删掉），
+/// 未 Failed 的同名仍是 `Duplicate` 而不是容量错（门的序也没换）。
+#[test]
+fn full_table_still_allows_re_registering_a_failed_module() {
+    let mut r = full_registry();
+    check_capacity_gate(&mut r);
+    check_duplicate_gate(&mut r);
+
+    let old = rr_bus::RR3_TASK_FIRST_MODULE;
+    fail_rr3_m0(&mut r);
 
     // 本用例的主角：表满 + 同名 Failed → 必须放行换新 task，而不是回 Capacity
-    let again = r
-        .rr3_reg_add(&facts("rr3-m0", 200, 1000, "never"), chan().0, 20)
-        .expect("表满时重注册 Failed 的同名条目必须放行（容量门的 superseded 半句）");
+    let again = re_register_m0(&mut r);
     assert_eq!(
         again,
         old + RR3_REG_MAX_MODULES as u64,
