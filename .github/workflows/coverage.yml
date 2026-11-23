@@ -46,3 +46,61 @@ jobs:
           name: coverage-summary
           path: /tmp/coverage.txt
           if-no-files-found: warn
+
+  # 独立工程覆盖率（六模块 + 三件发布工具）：此前只测 base/runtime workspace，
+  # modules/ 与 tools/ 的行覆盖完全看不见。矩阵腿各自出 summary，单件失败不拖
+  # 其余腿；仍是周程观测面，非阻断。
+  independent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: act
+            manifest: modules/rr3-act/Cargo.toml
+          - name: brain
+            manifest: modules/rr3-brain/Cargo.toml
+          - name: connect
+            manifest: modules/rr3-connect/Cargo.toml
+          - name: interact
+            manifest: modules/rr3-interact/Cargo.toml
+          - name: sense
+            manifest: modules/rr3-sense/Cargo.toml
+          - name: power
+            manifest: modules/rr3-power/Cargo.toml
+          - name: rrctl
+            manifest: tools/rrctl/Cargo.toml
+          - name: ota-ctl
+            manifest: base/ota/rr3-ota-ctl/Cargo.toml
+          - name: pack
+            manifest: tools/rr3-pack/Cargo.toml
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # 各独立工程共写仓根 target-dir（.cargo/config.toml），全量缓存共享依赖。
+          workspaces: base/runtime
+          cache-all-crates: "true"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: 独立工程行覆盖率（${{ matrix.name }}，summary-only）
+        run: |
+          set -o pipefail
+          out="/tmp/coverage-${{ matrix.name }}.txt"
+          if ! cargo llvm-cov --locked --manifest-path "${{ matrix.manifest }}" \
+               --summary-only 2>&1 | tee "$out"; then
+            echo "::warning title=coverage(${{ matrix.name }})::覆盖率报表失败（周程非阻断，先看日志）"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: coverage-${{ matrix.name }}
+          path: /tmp/coverage-${{ matrix.name }}.txt
+          if-no-files-found: warn

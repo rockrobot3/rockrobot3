@@ -53,7 +53,7 @@ STEP_USES = re.compile(r"^\s*-\s*uses:\s*(\S+)")
 TOOLCHAIN = "1.100.0"
 MAX_JOBS = 10
 # 跨多清单共写仓根 target-dir 的作业：rust-cache 必须全量缓存共享依赖
-CACHE_ALL_JOBS = {"conventions", "lint", "sim-assemble", "sim-chain", "matrix"}
+CACHE_ALL_JOBS = {"conventions", "sim-assemble", "sim-chain", "matrix"}
 
 # 五芯片验证面（platforms.yml）：每条矩阵腿都是独立开发板环境的回执，
 # 删除/改名任何一条即"某芯片不再被流水线验证"——用显式清单钉住。
@@ -382,8 +382,10 @@ def release_problems(text, rel):
 # 作业覆盖面（按名钉住）：门禁/集成/平台/发布/固件的 job 是覆盖契约的一部分，
 # 删除或改名即"某类验证不再跑"——必须同批改本表，不许静默缩水。
 REQUIRED_JOBS = {
+    # 风格/lint 面并入 conventions（check.sh ①c/①d/④b 单点），不再单列 lint job：
+    # 同一批 fmt/clippy 判据只跑一处，避免"CI 绿本地红"的双实现。
     "gate.yml": (
-        "conventions", "release", "lint", "supply", "alsa", "ota-bundle", "scripts",
+        "conventions", "release", "supply", "alsa", "ota-bundle", "scripts",
     ),
     "integration.yml": (
         "distro-smoke", "ota-sign", "rk3566-onboard", "buildroot-assembly",
