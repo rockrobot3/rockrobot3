@@ -93,9 +93,9 @@ pub struct Rr3VadTune {
 /// 噪声中位 → VAD 阈值组：倍率整定 + 上下界夹取，并保证收尾阈值不超过起音
 /// 阈值（反向滞回会让语音态永远等不到静音尾）。节拍参数沿用 `base`。
 pub fn rr3_vad_tune(noise_rms: i64, tune: &Rr3VadTune, base: Rr3VadConfig) -> Rr3VadConfig {
-    let start = (noise_rms * tune.start_q8 >> 8).clamp(tune.start_min, tune.start_max);
+    let start = ((noise_rms * tune.start_q8) >> 8).clamp(tune.start_min, tune.start_max);
     let tail_lo = tune.tail_min.min(start);
-    let tail = (noise_rms * tune.tail_q8 >> 8).clamp(tail_lo, start);
+    let tail = ((noise_rms * tune.tail_q8) >> 8).clamp(tail_lo, start);
     Rr3VadConfig {
         rms_start: start,
         rms_tail: tail,

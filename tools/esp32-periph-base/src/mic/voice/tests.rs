@@ -19,7 +19,7 @@ impl Xor {
         x ^= x >> 17;
         x ^= x << 5;
         self.0 = x;
-        (((x as i32) >> 16) * amp >> 15) as i16
+        ((((x as i32) >> 16) * amp) >> 15) as i16
     }
 }
 
