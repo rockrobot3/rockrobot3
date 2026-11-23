@@ -112,8 +112,16 @@ fn u32_of(v: Option<&Value>, what: &str) -> Result<u32, String> {
         .ok_or_else(|| format!("{what} 非 u32 无符号整数（{v:?}）"))
 }
 
-/// magic 行：offset=0/length=4，字段值的小端字节必须等于 wire_bytes_hex。
+/// magic 行：先取行并钉位（offset=0/length=4），再自证线上字节。
 fn magic_of(rows: &[Row]) -> Result<(u32, Vec<u8>), String> {
+    let row = magic_row(rows)?;
+    let value = row.value.ok_or("magic 行缺字段值 value")?;
+    let hex = row.wire.as_deref().ok_or("magic 行缺 wire_bytes_hex")?;
+    magic_wire(value, hex).map(|wire| (value, wire))
+}
+
+/// 取 magic 行并钉固定位（字段值按 u32 读，宽度必须是 4）。
+fn magic_row(rows: &[Row]) -> Result<&Row, String> {
     let row = rows
         .iter()
         .find(|r| r.name == "magic")
@@ -124,15 +132,18 @@ fn magic_of(rows: &[Row]) -> Result<(u32, Vec<u8>), String> {
             row.offset, row.length
         ));
     }
-    let value = row.value.ok_or("magic 行缺字段值 value")?;
-    let hex = row.wire.as_deref().ok_or("magic 行缺 wire_bytes_hex")?;
+    Ok(row)
+}
+
+/// magic 自证：线上字节必须等于字段值的小端字节。
+fn magic_wire(value: u32, hex: &str) -> Result<Vec<u8>, String> {
     let wire = hex_bytes(hex)?;
     if wire != value.to_le_bytes() {
         return Err(format!(
             "magic wire_bytes_hex {hex} ≠ 字段值 {value:#010X} 的小端字节"
         ));
     }
-    Ok((value, wire))
+    Ok(wire)
 }
 
 /// 十六进制文本 → 字节（非 ASCII/奇数长度/非法字符逐条点名，不切片 panic）。
@@ -140,16 +151,17 @@ fn hex_bytes(s: &str) -> Result<Vec<u8>, String> {
     if !s.is_ascii() {
         return Err(format!("{s} 非 ASCII 十六进制文本"));
     }
-    let mut out = Vec::new();
-    let mut chunks = s.as_bytes().chunks_exact(2);
-    for c in &mut chunks {
-        let pair = std::str::from_utf8(c).map_err(|e| format!("{s} 不可读: {e}"))?;
-        out.push(u8::from_str_radix(pair, 16).map_err(|e| format!("{s} 非十六进制: {e}"))?);
-    }
-    if !chunks.remainder().is_empty() {
+    let (chunks, rest) = s.as_bytes().as_chunks::<2>();
+    if !rest.is_empty() {
         return Err(format!("{s} 非偶数长度十六进制文本"));
     }
-    Ok(out)
+    chunks
+        .iter()
+        .map(|c| {
+            let pair = std::str::from_utf8(c).map_err(|e| format!("{s} 不可读: {e}"))?;
+            u8::from_str_radix(pair, 16).map_err(|e| format!("{s} 非十六进制: {e}"))
+        })
+        .collect()
 }
 
 /// 生成 envelope_gen.py 文本（头注点名生成器与真值点，手改必被门 ⑨-d 抓红）。
