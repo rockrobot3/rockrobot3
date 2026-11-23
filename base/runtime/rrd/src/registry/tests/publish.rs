@@ -103,7 +103,7 @@ fn foreign_mark_ctor() {
                 owner: "?".into(),
                 sender: "rr3-sima".into(),
             }),
-            "owner 比对分支在 owner 键缺失时必须回显 ?（与 publish_foreign_prefix_echoes_question_mark_when_owner_is_missing 同路径，这里双分支同测）"
+            "owner 比对分支在 owner 键缺失时必须回显 ?（与 pub_mark_owner_miss 同路径，这里双分支同测）"
         );
 }
 

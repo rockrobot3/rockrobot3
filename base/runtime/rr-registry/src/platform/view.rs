@@ -128,7 +128,7 @@ mod tests {
         assert!(esp.rr3_input_only_pins().contains(&34));
         assert!(!esp.rr3_input_only_pins().contains(&32));
         // 实-6 (a)：esp32 为 rtos 档，词形派生面空表显式（非缺段——缺段在
-        // missing_sections_and_keys_are_named 反例判）
+        // miss_keys_named 反例判）
         assert!(esp.rr3_wordform_map().is_empty());
         // ④-b：I2C0 硬线 {21,22} 与 UART2 {18,19} 两组互斥集
         assert!(esp

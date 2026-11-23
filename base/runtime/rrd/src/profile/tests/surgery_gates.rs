@@ -216,7 +216,7 @@ fn bare_tier_fatal() {
 fn tier_slot_tier_fatal() {
     let root = Root::new("l10");
     // tier 换 bare 同批翻转 [supplies.budget] 为 bare 档形状（分档自洽，
-    // bare_tier_without_watchdog_is_fatal 注记同源）
+    // bare_tier_fatal 注记同源）
     let bad = GOOD
             .replace("tier = \"host\"", "tier = \"bare\"")
             .replace(

@@ -148,7 +148,7 @@ pub fn rr3_cred_store_parse(s: &str) -> Option<String> {
 }
 
 /// GPIO 类键 → 槽位取值器（键集与槽位一处对齐：键名在 [`RR3_BOARD_BINDING_KEYS`]、
-/// 槽位在实体字段上，全键覆盖由单测 `entry_fills_known_keys_and_names_unknown` 兜底）。
+/// 槽位在实体字段上，全键覆盖由单测 `entry_keys_unknown` 兜底）。
 type Rr3BindSlot = fn(&mut Rr3BoardBindings) -> &mut Option<u8>;
 
 /// GPIO 类十键的槽位表（cred_store 是另一取值域，不入本表）。

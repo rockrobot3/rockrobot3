@@ -166,7 +166,7 @@ pub(crate) fn expr_eye_base(expr: &str) -> EyeStyle {
 }
 
 /// 表情基态表（15 项；`idle` 与未知表情统一走 [`EYE_IDLE`] 兜底）。键不得重复
-/// ——查表取首命中，重复键会被静默遮蔽（`expr_eyes_keys_unique` 守门）。
+/// ——查表取首命中，重复键会被静默遮蔽（`expr_keys_unique` 守门）。
 const EXPR_EYES: [(&str, EyeStyle); 15] = [
     ("blink", EyeStyle::new(4, 0, 0, 100, Brow::None)), // 眯缝
     ("happy", EyeStyle::new(55, 0, 2, 100, Brow::None)), // 眯眼微垂

@@ -74,7 +74,7 @@ fn overlay_adds_them() {
 /// 断言取自 `rr3_topics_load` 的真实返回，而不是再拼一遍期望集合——去掉装载处的
 /// 复验步骤本身不会让本测试变红（正确的 merge 造不出不自洽的表），它挡的是
 /// merge 将来退化；装载处的复验是同一件事的 fail-closed 版本，kind 那一支的**反向**实证
-/// 见 `contract_topic_kind_rewritten_by_the_merge_is_rejected`。
+/// 见 `contract_kind_rej`。
 #[test]
 fn merged_set_contract() {
     let (base_set, _) = rr3_topics_load(&contract(), None).expect("契约装载应成功");
@@ -391,7 +391,7 @@ fn unresolvable_echoing() {
 /// 遗留 ③ 的另一半实证：喂进去的是**带 `..` 的相对原词**，而致命文案里的路径必须是
 /// 规范化后的那一份（`rr3_overlay_abs`）。原先只有 `main.rs` 绝对化叠加层，装载入口
 /// 直接拿调用方给的原词做文案 → 运维照报错里的路径去查，展开的是他自己的 CWD。
-/// 与 `contract_path_is_normalised_before_it_reaches_the_error_text`（CF-4）同口径、同工具。
+/// 与 `contract_error_text`（CF-4）同口径、同工具。
 #[test]
 fn overlay_ns_rej() {
     let dir = std::env::temp_dir().join(format!("rr3-ov-cf3-{}", std::process::id()));

@@ -294,7 +294,7 @@ fn parity_leg1_power_rail_judge_train_is_deterministic() {
 fn parity_leg2_power_rail_judge_edge_equivalent_to_downward_transition() {
     // 腿二·正确性：边沿事件 ⇔ 向下档变（板侧 RailJudge 类型注的逐拍等价性）。
     // 档序 Ok=0/Mild=1/Severe=2，prev 初值 Ok：event ⇔ rank 增；回阈（rank 降）
-    // 不报。与 rail_judge_feed_matches_board_semantics 同一序列、判据独立重写。
+    // 不报。与 rail_feed_semantics 同一序列、判据独立重写。
     fn rank(t: Rr3RailTier) -> u8 {
         match t {
             Rr3RailTier::Ok => 0,

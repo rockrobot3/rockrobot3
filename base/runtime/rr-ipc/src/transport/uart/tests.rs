@@ -362,7 +362,7 @@ fn excl_holder_probe() -> bool {
 fn spawn_excl_holder(slave_path: &std::path::Path, ready: &std::path::Path) -> std::process::Child {
     std::process::Command::new(std::env::current_exe().unwrap())
         .args([
-            "transport::uart::tests::uart_excl_cross_process_second_process_rejected",
+            "transport::uart::tests::uart_excl_cross_rej",
             "--exact",
             "--nocapture",
         ])

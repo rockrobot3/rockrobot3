@@ -98,7 +98,7 @@ mod tests {
     /// **`stop_at: Some(..)` = "回调齐了才止步"模式**：预推帧由另一个线程写进 socket、
     /// 再由客户端读线程投递，`serve` 的 `poll_wait(0)` 在首拍可能一个帧都拿不到。若
     /// 终止条件仍按"第 N 拍"，夹具就隐含假设"帧已到达"，负载下随机早退（实测
-    /// `serve_dispatches_rpc_event_and_tick_in_order` 偶发 `rpcs=[]`）。故本模式下
+    /// `serve_rpc_tick_order` 偶发 `rpcs=[]`）。故本模式下
     /// 止步条件改为"两 Event + 两 RPC 都已回调"，并用墙钟兜底（超时返**不同文案**，
     /// 让"夹具没等到帧"与"被测语义错"分得开）。
     struct RecordingDispatcher {
