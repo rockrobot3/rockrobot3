@@ -68,45 +68,7 @@ impl FakeCloud {
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { break };
                 c.fetch_add(1, Ordering::Relaxed);
-                // keep-alive 档在同一条流上连续读数个请求；读到 EOF 即收
-                while let Some((path, headers, body)) = read_request(&mut stream) {
-                    r.lock().unwrap().push((
-                        path.clone(),
-                        headers.get("authorization").cloned().unwrap_or_default(),
-                        body,
-                    ));
-                    let fail = f.lock().unwrap().clone();
-                    let fail_once = fo.lock().unwrap().clone();
-                    let bad = b.lock().unwrap().clone();
-                    let missing = m.lock().unwrap().clone();
-                    let (status, payload): (&str, Vec<u8>) = if Some(&path) == fail_once.as_ref() {
-                        *fo.lock().unwrap() = None; // 一次性：下一请求恢复罐头
-                        ("500 Internal Server Error", br#"{"error":"boom"}"#.to_vec())
-                    } else if Some(&path) == fail.as_ref() {
-                        ("500 Internal Server Error", br#"{"error":"boom"}"#.to_vec())
-                    } else if Some(&path) == bad.as_ref() {
-                        // 200 + 非 JSON 体（B-16②：云 200 坏体的静默假成功口）
-                        ("200 OK", b"not-json-at-all".to_vec())
-                    } else if Some(&path) == missing.as_ref() {
-                        ("200 OK", b"{}".to_vec())
-                    } else if path == "/v1/audio/transcriptions" {
-                        ("200 OK", "{\"text\": \"你好\"}".as_bytes().to_vec())
-                    } else if path == "/v1/chat/completions" {
-                        (
-                            "200 OK",
-                            json!({"choices": [{"message": {"role": "assistant", "content": "好的"}}]})
-                                .to_string()
-                                .into_bytes(),
-                        )
-                    } else {
-                        // /v1/audio/speech → 原始 PCM
-                        ("200 OK", [1u8, 0].repeat(1600))
-                    };
-                    respond(&mut stream, status, &payload, keep_alive);
-                    if !keep_alive {
-                        break;
-                    }
-                }
+                Self::serve(&mut stream, &r, &f, &fo, &b, &m, keep_alive);
             }
         });
         Self {
@@ -118,6 +80,70 @@ impl FakeCloud {
             missing_field_path,
             conns,
         }
+    }
+
+    /// 单条连接上的请求循环：keep-alive 连续读数个请求，读到 EOF 即收
+    fn serve(
+        stream: &mut TcpStream,
+        r: &FakeReqs,
+        f: &FakePath,
+        fo: &FakePath,
+        b: &FakePath,
+        m: &FakePath,
+        keep_alive: bool,
+    ) {
+        // keep-alive 档在同一条流上连续读数个请求；读到 EOF 即收
+        while let Some((path, headers, body)) = read_request(stream) {
+            r.lock().unwrap().push((
+                path.clone(),
+                headers.get("authorization").cloned().unwrap_or_default(),
+                body,
+            ));
+            Self::answer(stream, &path, f, fo, b, m, keep_alive);
+            if !keep_alive {
+                break;
+            }
+        }
+    }
+
+    /// 记账后按故障开关/路径选罐头并回写（一次性开关命中即复位）
+    fn answer(
+        stream: &mut TcpStream,
+        path: &str,
+        f: &FakePath,
+        fo: &FakePath,
+        b: &FakePath,
+        m: &FakePath,
+        keep_alive: bool,
+    ) {
+        let fail = f.lock().unwrap().clone();
+        let fail_once = fo.lock().unwrap().clone();
+        let bad = b.lock().unwrap().clone();
+        let missing = m.lock().unwrap().clone();
+        let (status, payload): (&str, Vec<u8>) = if fail_once.as_deref() == Some(path) {
+            *fo.lock().unwrap() = None; // 一次性：下一请求恢复罐头
+            ("500 Internal Server Error", br#"{"error":"boom"}"#.to_vec())
+        } else if fail.as_deref() == Some(path) {
+            ("500 Internal Server Error", br#"{"error":"boom"}"#.to_vec())
+        } else if bad.as_deref() == Some(path) {
+            // 200 + 非 JSON 体（B-16②：云 200 坏体的静默假成功口）
+            ("200 OK", b"not-json-at-all".to_vec())
+        } else if missing.as_deref() == Some(path) {
+            ("200 OK", b"{}".to_vec())
+        } else if path == "/v1/audio/transcriptions" {
+            ("200 OK", "{\"text\": \"你好\"}".as_bytes().to_vec())
+        } else if path == "/v1/chat/completions" {
+            (
+                "200 OK",
+                json!({"choices": [{"message": {"role": "assistant", "content": "好的"}}]})
+                    .to_string()
+                    .into_bytes(),
+            )
+        } else {
+            // /v1/audio/speech → 原始 PCM
+            ("200 OK", [1u8, 0].repeat(1600))
+        };
+        respond(stream, status, &payload, keep_alive);
     }
 
     pub(crate) fn last(&self) -> (String, String, Vec<u8>) {
