@@ -62,6 +62,53 @@ fn empty_surface_requires_no_injection_marker() {
     assert!(errs.iter().any(|e| e.contains("只认 true")), "{errs:?}");
 }
 
+fn bad_shape_top_errs(errs: &[String]) {
+    assert!(
+        errs.iter().any(|e| e.contains("schema_version 必须为 2")),
+        "{errs:?}"
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("顶层未知键 mystery")),
+        "{errs:?}"
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("[assemble] 未知键 extra")),
+        "{errs:?}"
+    );
+}
+
+fn bad_shape_hnd_errs(errs: &[String]) {
+    assert!(
+        errs.iter().any(|e| e.contains("trait \"Rr3Nope\" 未在册")),
+        "{errs:?}"
+    );
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("desc_key \"nope_key\" 未在册")),
+        "{errs:?}"
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("handles[1] 应为内联表")),
+        "{errs:?}"
+    );
+}
+
+fn bad_shape_op_errs(errs: &[String]) {
+    assert!(
+        errs.iter().any(|e| e.contains("ops[0].slot 不得为空")),
+        "{errs:?}"
+    );
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("src_key \"a..b\" 不是合法点路径")),
+        "{errs:?}"
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("ops[1].src_key 应为字符串")),
+        "{errs:?}"
+    );
+}
+
 #[test]
 fn bad_shapes_are_all_named() {
     let text = concat!(
@@ -79,44 +126,9 @@ fn bad_shapes_are_all_named() {
         "]\n",
     );
     let errs = rr3_assemble_parse(text).expect_err("坏形必须报错");
-    assert!(
-        errs.iter().any(|e| e.contains("schema_version 必须为 2")),
-        "{errs:?}"
-    );
-    assert!(
-        errs.iter().any(|e| e.contains("顶层未知键 mystery")),
-        "{errs:?}"
-    );
-    assert!(
-        errs.iter().any(|e| e.contains("[assemble] 未知键 extra")),
-        "{errs:?}"
-    );
-    assert!(
-        errs.iter().any(|e| e.contains("trait \"Rr3Nope\" 未在册")),
-        "{errs:?}"
-    );
-    assert!(
-        errs.iter()
-            .any(|e| e.contains("desc_key \"nope_key\" 未在册")),
-        "{errs:?}"
-    );
-    assert!(
-        errs.iter().any(|e| e.contains("handles[1] 应为内联表")),
-        "{errs:?}"
-    );
-    assert!(
-        errs.iter().any(|e| e.contains("ops[0].slot 不得为空")),
-        "{errs:?}"
-    );
-    assert!(
-        errs.iter()
-            .any(|e| e.contains("src_key \"a..b\" 不是合法点路径")),
-        "{errs:?}"
-    );
-    assert!(
-        errs.iter().any(|e| e.contains("ops[1].src_key 应为字符串")),
-        "{errs:?}"
-    );
+    bad_shape_top_errs(&errs);
+    bad_shape_hnd_errs(&errs);
+    bad_shape_op_errs(&errs);
 }
 
 #[test]
@@ -170,10 +182,7 @@ fn injection_gaps_walk_config_paths() {
     assert!(rr3_injection_gaps(&empty, "garbage =\n").is_empty());
 }
 
-/// 电流需求申报面（基-36 首件）：正例解析 + 缺键 = 空申报合法 + 坏形逐条点名。
-/// 判据本体（Σ ≤ cap）不在本模块——读者在 rrd rr3_demand_budget。
-#[test]
-fn demands_parse_and_shape_errors_are_named() {
+fn demands_ok() {
     // 正例：servo 真实申报形状（五键定形 = ADR-0021 裁定 2；handles 同 servo 真实
     // 句柄，demands 不豁免 L-5 空面规则——它不是注入面）
     let f = rr3_assemble_parse(
@@ -186,18 +195,19 @@ fn demands_parse_and_shape_errors_are_named() {
     assert_eq!(f.demands[0].sustained_ma, 120);
     assert!(f.demands[0].critical);
     assert!(f.demands[0].concurrency_group.is_empty());
+}
 
-    // 缺 demands 键 = 空申报合法（执法面归门 c）
-    let f = rr3_assemble_parse(OK_SAMPLE).expect("无 demands 必须过");
-    assert!(f.demands.is_empty());
-
+fn demand_bad_errs() -> Vec<String> {
     // 坏形逐条点名（五键全显式，T-5）：空 rail / 峰值非正 / 缺 sustained_ma /
     // sustained>peak 物理矛盾 / critical 缺失 / concurrency_group 缺键 / 非数组 /
     // 空组名与非串元素 / 未知键 / 非表条目
-    let errs = rr3_assemble_parse(
+    rr3_assemble_parse(
             "schema_version = 2\n\n[assemble]\nhandles = [\n  { trait = \"Rr3PwmServo\", desc_key = \"pwm_chip\" },\n]\nops = []\ndemands = [\n  { rail = \"\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [] },\n  { rail = \"rail5v\", peak_ma = 0, sustained_ma = 120, critical = true, concurrency_group = [] },\n  { rail = \"rail5v\", peak_ma = 700, critical = true, concurrency_group = [] },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 800, critical = true, concurrency_group = [] },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, concurrency_group = [] },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = \"axis\" },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [\"\", 1] },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [], wat = 1 },\n  \"bare\",\n]\n",
         )
-        .expect_err("坏形必须报错");
+        .expect_err("坏形必须报错")
+}
+
+fn demand_field_errs(errs: &[String]) {
     assert!(
         errs.iter().any(|e| e.contains("demands[0].rail 不得为空")),
         "{errs:?}"
@@ -227,6 +237,9 @@ fn demands_parse_and_shape_errors_are_named() {
             .any(|e| e.contains("demands[5].concurrency_group 缺失")),
         "{errs:?}"
     );
+}
+
+fn demand_group_errs(errs: &[String]) {
     assert!(
         errs.iter()
             .any(|e| e.contains("demands[6].concurrency_group 应为字符串数组")),
@@ -250,6 +263,21 @@ fn demands_parse_and_shape_errors_are_named() {
         errs.iter().any(|e| e.contains("demands[9] 应为内联表")),
         "{errs:?}"
     );
+}
+
+/// 电流需求申报面（基-36 首件）：正例解析 + 缺键 = 空申报合法 + 坏形逐条点名。
+/// 判据本体（Σ ≤ cap）不在本模块——读者在 rrd rr3_demand_budget。
+#[test]
+fn demands_parse_and_shape_errors_are_named() {
+    demands_ok();
+
+    // 缺 demands 键 = 空申报合法（执法面归门 c）
+    let f = rr3_assemble_parse(OK_SAMPLE).expect("无 demands 必须过");
+    assert!(f.demands.is_empty());
+
+    let errs = demand_bad_errs();
+    demand_field_errs(&errs);
+    demand_group_errs(&errs);
 }
 
 /// 内存需求申报面（校验⑩ 分子，批N2 n2c-v10）：正例解析 + 缺键 = 未申报 0
