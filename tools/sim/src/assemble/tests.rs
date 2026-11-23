@@ -94,11 +94,8 @@ fn sim_profile_transform_rewrites_hal_and_drops_face_overrides() {
         .contains("缺 hal_backend"));
 }
 
-#[test]
-fn layout_stages_install_shape_from_a_fixture_repo() {
-    // 临时"仓"：profiles/default.toml + modules/rr3-pa（rust）
-    let repo = std::env::temp_dir().join(format!("rr3-assemble-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&repo);
+/// 夹具模块：rr3-pa（rust）manifest + config + atoms 申报面。
+fn stage_module(repo: &Path) {
     let (m, lang, entry) = ("rr3-pa", "rust", "rr3-pa");
     let dir = repo.join("modules").join(m);
     std::fs::create_dir_all(&dir).unwrap();
@@ -116,6 +113,10 @@ fn layout_stages_install_shape_from_a_fixture_repo() {
     // atoms/ 申报面：校验⑨ 从装机树读 demands，夹具必须与装机布局同形
     std::fs::create_dir_all(dir.join("atoms/servo")).unwrap();
     std::fs::write(dir.join("atoms/servo/assemble.toml"), "[assemble]\n").unwrap();
+}
+
+/// 夹具装配单：schema_version=5 形状，host 档合法不适用显式写，只走形状解析。
+fn stage_profile(repo: &Path) {
     std::fs::create_dir_all(repo.join("profiles")).unwrap();
     std::fs::write(
         repo.join("profiles/default.toml"),
@@ -136,8 +137,10 @@ fn layout_stages_install_shape_from_a_fixture_repo() {
              [slots]\npresent = [\"a.b\"]\n",
     )
     .unwrap();
-    // 接线档仓源（校验⑦ 装机档必在）：vcc/gnd-only 单线组，对夹具不声明
-    // [pins] 免疫
+}
+
+/// 夹具接线档：vcc/gnd-only 单线组，对夹具不声明 [pins] 免疫。
+fn stage_wiring(repo: &Path) {
     std::fs::create_dir_all(repo.join("hardware/default")).unwrap();
     std::fs::write(
         repo.join("hardware/default/wiring.toml"),
@@ -146,13 +149,28 @@ fn layout_stages_install_shape_from_a_fixture_repo() {
              gnd_common = \"star-1\"\n",
     )
     .unwrap();
+}
 
-    let work = std::env::temp_dir().join(format!("rr3-assemble-w-{}", std::process::id()));
-    let (profile_dst, entries) =
-        rr3_assemble_layout(&repo, &work, &repo.join("profiles/default.toml")).expect("布局装配");
+/// 临时“仓”：profiles/default.toml + modules/rr3-pa（rust）+ 接线档。
+fn stage_fixture_repo() -> std::path::PathBuf {
+    let repo = std::env::temp_dir().join(format!("rr3-assemble-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&repo);
+    stage_module(&repo);
+    stage_profile(&repo);
+    stage_wiring(&repo);
+    repo
+}
+
+/// 布局装配判果：装配单/接线档原文零改、entry 绝对化、config/atoms 同批就位。
+fn layout_asserts(
+    repo: &Path,
+    work: &Path,
+    profile_dst: &Path,
+    entries: &[(String, std::path::PathBuf)],
+) {
     // 装配单原文零改
     assert_eq!(
-        std::fs::read_to_string(&profile_dst).unwrap(),
+        std::fs::read_to_string(profile_dst).unwrap(),
         std::fs::read_to_string(repo.join("profiles/default.toml")).unwrap()
     );
     // 接线档同批原文零改
@@ -162,7 +180,7 @@ fn layout_stages_install_shape_from_a_fixture_repo() {
     );
     // 模块就位：entry 指与 rr3-sim 同 target-dir 的产物
     assert_eq!(entries.len(), 1);
-    let want_entry = rr3_bin_dir(&repo).join("rr3-pa");
+    let want_entry = rr3_bin_dir(repo).join("rr3-pa");
     assert_eq!(entries[0], ("rr3-pa".into(), want_entry.clone()));
     // manifest 已绝对化且原文仅 entry 一处改写
     let staged = std::fs::read_to_string(work.join("modules/rr3-pa/module.toml")).unwrap();
@@ -173,11 +191,20 @@ fn layout_stages_install_shape_from_a_fixture_repo() {
     assert!(staged.contains("name = \"rr3-pa\""));
     // config 同目录就位
     assert!(work.join("modules/rr3-pa/config.toml").is_file());
-    // atoms/ 树同批装机（漏拷会让 rrd 校验⑨ 误判"件未申报 demands"）
+    // atoms/ 树同批装机（漏拷会让 rrd 校验⑨ 误判“件未申报 demands”）
     assert_eq!(
         std::fs::read_to_string(work.join("modules/rr3-pa/atoms/servo/assemble.toml")).unwrap(),
         "[assemble]\n"
     );
+}
+
+#[test]
+fn layout_stages_install_shape_from_a_fixture_repo() {
+    let repo = stage_fixture_repo();
+    let work = std::env::temp_dir().join(format!("rr3-assemble-w-{}", std::process::id()));
+    let (profile_dst, entries) =
+        rr3_assemble_layout(&repo, &work, &repo.join("profiles/default.toml")).expect("布局装配");
+    layout_asserts(&repo, &work, &profile_dst, &entries);
     std::fs::remove_dir_all(&repo).ok();
     std::fs::remove_dir_all(&work).ok();
 }
