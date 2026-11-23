@@ -159,12 +159,9 @@ fn version_grammar_and_order_are_strict() {
     }
 }
 
-#[test]
-fn expect_checks_target_and_downgrade_policy() {
-    let text = manifest_text();
-    let m = rr3_manifest_parse(text.as_bytes()).unwrap();
+fn expect_upgrade_ok(m: &Rr3OtaManifest) {
     rr3_manifest_expect(
-        &m,
+        m,
         &Rr3OtaExpect {
             platform: Some("rk3566"),
             board: Some("radxa-zero3"),
@@ -173,9 +170,11 @@ fn expect_checks_target_and_downgrade_policy() {
         },
     )
     .expect("目标一致且升级");
+}
 
+fn expect_target_rejects(m: &Rr3OtaManifest) {
     let e = rr3_manifest_expect(
-        &m,
+        m,
         &Rr3OtaExpect {
             platform: Some("raspberry-pi-4"),
             ..Default::default()
@@ -185,7 +184,7 @@ fn expect_checks_target_and_downgrade_policy() {
     assert!(e.contains("platform 不匹配"), "{e}");
 
     let e = rr3_manifest_expect(
-        &m,
+        m,
         &Rr3OtaExpect {
             board: Some("pi4b-board"),
             ..Default::default()
@@ -193,9 +192,11 @@ fn expect_checks_target_and_downgrade_policy() {
     )
     .unwrap_err();
     assert!(e.contains("board 不匹配"), "{e}");
+}
 
+fn expect_downgrade(m: &Rr3OtaManifest) {
     let e = rr3_manifest_expect(
-        &m,
+        m,
         &Rr3OtaExpect {
             current_version: Some("0.0.8"),
             allow_downgrade: false,
@@ -206,7 +207,7 @@ fn expect_checks_target_and_downgrade_policy() {
     assert!(e.contains("拒绝降级"), "{e}");
 
     rr3_manifest_expect(
-        &m,
+        m,
         &Rr3OtaExpect {
             current_version: Some("0.0.8"),
             allow_downgrade: true,
@@ -214,6 +215,15 @@ fn expect_checks_target_and_downgrade_policy() {
         },
     )
     .expect("显式允许降级");
+}
+
+#[test]
+fn expect_checks_target_and_downgrade_policy() {
+    let text = manifest_text();
+    let m = rr3_manifest_parse(text.as_bytes()).unwrap();
+    expect_upgrade_ok(&m);
+    expect_target_rejects(&m);
+    expect_downgrade(&m);
 }
 
 #[test]
