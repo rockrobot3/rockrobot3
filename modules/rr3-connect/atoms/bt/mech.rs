@@ -42,14 +42,13 @@ impl Rr3BtPhase {
 /// 非法转移返回 `false` 且状态不动。
 ///
 /// 骨架期在飞（0.0.4 批E，conventions §2）：事件面未登记 → 主循环暂无转移
-/// 消费点（开机自述只走 new/phase/power_on/phase_name），转移函数本体由单测
-/// 钉死；豁免随真后端（BlueZ 板上批次）接线消费即移除。
-#[allow(dead_code)]
+/// 消费点（开机自述只走 new/phase/phase_name），转移函数本体由单测钉死；
+/// 豁免只挂在四个转移方法上（结构体与已消费读数不整块豁免），随真后端
+/// （BlueZ 板上批次）接线消费即移除。
 pub struct Rr3BtState {
     phase: Rr3BtPhase,
 }
 
-#[allow(dead_code)]
 impl Rr3BtState {
     /// 开机初值注入（N-1）：`up=true` 构造即上电进 Discoverable，false = Off
     /// （出厂不自动开蓝牙）。初值是装配期注入不走转移矩阵——件内不再有
@@ -69,6 +68,7 @@ impl Rr3BtState {
     }
 
     /// 上电：Off → Discoverable（可发现态，配网备选通道在开）。
+    #[allow(dead_code)] // 转移矩阵单测消费；事件面登记后由主循环接线
     pub fn rr3_bt_power_on(&mut self) -> bool {
         if self.phase != Rr3BtPhase::Off {
             return false;
@@ -78,6 +78,7 @@ impl Rr3BtState {
     }
 
     /// 对端入链：Discoverable → Connected。
+    #[allow(dead_code)] // 转移矩阵单测消费；事件面登记后由主循环接线
     pub fn rr3_bt_link_up(&mut self) -> bool {
         if self.phase != Rr3BtPhase::Discoverable {
             return false;
@@ -87,6 +88,7 @@ impl Rr3BtState {
     }
 
     /// 对端离链：Connected → Discoverable（回可发现态，不断电）。
+    #[allow(dead_code)] // 转移矩阵单测消费；事件面登记后由主循环接线
     pub fn rr3_bt_link_down(&mut self) -> bool {
         if self.phase != Rr3BtPhase::Connected {
             return false;
@@ -97,6 +99,7 @@ impl Rr3BtState {
 
     /// 断电：Discoverable → Off。Connected 不能直接断电（须先 link_down）——
     /// 状态机不 fake"连着还能静默关"，与 connect result 诚实原则同款。
+    #[allow(dead_code)] // 转移矩阵单测消费；事件面登记后由主循环接线
     pub fn rr3_bt_power_off(&mut self) -> bool {
         if self.phase != Rr3BtPhase::Discoverable {
             return false;

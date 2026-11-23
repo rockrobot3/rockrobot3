@@ -97,18 +97,9 @@ pub(super) fn rr3_asm_handles(
     facts: &mut Rr3AssembleFacts,
     errs: &mut Vec<String>,
 ) -> (bool, bool) {
-    let Some(v) = asm.get("handles") else {
-        errs.push("[assemble] 缺 handles 键（空数组合法，键本身必填）".into());
-        return (false, false);
-    };
-    let Some(items) = v.as_array() else {
-        errs.push(format!("[assemble].handles 应为数组，收到 {v:?}"));
-        return (false, false);
-    };
-    let (parsed, mut item_errs) = rr3_handles_parse(items);
+    let (parsed, present, empty) = rr3_handles_key(asm, errs);
     facts.handles = parsed;
-    errs.append(&mut item_errs);
-    (true, items.is_empty())
+    (present, empty)
 }
 
 /// ops：数组，每条 = { slot, src_key }，slot 非空、src_key 为合法点路径（共用同上）。
@@ -118,18 +109,9 @@ pub(super) fn rr3_asm_ops(
     facts: &mut Rr3AssembleFacts,
     errs: &mut Vec<String>,
 ) -> (bool, bool) {
-    let Some(v) = asm.get("ops") else {
-        errs.push("[assemble] 缺 ops 键（空数组合法，键本身必填）".into());
-        return (false, false);
-    };
-    let Some(items) = v.as_array() else {
-        errs.push(format!("[assemble].ops 应为数组，收到 {v:?}"));
-        return (false, false);
-    };
-    let (parsed, mut item_errs) = rr3_ops_parse(items);
+    let (parsed, present, empty) = rr3_ops_key(asm, errs);
     facts.ops = parsed;
-    errs.append(&mut item_errs);
-    (true, items.is_empty())
+    (present, empty)
 }
 
 /// demands：电流需求申报（基-36 首件）。缺键 = 空申报合法（执法面归门 c，

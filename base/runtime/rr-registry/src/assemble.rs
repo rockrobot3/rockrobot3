@@ -190,7 +190,9 @@ mod tests;
 
 use asm::*;
 pub(crate) use empty::rr3_no_injection_err;
-pub(crate) use item::{rr3_demands_parse, rr3_handles_parse, rr3_ops_parse};
+pub(crate) use item::{
+    rr3_demands_parse, rr3_handles_key, rr3_handles_parse, rr3_ops_key, rr3_ops_parse,
+};
 
 /// 解析 + 形状级校验一份装配清单文本。fail-closed：一条不静默放行，全部错误
 /// 逐条点名（与 manifest/描述符校验同一口径）。空 `[assemble]` 数组合法。

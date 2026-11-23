@@ -41,7 +41,7 @@
 //! [`crate::assemble::rr3_assemble_parse`] 同一口径）。
 
 use crate::assemble::{
-    rr3_handles_parse, rr3_no_injection_err, rr3_ops_parse, Rr3AssembleHandle, Rr3AssembleOp,
+    rr3_handles_key, rr3_no_injection_err, rr3_ops_key, Rr3AssembleHandle, Rr3AssembleOp,
 };
 use toml::Value;
 
@@ -329,18 +329,9 @@ fn rr3_comp_handles(
     facts: &mut Rr3CompositeFacts,
     errs: &mut Vec<String>,
 ) -> (bool, bool) {
-    let Some(v) = asm.get("handles") else {
-        errs.push("[assemble] 缺 handles 键（空数组合法，键本身必填，N-11）".into());
-        return (false, false);
-    };
-    let Some(items) = v.as_array() else {
-        errs.push(format!("[assemble].handles 应为数组，收到 {v:?}"));
-        return (false, false);
-    };
-    let (parsed, mut item_errs) = rr3_handles_parse(items);
+    let (parsed, present, empty) = rr3_handles_key(asm, errs);
     facts.handles = parsed;
-    errs.append(&mut item_errs);
-    (true, items.is_empty())
+    (present, empty)
 }
 
 /// ops 键：同上共用件级 helper。返回 (键出现, 数组为空)。
@@ -349,18 +340,9 @@ fn rr3_comp_ops(
     facts: &mut Rr3CompositeFacts,
     errs: &mut Vec<String>,
 ) -> (bool, bool) {
-    let Some(v) = asm.get("ops") else {
-        errs.push("[assemble] 缺 ops 键（空数组合法，键本身必填，N-11）".into());
-        return (false, false);
-    };
-    let Some(items) = v.as_array() else {
-        errs.push(format!("[assemble].ops 应为数组，收到 {v:?}"));
-        return (false, false);
-    };
-    let (parsed, mut item_errs) = rr3_ops_parse(items);
+    let (parsed, present, empty) = rr3_ops_key(asm, errs);
     facts.ops = parsed;
-    errs.append(&mut item_errs);
-    (true, items.is_empty())
+    (present, empty)
 }
 
 /// no_injection = true 是"本组合件不需注入面"的显式声明（L-5）：只认布尔 true。

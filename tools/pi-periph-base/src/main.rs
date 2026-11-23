@@ -14,6 +14,8 @@
 mod app;
 mod args;
 mod board;
+// 与 ESP32 底座共用同一份面部机制源码（同件复用，不抄第二份）；本板只消费
+// 其中的几何/编码子集，其余 API 属共享件的完整面，不是死码。
 #[allow(dead_code)]
 #[path = "../../esp32-periph-base/atoms/face/mech.rs"]
 mod face;
@@ -23,9 +25,12 @@ mod line;
 mod motion;
 mod oled;
 mod ports;
+// 同上：舵机机制与生成行程表共用 ESP32 底座源码，本板消费子集。
 #[allow(dead_code)]
 #[path = "../../esp32-periph-base/atoms/servo/mech.rs"]
 mod servo;
+// 生成的主题常量表（真值点 contracts/topics.toml）：整表随生成物入库，
+// 本板只取用其中若干主题，未用常量不构成死码。
 #[allow(dead_code)]
 #[path = "../../esp32-periph-base/src/topics_gen.rs"]
 mod topics_gen;

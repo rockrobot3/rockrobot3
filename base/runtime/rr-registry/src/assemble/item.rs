@@ -64,6 +64,43 @@ fn rr3_item_str_bad(what: &str, i: usize, key: &str, v: &str, bad: &str, errs: &
     }
 }
 
+/// handles 键面：键在场 → 数组形状 → 条目级解析。件级与组合件级**同形同规则**，
+/// 一份判据一份真值。返回 `(条目, 键出现, 数组为空)`；键缺/非数组时条目为空。
+pub(crate) fn rr3_handles_key(
+    asm: &toml::Table,
+    errs: &mut Vec<String>,
+) -> (Vec<Rr3AssembleHandle>, bool, bool) {
+    let Some(v) = asm.get("handles") else {
+        errs.push("[assemble] 缺 handles 键（空数组合法，键本身必填）".into());
+        return (Vec::new(), false, false);
+    };
+    let Some(items) = v.as_array() else {
+        errs.push(format!("[assemble].handles 应为数组，收到 {v:?}"));
+        return (Vec::new(), false, false);
+    };
+    let (parsed, mut item_errs) = rr3_handles_parse(items);
+    errs.append(&mut item_errs);
+    (parsed, true, items.is_empty())
+}
+
+/// ops 键面：键在场 → 数组形状 → 条目级解析（共用心智同 handles）。
+pub(crate) fn rr3_ops_key(
+    asm: &toml::Table,
+    errs: &mut Vec<String>,
+) -> (Vec<Rr3AssembleOp>, bool, bool) {
+    let Some(v) = asm.get("ops") else {
+        errs.push("[assemble] 缺 ops 键（空数组合法，键本身必填）".into());
+        return (Vec::new(), false, false);
+    };
+    let Some(items) = v.as_array() else {
+        errs.push(format!("[assemble].ops 应为数组，收到 {v:?}"));
+        return (Vec::new(), false, false);
+    };
+    let (parsed, mut item_errs) = rr3_ops_parse(items);
+    errs.append(&mut item_errs);
+    (parsed, true, items.is_empty())
+}
+
 /// handles 数组条目级解析与校验（件级与组合件级**同形同规则**，composite.rs 共用；
 /// 点名文案两处一致——一份判据一份真值）
 pub(crate) fn rr3_handles_parse(items: &[Value]) -> (Vec<Rr3AssembleHandle>, Vec<String>) {
