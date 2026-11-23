@@ -307,10 +307,18 @@ jobs:
           title: ${{ matrix.chip }}-act-sense
           prelude: ~/export-esp.sh
           command: bash tools/ci/rr3-act-sense-espidf-check.sh ${{ matrix.chip }}
-      # 全链固件制品（autonomy+tts 调试档）：periph-base 门 ⑦d 产出的 bin 在
-      # target 根，供真板 espflash 烧录与证据复现。两芯片分别上传，W7 classic
-      # 重烧不再依赖本地构建。
-      - name: 上传 S3 全链固件
+      # 全链固件制品：真板全链复验必须用 **release** 档（debug 档内部 SRAM 余量
+      # 更低，TLS 会 mbedtls_ssl_setup -0x7F00 分配失败）；debug 制品仅作编译
+      # 门产物保留。两芯片分别上传，W7 classic 重烧不再依赖本地构建。
+      - name: 上传 S3 全链固件（release）
+        if: matrix.chip == 'esp32s3'
+        uses: actions/upload-artifact@v7
+        with:
+          name: esp32s3-solo-firmware-release
+          path: /tmp/rr3-build/xtensa-esp32s3-espidf/release/esp32-periph-base
+          if-no-files-found: error
+          retention-days: 7
+      - name: 上传 S3 全链固件（debug 编译门）
         if: matrix.chip == 'esp32s3'
         uses: actions/upload-artifact@v7
         with:

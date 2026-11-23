@@ -37,11 +37,12 @@ const MAX_REPLY: usize = 180;
 /// 播放等待轮询步长与余量。
 const PLAY_POLL_MS: u64 = 200;
 const PLAY_SLACK_MS: u64 = 3_000;
-/// 对话轮内部 SRAM 准入预算（S3 余量②，0015 §6-5）：mbedTLS 握手/收发只走内部
-/// SRAM（PSRAM 不计），0015 实测轮内 `int_min ≈ 6.2 KB` 时 `create_ssl_handle`
-/// 失败。准入 = 24 KB，短等 1.5 s 让播放面缓冲退出；不足即弃轮并点名——
-/// 不把"堆不够"拖到 TLS 内部变成一句没有上下文的 SDK 错误。
-const DIALOG_INT_BUDGET_BYTES: usize = 24 * 1024;
+/// 对话轮内部 SRAM 准入预算（S3 余量②，0015 §6-5 + 2026-11-23 真板）：
+/// mbedTLS 只走内部 SRAM（PSRAM 不计）。24 KB 只是 0015 的失效下界；
+/// 2026-11-23 CI debug 档轮内 `int_free≈46 KB` 时 `mbedtls_ssl_setup` 仍返回
+/// -0x7F00（ALLOC_FAILED），release 档 dialog start≈73 KB / TTS≈58 KB 可用。
+/// 准入取 56 KB，短等 1.5 s；不足即弃轮并点名，不把堆不够拖成 SDK 内部错误。
+const DIALOG_INT_BUDGET_BYTES: usize = 56 * 1024;
 const DIALOG_INT_WAIT_MS: u64 = 1_500;
 /// 云端失败时的降级播报（契约 §4：不得静默弃轮；TTS 也失败则只留串口点名）。
 const RR3_DEGRADE_TEXT: &str = "网络不太通畅，请稍后再试。";
