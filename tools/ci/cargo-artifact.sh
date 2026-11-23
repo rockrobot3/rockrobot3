@@ -18,33 +18,49 @@ rr3_cargo_artifact() {
   printf '%s/%s/%s/%s\n' "$td" "$1" "$2" "$3"
 }
 
-# 分区表条目核验（W7-b1a 共享单点）：返回 0 = 指定 triple 中**晚于时间锚**的
-# partition-table.bin 含 label。锚点先于构建创建（缓存恢复的旧表早于锚点被排除），
-# 避免旧绿表冒充本轮；产物/条目缺位返回非 0，调用方按各门纪律 FAIL 点名。
-# 用法：rr3_partition_has <target-triple> <label> <marker-file>
+# 分区表条目核验（W7-b1a 共享单点）：返回 0 = 指定 triple 的构建树里存在
+# **与仓源 partitions.csv 内容一致**的 out/partitions.csv，且同一 out 树里的
+# partition-table.bin 含 label。2026-11-23 根因：缓存命中的构建不会重生成
+# partition-table.bin，旧的 mtime 时间锚把正确表判红；改为内容对拍，既排除
+# 旧绿表冒充，也不惩罚缓存复用。无 CSV 入参时回退旧 marker 语义。
+# 用法：rr3_partition_has <target-triple> <label> <marker-file> [repo-csv]
 rr3_partition_has() {
-  local td f
+  local td f out_csv out_dir table
   td="$(cargo metadata --format-version 1 --no-deps 2>/dev/null \
         | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')"
   [ -n "$td" ] || return 1
-  while IFS= read -r f; do
-    if grep -qa -- "$2" "$f"; then
-      return 0
-    fi
-  done < <(find "$td/$1/debug/build" -name partition-table.bin -newer "$3" 2>/dev/null)
+  if [ -n "${4:-}" ]; then
+    while IFS= read -r out_csv; do
+      cmp -s "$4" "$out_csv" || continue
+      out_dir="$(dirname "$(dirname "$out_csv")")"
+      table="$(find "$out_dir" -name partition-table.bin -print -quit 2>/dev/null)"
+      if [ -n "$table" ] && grep -qa -- "$2" "$table"; then
+        return 0
+      fi
+    done < <(find "$td/$1/debug/build" -path '*esp-idf-sys-*/out/partitions.csv' 2>/dev/null)
+  fi
+  if [ -n "${3:-}" ]; then
+    while IFS= read -r f; do
+      if grep -qa -- "$2" "$f"; then
+        return 0
+      fi
+    done < <(find "$td/$1/debug/build" -name partition-table.bin -newer "$3" 2>/dev/null)
+  fi
   # 失败归因（只在红时打印）：本轮表里到底有哪些 label、CSV 有没有进 out/、
   # sdkconfig 的分区档位是什么——三者足以区分"配置没生效 / 文件没搬入 / 表没重建"。
-  echo "DIAG 分区表核验未命中 triple=$1 label=$2 marker=$3" >&2
-  find "$td/$1/debug/build" -name partition-table.bin -newer "$3" 2>/dev/null \
-    | while IFS= read -r f; do
-        printf 'DIAG table=%s labels=' "$f" >&2
-        grep -aoE 'nvs|phy_init|factory|spool' "$f" 2>/dev/null | sort -u | tr '\n' ',' >&2
-        printf '\n' >&2
-      done
-  find "$td/$1/debug/build" -path '*esp-idf-sys-*/out/partitions.csv' -newer "$3" -print >&2
-  cfg="$(find "$td/$1/debug/build" -path '*esp-idf-sys-*/out/sdkconfig' -newer "$3" -print 2>/dev/null | head -1)"
-  if [ -n "$cfg" ]; then
-    grep -E '^CONFIG_PARTITION_TABLE_(CUSTOM|CUSTOM_FILENAME|SINGLE_APP)' "$cfg" >&2 || true
+  echo "DIAG 分区表核验未命中 triple=$1 label=$2 marker=${3:-} csv=${4:-}" >&2
+  find "$td/$1/debug/build" -path '*esp-idf-sys-*/out/partitions.csv' -print >&2
+  if [ -n "${3:-}" ]; then
+    find "$td/$1/debug/build" -name partition-table.bin -newer "$3" 2>/dev/null \
+      | while IFS= read -r f; do
+          printf 'DIAG table=%s labels=' "$f" >&2
+          grep -aoE 'nvs|phy_init|factory|spool' "$f" 2>/dev/null | sort -u | tr '\n' ',' >&2
+          printf '\n' >&2
+        done
+    cfg="$(find "$td/$1/debug/build" -path '*esp-idf-sys-*/out/sdkconfig' -newer "$3" -print 2>/dev/null | head -1)"
+    if [ -n "$cfg" ]; then
+      grep -E '^CONFIG_PARTITION_TABLE_(CUSTOM|CUSTOM_FILENAME|SINGLE_APP)' "$cfg" >&2 || true
+    fi
   fi
   return 1
 }

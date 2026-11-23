@@ -174,7 +174,8 @@ fi
 # ⑦g W7-b1a 分区表落地核验（ADR-0031）：spool 分区必须出现在构建产物的
 #     partition-table.bin 里。CONFIG_PARTITION_TABLE_CUSTOM 未生效时编译照绿，
 #     但板上没有 spool——配置漂移必须点名，不能靠烧录后才发现。
-if rr3_partition_has xtensa-esp32-espidf spool "$part_marker"; then
+if rr3_partition_has xtensa-esp32-espidf spool "$part_marker" \
+     "$root/tools/esp32-periph-base/partitions.csv"; then
   echo "PASS  classic 分区表含 spool 条目（W7-b1a 存储承载）"
 else
   echo "FAIL  classic 分区表未含 spool（查 sdkconfig.defaults CUSTOM/FILENAME 与 partitions.csv）" >&2
