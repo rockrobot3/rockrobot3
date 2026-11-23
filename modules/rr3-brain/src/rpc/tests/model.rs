@@ -181,6 +181,10 @@ fn model_rej_bad_miss() {
 /// 连通性测试：mock 档回 ok:true + mock:true（业务失败走 ok:false，不折 Err）
 #[test]
 fn model_arm_mock_row() {
+    // env 纪律：云档是进程级现读值，改档必须持全 crate 的 env 锁并在结尾复位——
+    // 此前裸 set_var 不还原，会把并发用例（wake_ack_pcm_reused 等）的 ASR 翻成
+    // mock（2026-11-24 Linux/macOS 交替假红的根因）。
+    let _g = crate::cloud::testkit::env_lock();
     std::env::set_var(crate::cloud::RR3_CLOUD_MODE_ENV, "mock");
     let cfg = repo_cfg();
     let v = rr3_model_test_arm(&cfg, &json!({"name": "DeepSeek官方"})).unwrap();
@@ -188,4 +192,5 @@ fn model_arm_mock_row() {
     assert_eq!(v["mock"], json!(true));
     let e = rr3_model_test_arm(&cfg, &json!({"name": "不存在"})).unwrap_err();
     assert!(e.contains("模型行不认"), "{e}");
+    std::env::remove_var(crate::cloud::RR3_CLOUD_MODE_ENV);
 }
