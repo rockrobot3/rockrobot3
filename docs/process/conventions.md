@@ -2920,3 +2920,17 @@ D11 的 `armed=true` 界面门要求"必须引用一条真板对拍证据的编�
   `effective:"boot"` 如实申报（落盘不改运行态，下次 rrd 装载投影）。上文"三写口随
   件九端点批挂接"的敞口就此结项——写口成功后契约记账重记（contracts 快照
   Mutex 化），自检账跟住最新验收事实，写口不再自造常驻"sha 漂"红。
+
+## 7 许可证、版本与测试名口径（2026-11-24 裁定）
+
+- **许可证**：全仓 Apache-2.0。追踪源文件（`.rs`/`.py`/`.sh`）首行（shebang 之后）
+  必须有 `SPDX-License-Identifier: Apache-2.0`；Cargo 清单 `license = "Apache-2.0"`。
+  生成物由生成器模板同源输出，手改生成物仍会被门 f/⑨-d 抓红。
+- **版本域分离**：产品版本唯一真源 = 仓根 `VERSION`（deb / 镜像标签 / 发布 tag 同读）；
+  Cargo `version`、`module.toml` 与启动横幅是**组件版本域**（`publish = false`），
+  不随产品 tag 漂移，避免把发布版本写进三处再各自腐化。
+- **测试名**：新增测试函数名 ≤20 字节；`parity_leg1_*` / `parity_leg2_*` 是门 ⑧-a
+  的机器锚，前缀本身可≥20 字节，**整族豁免**，不得改前缀规则。生产函数名维持 ≤20B。
+- **两轨同一装配程序**：deb 快路轨与 Buildroot 保底轨的模块/真值集落位都只经
+  `rr3-pack`（`--stage-only` / `--install-root`），`post-build.sh` 不保留第二份
+  entry 改写或文件清单；缺件/坏模块 fail-closed，不带半成品镜像出厂。
