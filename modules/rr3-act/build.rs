@@ -15,5 +15,8 @@ fn main() {
     if !espidf {
         return;
     }
-    embuild::build::LinkArgs::output_propagated("ESP_IDF").expect("ESP_IDF 链接参数接力失败");
+    if let Err(e) = embuild::build::LinkArgs::output_propagated("ESP_IDF") {
+        eprintln!("ESP_IDF 链接参数接力失败: {e:?}");
+        std::process::exit(1);
+    }
 }

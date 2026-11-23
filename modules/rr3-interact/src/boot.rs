@@ -381,7 +381,8 @@ fn rr3_face_at(i: usize, e: &toml::Value) -> Result<&'static str, String> {
 /// 兜底表情：缺键回落 `idle`（在册白名单恒含，expect 不是兜底而是不变量）
 fn rr3_face_default(face_sect: &toml::Value) -> Result<&'static str, String> {
     let Some(name) = face_sect.get("default_expression") else {
-        return Ok(rr3_face_expr_lookup("idle").expect("在册白名单恒含 idle，lookup 必中"));
+        return rr3_face_expr_lookup("idle")
+            .ok_or_else(|| "内置表情 idle 未在册（配置表自相矛盾）".to_string());
     };
     let s = name.as_str().ok_or_else(|| {
         format!("config [rr3-interact.face] default_expression 必须是字符串，收到 {name}")

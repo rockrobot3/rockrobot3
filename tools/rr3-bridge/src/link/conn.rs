@@ -225,10 +225,13 @@ fn rr3_up_spawn(
 ) {
     let dropped = Arc::clone(dropped);
     let sink = sink.clone();
-    std::thread::Builder::new()
+    if let Err(e) = std::thread::Builder::new()
         .name("bridge-upstream".into())
         .spawn(move || upstream_loop(rx, sink, dropped, exit))
-        .expect("起上行线程失败");
+    {
+        eprintln!("起上行线程失败（数据面不可用，显式停机）: {e:?}");
+        std::process::abort();
+    }
 }
 
 /// 起下行线程（UDS 读 → UART 写）。
@@ -240,10 +243,13 @@ fn rr3_down_spawn(
 ) {
     let src = src.clone();
     let stop = Arc::clone(shutdown);
-    std::thread::Builder::new()
+    if let Err(e) = std::thread::Builder::new()
         .name("bridge-downstream".into())
         .spawn(move || downstream_loop(tx, src, stop, exit))
-        .expect("起下行线程失败");
+    {
+        eprintln!("起下行线程失败（数据面不可用，显式停机）: {e:?}");
+        std::process::abort();
+    }
 }
 
 /// 逐条 UDS 连接接力（三态之三）：直到 UART 断链或关停。

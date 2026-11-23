@@ -255,11 +255,14 @@ pub fn spawn_mic_smoke(
     ws: impl Peripheral<P = impl InputPin + OutputPin> + Send + 'static,
 ) {
     let cfg = StdConfig::philips(MIC_SR_HZ, DataBitWidth::Bits32);
-    thread::Builder::new()
+    if let Err(e) = thread::Builder::new()
         .name("mic-smoke".into())
         .stack_size(MIC_THREAD_STACK)
         .spawn(move || mic_run(bus, cfg, i2s0, bclk, din, ws))
-        .expect("起 mic 冒烟线程失败");
+    {
+        eprintln!("[mic] 起冒烟线程失败（stack={MIC_THREAD_STACK}）: {e:?}");
+        std::process::abort();
+    }
 }
 
 /// I2S0 驱动装配 + 显式 `rx_enable`；任一步失败点名后回 `None`（线程退出，不 panic）。

@@ -29,10 +29,10 @@ use toml::Value;
 
 /// 仓根（Cargo.toml 的 tools/rr3-codegen 上两级）。
 fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../")
-        .canonicalize()
-        .expect("仓根可解析")
+    let raw = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    // canonicalize 只为消掉 `..`；失败（异常挂载/权限）就退回原路径，读写会在
+    // 具体文件处点名失败，不让路径解析 panic 抢走归因。
+    raw.canonicalize().unwrap_or(raw)
 }
 
 /// fail-closed 收口：任何一条错误都不写生成文件（宁可不生成，不许带病落盘）。
