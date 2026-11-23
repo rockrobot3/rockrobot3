@@ -35,7 +35,7 @@ type Rr3RpcArm =
     fn(&mut Rr3BrainCfg, &mut Rr3CloudClients, &mut Rr3Dialog, &Value) -> Result<Value, String>;
 
 /// 事务面六臂（自 Python composite.py 主循环 RPC 分支逐语义迁入）：completion
-/// （[`Rr3LlmClient`]）＋ops/list 快照＋ops/set 写臂（写 doc → 按组重建受影响
+/// （[`crate::cloud::Rr3LlmClient`]）＋ops/list 快照＋ops/set 写臂（写 doc → 按组重建受影响
 /// 客户端——dialog 组就地改参）＋模型行三臂；未知 topic 返 Err 由 serve 折
 /// `{"error": …}` 应答（与 Python 主循环兜底分支同 wire）。
 pub(crate) fn rr3_rpc_arm(

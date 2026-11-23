@@ -33,13 +33,12 @@ use serde_json::{json, Value};
 
 use rr3mod::{BusHandle, Dispatcher};
 
-use crate::boot::{rr3_cloud_cfg_of, Rr3BrainCfg};
-use crate::cloud::{Rr3AsrClient, Rr3LlmClient, Rr3TtsClient};
+use crate::boot::Rr3BrainCfg;
 use crate::dialog::{Rr3Dialog, Rr3DialogTurn};
 use crate::intent::rr3_extract_actions;
 use crate::rpc::{
-    rr3_model_list, rr3_model_row_of, rr3_model_set_arm, rr3_model_test_arm, rr3_ops_set_arm,
-    rr3_ops_snapshot, rr3_py_str,
+    rr3_model_list, rr3_model_set_arm, rr3_model_test_arm, rr3_ops_set_arm, rr3_ops_snapshot,
+    rr3_py_str,
 };
 
 /// 本模块 exposes 的 completion 点名（module.toml [rpc].exposes 同源）
