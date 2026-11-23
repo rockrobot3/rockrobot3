@@ -80,17 +80,9 @@ fn rr3_kill_hung_fixture(pid: u64) {
     }
 }
 
-/// S1 — DoD 主链：boot 起的模块真的上线（`running` 第一次有线上的脸），崩了按策略起第二世
-#[test]
-fn boot_spawned_module_reaches_running_then_restarts_after_crash() {
-    let m = rr3_fixture_manifest("sr-s1", "sima"); // restart_policy = always
-                                                   // 与 S2/S3 同一处置：本用例钉的是"退出码那一路的定性"，共用夹具的 500ms
-                                                   // watchdog 是 e2e_watchdog 的判据。高负载机上收尸可能晚于 500ms，watchdog
-                                                   // 抢记后收尸走 Silent、断言红在竞争噪声上（16 路并行实测复现）。
-    rr3_fixture_watchdog_ms(&m, 60_000);
-    let mut rrd = RrdTest::rr3_start_boot("sr-s1", &[&m.path], "abort", E2E_TICK_MS);
-    let mut b = rr3_observer(&mut rrd, "rr3-obs");
-
+/// S1 第一世：boot 的那一次没有"第几次重启"可说；registered → running 第一次上线。
+/// 返回 (pid, task) 供第二世比对。
+fn s1_first_life(rrd: &mut RrdTest, b: &mut RrdClient) -> (u64, u64) {
     // ---- 第一世：boot 的那一次没有"第几次重启"可说 ----
     let spawn1 = rrd.rr3_wait_log("spawn rr3-sima pid=");
     assert!(
@@ -115,23 +107,29 @@ fn boot_spawned_module_reaches_running_then_restarts_after_crash() {
     // 是两种合法时序——整个 workspace 并发跑时实测到过 `1`（旁观者尚未在册），
     // 单跑这个二进制时是 `2`。数字断言挪到第二世（下面 `run2`），那里的计数才有唯一答案。
     rrd.rr3_wait_log("rr3-sima → running（广播到");
-    let on = rr3_read_state_task(&mut b, "rr3-sima", "running", Some(task1));
+    let on = rr3_read_state_task(b, "rr3-sima", "running", Some(task1));
     assert_eq!(
         on["src_task"], task1,
         "线上那条 running 必须是第一世的（按 src_task 认，不按到达序猜）"
     );
+    (pid1, task1)
+}
 
-    // ---- 终态：owned 的模块由退出码定性（spec §5.4 崩溃检测双路的那一路） ----
+/// S1 终态：owned 的模块由退出码定性（spec §5.4 崩溃检测双路的那一路）。
+fn s1_terminal(rrd: &mut RrdTest, b: &mut RrdClient, task1: u64) {
     let exit1 = rrd.rr3_wait_log("rr3-sima 子进程退出 status=signal: 6");
     assert!(
         exit1.contains("→ 广播 failed 到 1 个连接"),
         "abort 是信号死：status 必须是 signal: 6，且只发给旁观者（发起者已被 exclude）: {exit1}"
     );
-    let on = rr3_read_state(&mut b, "rr3-sima", "failed");
+    let on = rr3_read_state(b, "rr3-sima", "failed");
     assert_eq!(on["src_task"], task1, "线上那条 failed 也必须指向第一世");
     // EOF 让位给退出码：conn 那一路对 owned 的模块一句都不广播（A-6 的分工）
     rrd.rr3_wait_log("rr3-sima 连接断开（干净收尾），终态交给子进程退出码那一路");
+}
 
+/// S1 第二世：退避到期后真的起了另一个进程、重新注册、再次 running。
+fn s1_restart(rrd: &mut RrdTest, b: &mut RrdClient, pid1: u64, task1: u64) {
     // ---- 第二世：退避到期后真的起了另一个进程、重新注册、再次 running ----
     let spawn2 = rrd.rr3_wait_log("spawn rr3-sima pid=");
     let pid2 = rr3_field_from_log(&spawn2, "pid=");
@@ -156,11 +154,26 @@ fn boot_spawned_module_reaches_running_then_restarts_after_crash() {
         2,
         "running 该发给当时在册的两条连接: {run2}"
     );
-    let on = rr3_read_state_task(&mut b, "rr3-sima", "running", Some(task2));
+    let on = rr3_read_state_task(b, "rr3-sima", "running", Some(task2));
     assert_eq!(
         on["src_task"], task2,
         "§9 的\"重启成功后必须重新注册才恢复 running\"——线上那一帧属于第二世"
     );
+}
+
+/// S1 — DoD 主链：boot 起的模块真的上线（`running` 第一次有线上的脸），崩了按策略起第二世
+#[test]
+fn boot_spawned_module_reaches_running_then_restarts_after_crash() {
+    let m = rr3_fixture_manifest("sr-s1", "sima"); // restart_policy = always
+                                                   // 与 S2/S3 同一处置：本用例钉的是"退出码那一路的定性"，共用夹具的 500ms
+                                                   // watchdog 是 e2e_watchdog 的判据。高负载机上收尸可能晚于 500ms，watchdog
+                                                   // 抢记后收尸走 Silent、断言红在竞争噪声上（16 路并行实测复现）。
+    rr3_fixture_watchdog_ms(&m, 60_000);
+    let mut rrd = RrdTest::rr3_start_boot("sr-s1", &[&m.path], "abort", E2E_TICK_MS);
+    let mut b = rr3_observer(&mut rrd, "rr3-obs");
+    let (pid1, task1) = s1_first_life(&mut rrd, &mut b);
+    s1_terminal(&mut rrd, &mut b, task1);
+    s1_restart(&mut rrd, &mut b, pid1, task1);
 }
 
 /// S2 — A-6 的对照：**同一个 abort role、两种所有权、两种线上相位**。
@@ -251,12 +264,8 @@ fn never_policy_crash_does_not_spawn_again() {
     rrd.rr3_assert_no_log("跳过重启", Duration::from_millis(150));
 }
 
-/// S4 — 第二条崩溃路：watchdog 到期判死一个 owned 的挂死模块 → **先杀再起** → 重新注册
-#[test]
-fn watchdog_expiry_of_an_owned_hang_kills_and_restarts() {
-    let m = rr3_fixture_manifest("sr-s4", "sima"); // always：判死那一路的计划会执行
-    let mut rrd = RrdTest::rr3_start_boot("sr-s4", &[&m.path], "go_silent", E2E_TICK_MS);
-
+/// S4 第一世：判死 → 杀掉挂死的；返回 (pid, task) 供第二世比对。
+fn s4_kill_first(rrd: &mut RrdTest) -> (u64, u64) {
     let spawn1 = rrd.rr3_wait_log("spawn rr3-sima pid=");
     let pid1 = rr3_field_from_log(&spawn1, "pid=");
     let task1 = rr3_field_from_log(&rrd.rr3_wait_log("注册 rr3-sima task="), "task=");
@@ -272,7 +281,11 @@ fn watchdog_expiry_of_an_owned_hang_kills_and_restarts() {
         pid1,
         "杀掉必须正是刚判死的那一世"
     );
+    (pid1, task1)
+}
 
+/// S4 第二世：再起、再判死、再杀；第三世起出来之后只做卫生清理。
+fn s4_second(rrd: &mut RrdTest, pid1: u64, task1: u64) {
     let spawn2 = rrd.rr3_wait_log("spawn rr3-sima pid=");
     let pid2 = rr3_field_from_log(&spawn2, "pid=");
     assert_ne!(pid1, pid2, "重起的是另一个进程");
@@ -310,6 +323,15 @@ fn watchdog_expiry_of_an_owned_hang_kills_and_restarts() {
     // 判据到此为止。第三世还是个挂死的夹具，测试进程是它名义上的"旁观者"却救不了它——
     // 只做卫生清理（不断言、不报错），别把一堆 sleep(3600s) 留给后面的用例与 CI。
     rr3_kill_hung_fixture(pid3);
+}
+
+/// S4 — 第二条崩溃路：watchdog 到期判死一个 owned 的挂死模块 → **先杀再起** → 重新注册
+#[test]
+fn watchdog_expiry_of_an_owned_hang_kills_and_restarts() {
+    let m = rr3_fixture_manifest("sr-s4", "sima"); // always：判死那一路的计划会执行
+    let mut rrd = RrdTest::rr3_start_boot("sr-s4", &[&m.path], "go_silent", E2E_TICK_MS);
+    let (pid1, task1) = s4_kill_first(&mut rrd);
+    s4_second(&mut rrd, pid1, task1);
 }
 
 /// S5 — 孤儿卫生：rrd 死了不许留下 boot 起的常驻夹具（CI 污染，不是理论风险）
