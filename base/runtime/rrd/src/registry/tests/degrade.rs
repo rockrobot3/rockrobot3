@@ -122,9 +122,7 @@ fn any_surviving_provider_keeps_dependent_running() {
     );
 }
 
-/// 解除的判据是"全部 required 就位"：只回来一个提供者不许解除
-#[test]
-fn provider_recovery_undegrades_only_when_all_deps_satisfied() {
+fn dep_under_two_caps() -> (RrdRegistry, u64) {
     let mut r = RrdRegistry::new(20);
     r.rr3_reg_providers(providers_of(&[
         ("cap.x", &["rr3-px"]),
@@ -133,63 +131,67 @@ fn provider_recovery_undegrades_only_when_all_deps_satisfied() {
     let d = facts_with_depends("rr3-dep", &["cap.x", "cap.y"]);
     let (dtx, _) = chan();
     let dt = r.rr3_reg_add(&d, dtx, 0).expect("dep 入册");
-    let promote = |r: &mut RrdRegistry, name: &str| -> u64 {
-        let (tx, _) = chan();
-        let t = r
-            .rr3_reg_add(&facts(name, 100, 5000, "always"), tx, 0)
-            .expect("入册");
-        assert_eq!(r.rr3_reg_beat(t, 10), Rr3Beat::Promoted);
-        t
-    };
-    let px = promote(&mut r, "rr3-px");
-    promote(&mut r, "rr3-py");
-    assert_eq!(r.rr3_reg_beat(dt, 20), Rr3Beat::Promoted);
+    (r, dt)
+}
 
+fn promote_module(r: &mut RrdRegistry, name: &str) -> u64 {
+    let (tx, _) = chan();
+    let t = r
+        .rr3_reg_add(&facts(name, 100, 5000, "always"), tx, 0)
+        .expect("入册");
+    assert_eq!(r.rr3_reg_beat(t, 10), Rr3Beat::Promoted);
+    t
+}
+
+fn kill_provider(r: &mut RrdRegistry, name: &str, at: u64) {
     assert!(matches!(
-        r.rr3_reg_death("rr3-px", false, 30),
+        r.rr3_reg_death(name, false, at),
         Rr3Death::Broadcast { .. }
     ));
+}
+
+fn dep_phase(r: &RrdRegistry) -> Option<Rr3Phase> {
+    r.rr3_reg_snapshot()
+        .iter()
+        .find(|(n, _, _)| n == "rr3-dep")
+        .map(|x| x.2)
+}
+
+/// 解除的判据是"全部 required 就位"：只回来一个提供者不许解除
+#[test]
+fn provider_recovery_undegrades_only_when_all_deps_satisfied() {
+    let (mut r, dt) = dep_under_two_caps();
+    let px = promote_module(&mut r, "rr3-px");
+    promote_module(&mut r, "rr3-py");
+    assert_eq!(r.rr3_reg_beat(dt, 20), Rr3Beat::Promoted);
+
+    kill_provider(&mut r, "rr3-px", 30);
     // 断供即降级（非对称设计的前半）：cap.x 已无任何在位提供者，dep 缺它就跑不了，
     // 不等 cap.y 也断——置位要快，解除才从严
     assert_eq!(
         r.rr3_reg_degrade("rr3-px"),
         vec![("rr3-dep".to_string(), dt)]
     );
-    assert!(matches!(
-        r.rr3_reg_death("rr3-py", false, 40),
-        Rr3Death::Broadcast { .. }
-    ));
+    kill_provider(&mut r, "rr3-py", 40);
     // 已经 Degraded 的不重复传播（Running 过滤器天然挡住）
     assert!(r.rr3_reg_degrade("rr3-py").is_empty(), "重复置位不是传播");
 
     // px 回来了（新 task 重注册 + Promoted），但 cap.y 还没好 → 不解除
-    let px2 = promote(&mut r, "rr3-px");
+    let px2 = promote_module(&mut r, "rr3-px");
     assert_ne!(px, px2, "重注册必须换新 task");
     assert!(
         r.rr3_reg_undegrade("rr3-px").is_empty(),
         "cap.y 仍无提供者在位"
     );
-    assert_eq!(
-        r.rr3_reg_snapshot()
-            .iter()
-            .find(|(n, _, _)| n == "rr3-dep")
-            .map(|x| x.2),
-        Some(Rr3Phase::Degraded)
-    );
+    assert_eq!(dep_phase(&r), Some(Rr3Phase::Degraded));
 
     // py 也回来了 → 全部就位 → 解除回 Running
-    promote(&mut r, "rr3-py");
+    promote_module(&mut r, "rr3-py");
     assert_eq!(
         r.rr3_reg_undegrade("rr3-py"),
         vec![("rr3-dep".to_string(), dt)]
     );
-    assert_eq!(
-        r.rr3_reg_snapshot()
-            .iter()
-            .find(|(n, _, _)| n == "rr3-dep")
-            .map(|x| x.2),
-        Some(Rr3Phase::Running)
-    );
+    assert_eq!(dep_phase(&r), Some(Rr3Phase::Running));
 }
 
 // ---------- 全局低电旗（0.0.2 方案 Q4 裁定；解除路径批N5 件二笔3）----------
