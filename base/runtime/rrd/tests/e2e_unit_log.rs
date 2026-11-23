@@ -21,9 +21,7 @@ fn e2e_unit_log_dir(socket: &Path) -> PathBuf {
     PathBuf::from(p)
 }
 
-#[test]
-fn spawned_module_stderr_lands_in_per_unit_log() {
-    // ---- 夹具：打一行 stderr 即退的脚本 + 绝对 entry 的 manifest ----
+fn unit_log_script() -> PathBuf {
     let script = std::env::temp_dir().join(format!(
         "rr3-unit-log-probe-{}-{}.sh",
         std::process::id(),
@@ -35,7 +33,10 @@ fn spawned_module_stderr_lands_in_per_unit_log() {
     std::fs::write(&script, "#!/bin/sh\necho unit-log-probe >&2\nexit 0\n").expect("写夹具脚本");
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
         .expect("脚本可执行位");
+    script
+}
 
+fn unit_log_manifest(script: &Path) -> PathBuf {
     let manifest = std::env::temp_dir().join(format!(
         "rr3-unit-log-{}-{}.toml",
         std::process::id(),
@@ -69,19 +70,21 @@ fn spawned_module_stderr_lands_in_per_unit_log() {
         ),
     )
     .expect("写夹具 manifest");
+    manifest
+}
 
-    // ---- boot 直驱：spawn 发生即应建 per-unit 文件，stderr 行落盘 ----
-    let mut rrd = RrdTest::rr3_start_boot("ulog", &[&manifest], "abort", E2E_TICK_MS);
+fn assert_spawn_entry(rrd: &mut RrdTest, script: &Path) {
     let spawn = rrd.rr3_wait_log("spawn rr3-ulog pid=");
     assert!(
         spawn.contains(&format!("entry={}", script.display())),
         "spawn 行必须回显脚本 entry: {spawn}"
     );
+}
 
-    let log_file = e2e_unit_log_dir(&rrd.socket).join("rr3-ulog.log");
+fn assert_stderr_landed(log_file: &Path) {
     let landed = rr3_wait_until(
         || {
-            std::fs::read_to_string(&log_file)
+            std::fs::read_to_string(log_file)
                 .map(|t| t.contains("unit-log-probe"))
                 .unwrap_or(false)
         },
@@ -92,6 +95,20 @@ fn spawned_module_stderr_lands_in_per_unit_log() {
         "子进程 stderr 未落 per-unit 日志 {}（门 r 通道断）",
         log_file.display()
     );
+}
+
+#[test]
+fn spawned_module_stderr_lands_in_per_unit_log() {
+    // ---- 夹具：打一行 stderr 即退的脚本 + 绝对 entry 的 manifest ----
+    let script = unit_log_script();
+    let manifest = unit_log_manifest(&script);
+
+    // ---- boot 直驱：spawn 发生即应建 per-unit 文件，stderr 行落盘 ----
+    let mut rrd = RrdTest::rr3_start_boot("ulog", &[&manifest], "abort", E2E_TICK_MS);
+    assert_spawn_entry(&mut rrd, &script);
+
+    let log_file = e2e_unit_log_dir(&rrd.socket).join("rr3-ulog.log");
+    assert_stderr_landed(&log_file);
     let _ = std::fs::remove_file(&script);
     let _ = std::fs::remove_file(&manifest);
     let _ = std::fs::remove_dir_all(e2e_unit_log_dir(&rrd.socket));
