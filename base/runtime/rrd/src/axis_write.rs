@@ -117,10 +117,7 @@ fn rr3_aw_layout(cfg: &Rr3AxisWriteArgs) -> Result<(BTreeSet<String>, PathBuf), 
     let profile = rr3_aw_profile(cfg)?;
     let pin_ids: BTreeSet<String> = profile.pins.iter().map(|p| p.rr3_pin_id()).collect();
     let wiring_path = crate::wiring::rr3_wiring_path(&cfg.profile)?;
-    let axis_dir = wiring_path
-        .parent()
-        .expect("wiring 路径必有父目录")
-        .join("axis");
+    let axis_dir = wiring_path.with_file_name("axis");
     Ok((pin_ids, axis_dir))
 }
 

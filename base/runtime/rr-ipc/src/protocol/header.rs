@@ -224,15 +224,33 @@ fn rr3_hdr_precheck(magic: u32, buf: &[u8]) -> Result<(), Rr3HdrError> {
     Ok(())
 }
 
-/// 头层前置判据（长度 → magic → 保留区 → payload_len 上界），返回 payload_len。
-fn rr3_hdr_guard(buf: &[u8]) -> Result<u32, Rr3HdrError> {
-    if buf.len() < RR3_IPC_HDR_SIZE {
-        return Err(Rr3HdrError::TooShort { got: buf.len() });
+/// 头层前置判据（magic → 保留区 → payload_len 上界），定长头上取 payload_len。
+/// 入参是已证明 128 字节的定长数组：字段读全部是编译期可判界的下标，无 unwrap。
+/// 定长小端字段读：偏移由 `OFF_*` 常量给出、头长恒 128；越界只可能是偏移表
+/// 未来改错，按 0 读不 panic（字段边界另有编译期常量对拍）。
+fn rr3_le<const N: usize>(h: &[u8; RR3_IPC_HDR_SIZE], o: usize) -> [u8; N] {
+    let mut a = [0u8; N];
+    if let Some(s) = h.get(o..o + N) {
+        a.copy_from_slice(s);
     }
-    let u32le = |o: usize| u32::from_le_bytes(buf[o..o + 4].try_into().unwrap());
-    let magic = u32le(OFF_MAGIC);
-    rr3_hdr_precheck(magic, buf)?;
-    rr3_hdr_len_max(u32le(OFF_PAYLOAD_LEN))
+    a
+}
+
+fn rr3_hdr_check(h: &[u8; RR3_IPC_HDR_SIZE]) -> Result<u32, Rr3HdrError> {
+    let magic = u32::from_le_bytes([
+        h[OFF_MAGIC],
+        h[OFF_MAGIC + 1],
+        h[OFF_MAGIC + 2],
+        h[OFF_MAGIC + 3],
+    ]);
+    rr3_hdr_precheck(magic, h)?;
+    let len = u32::from_le_bytes([
+        h[OFF_PAYLOAD_LEN],
+        h[OFF_PAYLOAD_LEN + 1],
+        h[OFF_PAYLOAD_LEN + 2],
+        h[OFF_PAYLOAD_LEN + 3],
+    ]);
+    rr3_hdr_len_max(len)
 }
 
 /// 载荷长度上界（超过即拒，防自称长度撑爆上限）。
@@ -261,23 +279,23 @@ impl Rr3Header {
     /// 解析 128 字节头（小端）。IPC-T-001/002/010。**不校验 CRC**（此处的入参只有
     /// 头，CRC 覆盖载荷）——校验点在拿到 payload 的调用方（见 [`rr3_crc32`]）。
     pub fn from_bytes(buf: &[u8]) -> Result<Self, Rr3HdrError> {
-        let payload_len = rr3_hdr_guard(buf)?;
-        // 长度守卫已保证 buf.len() ≥ 128，任意常量偏移 + 宽度都不越界，
-        // try_into 定长切片必然成功——unwrap 是守卫的直读推论，不是风险点。
-        let u16le = |o: usize| u16::from_le_bytes(buf[o..o + 2].try_into().unwrap());
-        let u32le = |o: usize| u32::from_le_bytes(buf[o..o + 4].try_into().unwrap());
-        let u64le = |o: usize| u64::from_le_bytes(buf[o..o + 8].try_into().unwrap());
-
+        // 一次性收成 128 字节定长视图：后续字段下标全部编译期可判界，畸形输入
+        // 在入口即 TooShort，解析体内不再有 unwrap/运行时越界。
+        let h: &[u8; RR3_IPC_HDR_SIZE] = buf
+            .get(..RR3_IPC_HDR_SIZE)
+            .and_then(|s| s.try_into().ok())
+            .ok_or(Rr3HdrError::TooShort { got: buf.len() })?;
+        let payload_len = rr3_hdr_check(h)?;
         Ok(Self {
-            opcode: u16le(OFF_OPCODE),
+            opcode: u16::from_le_bytes(rr3_le(h, OFF_OPCODE)),
             // 未知 flags 位原样保留、不报错：AOS-STD-IPC-004 要求接收方忽略未知位
-            flags: u16le(OFF_FLAGS),
-            trace_id: u64le(OFF_TRACE_ID),
-            timestamp_ns: u64le(OFF_TIMESTAMP_NS),
-            src_task: u64le(OFF_SRC_TASK),
-            dst_task: u64le(OFF_DST_TASK),
+            flags: u16::from_le_bytes(rr3_le(h, OFF_FLAGS)),
+            trace_id: u64::from_le_bytes(rr3_le(h, OFF_TRACE_ID)),
+            timestamp_ns: u64::from_le_bytes(rr3_le(h, OFF_TIMESTAMP_NS)),
+            src_task: u64::from_le_bytes(rr3_le(h, OFF_SRC_TASK)),
+            dst_task: u64::from_le_bytes(rr3_le(h, OFF_DST_TASK)),
             payload_len,
-            payload_crc32: u32le(OFF_CRC32),
+            payload_crc32: u32::from_le_bytes(rr3_le(h, OFF_CRC32)),
         })
     }
 

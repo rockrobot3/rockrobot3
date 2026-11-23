@@ -83,7 +83,9 @@ fn rr3_ev_ref(root: &Path, reference: &str) -> Result<(String, std::path::PathBu
             "证据引用 {reference:?} 形制不合法（应为 <形态>/<四位编号>，形态段不含空白）"
         ));
     }
-    let (form, _) = reference.split_once('/').expect("形制已过，'/' 必在");
+    let Some((form, _)) = reference.split_once('/') else {
+        return Err(format!("证据引用 {reference:?} 形制不合法（缺 '/'）"));
+    };
     Ok((form.to_string(), root.join(format!("{reference}.md"))))
 }
 
@@ -92,11 +94,12 @@ fn rr3_ev_check(path: &Path, form: &str) -> Result<(), String> {
     let text = rr3_ev_read(path)?;
     let fields = rr3_evidence_head(&text)
         .map_err(|e| format!("证据文件 {} frontmatter 不合法: {e}", path.display()))?;
-    let declared = fields
-        .iter()
-        .find(|(k, _)| *k == "form")
-        .map(|(_, v)| *v)
-        .expect("frontmatter 已验六键齐，form 必在");
+    let Some(declared) = fields.iter().find(|(k, _)| *k == "form").map(|(_, v)| *v) else {
+        return Err(format!(
+            "证据文件 {} frontmatter 缺 form（frontmatter 校验未拦住，属内部矛盾）",
+            path.display()
+        ));
+    };
     rr3_ev_declared_chk(path, declared, form)
 }
 

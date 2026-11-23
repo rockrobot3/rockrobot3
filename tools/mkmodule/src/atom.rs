@@ -158,11 +158,15 @@ fn rr3_mkmod_atom_write(staging: &Path, files: &[(String, String)]) -> Result<()
 fn rr3_mkmod_atom_gate(staging: &Path, files: &[(String, String)]) -> Result<(), Rr3MkmodError> {
     // G4：装配清单走 rr-registry 形状级真值（模板空数组必过；填实后坏形当场听见）。
     let mut errs = rr_registry::rr3_atom_gate(&staging.join("atom.toml"));
-    let assemble_body = files
+    let Some(assemble_body) = files
         .iter()
         .find(|(rel, _)| rel == "assemble.toml")
         .map(|(_, body)| body.as_str())
-        .expect("五件套必含 assemble.toml");
+    else {
+        return Err(Rr3MkmodError::Manifest(vec![
+            "五件套缺 assemble.toml（生成器内部错误）".into(),
+        ]));
+    };
     let assemble_errs = rr_registry::rr3_assemble_parse(assemble_body).err();
     errs.extend(assemble_errs.unwrap_or_default());
     if errs.is_empty() {

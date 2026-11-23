@@ -93,7 +93,9 @@ impl Rr3Dialog {
             self.preroll.push_back((pcm, ms));
             self.preroll_ms += ms;
             while self.preroll_ms > RR3_PREROLL_MS && self.preroll.len() > 1 {
-                let (_, old_ms) = self.preroll.pop_front().expect("len>1 保证非空");
+                let Some((_, old_ms)) = self.preroll.pop_front() else {
+                    break;
+                };
                 self.preroll_ms -= old_ms;
             }
             return Ok(());

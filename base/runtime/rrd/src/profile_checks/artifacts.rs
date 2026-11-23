@@ -34,7 +34,7 @@ pub(crate) fn rr3_axis_load(
     wiring_abs: &Path,
     pin_ids: &BTreeSet<String>,
 ) -> (Vec<crate::axis::Rr3AxisFile>, String, Vec<String>) {
-    let axis_dir = wiring_abs.parent().expect("接线档必有父目录").join("axis");
+    let axis_dir = wiring_abs.with_file_name("axis");
     let axis_wanted = std::env::var(rr_hal_api::RR3_PERIPH_AXIS_ENV)
         .ok()
         .map(|v| v.trim().to_string())

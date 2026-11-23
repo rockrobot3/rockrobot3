@@ -23,16 +23,17 @@ pub const RR3_CONTRACT_TOPICS_PATH: &str = concat!(
     "/../../../contracts/topics.toml"
 );
 
+/// 契约目录的编译期定位（与 [`RR3_CONTRACT_TOPICS_PATH`] 同根；缺省目录直接用本
+/// 常量，不再对文件路径做 parent 推导）。
+pub const RR3_CONTRACT_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../contracts");
+
 /// 契约目录的运行期落点（0.0.2 T5）：`--contracts` 显式给值时原样用之（topics.toml /
 /// slots.toml 由装载入口各自 join），否则回落编译期仓内路径——deb 装机后编译期路径
 /// 不存在，payload 必须显式指向包内 `/usr/lib/rockrobot3/contracts`。
 pub fn rr3_contracts_dir(contracts: Option<&Path>) -> PathBuf {
-    contracts.map(Path::to_path_buf).unwrap_or_else(|| {
-        Path::new(RR3_CONTRACT_TOPICS_PATH)
-            .parent()
-            .expect("编译期常量路径必有父目录")
-            .to_path_buf()
-    })
+    contracts
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from(RR3_CONTRACT_DIR))
 }
 
 fn read_set(path: &Path, role: &str) -> Result<Rr3TopicSet, Vec<String>> {
