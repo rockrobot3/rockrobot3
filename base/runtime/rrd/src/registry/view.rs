@@ -1,5 +1,5 @@
-// registry 的只读视图与转发面：存活/名字/事实查询、广播扇出与留痕闸、
-// 快照与健康行、点名路由的候选选择。写入路径在 lifecycle.rs。
+//! registry 的只读视图与转发面：存活/名字/事实查询、广播扇出与留痕闸、
+//! 快照与健康行、点名路由的候选选择。写入路径在 lifecycle.rs。
 use super::*;
 
 impl RrdRegistry {

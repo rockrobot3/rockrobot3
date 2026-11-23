@@ -72,6 +72,8 @@ pub(super) type OutputCallback = unsafe extern "C" fn(
     buffer: AudioQueueBufferRef,
 );
 
+// SAFETY：`AudioQueue*` 声明与 AudioToolbox 头文件一致；裸指针只在回调期间有效，
+// 封装层用 Arc/生命周期保证调用期存活，回调返回后不留存。
 #[link(name = "AudioToolbox", kind = "framework")]
 extern "C" {
     pub(super) fn AudioQueueNewInput(

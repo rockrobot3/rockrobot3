@@ -55,6 +55,8 @@ pub(super) enum ExitMsg {
 /// 信号处理登记槽：C-ABI 回调不能捕获环境，用 OnceLock 转交退出标志。
 static SIGNAL_SLOT: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 
+// SAFETY：`signal(3)` 声明与 BSD/glibc/musl 同形；处理器是无捕获 C-ABI 函数，
+// 体内只写 OnceLock 中的 AtomicBool（async-signal-safe）。
 extern "C" {
     /// `signal(3)`（BSD/macOS 与 glibc/musl 同形）。返回值（旧 handler）不关心。
     fn signal(signum: i32, handler: extern "C" fn(i32)) -> usize;

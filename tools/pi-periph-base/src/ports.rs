@@ -144,6 +144,8 @@ mod linux_i2c {
         nmsgs: u32,
     }
 
+    // SAFETY：声明与 Linux uapi `ioctl(2)` 原型一致（request 为 unsigned long）；
+    // 调用点只传本进程打开的合法 fd 与已校验的请求码，错误由返回值判。
     extern "C" {
         /// `ioctl(2)`：Linux aarch64/x86_64 的 request 是 `unsigned long`（u64）。
         fn ioctl(fd: i32, request: u64, ...) -> i32;
@@ -416,6 +418,8 @@ fn now_ns() -> u64 {
         tv_sec: i64,
         tv_nsec: i64,
     }
+    // SAFETY：声明与 POSIX `clock_gettime(2)` 一致；tp 指向栈上 Timespec，
+    // 仅 CLOCK_MONOTONIC 调用，返回值判错。
     extern "C" {
         fn clock_gettime(clk_id: i32, tp: *mut Timespec) -> i32;
     }

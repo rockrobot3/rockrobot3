@@ -1,6 +1,6 @@
-// registry 的类型模型：阶段/错误/回报枚举、到期与重启计划、上限常量与
-// 纯策略函数（退避档、退出码→相位）。本文件不持有状态、不碰 I/O——
-// 状态机本体在 lifecycle.rs，查询与扇出在 view.rs。
+//! registry 的类型模型：阶段/错误/回报枚举、到期与重启计划、上限常量与
+//! 纯策略函数（退避档、退出码→相位）。本文件不持有状态、不碰 I/O——
+//! 状态机本体在 lifecycle.rs，查询与扇出在 view.rs。
 use super::RrdRegistry;
 use rr_registry::Rr3TopicSet;
 use std::fmt;

@@ -21,6 +21,8 @@ const RR3_CTL_SOCKET_GROUP: &str = crate::RR3_OPS_GROUP;
 // 手写 extern 壳不引依赖（同 rr-hal chmod/getgrnam 先例；原 rr-ipc shm 六函数
 // 先例已随 L-32 摘面移除，0.0.8 批N19）。
 
+// SAFETY：`signal`/`write` 是 libc 同步符号，签名与 POSIX 一致；调用点全部包在
+// `unsafe` 内，且处理器体只做 Atomic 与 write(2)（async-signal-safe）。
 extern "C" {
     fn signal(signum: i32, handler: usize) -> usize;
     // buf 用 POSIX 原型 `const void *`（c_void）：与 std 运行时同名符号签名一致，

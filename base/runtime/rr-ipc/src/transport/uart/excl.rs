@@ -7,6 +7,8 @@ pub(super) const TCSANOW: i32 = 0;
 const LOCK_EX: i32 = 2;
 const LOCK_NB: i32 = 4;
 
+// SAFETY：`open`/`close`/`flock` 与 libc 原型一致；path 由调用方保证 NUL 结尾，
+// 所有调用点检查返回值并映射 errno。
 extern "C" {
     /// `open(2)` 是变参：这里只用两参形状（path, oflag）
     #[link_name = "open"]
