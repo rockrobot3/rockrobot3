@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 use crate::Rr3PackConfig;
 
 /// 真仓装配单（基-25：打包预验走 rrd 解析器，夹具必须给合法装配单——空文本过不了
-/// 解析器。include_str! 相对源文件 src/，到仓根四级）。distro chip=rk3566、
+/// 解析器。include_str! 相对源文件 src/tests/，到仓根五级）。distro chip=rk3566、
 /// esp32-mini chip=esp32，平台事实表册位随之。
-pub(super) const DISTRO_PROFILE: &str = include_str!("../../../profiles/distro.toml");
-pub(super) const ESP32_MINI_PROFILE: &str = include_str!("../../../profiles/esp32-mini.toml");
+pub(super) const DISTRO_PROFILE: &str = include_str!("../../../../profiles/distro.toml");
+pub(super) const ESP32_MINI_PROFILE: &str = include_str!("../../../../profiles/esp32-mini.toml");
 
 /// 夹具根唯一序号：并行测试各占一个目录（ZST 指针恒同、pid 同批相同，都当不得唯一键）
 pub(super) fn fixture_seq() -> u64 {
