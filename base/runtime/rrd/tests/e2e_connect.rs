@@ -93,16 +93,9 @@ fn boot_connect(tag: &str, env: &[(&str, &str)]) -> (RrdTest, RrdClient, u64, E2
     (rrd, obs, obs_task, root)
 }
 
-#[test]
-fn connect_module_link_up_and_session_open_end_to_end() {
-    // ---------- 夹具 + boot：sim 缺省在线（不注入 UP 键，钉缺省语义） ----------
-    let (mut rrd, mut obs, obs_task, _root) =
-        boot_connect("conn-up", &[("RR3_HAL_BACKEND", "sim")]);
-    let reg = rrd.rr3_wait_log("注册 rr3-connect task=");
-    let conn_task = rr3_field_from_log(&reg, "task=");
-
-    // ---------- ① net/link 周期流：首拍基线 + seq 严格递增 ----------
-    let l1 = rr3_read_where(&mut obs, " net/link 首拍", |f| {
+/// ① net/link 周期流：首拍基线（up/ssid/rssi 原样透传）+ seq 严格递增。
+fn link_up_cycle(obs: &mut RrdClient, conn_task: u64) {
+    let l1 = rr3_read_where(obs, " net/link 首拍", |f| {
         matches!(
             frame_topic(f),
             Some((Rr3PayloadType::Event, ref t)) if t == "rr3-connect/net/link"
@@ -116,7 +109,7 @@ fn connect_module_link_up_and_session_open_end_to_end() {
     let seq1 = v1["seq"]
         .as_u64()
         .unwrap_or_else(|| panic!("link 带 seq: {v1}"));
-    let l2 = rr3_read_where(&mut obs, " net/link 序列推进", |f| {
+    let l2 = rr3_read_where(obs, " net/link 序列推进", |f| {
         matches!(
             frame_topic(f),
             Some((Rr3PayloadType::Event, ref t)) if t == "rr3-connect/net/link"
@@ -126,10 +119,12 @@ fn connect_module_link_up_and_session_open_end_to_end() {
         rr3_json_of(&l2)["seq"].as_u64().unwrap() > seq1,
         "周期流必须推进（seq 严格递增）"
     );
+}
 
-    // ---------- ② cloud/session open：mock 会话应答 ----------
+/// ② cloud/session open：mock 会话应答（回显当前链路 ssid）。
+fn session_open_ok(obs: &mut RrdClient, obs_task: u64) {
     rr3_send(
-        &mut obs,
+        obs,
         &rr3_rpc_frame(
             rr_bus::RR3_METHOD_CALL,
             201,
@@ -137,7 +132,7 @@ fn connect_module_link_up_and_session_open_end_to_end() {
             obs_task,
         ),
     );
-    let v = rr3_read_call_reply(&mut obs, 201);
+    let v = rr3_read_call_reply(obs, 201);
     assert!(v.get("error").is_none(), "链路在线时 open 不该被拒: {v}");
     assert_eq!(v["result"]["session"], "opened", "{v}");
     assert_eq!(
@@ -148,10 +143,12 @@ fn connect_module_link_up_and_session_open_end_to_end() {
         v["result"]["ssid"], "rock-sim",
         "会话应答回显当前链路 ssid: {v}"
     );
+}
 
-    // ---------- ③ 业务性失败折 result.error 不断链 ----------
+/// ③ 业务性失败折 result.error 不断链（未知 action 点名）。
+fn session_close_err(obs: &mut RrdClient, obs_task: u64) {
     rr3_send(
-        &mut obs,
+        obs,
         &rr3_rpc_frame(
             rr_bus::RR3_METHOD_CALL,
             202,
@@ -159,11 +156,29 @@ fn connect_module_link_up_and_session_open_end_to_end() {
             obs_task,
         ),
     );
-    let v = rr3_read_call_reply(&mut obs, 202);
+    let v = rr3_read_call_reply(obs, 202);
     let err = v["result"]["error"]
         .as_str()
         .unwrap_or_else(|| panic!("未知 action 必须回 result.error 字符串: {v}"));
     assert!(err.contains("close"), "未知值要点名: {err}");
+}
+
+#[test]
+fn connect_module_link_up_and_session_open_end_to_end() {
+    // ---------- 夹具 + boot：sim 缺省在线（不注入 UP 键，钉缺省语义） ----------
+    let (mut rrd, mut obs, obs_task, _root) =
+        boot_connect("conn-up", &[("RR3_HAL_BACKEND", "sim")]);
+    let reg = rrd.rr3_wait_log("注册 rr3-connect task=");
+    let conn_task = rr3_field_from_log(&reg, "task=");
+
+    // ---------- ① net/link 周期流：首拍基线 + seq 严格递增 ----------
+    link_up_cycle(&mut obs, conn_task);
+
+    // ---------- ② cloud/session open：mock 会话应答 ----------
+    session_open_ok(&mut obs, obs_task);
+
+    // ---------- ③ 业务性失败折 result.error 不断链 ----------
+    session_close_err(&mut obs, obs_task);
 }
 
 #[test]
