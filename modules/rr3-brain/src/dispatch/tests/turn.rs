@@ -85,7 +85,11 @@ fn asr_fail_ledger() {
 #[test]
 fn wake_ack_pcm_reused() {
     let _g = env_lock();
-    let srv = crate::cloud::testkit::FakeCloud::start();
+    // keep-alive 档：本用例在同一宿主上先 TTS 预合成、再 ASR 两请求；默认 close 档
+    // 会让共享 Agent 在 macOS 上复用对端已关的连接（写成功、读 EOF），两次重试都
+    // 打不出去（2026-11-24 host-macos 连红，Linux 绿）。真实云端点保持连接，
+    // keep-alive 更贴近被测形态。
+    let srv = crate::cloud::testkit::FakeCloud::start_keep_alive();
     std::env::set_var(crate::cloud::RR3_CLOUD_MODE_ENV, "real");
     std::env::set_var(crate::cloud::RR3_API_KEY_ENV, "test-key");
     std::env::remove_var(crate::cloud::RR3_TTS_BACKEND_ENV);
