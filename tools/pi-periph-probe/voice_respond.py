@@ -27,7 +27,8 @@ import sys
 import time
 
 from probe_common import (
-    HEADER_LEN, MAGIC, OFF_PAYLOAD_LEN, baud_from_argv_or_env, flush_input,
+    HEADER_LEN, MAGIC, LEN_PAYLOAD_LEN, MAX_PAYLOAD, OFF_PAYLOAD_LEN,
+    baud_from_argv_or_env, flush_input,
     open_tty, pump, read_avail,
 )
 
@@ -94,8 +95,9 @@ def parse_pcm_stream(buf):
     while i >= 0:
         if i + HEADER_LEN > n:
             break  # 头不完整：留到下一轮
-        plen = int.from_bytes(buf[i + OFF_PAYLOAD_LEN:i + OFF_PAYLOAD_LEN + 4], "little")
-        if plen == 0 or plen > 20000:
+        plen = int.from_bytes(
+            buf[i + OFF_PAYLOAD_LEN:i + OFF_PAYLOAD_LEN + LEN_PAYLOAD_LEN], "little")
+        if plen == 0 or plen > MAX_PAYLOAD:
             i = buf.find(MAGIC, i + 1)  # 坏长度：跳过这个伪 magic
             continue
         if i + HEADER_LEN + plen > n:

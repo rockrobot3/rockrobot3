@@ -261,9 +261,11 @@ step "⑧ 件级判据三门（对拍计数门/依赖闭包门/注入面校验�
 rr3_step_8
 
 # —— ⑨-d 生成物一致性门（门 f：重跑生成器 diff 为空；全案 §8/§4.5，批N1 n1-8）
-# 真值点 contracts/topics.toml + contracts/face-expressions.toml → 板侧副本
-# tools/esp32-periph-base/src/topics_gen.rs（rr3-codegen --check 只比对不写）。
-step "⑨-d 生成物一致性（真值点 → 板侧常量表，重跑 rr3-codegen diff 为空）"
+# 真值点 contracts/{topics,face-expressions}.toml → topics_gen.rs、
+# hardware/esp32-mini/axis/*.toml → axis_gen.rs、
+# contracts/envelope.schema.json → pi-periph-probe/envelope_gen.py
+# （rr3-codegen --check 只比对不写，三份生成物同一判据）。
+step "⑨-d 生成物一致性（真值点 → 板侧常量表/探针布局，重跑 rr3-codegen diff 为空）"
 rr3_step_9d
 
 # —— ⑨-e 行程真值单点门（门 g：全案 §8，批N3 件五；读者集合定义随 act A-17）。

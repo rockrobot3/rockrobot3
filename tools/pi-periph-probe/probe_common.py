@@ -8,7 +8,8 @@
 
 三个真值口径（后续任何探针都必须用这里的定义，不得再各写一套）：
 
-1. **帧面**：magic `31 45 52 41`；`payload_len` 在帧头偏移 40。帧与帧之间的字节
+1. **帧面**：magic、头长与各字段偏移见 [`envelope_gen.py`](envelope_gen.py)
+   ——由 `contracts/envelope.schema.json` 生成，探针侧零手抄。帧与帧之间的字节
    不是「坏头」，而是一个待分类的**段**。
 2. **段分类**（[`classify_segment`]）：段内全部字节都是可打印 ASCII（0x20–0x7E
    加 CR/LF/TAB）→ 判为**行面回包文本**（合法流量，不计误码）；段内出现任何非
@@ -31,15 +32,15 @@ import termios
 import time
 import zlib
 
-#: 帧 magic 的线上字节序（LE u32 0x41524531 → 31 45 52 41）。
-MAGIC = b"\x31\x45\x52\x41"
-#: 帧头固定长度（128B）。
-HEADER_LEN = 128
-#: `payload_len` 在帧头内的偏移。
-OFF_PAYLOAD_LEN = 40
-#: 载荷 CRC32 在帧头内的偏移（2026-10-30 启用，占原预留区首 4 字节）。
-OFF_CRC32 = 44
-#: 线上合法 payload 上限（防御：坏头里读出的长度不可信）。
+# 帧面常量只读生成物（真值点 contracts/envelope.schema.json；重生成与漂移
+# 检查由 rr3-codegen --check 承担，探针里不再写第二份）。
+from envelope_gen import (
+    HEADER_LEN, LEN_PAYLOAD_CRC32, LEN_PAYLOAD_LEN, MAGIC, OFF_PAYLOAD_CRC32,
+    OFF_PAYLOAD_LEN,
+)
+
+#: 探针侧坏头防御上限（B）：坏头里读出的长度不可信，超出单帧实测量级的直接
+#: 判坏头跳过。**不是**协议上限——协议上限见契约 payload_len 注（64 MiB）。
 MAX_PAYLOAD = 20000
 
 
@@ -226,7 +227,8 @@ def scan_frames(buf):
             _account_segment(st, buf[i:j])
             i = j
             continue
-        plen = int.from_bytes(buf[i + OFF_PAYLOAD_LEN:i + OFF_PAYLOAD_LEN + 4], "little")
+        plen = int.from_bytes(
+            buf[i + OFF_PAYLOAD_LEN:i + OFF_PAYLOAD_LEN + LEN_PAYLOAD_LEN], "little")
         if plen == 0 or plen > MAX_PAYLOAD:
             st["torn"] += 1
             i += 1
@@ -237,7 +239,8 @@ def scan_frames(buf):
         p = bytes(buf[i + HEADER_LEN:i + HEADER_LEN + plen])
         st["frames"] += 1
         # 载荷 CRC32（与固件 `rr3_crc32` 同一算法：zlib.crc32 = IEEE 反射多项式）
-        declared = int.from_bytes(buf[i + OFF_CRC32:i + OFF_CRC32 + 4], "little")
+        declared = int.from_bytes(
+            buf[i + OFF_PAYLOAD_CRC32:i + OFF_PAYLOAD_CRC32 + LEN_PAYLOAD_CRC32], "little")
         actual = zlib.crc32(p) & 0xFFFF_FFFF
         if declared != actual:
             st["crc_bad"] += 1

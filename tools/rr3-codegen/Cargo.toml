@@ -15,3 +15,6 @@ description = "0.0.5 增补轮六 批N1 n1-8：契约真值点 → 板侧常量�
 # TOML 平表解析：topics.toml / face-expressions.toml 都是 Value 级手查（无 serde
 # 结构体，键名 fail-closed 手点名，与 rr-registry 读表器同口径）。
 toml = "0.8"
+# JSON 真值源解析：探针帧布局从 contracts/envelope.schema.json 的 x-offset-table
+# 导出（L1 冻结的字节级事实源；生成器只读，不在 Python 侧手抄偏移）。
+serde_json = "1"

@@ -24,7 +24,8 @@ import time
 import zlib
 
 from probe_common import (
-    MAGIC, HEADER_LEN, OFF_PAYLOAD_LEN, OFF_CRC32,
+    MAGIC, HEADER_LEN, LEN_PAYLOAD_CRC32, LEN_PAYLOAD_LEN, MAX_PAYLOAD,
+    OFF_PAYLOAD_CRC32, OFF_PAYLOAD_LEN,
     baud_from_argv_or_env, open_tty, read_avail, drain_until_quiet,
 )
 
@@ -78,14 +79,16 @@ def parse_pcm_stream(buf):
     while i >= 0:
         if i + HEADER_LEN > n:
             break
-        plen = int.from_bytes(buf[i + OFF_PAYLOAD_LEN:i + OFF_PAYLOAD_LEN + 4], "little")
-        if plen == 0 or plen > 20000:
+        plen = int.from_bytes(
+            buf[i + OFF_PAYLOAD_LEN:i + OFF_PAYLOAD_LEN + LEN_PAYLOAD_LEN], "little")
+        if plen == 0 or plen > MAX_PAYLOAD:
             i = buf.find(MAGIC, i + 1)
             continue
         if i + HEADER_LEN + plen > n:
             break
         body = bytes(buf[i + HEADER_LEN:i + HEADER_LEN + plen])
-        declared = int.from_bytes(buf[i + OFF_CRC32:i + OFF_CRC32 + 4], "little")
+        declared = int.from_bytes(
+            buf[i + OFF_PAYLOAD_CRC32:i + OFF_PAYLOAD_CRC32 + LEN_PAYLOAD_CRC32], "little")
         if declared != (zlib.crc32(body) & 0xFFFF_FFFF):
             crc_bad += 1
             if _body_is_json(body):

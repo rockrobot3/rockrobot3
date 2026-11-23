@@ -41,7 +41,7 @@ import time
 import wave
 
 from probe_common import (
-    MAGIC, HEADER_LEN, OFF_PAYLOAD_LEN,
+    MAGIC, HEADER_LEN, LEN_PAYLOAD_LEN, MAX_PAYLOAD, OFF_PAYLOAD_LEN,
     baud_from_argv_or_env, open_tty, flush_input, read_avail,
     drain_until_quiet,
 )
@@ -145,8 +145,9 @@ def parse_pcm_stream(buf):
     while i >= 0:
         if i + HEADER_LEN > n:
             break
-        plen = int.from_bytes(buf[i + OFF_PAYLOAD_LEN:i + OFF_PAYLOAD_LEN + 4], "little")
-        if plen == 0 or plen > 20000:
+        plen = int.from_bytes(
+            buf[i + OFF_PAYLOAD_LEN:i + OFF_PAYLOAD_LEN + LEN_PAYLOAD_LEN], "little")
+        if plen == 0 or plen > MAX_PAYLOAD:
             i = buf.find(MAGIC, i + 1)
             continue
         if i + HEADER_LEN + plen > n:

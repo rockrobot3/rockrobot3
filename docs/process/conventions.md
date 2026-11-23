@@ -2934,3 +2934,6 @@ D11 的 `armed=true` 界面门要求"必须引用一条真板对拍证据的编�
 - **两轨同一装配程序**：deb 快路轨与 Buildroot 保底轨的模块/真值集落位都只经
   `rr3-pack`（`--stage-only` / `--install-root`），`post-build.sh` 不保留第二份
   entry 改写或文件清单；缺件/坏模块 fail-closed，不带半成品镜像出厂。
+- **生成副本单向**：真值点（`contracts/`、`hardware/*/axis/`）→ 生成物
+  （`topics_gen.rs` / `axis_gen.rs` / `envelope_gen.py`）只经 `rr3-codegen` 导出；
+  消费者不手抄常量，重跑 `--check` diff 为空由门 ⑨-d 执法（三份同一判据）。

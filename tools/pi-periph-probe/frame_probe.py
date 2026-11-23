@@ -27,9 +27,14 @@ import sys
 import time
 import zlib
 
+from envelope_gen import (
+    LEN_DST_TASK, LEN_OPCODE, LEN_SRC_TASK, LEN_TIMESTAMP_NS, LEN_TRACE_ID,
+    OFF_DST_TASK, OFF_OPCODE, OFF_SRC_TASK, OFF_TIMESTAMP_NS, OFF_TRACE_ID,
+)
 from probe_common import (
-    HEADER_LEN, MAGIC, OFF_CRC32, OFF_PAYLOAD_LEN, baud_from_argv_or_env,
-    flush_input, open_tty, pump,
+    HEADER_LEN, LEN_PAYLOAD_CRC32, LEN_PAYLOAD_LEN, MAGIC, MAX_PAYLOAD,
+    OFF_PAYLOAD_CRC32, OFF_PAYLOAD_LEN, baud_from_argv_or_env, flush_input,
+    open_tty, pump,
 )
 
 DEV = os.environ.get("RR3_PROBE_TTY", "/dev/ttyAMA0")
@@ -94,14 +99,17 @@ def build_frame(ty, body_obj, trace_id=0, dst=DST_PERIPH, src=SRC_HOST):
     js = json.dumps(body_obj, separators=(",", ":")).encode()
     payload = ty.to_bytes(2, "little") + js
     hdr = bytearray(HEADER_LEN)
-    hdr[0:4] = MAGIC
-    hdr[4:6] = OP_SEND.to_bytes(2, "little")
-    hdr[8:16] = trace_id.to_bytes(8, "little")
-    hdr[16:24] = int(time.time() * 1e9).to_bytes(8, "little")
-    hdr[24:32] = src.to_bytes(8, "little")
-    hdr[32:40] = dst.to_bytes(8, "little")
-    hdr[40:44] = len(payload).to_bytes(4, "little")
-    hdr[OFF_CRC32:OFF_CRC32 + 4] = (zlib.crc32(payload) & 0xFFFFFFFF).to_bytes(4, "little")
+    hdr[0:len(MAGIC)] = MAGIC
+    hdr[OFF_OPCODE:OFF_OPCODE + LEN_OPCODE] = OP_SEND.to_bytes(LEN_OPCODE, "little")
+    hdr[OFF_TRACE_ID:OFF_TRACE_ID + LEN_TRACE_ID] = trace_id.to_bytes(LEN_TRACE_ID, "little")
+    hdr[OFF_TIMESTAMP_NS:OFF_TIMESTAMP_NS + LEN_TIMESTAMP_NS] = (
+        int(time.time() * 1e9).to_bytes(LEN_TIMESTAMP_NS, "little"))
+    hdr[OFF_SRC_TASK:OFF_SRC_TASK + LEN_SRC_TASK] = src.to_bytes(LEN_SRC_TASK, "little")
+    hdr[OFF_DST_TASK:OFF_DST_TASK + LEN_DST_TASK] = dst.to_bytes(LEN_DST_TASK, "little")
+    hdr[OFF_PAYLOAD_LEN:OFF_PAYLOAD_LEN + LEN_PAYLOAD_LEN] = (
+        len(payload).to_bytes(LEN_PAYLOAD_LEN, "little"))
+    hdr[OFF_PAYLOAD_CRC32:OFF_PAYLOAD_CRC32 + LEN_PAYLOAD_CRC32] = (
+        (zlib.crc32(payload) & 0xFFFFFFFF).to_bytes(LEN_PAYLOAD_CRC32, "little"))
     return bytes(hdr) + payload
 
 
@@ -111,17 +119,23 @@ def parse_frames(raw):
     i = raw.find(MAGIC)
     n = len(raw)
     while i >= 0 and i + HEADER_LEN <= n:
-        plen = int.from_bytes(raw[i + OFF_PAYLOAD_LEN:i + OFF_PAYLOAD_LEN + 4], "little")
-        if plen == 0 or plen > 20000 or i + HEADER_LEN + plen > n:
+        plen = int.from_bytes(
+            raw[i + OFF_PAYLOAD_LEN:i + OFF_PAYLOAD_LEN + LEN_PAYLOAD_LEN], "little")
+        if plen == 0 or plen > MAX_PAYLOAD or i + HEADER_LEN + plen > n:
             i = raw.find(MAGIC, i + 1)
             continue
         p = raw[i + HEADER_LEN:i + HEADER_LEN + plen]
-        declared = int.from_bytes(raw[i + OFF_CRC32:i + OFF_CRC32 + 4], "little")
+        declared = int.from_bytes(
+            raw[i + OFF_PAYLOAD_CRC32:i + OFF_PAYLOAD_CRC32 + LEN_PAYLOAD_CRC32], "little")
         out.append(({
-            "trace_id": int.from_bytes(raw[i + 8:i + 16], "little"),
-            "src": int.from_bytes(raw[i + 24:i + 32], "little"),
-            "dst": int.from_bytes(raw[i + 32:i + 40], "little"),
-            "opcode": int.from_bytes(raw[i + 4:i + 6], "little"),
+            "trace_id": int.from_bytes(
+                raw[i + OFF_TRACE_ID:i + OFF_TRACE_ID + LEN_TRACE_ID], "little"),
+            "src": int.from_bytes(
+                raw[i + OFF_SRC_TASK:i + OFF_SRC_TASK + LEN_SRC_TASK], "little"),
+            "dst": int.from_bytes(
+                raw[i + OFF_DST_TASK:i + OFF_DST_TASK + LEN_DST_TASK], "little"),
+            "opcode": int.from_bytes(
+                raw[i + OFF_OPCODE:i + OFF_OPCODE + LEN_OPCODE], "little"),
         }, p, declared == (zlib.crc32(p) & 0xFFFFFFFF)))
         i = raw.find(MAGIC, i + HEADER_LEN + plen)
     return out
