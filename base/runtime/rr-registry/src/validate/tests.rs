@@ -42,6 +42,30 @@ watchdog_timeout_ms = {wd}
     )
 }
 
+fn interact_manifest(publishes: &str, subscribes: &str) -> String {
+    format!(
+        r#"[manifest]
+schema_version = 1
+name = "rr3-interact"
+version = "0.0.1"
+type = "module"
+lang = "rust"
+entry = "/usr/bin/rr3-interact"
+
+[events]
+publishes = [{publishes}]
+subscribes = [{subscribes}]
+
+[resources]
+restart_policy = "always"
+
+[health]
+heartbeat_ms = 200
+watchdog_timeout_ms = 1000
+"#
+    )
+}
+
 /// 只在叠加层里的 topic：合并后放行，未合并按未注册主题拒
 #[test]
 fn overlay_topic_passes_only_when_merged() {
@@ -82,32 +106,9 @@ fn overlay_relaxes_nothing_but_membership() {
 #[test]
 fn retired_topics_cannot_be_declared() {
     let set = rr3_topic_parse(CONTRACT);
-    let manifest = |publishes: &str, subscribes: &str| {
-        format!(
-            r#"[manifest]
-schema_version = 1
-name = "rr3-interact"
-version = "0.0.1"
-type = "module"
-lang = "rust"
-entry = "/usr/bin/rr3-interact"
-
-[events]
-publishes = [{publishes}]
-subscribes = [{subscribes}]
-
-[resources]
-restart_policy = "always"
-
-[health]
-heartbeat_ms = 200
-watchdog_timeout_ms = 1000
-"#
-        )
-    };
 
     // 发布申报 → 拒并点名
-    let r = rr3_manifest_chk(&manifest("\"rr3-interact/asr/text\"", ""), &set);
+    let r = rr3_manifest_chk(&interact_manifest("\"rr3-interact/asr/text\"", ""), &set);
     assert!(
         r.errors
             .iter()
@@ -117,7 +118,7 @@ watchdog_timeout_ms = 1000
     );
 
     // RPC 暴露申报（retired 主题不能过 rpc.exposes——用同一点名门）与订阅申报 → 拒
-    let r = rr3_manifest_chk(&manifest("", "\"rr3-interact/dialog/turn\""), &set);
+    let r = rr3_manifest_chk(&interact_manifest("", "\"rr3-interact/dialog/turn\""), &set);
     assert!(
         r.errors
             .iter()
@@ -128,7 +129,7 @@ watchdog_timeout_ms = 1000
 
     // 正常主题申报不受退役门影响（号位保留语义：非 retired 的在册主题照常放行）
     let r = rr3_manifest_chk(
-        &manifest(
+        &interact_manifest(
             "\"rr3-interact/face/expression\"",
             "\"rr3-runtime/module/state\"",
         ),
