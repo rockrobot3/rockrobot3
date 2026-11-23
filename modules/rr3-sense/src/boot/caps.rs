@@ -86,12 +86,24 @@ fn rr3_cap_chan(audio: &Rr3AudioConfig) -> Result<(), String> {
     Ok(())
 }
 
-/// VAD 阈值域（i16 采样域）。
+/// VAD 阈值域（i16 采样域；收尾阈值不得高于起音，反向滞回语义反转）。
 fn rr3_vad_cap_check(vad: &Rr3VadConfig) -> Result<(), String> {
     if !(0..=32767).contains(&vad.rms_start) {
         return Err(format!(
             "[rr3-sense.vad] rms_start 须在 0..=32767（i16 采样域），收到 {}",
             vad.rms_start
+        ));
+    }
+    if !(0..=32767).contains(&vad.rms_tail) {
+        return Err(format!(
+            "[rr3-sense.vad] rms_tail 须在 0..=32767（i16 采样域），收到 {}",
+            vad.rms_tail
+        ));
+    }
+    if vad.rms_tail > vad.rms_start {
+        return Err(format!(
+            "[rr3-sense.vad] rms_tail 不得高于 rms_start（收尾阈值须形成滞回），收到 tail={} start={}",
+            vad.rms_tail, vad.rms_start
         ));
     }
     Ok(())

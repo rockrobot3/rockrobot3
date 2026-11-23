@@ -9,12 +9,13 @@ fn config_parse_defaults_on_empty_and_fills_partial() {
     // 只给部分键：给的生效，缺的回落默认
     let cfg = rr3_sense_cfg_parse("[rr3-sense.vad]\nrms_start = 900\n").unwrap();
     assert_eq!(cfg.vad.rms_start, 900);
+    assert_eq!(cfg.vad.rms_tail, 900, "缺省收尾阈值跟随起音（无滞回）");
     assert_eq!(cfg.vad.silence_tail_ms, 700);
     assert_eq!(cfg.audio.sample_rate, 16000);
     // 全量
     let full = rr3_sense_cfg_parse(
         "[rr3-sense.audio]\nsample_rate = 48000\nchannels = 2\nframe_ms = 10\n\n\
-             [rr3-sense.vad]\nrms_start = 2000\nsilence_tail_ms = 500\nmin_speech_ms = 150\n\n\
+             [rr3-sense.vad]\nrms_start = 2000\nrms_tail = 1600\nsilence_tail_ms = 500\nmin_speech_ms = 150\n\n\
              [rr3-sense.doa]\nbin_threshold_deg = 20\n",
     )
     .unwrap();
@@ -22,6 +23,7 @@ fn config_parse_defaults_on_empty_and_fills_partial() {
     assert_eq!(full.audio.channels, 2);
     assert_eq!(full.audio.frame_ms, 10);
     assert_eq!(full.vad.rms_start, 2000);
+    assert_eq!(full.vad.rms_tail, 1600, "显式收尾阈值生效");
     assert_eq!(full.vad.silence_tail_ms, 500);
     assert_eq!(full.vad.min_speech_ms, 150);
     assert_eq!(full.doa.bin_threshold_deg, 20, "S-5 阈值注入生效");
@@ -57,6 +59,8 @@ fn config_rejects_degenerate_audio_and_doa_domains() {
         "[rr3-sense.audio]\nframe_ms = 1001\n",
         "[rr3-sense.vad]\nrms_start = -1\n",
         "[rr3-sense.vad]\nrms_start = 32768\n",
+        "[rr3-sense.vad]\nrms_start = 1500\nrms_tail = 1600\n",
+        "[rr3-sense.vad]\nrms_tail = -1\n",
         "[rr3-sense.doa]\nbin_threshold_deg = -1\n",
         "[rr3-sense.doa]\nbin_threshold_deg = 181\n",
         "[rr3-sense.reflex]\ndeadband_deg = -1\n",
@@ -144,6 +148,7 @@ fn config_toml_matches_registered_values() {
     assert_eq!(cfg.audio.channels, 1);
     assert_eq!(cfg.audio.frame_ms, 20);
     assert_eq!(cfg.vad.rms_start, 1500);
+    assert_eq!(cfg.vad.rms_tail, 1500, "config.toml 未给收尾键：跟随起音");
     assert_eq!(cfg.vad.silence_tail_ms, 700);
     assert_eq!(cfg.vad.min_speech_ms, 200);
     assert_eq!(cfg.doa.bin_threshold_deg, 30);

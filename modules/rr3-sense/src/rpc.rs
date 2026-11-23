@@ -212,6 +212,7 @@ mod tests {
         let v = rr3_doa_field(&Rr3DoaFix {
             deg: -60,
             bin: Rr3DoaBin::Left,
+            conf_q15: 24_000,
         });
         assert_eq!(v["deg"], -60);
         assert_eq!(v["bin"], "left");

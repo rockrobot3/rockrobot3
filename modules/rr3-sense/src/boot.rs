@@ -224,6 +224,9 @@ fn rr3_cfg_vad(section: Option<&toml::Value>, cfg: &mut Rr3SenseConfig) -> Resul
         return Ok(());
     };
     rr3_cfg_i64(vad, "rms_start", &mut cfg.vad.rms_start)?;
+    // 收尾阈值缺省跟随起音（无滞回，兼容旧配置）；显式给出才覆盖。
+    cfg.vad.rms_tail = cfg.vad.rms_start;
+    rr3_cfg_i64(vad, "rms_tail", &mut cfg.vad.rms_tail)?;
     rr3_cfg_u64(vad, "silence_tail_ms", &mut cfg.vad.silence_tail_ms)?;
     rr3_cfg_u64(vad, "min_speech_ms", &mut cfg.vad.min_speech_ms)?;
     Ok(())

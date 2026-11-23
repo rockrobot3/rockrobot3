@@ -17,9 +17,14 @@
 //!
 //! 能量门：窗内任一采集帧（L/R 任一通道）rms ≥ `window_rms_min` 才判，防全静音
 //! 窗零比零。
+//!
+//! 置信度：`conf_q15 = |cc_peak| / √(ΣL²·ΣR²)`（Q15）——相干声源接近满值，双麦
+//! 不相关噪声低值。策略面按门槛丢弃低置信判向，抑制漫反射噪声的假转向。
 
 use alloc::vec;
 use alloc::vec::Vec;
+
+use crate::rr3_isqrt;
 
 // ---------- 帧节拍换算 ----------
 
@@ -64,11 +69,13 @@ impl Rr3DoaBin {
     }
 }
 
-/// 一次判向结果：连续角（度，-90..=90，负=左）+ 三档离散档位
+/// 一次判向结果：连续角（度，-90..=90，负=左）+ 三档离散档位 + 归一化互相关
+/// 峰值置信度（Q15，0..=32767）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rr3DoaFix {
     pub deg: i32,
     pub bin: Rr3DoaBin,
+    pub conf_q15: i32,
 }
 
 /// 声速（mm/s，20°C 空气 ~343 m/s）：机制面物理常量，换环境校准随换装批。
@@ -112,7 +119,7 @@ pub fn rr3_doa_fix(samples: &[i16], channels: u8, cfg: &Rr3DoaCfg) -> Option<Rr3
     let lag_max = ((2 * sr_mm + RR3_SOUND_MM_PER_S) / (2 * RR3_SOUND_MM_PER_S)) as usize;
     let half = lag_max + 1;
     let cc = rr3_doa_cc(samples, ch, frames, half);
-    let lag_q7 = rr3_doa_peak(&cc, lag_max, half);
+    let (lag_q7, peak) = rr3_doa_peak(&cc, lag_max, half);
     // sinθ = lag·声速/(sr·基线)：K_Q15 定标（Q7 lag → Q15 sinθ），查表出整度
     let k_q15 = RR3_SOUND_MM_PER_S * 32768 / sr_mm;
     let sin_q15 = ((lag_q7 * k_q15) >> 7).clamp(-32768, 32767) as i32;
@@ -123,7 +130,19 @@ pub fn rr3_doa_fix(samples: &[i16], channels: u8, cfg: &Rr3DoaCfg) -> Option<Rr3
         RR3_ASIN_DEG_LUT[idx]
     };
     let bin = rr3_doa_bin_of(deg, cfg.bin_threshold_deg);
-    Some(Rr3DoaFix { deg, bin })
+    let conf_q15 = rr3_doa_conf(samples, ch, peak);
+    Some(Rr3DoaFix { deg, bin, conf_q15 })
+}
+
+/// 归一化互相关峰值置信度（Q15）：`|peak| / √(ΣL²·ΣR²)`。分母按两通道能量
+/// 开方后相乘（避免平方和相乘溢出），相干源接近 32767，独立噪声低值。
+fn rr3_doa_conf(samples: &[i16], ch: usize, peak: i64) -> i32 {
+    let (sq_l, sq_r) = rr3_sq_pair(samples, ch);
+    let den = (rr3_isqrt(sq_l) as i64) * (rr3_isqrt(sq_r) as i64);
+    if den <= 0 {
+        return 0;
+    }
+    ((peak * 32768) / den).clamp(0, 32767) as i32
 }
 
 /// 形状门 + 能量门：通道/基线/帧数合法且至少一采集帧 rms ≥ 阈值才继续。
@@ -222,8 +241,9 @@ fn rr3_doa_lag_fwd(samples: &[i16], ch: usize, frames: usize, dd: usize) -> i64 
     acc
 }
 
-/// 峰值 + 整数抛物线亚样本（Q7）：峰值搜索限物理域 [−lag_max, lag_max]。
-fn rr3_doa_peak(cc: &[i64], lag_max: usize, half: usize) -> i64 {
+/// 峰值 + 整数抛物线亚样本（Q7）：峰值搜索限物理域 [−lag_max, lag_max]；
+/// 返回 `(lag_q7, 峰值绝对值)` 供置信度复用同一峰值。
+fn rr3_doa_peak(cc: &[i64], lag_max: usize, half: usize) -> (i64, i64) {
     let (best, bv) = rr3_doa_argmax(cc, lag_max, half);
     let y0 = cc[(best - 1 + half as i64) as usize].abs();
     let y2 = cc[(best + 1 + half as i64) as usize].abs();
@@ -233,7 +253,7 @@ fn rr3_doa_peak(cc: &[i64], lag_max: usize, half: usize) -> i64 {
     } else {
         0
     };
-    best * 128 + sub
+    (best * 128 + sub, bv)
 }
 
 /// 物理域内峰值搜索（域外次峰按构造剔除）。
@@ -281,6 +301,15 @@ mod tests {
             (u[..frames].to_vec(), u[(-tau) as usize..].to_vec())
         };
         (0..frames).flat_map(|t| [r[t], l[t]]).collect()
+    }
+
+    /// 独立双通道噪声（两麦不相关）：置信度低值判据的输入。
+    fn uncorrelated_stereo(frames: usize, amp: i32) -> Vec<i16> {
+        let mut a = Xorshift(0x1234_5678);
+        let mut b = Xorshift(0x9e37_79b9);
+        (0..frames)
+            .flat_map(|_| [a.next_i16_scaled(amp), b.next_i16_scaled(amp)])
+            .collect()
     }
 
     fn doa_cfg() -> Rr3DoaCfg {
@@ -338,6 +367,18 @@ mod tests {
         assert_eq!(normal.bin, Rr3DoaBin::Right);
         assert_eq!(inv.bin, Rr3DoaBin::Left);
         assert_eq!(inv.deg, -normal.deg);
+    }
+
+    /// 置信度：相干声源接近满值，独立双麦噪声低值（漫反射抑制的判据）。
+    #[test]
+    fn confidence_high_for_coherent_source_low_for_independent_noise() {
+        let cfg = doa_cfg();
+        let coherent = delayed_stereo(4, 3200, 3000);
+        let fx = rr3_doa_fix(&coherent, 2, &cfg).expect("相干源应判出");
+        assert!(fx.conf_q15 > 20_000, "相干源置信度应高: {}", fx.conf_q15);
+        let noise = uncorrelated_stereo(3200, 3000);
+        let nf = rr3_doa_fix(&noise, 2, &cfg).expect("独立噪声仍过能量门");
+        assert!(nf.conf_q15 < 4_000, "独立噪声置信度应低: {}", nf.conf_q15);
     }
 
     /// 单声道/空窗/全静音/欠能量窗恒 None；尾帧过门照样判。

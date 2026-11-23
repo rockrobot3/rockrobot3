@@ -7,8 +7,12 @@
 //!
 //! ```text
 //! （未在语音中）rms ≥ rms_start 连续 ≥ min_speech_ms ──→ Onset{rms_peak, speech_ms}
-//! （在语音中）rms <  rms_start 连续 ≥ silence_tail_ms ──→ Offset{speech_ms}
+//! （在语音中）rms <  rms_tail 连续 ≥ silence_tail_ms ──→ Offset{speech_ms}
 //! ```
+//!
+//! 滞回（`rms_tail < rms_start`）是机制内建语义：起音用高档、收尾用低档，调用方
+//! 不复用"起音后改阈"的外部编排。默认 `rms_tail == rms_start`（无滞回，兼容旧
+//! 配置）；自适应整定见 [`noise`]。
 //!
 //! DoA：判向窗上做 plain 时域互相关，lag>0 = 右麦先到 = 声源在右；Q7 亚样本
 //! 抛物线 + 256 格 asin 查表，出整度与三档离散。
@@ -22,6 +26,8 @@ extern crate alloc;
 
 mod chan;
 mod doa;
+mod doa_track;
+mod noise;
 mod pcm;
 mod pcm_stream;
 mod spool;
@@ -29,6 +35,8 @@ mod wav;
 
 pub use chan::{rr3_chan_pick, rr3_chan_take, rr3_pcm_best_channel};
 pub use doa::{rr3_doa_fix, rr3_frames_per_tick, Rr3DoaBin, Rr3DoaCfg, Rr3DoaFix};
+pub use doa_track::Rr3DoaTrack;
+pub use noise::{rr3_vad_tune, Rr3NoiseEst, Rr3VadTune, RR3_NOISE_FRAMES};
 pub use pcm::{rr3_pcm_ms, rr3_pcm_stereo, rr3_wav_info, rr3_wav_pcm, Rr3WavInfo, Rr3WavPcm};
 pub use pcm_stream::Rr3PcmStream;
 pub use spool::{
@@ -42,6 +50,8 @@ pub use wav::rr3_wav_header;
 pub struct Rr3VadConfig {
     /// 起音阈值（帧 RMS ≥ 它才算"有声"）
     pub rms_start: i64,
+    /// 收尾阈值（语音态内帧 RMS < 它才算静音；须 ≤ `rms_start`）
+    pub rms_tail: i64,
     /// 判停尾静音：在语音中连续静音达到此时长 → Offset
     pub silence_tail_ms: u64,
     /// 最短语音：起音须连续保持此时长才认（防瞬态 blip 误触发）
@@ -52,6 +62,7 @@ impl Default for Rr3VadConfig {
     fn default() -> Self {
         Self {
             rms_start: 1500,
+            rms_tail: 1500,
             silence_tail_ms: 700,
             min_speech_ms: 200,
         }
@@ -173,7 +184,7 @@ impl Rr3VadState {
 
     /// 语音态：净有声时长累计 / 判停窗积累（`silence_tail_ms` 到点发 Offset）。
     fn rr3_vad_tail(&mut self, rms: i64) -> Option<Rr3VadEdge> {
-        if rms >= self.cfg.rms_start {
+        if rms >= self.cfg.rms_tail {
             self.silence_ms = 0;
             self.speech_ms += self.frame_ms;
             return None;
@@ -204,6 +215,7 @@ mod tests {
     const FRAME_MS: u64 = 20;
     const CFG: Rr3VadConfig = Rr3VadConfig {
         rms_start: 1500,
+        rms_tail: 1500,
         silence_tail_ms: 700,
         min_speech_ms: 200,
     };
@@ -339,6 +351,35 @@ mod tests {
         for _ in 0..200 {
             assert_eq!(vad.rr3_vad_feed(&frame(0)), None);
         }
+    }
+
+    /// 滞回：语音态用 rms_tail 判静音，起音档与收尾档互不串用。
+    #[test]
+    fn tail_threshold_holds_between_start_and_tail() {
+        let mut vad = Rr3VadState::rr3_vad_new(
+            Rr3VadConfig {
+                rms_tail: 800,
+                ..CFG
+            },
+            FRAME_MS,
+        );
+        for _ in 0..10 {
+            vad.rr3_vad_feed(&frame(1500));
+        }
+        for _ in 0..60 {
+            assert_eq!(
+                vad.rr3_vad_feed(&frame(1000)),
+                None,
+                "1000 ≥ tail 800：语音态内不得判停"
+            );
+        }
+        for _ in 0..34 {
+            assert_eq!(vad.rr3_vad_feed(&frame(0)), None);
+        }
+        assert_eq!(
+            vad.rr3_vad_feed(&frame(0)),
+            Some(Rr3VadEdge::Offset { speech_ms: 1400 })
+        );
     }
 
     /// 判停中途恢复有声：silence_ms 清零重新数，净 speech_ms 继续累计。

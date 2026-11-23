@@ -17,6 +17,7 @@ mod parity {
     fn cfg() -> Rr3VadConfig {
         Rr3VadConfig {
             rms_start: 1500,
+            rms_tail: 1500,
             silence_tail_ms: 700,
             min_speech_ms: 200,
         }
