@@ -38,6 +38,9 @@ pub struct Rr3DoaCfg {
     pub mic_baseline_mm: u32,
     pub window_rms_min: i64,
     pub bin_threshold_deg: i32,
+    /// 物理通道序校准：+1 = 帧内 ch0 在物理左；-1 = 通道序反向（换装/接线后按
+    /// 真板标定注入）。只翻判向符号，不改 TDOA/基线/阈值。
+    pub sign: i32,
 }
 
 /// DoA 分档（±90° 值域的三档离散）
@@ -114,7 +117,11 @@ pub fn rr3_doa_fix(samples: &[i16], channels: u8, cfg: &Rr3DoaCfg) -> Option<Rr3
     let k_q15 = RR3_SOUND_MM_PER_S * 32768 / sr_mm;
     let sin_q15 = ((lag_q7 * k_q15) >> 7).clamp(-32768, 32767) as i32;
     let idx = (((sin_q15 + 32768) * 256 + 32768) >> 16) as usize;
-    let deg = RR3_ASIN_DEG_LUT[idx];
+    let deg = if cfg.sign < 0 {
+        -RR3_ASIN_DEG_LUT[idx]
+    } else {
+        RR3_ASIN_DEG_LUT[idx]
+    };
     let bin = rr3_doa_bin_of(deg, cfg.bin_threshold_deg);
     Some(Rr3DoaFix { deg, bin })
 }
@@ -283,6 +290,7 @@ mod tests {
             mic_baseline_mm: 150,
             window_rms_min: 800,
             bin_threshold_deg: 30,
+            sign: 1,
         }
     }
 
@@ -317,6 +325,19 @@ mod tests {
             assert_eq!(fix.deg, want_deg, "tau={tau} 反演角");
             assert_eq!(fix.bin, want_bin, "tau={tau} 档位");
         }
+    }
+
+    /// 符号校准注入面：同一 TDOA 窗换 `sign` 即翻左右，角度取反。
+    #[test]
+    fn sign_inverts_left_right() {
+        let samples = delayed_stereo(4, 3200, 3000);
+        let normal = rr3_doa_fix(&samples, 2, &doa_cfg()).unwrap();
+        let mut flipped = doa_cfg();
+        flipped.sign = -1;
+        let inv = rr3_doa_fix(&samples, 2, &flipped).unwrap();
+        assert_eq!(normal.bin, Rr3DoaBin::Right);
+        assert_eq!(inv.bin, Rr3DoaBin::Left);
+        assert_eq!(inv.deg, -normal.deg);
     }
 
     /// 单声道/空窗/全静音/欠能量窗恒 None；尾帧过门照样判。

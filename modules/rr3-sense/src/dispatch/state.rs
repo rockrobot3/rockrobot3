@@ -39,6 +39,7 @@ impl Rr3SenseDispatcher {
             mic_baseline_mm: cfg.doa.mic_baseline_mm,
             window_rms_min: cfg.doa.window_rms_min,
             bin_threshold_deg: cfg.doa.bin_threshold_deg,
+            sign: 1,
         };
         let doa_ring = if cfg.audio.channels >= 2 {
             Some(Rr3DoaRing::rr3_ring_new(

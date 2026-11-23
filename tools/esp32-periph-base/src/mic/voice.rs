@@ -47,6 +47,8 @@ const DOA_CFG: Rr3DoaCfg = Rr3DoaCfg {
     mic_baseline_mm: 150,
     window_rms_min: 450,
     bin_threshold_deg: 30,
+    // 2026-11-23 真板：站板子左侧判 right、右侧判 left → 两麦通道序反向。
+    sign: -1,
 };
 /// 采集块节拍（20 ms）与每块采样数（320 帧 × 2 声道 / 单声道）。
 const FRAME_MS: u64 = 20;

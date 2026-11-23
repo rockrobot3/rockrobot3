@@ -106,6 +106,7 @@ mod tests {
             mic_baseline_mm: 150,
             window_rms_min: 800,
             bin_threshold_deg: 30,
+            sign: 1,
         };
         let n = 3400usize;
         let mut x = 0x1234_5678u32;

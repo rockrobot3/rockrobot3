@@ -49,6 +49,7 @@ mod parity {
             mic_baseline_mm: 150,
             window_rms_min: 800,
             bin_threshold_deg: 30,
+            sign: 1,
         }
     }
 
