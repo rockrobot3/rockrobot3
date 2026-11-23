@@ -501,6 +501,16 @@ jobs:
                      -not -path "tools/espidf-sentinel/*" -not -path "tools/esp32-periph-base/*" \
                      | sort); do
             echo "=== $m ==="
-            cargo test --locked -q --manifest-path "$m"
+            # 失败必须点名到 crate 与断言：日志匿名不可读，注解是唯一公开取数面。
+            # 与上一步同口径：test FAILED/编译错误/panic 行优先，末 12 行兜底。
+            if ! cargo test --locked -q --manifest-path "$m" 2>&1 | tee /tmp/mac-one.log; then
+              fails=$(grep -E "^test .* FAILED|^error(\[|:)|panicked at" /tmp/mac-one.log \
+                      | head -6 | tr '\n' ' ')
+              echo "::error title=host-macos-indep($m)::${fails:0:900}"
+              while IFS= read -r line; do
+                [ -n "$line" ] && echo "::error title=host-macos-indep-tail::${line:0:900}"
+              done < <(tail -12 /tmp/mac-one.log)
+              exit 1
+            fi
           done
 
