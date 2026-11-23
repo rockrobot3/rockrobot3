@@ -134,6 +134,11 @@ impl Rr3VadState {
         }
     }
 
+    /// 运行期换判据（滞回：起音用高档、收尾用低档）。只换阈值，不重置状态机。
+    pub fn rr3_vad_retune(&mut self, cfg: Rr3VadConfig) {
+        self.cfg = cfg;
+    }
+
     /// 喂一帧采样，返回边沿（无边沿返回 `None`）。
     /// 判定按**帧 RMS**整帧二值化：一帧内不做过渡带。
     pub fn rr3_vad_feed(&mut self, samples: &[i16]) -> Option<Rr3VadEdge> {
@@ -244,6 +249,25 @@ mod tests {
     }
 
     /// golden 向量：常幅 3000 连喂 10 帧（200ms）→ 第 10 帧发 Onset。
+    #[test]
+    fn retune_changes_threshold_for_subsequent_frames() {
+        let mut vad = state();
+        for _ in 0..10 {
+            assert_eq!(vad.rr3_vad_feed(&frame(1000)), None);
+        }
+        vad.rr3_vad_retune(Rr3VadConfig {
+            rms_start: 800,
+            ..CFG
+        });
+        for _ in 0..9 {
+            assert_eq!(vad.rr3_vad_feed(&frame(1000)), None);
+        }
+        assert!(matches!(
+            vad.rr3_vad_feed(&frame(1000)),
+            Some(Rr3VadEdge::Onset { .. })
+        ));
+    }
+
     #[test]
     fn constant_speech_fires_onset_at_min_speech_boundary() {
         let mut vad = state();

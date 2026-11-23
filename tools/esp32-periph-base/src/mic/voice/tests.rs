@@ -34,6 +34,24 @@ fn noise_below_threshold_never_opens() {
 }
 
 #[test]
+fn hysteresis_tail_holds_between_thresholds() {
+    let bus = bus();
+    let mut v = VoiceRun::rr3_new_mode(Rr3VoiceMode::Mem);
+    for _ in 0..10 {
+        v.block(&block(500), &bus);
+    }
+    assert!(v.recording, "500 ≥ 起音 450 应起音");
+    for _ in 0..20 {
+        v.block(&block(400), &bus);
+    }
+    assert!(v.recording, "400 ≥ 收尾 380，不得判停");
+    for _ in 0..20 {
+        v.block(&block(300), &bus);
+    }
+    assert!(!v.recording, "300 < 380 连续 400ms 应收段");
+}
+
+#[test]
 fn constant_speech_opens_then_offset_closes() {
     let bus = bus();
     let mut v = VoiceRun::rr3_new_mode(Rr3VoiceMode::Mem);

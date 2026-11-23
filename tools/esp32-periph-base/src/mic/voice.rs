@@ -33,6 +33,13 @@ const VAD_CFG: Rr3VadConfig = Rr3VadConfig {
     silence_tail_ms: 400,
     min_speech_ms: 200,
 };
+/// 收尾阈值（滞回）：起音 450，进入语音后降到 380，让 380–450 的底噪不再
+/// 把 tail 一直顶住；出段后由 `finish/reset` 恢复 [`VAD_CFG`]。
+const VAD_CFG_TAIL: Rr3VadConfig = Rr3VadConfig {
+    rms_start: 380,
+    silence_tail_ms: VAD_CFG.silence_tail_ms,
+    min_speech_ms: VAD_CFG.min_speech_ms,
+};
 /// 判向参数（与 Pi 侧同源；基线 = 双麦物理间距）。
 const DOA_CFG: Rr3DoaCfg = Rr3DoaCfg {
     sample_rate_hz: MIC_SR_HZ,
@@ -124,8 +131,12 @@ impl VoiceRun {
         }
         if mode != Rr3VoiceMode::Off {
             println!(
-                "[mic] VAD cfg rms_start={} silence_tail={}ms min_speech={}ms max_utter={}ms",
-                VAD_CFG.rms_start, VAD_CFG.silence_tail_ms, VAD_CFG.min_speech_ms, MAX_UTTER_MS
+                "[mic] VAD cfg rms_start={} tail={} silence_tail={}ms min_speech={}ms max_utter={}ms",
+                VAD_CFG.rms_start,
+                VAD_CFG_TAIL.rms_start,
+                VAD_CFG.silence_tail_ms,
+                VAD_CFG.min_speech_ms,
+                MAX_UTTER_MS
             );
         }
         Self::rr3_new_mode(mode)
@@ -225,7 +236,10 @@ impl VoiceRun {
         let edge = self.vad.rr3_vad_feed(&mono);
         self.pre_extend(block);
         match edge {
-            Some(Rr3VadEdge::Onset { .. }) => self.onset(bus),
+            Some(Rr3VadEdge::Onset { .. }) => {
+                self.vad.rr3_vad_retune(VAD_CFG_TAIL);
+                self.onset(bus);
+            }
             Some(Rr3VadEdge::Offset { .. }) => self.finish(bus, "offset"),
             None if self.recording => self.append(bus, &mono, block),
             None => {}
