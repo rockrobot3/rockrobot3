@@ -8,7 +8,7 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
 
 | 文件 | 作用 | 稳定级 |
 |---|---|---|
-| `envelope.schema.json` | A-IPC 128B 消息头逐字节偏移表 + payload 类型/flags/错误码枚举 | L1 |
+| `envelope.schema.json` | A-IPC 128B 消息头逐字节偏移表 + payload 类型/flags/错误码枚举；探针副本 = `tools/pi-periph-probe/envelope_gen.py`（tools/rr3-codegen 生成，重跑 diff 为空 = 门 ⑨-d） | L1 |
 | `golden/event-header-128.hex` | 一条真实头的 hex 向量（IPC-T-001 的**同机**基准；跨架构等值另见下） | L1 |
 | `topics.toml` | 主题所有权注册表：`[[owner]]` + `[[topic]]` 两组表（校验入口共三处——`rr3-mkmod` 生成自检、`rr-registry` 契约测试、rrd 在册表判定 `RrdRegistry::rr3_reg_pub_check`；职责与顺序见 [docs/architecture/architecture.md §6.3](../docs/architecture/architecture.md)，第三个入口的线上接线进度属实况，见 [docs/status.md](../docs/status.md)） | L2 |
 | `slots.toml` | 能力格坐标系总表：`[[slot]]`（name/layer/note），三层 base/body/cognition（查册门真值见下"slots.toml 裁定"） | L2 |
