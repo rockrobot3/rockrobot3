@@ -72,8 +72,7 @@ impl FakeCloud {
             for stream in listener.incoming() {
                 let Ok(stream) = stream else { break };
                 c.fetch_add(1, Ordering::Relaxed);
-                let (r, f, fo, b, m) =
-                    (r.clone(), f.clone(), fo.clone(), b.clone(), m.clone());
+                let (r, f, fo, b, m) = (r.clone(), f.clone(), fo.clone(), b.clone(), m.clone());
                 std::thread::spawn(move || {
                     let mut stream = stream;
                     Self::serve(&mut stream, &r, &f, &fo, &b, &m, keep_alive);
