@@ -171,12 +171,8 @@ fn parity_leg1_power_rail_tier_effective_train_is_deterministic() {
     assert_eq!(run(), run(), "同输入序列两跑逐拍相等（腿一·确定性）");
 }
 
-#[test]
-fn parity_leg2_power_rail_tier_effective_matches_ruling_semantics() {
-    // 腿二·正确性：裁定语义逐条点名（真值 = rr_hal_api rr3_rail_tier_fold，
-    // 全案 §6 T-6 运行期读数可信度 + Y-4 如实申报）
+fn rail_fold_unknown(max: u32) {
     use rr_hal_api::{rr3_rail_tier_fold, Rr3RailTier};
-    let max = 250u32;
     // 取不到基准（None）⇒ Unknown，与档位无关——新鲜 Ok 也折不出"可信"
     assert_eq!(
         rr3_rail_tier_fold(Rr3RailTier::Ok, None, max),
@@ -198,6 +194,10 @@ fn parity_leg2_power_rail_tier_effective_matches_ruling_semantics() {
         rr3_rail_tier_fold(Rr3RailTier::Ok, Some(max + 1), max),
         Rr3RailTier::Unknown
     );
+}
+
+fn rail_fold_fresh(max: u32) {
+    use rr_hal_api::{rr3_rail_tier_fold, Rr3RailTier};
     // 边界 age == max 不折（新鲜度上界是闭区间内）；龄期内原样透传
     assert_eq!(
         rr3_rail_tier_fold(Rr3RailTier::Severe, Some(max), max),
@@ -209,6 +209,16 @@ fn parity_leg2_power_rail_tier_effective_matches_ruling_semantics() {
         Rr3RailTier::Ok,
         "新鲜读数原样透传"
     );
+}
+
+#[test]
+fn parity_leg2_power_rail_tier_effective_matches_ruling_semantics() {
+    // 腿二·正确性：裁定语义逐条点名（真值 = rr_hal_api rr3_rail_tier_fold，
+    // 全案 §6 T-6 运行期读数可信度 + Y-4 如实申报）
+    use rr_hal_api::{rr3_rail_tier_fold, Rr3RailTier};
+    let max = 250u32;
+    rail_fold_unknown(max);
+    rail_fold_fresh(max);
     // 档名串同源：第四态 "unknown" 不冒充 "severe"（守护输出行 INFO rail_tier=
     // 与板侧 RailTier::name 同一词表——展示面原样的数据基础）
     assert_eq!(Rr3RailTier::Unknown.rr3_rail_tier_name(), "unknown");
