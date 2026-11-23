@@ -127,20 +127,15 @@ fn send_response(c: &mut RrdClient, trace_id: u64, src: u64, id: u64, result: &V
     );
 }
 
-/// 全链路 round trip：调用方 → rrd（转发）→ 被调方 → rrd（改道）→ 调用方
-#[test]
-fn call_routes_to_callee_and_response_comes_back() {
-    let rrd = RrdTest::rr3_start("mcall-rt");
-    let mut callee = rrd.rr3_connect();
-    let task_c = register(
-        &mut callee,
-        &manifest_exposes("rr3-interact", &["rr3-interact/tts/text"]),
-        "rr3-interact",
-    );
-    let (mut caller, task_r) = register_caller(&rrd);
-
+/// 调用方发出 rr3.call，并校验被调方收到的转发帧（头三处改写 + body 原样）
+fn call_and_check_fwd(
+    caller: &mut RrdClient,
+    callee: &mut RrdClient,
+    task_r: u64,
+    task_c: u64,
+) -> Rr3Frame {
     rr3_send(
-        &mut caller,
+        caller,
         &rr3_rpc_frame(
             rr_bus::RR3_METHOD_CALL,
             42,
@@ -149,7 +144,7 @@ fn call_routes_to_callee_and_response_comes_back() {
         ),
     );
     // 被调方收到的转发帧：头三处改写 + body 原样（id/params 原封不动）
-    let (fwd, v) = read_forwarded_call(&mut callee);
+    let (fwd, v) = read_forwarded_call(callee);
     assert_eq!(
         fwd.header.src_task, task_r,
         "转发帧的 src 必须是调用方 task"
@@ -165,22 +160,26 @@ fn call_routes_to_callee_and_response_comes_back() {
     assert_eq!(v["id"], 42, "body 原样：JSON-RPC id 不许被 rrd 重写");
     assert_eq!(v["params"]["topic"], "rr3-interact/tts/text");
     assert_eq!(v["params"]["args"]["text"], "hi");
+    fwd
+}
 
+/// 被调方沿回路应答，并校验回程帧（trace_id 原样带回、rrd 只改 dst）
+fn answer_roundtrip(
+    caller: &mut RrdClient,
+    callee: &mut RrdClient,
+    trace_id: u64,
+    task_c: u64,
+    task_r: u64,
+) {
     // 被调方沿回路应答：trace_id 原样带回
-    send_response(
-        &mut callee,
-        fwd.header.trace_id,
-        task_c,
-        42,
-        &json!({"echoed": "hi"}),
-    );
-    let back = rr3_read_where(&mut caller, " 回程应答 id=42", |f| match rr3_body_split(
-        &f.payload,
-    ) {
-        Ok((Rr3PayloadType::Response, body)) => serde_json::from_slice::<Value>(&body)
-            .map(|v| v["id"].as_u64() == Some(42))
-            .unwrap_or(false),
-        _ => false,
+    send_response(callee, trace_id, task_c, 42, &json!({"echoed": "hi"}));
+    let back = rr3_read_where(caller, " 回程应答 id=42", |f| {
+        match rr3_body_split(&f.payload) {
+            Ok((Rr3PayloadType::Response, body)) => serde_json::from_slice::<Value>(&body)
+                .map(|v| v["id"].as_u64() == Some(42))
+                .unwrap_or(false),
+            _ => false,
+        }
     });
     let v = rr3_json_of(&back);
     assert_eq!(v["result"]["echoed"], "hi");
@@ -188,14 +187,31 @@ fn call_routes_to_callee_and_response_comes_back() {
     assert_eq!(back.header.dst_task, task_r, "rrd 把 dst 改写回调用方 task");
 }
 
-/// 没人 exposes 的 topic：Invalid 错误帧，连接不断（下一帧照常服务）
+/// 全链路 round trip：调用方 → rrd（转发）→ 被调方 → rrd（改道）→ 调用方
 #[test]
-fn call_unknown_topic_is_rejected_and_connection_survives() {
-    let rrd = RrdTest::rr3_start("mcall-unknown");
+fn call_routes_to_callee_and_response_comes_back() {
+    let rrd = RrdTest::rr3_start("mcall-rt");
+    let mut callee = rrd.rr3_connect();
+    let task_c = register(
+        &mut callee,
+        &manifest_exposes("rr3-interact", &["rr3-interact/tts/text"]),
+        "rr3-interact",
+    );
     let (mut caller, task_r) = register_caller(&rrd);
-
-    rr3_send(
+    let fwd = call_and_check_fwd(&mut caller, &mut callee, task_r, task_c);
+    answer_roundtrip(
         &mut caller,
+        &mut callee,
+        fwd.header.trace_id,
+        task_c,
+        task_r,
+    );
+}
+
+/// 发往无人在册 topic 的 rr3.call：断言 Invalid 错误帧（id=43）
+fn check_unknown_topic(caller: &mut RrdClient, task_r: u64) {
+    rr3_send(
+        caller,
         &rr3_rpc_frame(
             rr_bus::RR3_METHOD_CALL,
             43,
@@ -203,16 +219,14 @@ fn call_unknown_topic_is_rejected_and_connection_survives() {
             task_r,
         ),
     );
-    let f = rr3_read_where(
-        &mut caller,
-        " 无人在册的错误应答",
-        |f| match rr3_body_split(&f.payload) {
-            Ok((Rr3PayloadType::Response, body)) => serde_json::from_slice::<Value>(&body)
-                .map(|v| v["id"].as_u64() == Some(43) && v["error"].is_object())
-                .unwrap_or(false),
-            _ => false,
-        },
-    );
+    let f = rr3_read_where(caller, " 无人在册的错误应答", |f| match rr3_body_split(
+        &f.payload,
+    ) {
+        Ok((Rr3PayloadType::Response, body)) => serde_json::from_slice::<Value>(&body)
+            .map(|v| v["id"].as_u64() == Some(43) && v["error"].is_object())
+            .unwrap_or(false),
+        _ => false,
+    });
     let v = rr3_json_of(&f);
     assert_eq!(
         v["error"]["code"],
@@ -226,14 +240,17 @@ fn call_unknown_topic_is_rejected_and_connection_survives() {
             .contains("没有在册模块 exposes"),
         "{v}"
     );
+}
 
+/// 拒帧后同一连接的心跳照常 accepted（连接不断）
+fn heartbeat_survives(caller: &mut RrdClient, task_r: u64) {
     // 连接不断：同一连接再发一颗心跳，照常 accepted
     rr3_send(
-        &mut caller,
+        caller,
         &rr3_rpc_frame("rr3.heartbeat", 44, json!({}), task_r),
     );
     let v = {
-        let f = rr3_read_where(&mut caller, " 心跳应答", |f| {
+        let f = rr3_read_where(caller, " 心跳应答", |f| {
             match rr3_body_split(&f.payload) {
                 Ok((Rr3PayloadType::Response, body)) => serde_json::from_slice::<Value>(&body)
                     .map(|v| v["id"].as_u64() == Some(44))
@@ -247,6 +264,15 @@ fn call_unknown_topic_is_rejected_and_connection_survives() {
         v["result"]["beat"], "accepted",
         "拒帧不断连：被拒后连接必须还能服务"
     );
+}
+
+/// 没人 exposes 的 topic：Invalid 错误帧，连接不断（下一帧照常服务）
+#[test]
+fn call_unknown_topic_is_rejected_and_connection_survives() {
+    let rrd = RrdTest::rr3_start("mcall-unknown");
+    let (mut caller, task_r) = register_caller(&rrd);
+    check_unknown_topic(&mut caller, task_r);
+    heartbeat_survives(&mut caller, task_r);
 }
 
 /// 自呼拒：唯一 exposes 该 topic 的模块就是调用方自己
