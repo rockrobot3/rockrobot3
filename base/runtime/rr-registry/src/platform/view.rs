@@ -27,10 +27,6 @@ impl Rr3PlatformTable {
         &self.capabilities.input_only_pins
     }
 
-    pub fn rr3_no_open_drain(&self) -> &BTreeSet<i64> {
-        &self.capabilities.no_open_drain
-    }
-
     /// ④-b 判据源：冲突矩阵（每条 = 一组互斥成员 + 组名 + 可读理由）
     pub fn rr3_conflicts(&self) -> &[Rr3ConflictEntry] {
         &self.conflicts

@@ -207,12 +207,6 @@ fn rr3_cmdline_of(rest: &str) -> Result<Rr3Slot, String> {
         .ok_or_else(|| format!("cmdline root=LABEL={rest} 不在在册标签——形状漂移，拒判定"))
 }
 
-/// 读 /proc/cmdline（linux 门：/proc 是 linux 特有面；解析逻辑全平台可测）
-#[cfg(target_os = "linux")]
-pub fn rr3_cmdline_read() -> std::io::Result<String> {
-    std::fs::read_to_string("/proc/cmdline")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

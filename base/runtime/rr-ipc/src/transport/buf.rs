@@ -78,15 +78,6 @@ impl Rr3FrameBuf {
             Err(Rr3FrameError::Unsealed)
         }
     }
-
-    /// 拆成值视图（`Rr3Frame`）：不分配，payload 直接搬走
-    pub fn rr3_into_frame(mut self) -> Rr3Frame {
-        let payload = self.bytes.split_off(RR3_IPC_HDR_SIZE);
-        Rr3Frame {
-            header: self.hdr,
-            payload,
-        }
-    }
 }
 
 impl From<&Rr3Frame> for Rr3FrameBuf {

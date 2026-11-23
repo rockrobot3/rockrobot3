@@ -276,10 +276,6 @@ pub struct Rr3Esp32UartServo {
 }
 
 impl Rr3Esp32UartServo {
-    pub fn rr3_esp32_servo_new(path: PathBuf, axis: &'static str) -> Self {
-        Self::rr3_esp32_servo_baud(path, axis, RR3_BRIDGE_BAUD)
-    }
-
     /// 波特率显式档（批D②）：env [`RR3_HAL_PERIPH_BAUD_ENV`] 的解析结果经此处入 conn。
     pub fn rr3_esp32_servo_baud(path: PathBuf, axis: &'static str, baud: u32) -> Self {
         Self {
@@ -341,10 +337,6 @@ pub struct Rr3Esp32UartDisplay {
 }
 
 impl Rr3Esp32UartDisplay {
-    pub fn rr3_esp32_disp_new(path: PathBuf) -> Self {
-        Self::rr3_esp32_disp_baud(path, RR3_BRIDGE_BAUD)
-    }
-
     /// 波特率显式档（批D②）：env [`RR3_HAL_PERIPH_BAUD_ENV`] 的解析结果经此处入 conn。
     pub fn rr3_esp32_disp_baud(path: PathBuf, baud: u32) -> Self {
         Self {

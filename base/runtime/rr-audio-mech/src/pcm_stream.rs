@@ -92,6 +92,7 @@ impl Rr3PcmStream {
     }
 
     /// 已整形的源帧数。
+    #[cfg(test)]
     pub fn rr3_frames(&self) -> u64 {
         self.frames
     }

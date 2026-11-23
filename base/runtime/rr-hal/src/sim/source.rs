@@ -93,10 +93,6 @@ impl Rr3SimAudioSource {
             open: Mutex::new(None),
         }
     }
-
-    pub fn rr3_sim_source_wave(&self) -> Rr3SimWave {
-        self.wave
-    }
 }
 
 impl Rr3AudioSource for Rr3SimAudioSource {
