@@ -312,38 +312,31 @@ fn multiple_actions_execute_in_order() {
     assert!(!gpio.rr3_sim_gpio_level(), "按序执行后最终态=最后一条");
 }
 
-/// MC-5 低电禁动闸门·intent 路两腿对拍（§20 ② ②）：
-/// 腿一·确定性——同一闭锁输入两跑逐条相等；
-/// 腿二·正确性——执行面（servo/relay）拒动且拒因点名"低电禁动"，
-/// 妆面（led）不因低电禁动而拒（仍走开放门=未列开放集），解禁后照常执行。
-#[test]
-fn low_gate_blocks_effector_not_face_on_intent_path() {
+fn low_gate_run(low_blocked: bool) -> (Vec<Result<Rr3IntentOutcome, String>>, bool, u16) {
     let args = json!([
         {"topic": "rr3-act/relay/set", "args": {"on": true}},
         {"topic": "rr3-act/servo/command", "args": {"angle_deg": 45}},
         {"topic": "rr3-act/led/effect", "args": {}},
     ]);
+    let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
+    let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
+    let out = rr3_actions_handle(
+        &args,
+        &mut gpio,
+        &mut servo,
+        &servo_cfg(),
+        low_blocked,
+        &axis_calibrated(),
+        &open_all(),
+    );
+    (out, gpio.rr3_sim_gpio_level(), servo.rr3_sim_servo_angle())
+}
 
-    // 腿一·确定性：闭锁态两跑逐条相等（无隐藏状态）
-    let run = |low_blocked: bool| {
-        let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
-        let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
-        let out = rr3_actions_handle(
-            &args,
-            &mut gpio,
-            &mut servo,
-            &servo_cfg(),
-            low_blocked,
-            &axis_calibrated(),
-            &open_all(),
-        );
-        (out, gpio.rr3_sim_gpio_level(), servo.rr3_sim_servo_angle())
-    };
-    assert_eq!(run(true), run(true), "闭锁态两跑必须逐拍相等");
-    assert_eq!(run(false), run(false), "开放态两跑必须逐拍相等");
-
-    // 腿二·正确性：闭锁只辖执行面（servo/relay 拒动），妆面 led 不因低电被禁
-    let (blocked, gpio_lvl, servo_deg) = run(true);
+fn assert_gate_blocked(
+    blocked: &[Result<Rr3IntentOutcome, String>],
+    gpio_lvl: bool,
+    servo_deg: u16,
+) {
     assert!(blocked[0].is_err(), "闭锁：relay 必须拒: {blocked:?}");
     assert!(
         blocked[0].as_ref().unwrap_err().contains("低电禁动"),
@@ -360,9 +353,32 @@ fn low_gate_blocks_effector_not_face_on_intent_path() {
     );
     assert!(!gpio_lvl, "闭锁：relay 不得落到 GPIO");
     assert_eq!(servo_deg, 90, "闭锁：舵机不得动");
+}
+
+/// MC-5 低电禁动闸门·intent 路两腿对拍（§20 ② ②）：
+/// 腿一·确定性——同一闭锁输入两跑逐条相等；
+/// 腿二·正确性——执行面（servo/relay）拒动且拒因点名"低电禁动"，
+/// 妆面（led）不因低电禁动而拒（仍走开放门=未列开放集），解禁后照常执行。
+#[test]
+fn low_gate_blocks_effector_not_face_on_intent_path() {
+    // 腿一·确定性：闭锁态两跑逐条相等（无隐藏状态）
+    assert_eq!(
+        low_gate_run(true),
+        low_gate_run(true),
+        "闭锁态两跑必须逐拍相等"
+    );
+    assert_eq!(
+        low_gate_run(false),
+        low_gate_run(false),
+        "开放态两跑必须逐拍相等"
+    );
+
+    // 腿二·正确性：闭锁只辖执行面（servo/relay 拒动），妆面 led 不因低电被禁
+    let (blocked, gpio_lvl, servo_deg) = low_gate_run(true);
+    assert_gate_blocked(&blocked, gpio_lvl, servo_deg);
 
     // 解禁后（回阈+迟滞的开放态）照常执行，执行面复位生效
-    let (open, gpio_lvl, servo_deg) = run(false);
+    let (open, gpio_lvl, servo_deg) = low_gate_run(false);
     assert_eq!(
         open[0],
         Ok(Rr3IntentOutcome::Relay(true, false)),
