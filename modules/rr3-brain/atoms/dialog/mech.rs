@@ -130,6 +130,12 @@ impl Rr3Dialog {
         self.active && now_ms.saturating_sub(self.started_ms) as i64 >= self.max_utterance_ms
     }
 
+    /// 轮缓冲字节数（测试归因面；生产不读）。
+    #[cfg(test)]
+    pub(crate) fn rr3_utt_len(&self) -> usize {
+        self.buf.len()
+    }
+
     /// 交出本轮 PCM 并复位。未开轮时交空（调用方应先看判停条件）。
     pub fn rr3_take_utterance(&mut self) -> Vec<u8> {
         let pcm = core::mem::take(&mut self.buf);

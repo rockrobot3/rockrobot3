@@ -110,6 +110,8 @@ fn wake_ack_pcm_reused() {
         .rr3_feed_pcm(&rr3_base64_encode(&pcm_bytes(320)), 32)
         .unwrap();
     let bus = FakeTurnBus::reply(json!({"played_ms": 120}));
+    let utt_len = dp.dialog.rr3_utt_len();
+    assert_eq!(utt_len, 320, "onset + pcm 后轮缓冲应有 320 B");
     dp.rr3_finish_turn(&bus).unwrap();
 
     let paths: Vec<String> = srv
@@ -130,7 +132,9 @@ fn wake_ack_pcm_reused() {
     assert_eq!(
         paths,
         vec!["/v1/audio/speech", "/v1/audio/transcriptions"],
-        "首个唤醒轮复用预合成 PCM，不再等第二次 TTS"
+        "首个唤醒轮复用预合成 PCM（mode={:?} asr_fail={} utt_len={utt_len} paths={paths:?}）",
+        crate::cloud::rr3_cloud_mode(),
+        bus.bumps_of("asr_fail")
     );
     assert_eq!(dp_last_intent(&bus)["reply_text"], "我在呢");
     std::env::remove_var(crate::cloud::RR3_API_KEY_ENV);
