@@ -110,11 +110,18 @@ impl RtPeriph {
             Axis::Pan => Rr3PwmChannel::Pan,
             Axis::Tilt => Rr3PwmChannel::Tilt,
         };
+        let mut wrote = false;
         for step in rr3_slew_steps(self.servo.deg(ch), deg, SERVO_SLEW_STEP_DEG) {
             self.rr3_pwm_duty(ch, deg_to_duty(step, DUTY_MIN, DUTY_MAX))?;
+            wrote = true;
             if step != deg {
                 thread::sleep(Duration::from_millis(SERVO_SLEW_STEP_MS));
             }
+        }
+        if !wrote {
+            // 同角度请求：servo_release 已把通道 duty 拉 0，空步进序列不会重新激磁。
+            // 必须落一次目标 duty，否则舵机保持松脱（2026-11-23 真板：连续判右 110° 回读 0）。
+            self.rr3_pwm_duty(ch, deg_to_duty(deg, DUTY_MIN, DUTY_MAX))?;
         }
         self.servo.commit(ch, deg);
         Ok(deg)

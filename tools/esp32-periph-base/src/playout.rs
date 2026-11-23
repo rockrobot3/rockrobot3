@@ -308,8 +308,10 @@ fn play_run(
                     thread::sleep(Duration::from_millis(5));
                 } else {
                     // 阻塞写按 DMA 消费自然节流（≈32ms/块）：既不断流也不空转，
-                    // 新数据最多等一块时延。写失败只留痕（下拍重试）。
-                    let _ = tx.write_all(&PLAY_SILENCE, PLAY_TIMEOUT);
+                    // 新数据最多等一块时延。写失败退避 5ms，避免错误路径紧循环。
+                    if tx.write_all(&PLAY_SILENCE, PLAY_TIMEOUT).is_err() {
+                        thread::sleep(Duration::from_millis(5));
+                    }
                 }
             }
             Action::Data(n) => {

@@ -8,8 +8,10 @@
 //! 半双工（W4-2 语义）：`gated`（播放面 `tts_gate`）期间整段重置——扬声器回授
 //! 不进 VAD，也不进云端 ASR。
 //!
-//! 判据参数取 Pi 侧 esp32 档标定值（config-esp32.toml）：rms_start=500、
-//! silence_tail=400 ms、min_speech=200 ms、DoA 阈值 30°、麦间距 150 mm。
+//! 判据参数：2026-11-23 S3 真板实测房间底噪 `voice mono_rms≈500`，原 500 阈值
+//! 与底噪重合导致 VAD 长期停在进行态、每段拖到 8 s，云端 ASR 8 s 超时；
+//! 阈值抬到 1500。silence_tail=400 ms、min_speech=200 ms、DoA 阈值 30°、
+//! 麦间距 150 mm 不变。
 
 use std::sync::{Arc, Mutex};
 
@@ -22,11 +24,11 @@ use crate::board::MIC_SR_HZ;
 use crate::capture::{chunk_to_pcm, frame32_to_pair, Rr3DcBlocker};
 use crate::state::{lock_bus, push_job, rr3_expr_set, Bus, Job};
 
-/// VAD 判据（2026-11-20 S3 单板近讲实测订正：底噪 370–400，用户正常音量
-/// 2 s 窗均值 499，650 阈值全程不起音；下调到 500。若环境噪声触发误起音，
-/// 再按 `voice mono_rms` 回填 550）。
+/// VAD 判据（2026-11-23 S3 真板订正：底噪≈500，原 500 阈值使 VAD 长期停在
+/// 进行态、段段 8 s，ASR 8 s 超时；抬到 1500。max_utter 收 6 s，给云端
+/// ASR 8 s 预算留上传余量）。
 const VAD_CFG: Rr3VadConfig = Rr3VadConfig {
-    rms_start: 500,
+    rms_start: 1500,
     silence_tail_ms: 400,
     min_speech_ms: 200,
 };
@@ -35,7 +37,7 @@ const DOA_CFG: Rr3DoaCfg = Rr3DoaCfg {
     sample_rate_hz: MIC_SR_HZ,
     frame_ms: 20,
     mic_baseline_mm: 150,
-    window_rms_min: 500,
+    window_rms_min: 1500,
     bin_threshold_deg: 30,
 };
 /// 采集块节拍（20 ms）与每块采样数（320 帧 × 2 声道 / 单声道）。
@@ -51,10 +53,10 @@ const _: () = assert!(BLK_MONO == crate::spool::RR3_SPOOL_BLK);
 /// 容错承担。
 const PRE_ROLL_MEM: usize = 30;
 const PRE_ROLL_SPOOL: usize = 10;
-/// 单段上限：8 s（与云 TTS 上限同量级；超长强制收段，不无限攒）。
-const MAX_UTTER_MS: usize = 8_000;
+/// 单段上限：6 s（给云端 ASR 8 s 预算留上传余量；超长强制收段，不无限攒）。
+const MAX_UTTER_MS: usize = 6_000;
 const MAX_UTTER_SAMPLES: usize = (MIC_SR_HZ as usize / 1000) * MAX_UTTER_MS * 2;
-/// spool 路径上限是单声道样本数（8 s × 16 kHz = 128 k 样本）。
+/// spool 路径上限是单声道样本数（6 s × 16 kHz = 96 k 样本）。
 const MAX_SEG_MONO: usize = MAX_UTTER_SAMPLES / 2;
 /// DoA 左右落 pan：**收进 70/110**（与意图三档同值）。2026-11-20 真板实锤：
 /// 右转落 120（机械行程上限）时舵机顶死堵转，300 s 内 13 次 BOD；左 60 偶发但
@@ -117,6 +119,12 @@ impl VoiceRun {
             Rr3VoiceMode::Off => println!(
                 "[mic] 本地 VAD/分段停用：PSRAM 未启用且 spool 未装配（classic 看 [spool] 的堆预留/分区行；S3 查 CONFIG_SPIRAM）"
             ),
+        }
+        if mode != Rr3VoiceMode::Off {
+            println!(
+                "[mic] VAD cfg rms_start={} silence_tail={}ms min_speech={}ms max_utter={}ms",
+                VAD_CFG.rms_start, VAD_CFG.silence_tail_ms, VAD_CFG.min_speech_ms, MAX_UTTER_MS
+            );
         }
         Self::rr3_new_mode(mode)
     }

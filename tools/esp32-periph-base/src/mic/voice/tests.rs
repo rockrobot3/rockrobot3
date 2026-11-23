@@ -21,6 +21,19 @@ fn block(amp: i16) -> [i16; BLOCK_SAMPLES] {
 }
 
 #[test]
+fn noise_below_threshold_never_opens() {
+    let bus = bus();
+    let mut v = VoiceRun::rr3_new_mode(Rr3VoiceMode::Mem);
+    for i in 0..100 {
+        v.block(&block(1000), &bus);
+        assert!(
+            !v.recording,
+            "第 {i} 块底噪 1000 低于 rms_start=1500，不得起音"
+        );
+    }
+}
+
+#[test]
 fn constant_speech_opens_then_offset_closes() {
     let bus = bus();
     let mut v = VoiceRun::rr3_new_mode(Rr3VoiceMode::Mem);
@@ -52,7 +65,7 @@ fn overlong_utterance_is_forced_closed() {
     for _ in 0..blocks {
         v.block(&block(3000), &bus);
     }
-    assert!(!v.recording, "超过 8 s 必须强制收段");
+    assert!(!v.recording, "超过 6 s 必须强制收段");
     assert!(v.utter.is_empty());
 }
 
