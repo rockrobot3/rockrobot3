@@ -2,7 +2,7 @@
 //! 板侧启动失败诊断：失败上下文（引脚/频率/栈）的单点构造，返回可打印的
 //! 错误串；不决定控制流。统一收口在 `boot.rs` 的最外层——先打印，再显式停机。
 
-use super::{
+use crate::board::{
     I2C_BAUD_HZ, LEDC_FREQ_HZ, LEDC_RES_BITS, RR3_BIND_LEDC_PAN, RR3_BIND_LEDC_TILT,
     RR3_BIND_UART2_RX, RR3_BIND_UART2_TX, THREAD_STACK, UART2_BAUD_HZ,
 };
