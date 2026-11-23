@@ -50,6 +50,9 @@ const PLAY_BUSY_MS: u64 = 30_000;
 const PLAY_STACK: usize = 16_384;
 /// I2S 写阻塞上限（portMAX_DELAY 同义）。
 const PLAY_TIMEOUT: TickType_t = u32::MAX;
+/// 空闲喂养源：全零帧 = 物理静音（PCM 中点）。W7 现场根修：流结束后 TX
+/// 不停止时 DMA 空转会反复放大残留数据（真板实录：对话结束喇叭持续响）。
+const PLAY_SILENCE: [u8; PLAY_CHUNK] = [0u8; PLAY_CHUNK];
 
 /// 播放环状态（生产者与播放线程共享；锁只护短临界区，不跨 I2S 写）。
 struct Rr3PlayState {
@@ -293,9 +296,6 @@ fn play_run(
         "[spk] 播放面起：I2S1 TX {PLAY_RATE_HZ}Hz 16bit stereo ring={PLAY_RING_BYTES}B（W7-b2 流式）"
     );
     let mut buf = [0u8; PLAY_CHUNK];
-    // 空闲喂养源：全零帧 = 物理静音（PCM 中点）。W7 现场根修：流结束后 TX
-    // 不停止时 DMA 空转会反复放大残留数据（真板实录：对话结束喇叭持续响）。
-    let silence = [0u8; PLAY_CHUNK];
     let mut t0: Option<Instant> = None;
     loop {
         let Some(action) = play_take(&state, &mut buf) else {
@@ -309,7 +309,7 @@ fn play_run(
                 } else {
                     // 阻塞写按 DMA 消费自然节流（≈32ms/块）：既不断流也不空转，
                     // 新数据最多等一块时延。写失败只留痕（下拍重试）。
-                    let _ = tx.write_all(&silence, PLAY_TIMEOUT);
+                    let _ = tx.write_all(&PLAY_SILENCE, PLAY_TIMEOUT);
                 }
             }
             Action::Data(n) => {
