@@ -504,12 +504,14 @@ jobs:
             # 失败必须点名到 crate 与断言：日志匿名不可读，注解是唯一公开取数面。
             # 与上一步同口径：test FAILED/编译错误/panic 行优先，末 12 行兜底。
             if ! cargo test --locked -q --manifest-path "$m" 2>&1 | tee /tmp/mac-one.log; then
-              fails=$(grep -E "^test .* FAILED|^error(\[|:)|panicked at" /tmp/mac-one.log \
-                      | head -6 | tr '\n' ' ')
+              # 被测代码的弃轮原因（如 ASR 失败行）也要进注解：失败断言只给结论，
+              # 现场捕获的 stderr 才是根因；capture 块在失败摘要里，tail 放宽到 40。
+              fails=$(grep -E "^test .* FAILED|^error(\[|:)|panicked at|ASR 失败|轮次 " /tmp/mac-one.log \
+                      | head -8 | tr '\n' ' ')
               echo "::error title=host-macos-indep($m)::${fails:0:900}"
               while IFS= read -r line; do
                 [ -n "$line" ] && echo "::error title=host-macos-indep-tail::${line:0:900}"
-              done < <(tail -12 /tmp/mac-one.log)
+              done < <(tail -40 /tmp/mac-one.log)
               exit 1
             fi
           done

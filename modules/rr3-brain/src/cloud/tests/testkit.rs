@@ -65,11 +65,19 @@ impl FakeCloud {
         );
         // 线程随测试进程退出回收（cargo test 主线程等所有 #[test] 完成，本
         // detached 线程不阻塞收尾；每测试独立端口，线程间零干扰）
+        // 每连接一线程：keep-alive 档下 `serve` 会在首连接上阻塞等下一请求，
+        // 单线程 accept 会把客户端另开的新连接压在 backlog 里（macOS 实测：
+        // TTS 后 ASR 打不进来，假红）。真实服务端并发接连接，夹具同形。
         std::thread::spawn(move || {
             for stream in listener.incoming() {
-                let Ok(mut stream) = stream else { break };
+                let Ok(stream) = stream else { break };
                 c.fetch_add(1, Ordering::Relaxed);
-                Self::serve(&mut stream, &r, &f, &fo, &b, &m, keep_alive);
+                let (r, f, fo, b, m) =
+                    (r.clone(), f.clone(), fo.clone(), b.clone(), m.clone());
+                std::thread::spawn(move || {
+                    let mut stream = stream;
+                    Self::serve(&mut stream, &r, &f, &fo, &b, &m, keep_alive);
+                });
             }
         });
         Self {
