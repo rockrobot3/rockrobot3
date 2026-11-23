@@ -92,11 +92,7 @@ fn face_panel_selftest_keys_fall_back_and_reject_bad_values() {
     assert!(e.contains("非在册表情"), "自检期望在册外点名: {e}");
 }
 
-/// selftest expect 预期表（批N5 件五 F-31）：段/键缺省回落固定腿全 pass +
-/// wiring 组零 fail；在册三态任选；值域外、组预期词表外、未知腿名、非字符
-/// 串值、非表段逐键点名拒 boot（fail-closed）
-#[test]
-fn selftest_expect_table_falls_back_and_rejects_unknown_legs_and_states() {
+fn selftest_defaults() {
     let minimal = "[rr3-interact.face]\nnon_pointable = []\n";
     // 段/键缺省：预期表回落固定腿全 pass + 两组零 fail
     let cfg = rr3_itact_cfg_parse(minimal).unwrap();
@@ -105,6 +101,9 @@ fn selftest_expect_table_falls_back_and_rejects_unknown_legs_and_states() {
     assert_eq!(cfg.selftest.expect.face, "pass");
     assert_eq!(cfg.selftest.expect.wiring, "zero-fail");
     assert_eq!(cfg.selftest.expect.contracts, "zero-fail");
+}
+
+fn selftest_explicit() {
     // 显式值合法读入：在册三态任选（恒败形态可如实申报期望 fail/n-a）
     let cfg = rr3_itact_cfg_parse(
             "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\nspeaker = \"fail\"\nrelay = \"pass\"\nface = \"n-a\"\nwiring = \"zero-fail\"\ncontracts = \"zero-fail\"\n",
@@ -115,6 +114,9 @@ fn selftest_expect_table_falls_back_and_rejects_unknown_legs_and_states() {
     assert_eq!(cfg.selftest.expect.face, "n-a");
     assert_eq!(cfg.selftest.expect.wiring, "zero-fail");
     assert_eq!(cfg.selftest.expect.contracts, "zero-fail");
+}
+
+fn reject_expect_words() {
     // 三态值域外拒：非在册判值点名
     let e = rr3_itact_cfg_parse(
             "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\nspeaker = \"ok\"\n",
@@ -139,6 +141,9 @@ fn selftest_expect_table_falls_back_and_rejects_unknown_legs_and_states() {
         e.contains("非在册组预期") && e.contains("contracts"),
         "组预期词表点名: {e}"
     );
+}
+
+fn reject_expect_shape() {
     // 未知腿名拒：腿册外预期不容静默（fail-closed）
     let e = rr3_itact_cfg_parse(
         "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\narm = \"pass\"\n",
@@ -160,6 +165,17 @@ fn selftest_expect_table_falls_back_and_rejects_unknown_legs_and_states() {
     )
     .unwrap_err();
     assert!(e.contains("expect 段必须是表"), "段形状点名: {e}");
+}
+
+/// selftest expect 预期表（批N5 件五 F-31）：段/键缺省回落固定腿全 pass +
+/// wiring 组零 fail；在册三态任选；值域外、组预期词表外、未知腿名、非字符
+/// 串值、非表段逐键点名拒 boot（fail-closed）
+#[test]
+fn selftest_expect_table_falls_back_and_rejects_unknown_legs_and_states() {
+    selftest_defaults();
+    selftest_explicit();
+    reject_expect_words();
+    reject_expect_shape();
 }
 
 /// player 两键（MC-2）：键/段缺省回落默认；类型错、负数、越界逐键点名拒
