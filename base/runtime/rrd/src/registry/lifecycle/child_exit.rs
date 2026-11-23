@@ -17,34 +17,19 @@ impl RrdRegistry {
         // 收过尸就撤所有权标记：无论走哪条分支，这次退出都已被 supervisor 处理完，
         // 否则同名新实例的 EOF 会永远等一个不再来的退出码（`owned_conn_death...` 钉这一条）。
         self.owned.remove(facts.name.as_str());
-        let present = self
-            .modules
-            .get(facts.name.as_str())
-            .map(|e| (e.phase, e.src_task));
-        let Some((phase, src_task)) = present else {
+        // 单次可变借用内完成"在册判定 → 相位封印 → 摘句柄"；守卫在
+        // `e` 最后一次使用处结束，`rr3_charge` 才能再借 `&mut self`。
+        let Some(e) = self.modules.get_mut(facts.name.as_str()) else {
             return self.rr3_child_absent(facts, clean_exit);
         };
         // 已被 watchdog 判死：收尸不得双计（R-A4 的封印）。
-        if phase == Rr3Phase::Failed {
+        if e.phase == Rr3Phase::Failed {
             return Rr3ChildExit::Silent;
         }
-        // 在册且活着：相位、句柄、账都在这一次到位。
-        self.rr3_child_crashed(facts, clean_exit, src_task)
-    }
-
-    /// 在册崩溃那一路：置 Failed、摘句柄、记账。
-    fn rr3_child_crashed(
-        &mut self,
-        facts: &Rr3ManifestFacts,
-        clean_exit: bool,
-        src_task: u64,
-    ) -> Rr3ChildExit {
-        let e = self
-            .modules
-            .get_mut(facts.name.as_str())
-            .expect("刚确认在册");
+        let src_task = e.src_task;
         e.tx = None;
         e.phase = Rr3Phase::Failed;
+        // 在册且活着：相位、句柄、账都在这一次到位。
         Rr3ChildExit::Crashed {
             src_task,
             clean_exit,

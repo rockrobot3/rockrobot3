@@ -32,16 +32,23 @@ impl RrdRegistry {
 
     /// 判死后落账：摘发送端 → 标 failed → 按策略记重启账。
     fn rr3_death_fail(&mut self, name: &str, clean_exit: bool) -> Rr3Death {
-        {
-            let e = self.modules.get_mut(name).expect("上面确认过条目在");
-            e.tx = None;
-            e.phase = Rr3Phase::Failed;
-        }
-        // 两段式借用：`&mut self.modules` 的守卫不能越过 `&mut self` 的方法调用活着
-        let facts = self.modules.get(name).expect("刚改过相位").facts.clone();
+        // 条目在 `rr3_reg_death` 已确认；单次可变借用内改相位并取 facts 副本，
+        // 守卫随 `rr3_death_mark` 返回释放，后面的 `rr3_charge` 才拿得到 `&mut self`。
+        let Some(facts) = self.rr3_death_mark(name) else {
+            // 结构性不可达：语义与"unregister 之后的收尾"同路（广播 unregistered，不记账）。
+            return Rr3Death::Broadcast { plan: None };
+        };
         Rr3Death::Broadcast {
             plan: self.rr3_charge(&facts, clean_exit),
         }
+    }
+
+    /// 置 Failed、摘发送端并回 facts 副本（借用守卫在返回前释放）。
+    fn rr3_death_mark(&mut self, name: &str) -> Option<Rr3ManifestFacts> {
+        let e = self.modules.get_mut(name)?;
+        e.tx = None;
+        e.phase = Rr3Phase::Failed;
+        Some(e.facts.clone())
     }
 
     pub fn rr3_reg_remove(&mut self, name: &str) -> bool {
