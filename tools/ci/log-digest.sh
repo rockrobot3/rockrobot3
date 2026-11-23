@@ -67,10 +67,15 @@ digest() {
 		elif [ -z "$sig" ]; then
 			sig=$SIG_DEFAULT${extra:+|$extra}
 		fi
+		# 调用方给 --sig 时大小写敏感：-i 会让 `^test .* FAILED` 命中
+		# "test result: ok. 0 failed"，真 FAIL 行被正常测试尾巴挤出 900 字符上限
+		# （2026-11-24 gate 注解实测）。缺省 SIG_DEFAULT 仍是大小写不敏感。
+		local sflags="-aiE"
+		[ -n "$sig" ] && sflags="-aE"
 		if [ "$head_first" -eq 1 ]; then
-			hits=$(grep -aiE "$sig" "$log" | grep -aviE "$NOISE_DEFAULT" | head -12 | oneline)
+			hits=$(grep "$sflags" "$sig" "$log" | grep -aviE "$NOISE_DEFAULT" | head -12 | oneline)
 		else
-			hits=$(grep -aiE "$sig" "$log" | grep -aviE "$NOISE_DEFAULT" | tail -12 | oneline)
+			hits=$(grep "$sflags" "$sig" "$log" | grep -aviE "$NOISE_DEFAULT" | tail -12 | oneline)
 		fi
 		if [ -z "$hits" ]; then
 			hits="无信号匹配，末段：$(tail -3 "$log" 2>/dev/null | oneline)"
