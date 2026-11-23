@@ -139,18 +139,31 @@ fn rr3_serve_frame(
         );
         return Ok(Rr3Flow::Keep);
     }
+    rr3_serve_payload(out, ctx, me, frame, ty, &body)
+}
+
+/// 上行 payload 类型分派（校验已过）：Request 走 RPC、Event 走发布、
+/// Response 走 `rr3.call` 应答回路；其余一律拒帧不断连。
+fn rr3_serve_payload(
+    out: &Arc<Mutex<UnixStream>>,
+    ctx: &Rr3ConnCtx,
+    me: &Rr3Peer,
+    frame: &Rr3Frame,
+    ty: Rr3PayloadType,
+    body: &[u8],
+) -> Result<Rr3Flow, String> {
     match ty {
-        Rr3PayloadType::Request => rr3_serve_request(out, ctx, me, &body),
-        Rr3PayloadType::Event => publish::rr3_publish(out, ctx, me, &body),
+        Rr3PayloadType::Request => rr3_serve_request(out, ctx, me, body),
+        Rr3PayloadType::Event => publish::rr3_publish(out, ctx, me, body),
         // M3：上行 Response 是 rr3.call 的应答回路（trace_id 改道回调用方）
-        Rr3PayloadType::Response => route::rr3_route_response(out, ctx, me, frame, &body),
+        Rr3PayloadType::Response => route::rr3_route_response(out, ctx, me, frame, body),
         // 拒是默认值，放行才需要理由：Request/Event/Response 之外的上行（Notification
         // 冒充上行）仍然一律拒帧不断连。
         other => {
             rr3_reply_err(
                 out,
                 me,
-                rr3_best_effort_id(&body),
+                rr3_best_effort_id(body),
                 Rr3StatusCode::Invalid,
                 &format!("上行不支持 payload 类型 {other:?}（业务发布请用 Event）"),
             );

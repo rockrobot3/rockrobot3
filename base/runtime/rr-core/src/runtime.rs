@@ -215,17 +215,7 @@ impl Rr3GuardBuf {
         self.len = 0;
         self.guard_push(b"RR3G ");
         match *ev {
-            Rr3GuardEvent::Boot(state) => {
-                self.guard_push(b"boot ");
-                match state {
-                    Rr3LinkState::Registering => self.guard_push(b"registering"),
-                    Rr3LinkState::Online { task } => {
-                        self.guard_push(b"online task=");
-                        self.guard_push_u64(task);
-                    }
-                    Rr3LinkState::Down => self.guard_push(b"down"),
-                }
-            }
+            Rr3GuardEvent::Boot(state) => self.guard_boot(state),
             Rr3GuardEvent::Feed { seq } => {
                 self.guard_push(b"feed seq=");
                 self.guard_push_u64(seq);
@@ -237,6 +227,19 @@ impl Rr3GuardBuf {
             }
         }
         self.rr3_guard_as_str()
+    }
+
+    /// 起动态行体：`boot <registering | online task=<dec> | down>`。
+    fn guard_boot(&mut self, state: Rr3LinkState) {
+        self.guard_push(b"boot ");
+        match state {
+            Rr3LinkState::Registering => self.guard_push(b"registering"),
+            Rr3LinkState::Online { task } => {
+                self.guard_push(b"online task=");
+                self.guard_push_u64(task);
+            }
+            Rr3LinkState::Down => self.guard_push(b"down"),
+        }
     }
 
     /// 当前缓冲内容（最近一次格式化的行；空缓冲 = 空串）。

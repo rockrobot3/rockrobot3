@@ -95,16 +95,19 @@ fn rr3_py_type_name(v: &Value) -> &'static str {
     match v {
         Value::Null => "NoneType",
         Value::Bool(_) => "bool",
-        Value::Number(n) => {
-            if n.is_f64() {
-                "float"
-            } else {
-                "int"
-            }
-        }
+        Value::Number(n) => rr3_py_num_name(n),
         Value::String(_) => "str",
         Value::Array(_) => "list",
         Value::Object(_) => "dict",
+    }
+}
+
+/// JSON 数字的对位类型名：带小数/指数按 float，其余按 int。
+fn rr3_py_num_name(n: &serde_json::Number) -> &'static str {
+    if n.is_f64() {
+        "float"
+    } else {
+        "int"
     }
 }
 
@@ -273,35 +276,44 @@ fn rr3_ops_target(
     group: &str,
     slot: &str,
 ) -> Result<(&'static str, String), String> {
-    let section = if group == "dialog" {
-        "dialog"
-    } else if ["asr", "tts"].contains(&group) || slot == "timeout_s" || rr3_no_model_rows(brain) {
+    let section = rr3_ops_section(brain, group, slot)?;
+    Ok((section, rr3_ops_key(section, slot)))
+}
+
+/// 写源段选择：dialog 组落 dialog 段；asr/tts 全槽、llm.timeout_s 与无模型行
+/// 落 cloud 段；其余落 model 行（须恰一行 active）。
+fn rr3_ops_section(brain: &Value, group: &str, slot: &str) -> Result<&'static str, String> {
+    if group == "dialog" {
+        return Ok("dialog");
+    }
+    if ["asr", "tts"].contains(&group) || slot == "timeout_s" || rr3_no_model_rows(brain) {
         // asr/tts/timeout 恒写 cloud；llm 组无模型行时写行无处落，同落 cloud
-        "cloud"
-    } else {
-        let actives = brain
-            .get("model")
-            .and_then(Value::as_array)
-            .map(|rows| {
-                rows.iter()
-                    .filter(|r| r.get("active").and_then(Value::as_bool) == Some(true))
-                    .count()
-            })
-            .unwrap_or(0);
-        if actives != 1 {
-            return Err(format!(
-                "[[rr3-brain.model]] 须恰一行 active=true（现 {actives} 行）——写面不修结构错误"
-            ));
-        }
-        "model"
-    };
-    // model 路写键名换算（行内键：llm_model → model_id；base_url → base_url）
-    let key = if section == "model" && slot == "llm_model" {
+        return Ok("cloud");
+    }
+    let actives = brain
+        .get("model")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter(|r| r.get("active").and_then(Value::as_bool) == Some(true))
+                .count()
+        })
+        .unwrap_or(0);
+    if actives != 1 {
+        return Err(format!(
+            "[[rr3-brain.model]] 须恰一行 active=true（现 {actives} 行）——写面不修结构错误"
+        ));
+    }
+    Ok("model")
+}
+
+/// model 路写键名换算（行内键：llm_model → model_id；base_url → base_url）。
+fn rr3_ops_key(section: &str, slot: &str) -> String {
+    if section == "model" && slot == "llm_model" {
         "model_id".to_string()
     } else {
         slot.to_string()
-    };
-    Ok((section, key))
+    }
 }
 
 /// 模型行表是否缺省（缺表/空表走 cloud fallback；非数组视同非空由调用方拦）

@@ -18,34 +18,38 @@ pub(super) fn rr3_write(out: &Arc<Mutex<UnixStream>>, frame: &Rr3Frame) -> bool 
     // "对端不收"必须能单独点名与计数（续轮二十五）。
     let (res, timed_out) = {
         let mut guard = rr3_lock(out);
-        match rr_ipc::rr3_frame_to_bytes(frame) {
-            Err(e) => (Err(format!("{e:?}")), false),
-            Ok(bytes) => match guard.write_all(&bytes).and_then(|_| guard.flush()) {
-                Ok(()) => (Ok(()), false),
-                Err(e) => (
-                    Err(e.to_string()),
-                    matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut),
-                ),
-            },
-        }
+        rr3_write_bytes(&mut guard, frame)
     };
-    match res {
-        Ok(()) => true,
-        Err(e) => {
-            // 超时与普通写错分流：超时是"对端不收"，普通错是"通道坏了"——运维
-            // 处置不同（前者查慢消费者，后者查进程/句柄），日志与计数都要分开。
-            if timed_out {
-                RR3_WRITE_TIMEOUTS.fetch_add(1, Ordering::Relaxed);
-                rr3_log(&format!(
-                    "写帧超时 dst={}：对端 {}s 不收，writer 收摊；连接交 reader 回收（{e}）",
-                    frame.header.dst_task,
-                    RR3_FAN_WRITE_TIMEOUT.as_secs()
-                ));
-            } else {
-                rr3_log(&format!("写帧失败 dst={}: {e}", frame.header.dst_task));
-            }
-            false
-        }
+    let Err(e) = res else {
+        return true;
+    };
+    // 超时与普通写错分流：超时是"对端不收"，普通错是"通道坏了"——运维
+    // 处置不同（前者查慢消费者，后者查进程/句柄），日志与计数都要分开。
+    if timed_out {
+        RR3_WRITE_TIMEOUTS.fetch_add(1, Ordering::Relaxed);
+        rr3_log(&format!(
+            "写帧超时 dst={}：对端 {}s 不收，writer 收摊；连接交 reader 回收（{e}）",
+            frame.header.dst_task,
+            RR3_FAN_WRITE_TIMEOUT.as_secs()
+        ));
+    } else {
+        rr3_log(&format!("写帧失败 dst={}: {e}", frame.header.dst_task));
+    }
+    false
+}
+
+/// 持锁写一帧（组帧 + write_all + flush），返回 `(结果, 是否写超时)`。
+/// 只做字节面，不落日志/计数——分类与点名留给唯一调用方 `rr3_write`。
+fn rr3_write_bytes(guard: &mut UnixStream, frame: &Rr3Frame) -> (Result<(), String>, bool) {
+    match rr_ipc::rr3_frame_to_bytes(frame) {
+        Err(e) => (Err(format!("{e:?}")), false),
+        Ok(bytes) => match guard.write_all(&bytes).and_then(|_| guard.flush()) {
+            Ok(()) => (Ok(()), false),
+            Err(e) => (
+                Err(e.to_string()),
+                matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut),
+            ),
+        },
     }
 }
 
