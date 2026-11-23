@@ -16,6 +16,9 @@
 //! 帧面/指令面守门）；本件 `expr_eye_base` 查表兜底 fail-safe（未知表情
 //! 正目全开），白名单扩员不哑不红。
 
+#[path = "mech/eye.rs"]
+mod eye;
+
 // —— 画布与眼形（ui.face 板侧执行面内在定义：0.96" 128×64 OLED 胶囊眼面目，
 //      收编自 oled.rs oled_capsules，数值零改动；换 OLED 面板尺寸时本件与
 //      oled.rs 传输面一并动——面目语义归本件，页写协议归传输面）——
@@ -122,7 +125,6 @@ pub(crate) fn eye_page(page: u8, style: EyeStyle) -> [u8; 128] {
     let cy = CY + style.dy as i32;
     for y in y0..y0 + 8 {
         let bit = 1u8 << (y % 8);
-        let py = (y - cy).abs();
         for (ix, &ecx) in EYES.iter().enumerate() {
             let cx = ecx + style.dx as i32;
             // 左右眼开合差：asym 加在左眼、减在右眼（困惑态左眯右睁）
@@ -135,102 +137,19 @@ pub(crate) fn eye_page(page: u8, style: EyeStyle) -> [u8; 128] {
             let half_h = (base_h * open / 100).max(4) / 2;
             let rc = W2.min(half_h);
             let straight = half_h - rc;
-            let mut put = |x: i32| {
-                if (0..128).contains(&x) {
-                    buf[x as usize] |= bit;
-                }
+            let p = eye::EyePaint {
+                cx,
+                cy,
+                y,
+                half_h,
+                rc,
+                straight,
             };
-            match style.shape {
-                EyeShape::Capsule => {
-                    if py > half_h {
-                        continue;
-                    }
-                    for x in (cx - hw_at(py, rc, straight))..=(cx + hw_at(py, rc, straight)) {
-                        put(x);
-                    }
-                }
-                EyeShape::Ring => {
-                    if py > half_h {
-                        continue;
-                    }
-                    let hw = hw_at(py, rc, straight);
-                    let lid = py > half_h - 3;
-                    for x in (cx - hw)..=(cx + hw) {
-                        if lid || (x - cx).abs() > hw - 3 {
-                            put(x);
-                        }
-                    }
-                    // 中心瞳孔（5×5）：空心环里的小黑点
-                    let pupil = if half_h >= 8 { 2 } else { 1 };
-                    if py <= pupil {
-                        for x in (cx - pupil)..=(cx + pupil) {
-                            put(x);
-                        }
-                    }
-                }
-                EyeShape::Heart => {
-                    // 心形隐函数 (x²+y²-1)³ - x²y³ ≤ 0（y 向上为正）
-                    for x in (cx - W2)..=(cx + W2) {
-                        let nx = (x - cx) as f32 / W2 as f32;
-                        let ny = (cy - y) as f32 / half_h as f32;
-                        let a = nx * nx + ny * ny - 1.0;
-                        if a * a * a - nx * nx * ny * ny * ny <= 0.0 {
-                            put(x);
-                        }
-                    }
-                }
-                EyeShape::Spiral => {
-                    // 同心双环（眩晕纹）——椭圆化到眼框内
-                    for x in (cx - W2)..=(cx + W2) {
-                        let nx = (x - cx) as f32 / W2 as f32;
-                        let ny = (cy - y) as f32 / half_h as f32;
-                        let d = (nx * nx + ny * ny).sqrt();
-                        if (d - 0.38).abs() < 0.16 || (d - 0.76).abs() < 0.16 {
-                            put(x);
-                        }
-                    }
-                }
-            }
+            eye::paint_eye(&mut buf, bit, style.shape, &p);
         }
-        if style.brow != Brow::None {
-            for (ix, &ecx) in EYES.iter().enumerate() {
-                let cx = ecx + style.dx as i32;
-                for x in (cx - W2).max(0)..=(cx + W2).min(127) {
-                    // 斜率位：t=0 外端 → t=BROW_TILT 内端（左眼）／反之（右眼）
-                    let t = ((x - (cx - W2)) * BROW_TILT) / (2 * W2);
-                    let off = match (style.brow, ix) {
-                        (Brow::Angry, 0) => t,             // 左眼内端低
-                        (Brow::Angry, _) => BROW_TILT - t, // 右眼内端低
-                        (Brow::Sad, 0) => BROW_TILT - t,   // 左眼外端低
-                        (Brow::Sad, _) => t,               // 右眼外端低
-                        (Brow::Focus, _) => 1,             // 平直略压
-                        (Brow::Confused, 0) => -2,         // 左眉抬高
-                        (Brow::Confused, _) => 2,          // 右眉压低
-                        (Brow::None, _) => 0,
-                    };
-                    let by = y - (BROW_Y + style.dy as i32 + off);
-                    if (0..BROW_THICK).contains(&by) {
-                        buf[x as usize] |= bit;
-                    }
-                }
-            }
-        }
+        eye::paint_brow(&mut buf, bit, y, style);
     }
     buf
-}
-
-/// 胶囊行内半宽：直段区全宽，圆角区取 sqrt 余量；越界返回 -1（空区间）。
-fn hw_at(py: i32, rc: i32, straight: i32) -> i32 {
-    if py <= straight {
-        W2
-    } else {
-        let rem = rc * rc - (py - straight) * (py - straight);
-        if rem <= 0 {
-            -1
-        } else {
-            (W2 - rc + (rem as f32).sqrt() as i32).min(W2)
-        }
-    }
 }
 
 /// 表情→眼形基态预设：16 态白名单各有面目（7 基态 + 4 情绪态 + 5 情绪/彩蛋态），

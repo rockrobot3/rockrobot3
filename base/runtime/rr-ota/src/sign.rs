@@ -289,8 +289,12 @@ pub fn rr3_image_digest(path: &Path) -> Result<([u8; 32], u64), String> {
 }
 
 /// 单次流式扫描：`cap` 存在时超限即停，避免坏包把磁盘读穿。
-fn rr3_image_scan(path: &Path, cap: Option<u64>) -> Result<([u8; 32], u64), String> {
-    let mut file = std::fs::File::open(path).map_err(|e| format!("打开镜像 {path:?} 失败: {e}"))?;
+/// 分块读镜像喂 sha256，边读边核声明字节数；返回（摘要，总字节数）。
+fn sha_file_chunks(
+    path: &Path,
+    file: &mut std::fs::File,
+    cap: Option<u64>,
+) -> Result<([u8; 32], u64), String> {
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 64 * 1024];
     let mut total: u64 = 0;
@@ -312,6 +316,11 @@ fn rr3_image_scan(path: &Path, cap: Option<u64>) -> Result<([u8; 32], u64), Stri
         hasher.update(&buf[..n]);
     }
     Ok((hasher.finalize().into(), total))
+}
+
+fn rr3_image_scan(path: &Path, cap: Option<u64>) -> Result<([u8; 32], u64), String> {
+    let mut file = std::fs::File::open(path).map_err(|e| format!("打开镜像 {path:?} 失败: {e}"))?;
+    sha_file_chunks(path, &mut file, cap)
 }
 
 /// 32 字节种子 / 公钥的十六进制解析（必须 64 位小写十六进制）。

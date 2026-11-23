@@ -339,9 +339,42 @@ fn rr3_contracts_render(s: &Rr3ContractsSnapshot) -> Value {
     })
 }
 
-/// sha256（FIPS 180-4）——纯函数，无查表依赖，正确性由 [`tests`] 的 NIST
-/// 标准测试向量钉死（空串 / 单字节 / 一块 / 填充临界 56 字节 / 跨三块 112 字节）。
-pub fn rr3_sha256(data: &[u8]) -> [u8; 32] {
+/// 消息填充：0x80 + 零 + 64 位大端位长（|msg| ≡ 56 mod 64）。
+fn sha_pad(data: &[u8]) -> Vec<u8> {
+    let bit_len = (data.len() as u64).wrapping_mul(8);
+    let mut padded = data.to_vec();
+    padded.push(0x80);
+    while padded.len() % 64 != 56 {
+        padded.push(0);
+    }
+    padded.extend_from_slice(&bit_len.to_be_bytes());
+    padded
+}
+
+/// 单块消息扩展：16 个原始大端字 + 48 个递推字。
+fn sha_schedule(block: &[u8]) -> [u32; 64] {
+    let mut w = [0u32; 64];
+    for (i, wi) in w.iter_mut().enumerate().take(16) {
+        *wi = u32::from_be_bytes([
+            block[i * 4],
+            block[i * 4 + 1],
+            block[i * 4 + 2],
+            block[i * 4 + 3],
+        ]);
+    }
+    for i in 16..64 {
+        let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+        let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+        w[i] = w[i - 16]
+            .wrapping_add(s0)
+            .wrapping_add(w[i - 7])
+            .wrapping_add(s1);
+    }
+    w
+}
+
+/// 64 轮压缩：状态 h 就地滚动累加。
+fn sha_compress(h: &mut [u32; 8], w: &[u32; 64]) {
     const K: [u32; 64] = [
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
         0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
@@ -354,61 +387,42 @@ pub fn rr3_sha256(data: &[u8]) -> [u8; 32] {
         0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
         0xc67178f2,
     ];
-    // 消息填充：0x80 + 零 + 64 位大端位长（|msg| ≡ 56 mod 64）
-    let bit_len = (data.len() as u64).wrapping_mul(8);
-    let mut padded = data.to_vec();
-    padded.push(0x80);
-    while padded.len() % 64 != 56 {
-        padded.push(0);
+    let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh] = *h;
+    for i in 0..64 {
+        let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+        let ch = (e & f) ^ ((!e) & g);
+        let t1 = hh
+            .wrapping_add(s1)
+            .wrapping_add(ch)
+            .wrapping_add(K[i])
+            .wrapping_add(w[i]);
+        let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+        let maj = (a & b) ^ (a & c) ^ (b & c);
+        let t2 = s0.wrapping_add(maj);
+        hh = g;
+        g = f;
+        f = e;
+        e = d.wrapping_add(t1);
+        d = c;
+        c = b;
+        b = a;
+        a = t1.wrapping_add(t2);
     }
-    padded.extend_from_slice(&bit_len.to_be_bytes());
+    for (hi, xi) in h.iter_mut().zip([a, b, c, d, e, f, g, hh]) {
+        *hi = hi.wrapping_add(xi);
+    }
+}
 
+/// sha256（FIPS 180-4）——纯函数，无查表依赖，正确性由 [`tests`] 的 NIST
+/// 标准测试向量钉死（空串 / 单字节 / 一块 / 填充临界 56 字节 / 跨三块 112 字节）。
+pub fn rr3_sha256(data: &[u8]) -> [u8; 32] {
+    let padded = sha_pad(data);
     let mut h: [u32; 8] = [
         0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
         0x5be0cd19,
     ];
     for block in padded.chunks_exact(64) {
-        let mut w = [0u32; 64];
-        for (i, wi) in w.iter_mut().enumerate().take(16) {
-            *wi = u32::from_be_bytes([
-                block[i * 4],
-                block[i * 4 + 1],
-                block[i * 4 + 2],
-                block[i * 4 + 3],
-            ]);
-        }
-        for i in 16..64 {
-            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
-            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
-            w[i] = w[i - 16]
-                .wrapping_add(s0)
-                .wrapping_add(w[i - 7])
-                .wrapping_add(s1);
-        }
-        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh] = h;
-        for i in 0..64 {
-            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-            let ch = (e & f) ^ ((!e) & g);
-            let t1 = hh
-                .wrapping_add(s1)
-                .wrapping_add(ch)
-                .wrapping_add(K[i])
-                .wrapping_add(w[i]);
-            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-            let maj = (a & b) ^ (a & c) ^ (b & c);
-            let t2 = s0.wrapping_add(maj);
-            hh = g;
-            g = f;
-            f = e;
-            e = d.wrapping_add(t1);
-            d = c;
-            c = b;
-            b = a;
-            a = t1.wrapping_add(t2);
-        }
-        for (hi, xi) in h.iter_mut().zip([a, b, c, d, e, f, g, hh]) {
-            *hi = hi.wrapping_add(xi);
-        }
+        sha_compress(&mut h, &sha_schedule(block));
     }
     let mut out = [0u8; 32];
     for (i, v) in h.iter().enumerate() {

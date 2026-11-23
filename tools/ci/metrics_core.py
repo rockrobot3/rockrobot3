@@ -241,12 +241,29 @@ def strip_code(src):
 
 
 def functions(src):
-    """(名字, 函数体) 列表；花括号配对取体，声明无体（trait 方法）跳过。"""
+    """(名字, 函数体) 列表；花括号配对取体，声明无体（trait 方法）跳过。
+
+    签名扫描按圆括号/方括号深度判定：`-> [u8; 32]` / `x: [u8; N]` 里的分号
+    属于类型而非声明终止，只有深度 0 的分号才是无体声明（2026-11-23 修：
+    旧写法把整类数组返回/参数函数漏出度量面）。"""
     out = []
     for m in re.finditer(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)", src):
-        body_at = src.find("{", m.end())
-        semi_at = src.find(";", m.end())
-        if body_at < 0 or (0 <= semi_at < body_at):
+        depth = 0
+        body_at = -1
+        k = m.end()
+        while k < len(src):
+            c = src[k]
+            if c in "([":
+                depth += 1
+            elif c in ")]":
+                depth = max(0, depth - 1)
+            elif c == "{" and depth == 0:
+                body_at = k
+                break
+            elif c == ";" and depth == 0:
+                break
+            k += 1
+        if body_at < 0:
             continue
         depth, k = 0, body_at
         while k < len(src):
@@ -261,12 +278,29 @@ def functions(src):
     return out
 
 
+def _bool_or(body):
+    """布尔短路 `||` 计数：排除零参闭包（`|| ...` / `move || ...` / `async || ...`）。
+
+    Rust 里 `||` 有两种词法：布尔或与零参闭包。旧写法把闭包也算判定点，
+    全仓 232 处假点（2026-11-23 修）——闭包不是分支，不进 McCabe。"""
+    hits = 0
+    for m in re.finditer(r"\|\|", body):
+        if re.search(r"\b(?:move|async)\s*$", body[: m.start()]):
+            continue
+        i = m.start() - 1
+        while i >= 0 and body[i] in " \t\n":
+            i -= 1
+        if i >= 0 and body[i] not in "([,=;{}>:":
+            hits += 1
+    return hits
+
+
 def cyclomatic(body):
     """McCabe 近似：1 + 判定点（if/for/while/loop/匹配臂/布尔短路/?）。"""
     points = 0
-    for pat in (r"\bif\b", r"\bfor\b", r"\bwhile\b", r"\bloop\b", r"=>",
-                r"&&", r"\|\|", r"\?"):
+    for pat in (r"\bif\b", r"\bfor\b", r"\bwhile\b", r"\bloop\b", r"=>", r"&&", r"\?"):
         points += len(re.findall(pat, body))
+    points += _bool_or(body)
     return 1 + points
 
 
