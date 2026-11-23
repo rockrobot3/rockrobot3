@@ -90,7 +90,10 @@ fn wake_ack_pcm_reused() {
     std::env::set_var(crate::cloud::RR3_API_KEY_ENV, "test-key");
     std::env::remove_var(crate::cloud::RR3_TTS_BACKEND_ENV);
     let cfg = rr3_brain_cfg_parse(&format!(
-            "[rr3-brain.cloud]\nbase_url = \"{}\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 1\n[rr3-brain.dialog]\n[rr3-brain.wake]\nenable = true\nphrases = [\"你好洛克\"]\nack = \"我在呢\"\nfollowup_ms = 30000\n",
+            // 本地假端点的超时给足：本用例钉的是"复用预合成 PCM"，
+            // 不是超时行为——1s 在共享 macOS runner 上会偶发 ASR 未发出即超时
+            // （2026-11-24 实测 host-macos 连红，Linux 绿）。
+            "[rr3-brain.cloud]\nbase_url = \"{}\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 30\n[rr3-brain.dialog]\n[rr3-brain.wake]\nenable = true\nphrases = [\"你好洛克\"]\nack = \"我在呢\"\nfollowup_ms = 30000\n",
             srv.base
         ))
         .unwrap();
