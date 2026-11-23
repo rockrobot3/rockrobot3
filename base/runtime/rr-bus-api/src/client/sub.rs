@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 收帧、reader 线程与派发（应答按 id 路由、其余进 inbox）。
 
 use std::os::unix::net::UnixStream;

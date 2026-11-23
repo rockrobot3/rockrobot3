@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! relay 原子件机制主体（五件套③，自原 src/relay.rs 逐字迁入，逻辑零改动）。
 //!
 //! 通断应用 + 变化判定（0.0.5 批I A-7）+ 运维计数键。参数裁决（只认真布尔）

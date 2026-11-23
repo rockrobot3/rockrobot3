@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 有界重试与错误分类（429/5xx/传输层可重试，其余不重试）。
 
 use std::time::Duration;

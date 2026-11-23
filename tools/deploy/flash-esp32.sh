@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # flash-esp32 —— 微型形态（ESP32）烧录封装脚本（0.0.5 增补轮六 批N9 件二，敞口 13
 # 烧录封装半边收口；另三件镜像装配/OTA/回滚仍敞）。
 #

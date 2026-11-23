@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! runtime 单测（文件头：本文件只放测试，生产面在 `runtime.rs`）。
 //!
 //! 拆分动因：`runtime.rs` 489 行、内联测试自 278 行起占近半，先按仓内同形搬出。

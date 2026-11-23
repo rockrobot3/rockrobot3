@@ -3,7 +3,7 @@ name = "espidf-sentinel"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.82"
-license = "UNLICENSED"
+license = "Apache-2.0"
 publish = false
 description = "0.0.7 批D1 层③ 哨兵（esp-rs std，内跑 rr-core::runtime 的真板消费者）"
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 命令行与总线路径解析（纯逻辑，平台无关）。
 
 use std::path::{Path, PathBuf};

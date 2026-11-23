@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// SPDX-License-Identifier: Apache-2.0
 //! 低电兜底**解除路径**的端到端（批N5 件二笔3，全案 §17 运维留痕 F-30 第三项）。
 //!
 //! 兄弟文件 `e2e_power.rs` 走真模块钉"置旗"半边（sim 电量 env 启动定格，恢复沿出不来）；

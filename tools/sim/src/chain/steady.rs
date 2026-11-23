@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! `--hold-ms` 稳态段：`rr3-ctl health` 逐拍聚合 + 收尾一次 `rr3-ctl status`
 //! （纯逻辑，单测可钉）。
 //!

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! manifest 校验面：必填字段、心跳/看门狗关系、发布前缀、能力形状、semver。
 
 use super::*;

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """流水线结构审计 CLI（规则核在 workflow_rules.py，自检在 workflows_audit_selftest.py）。"""
 
 import argparse

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! `rr3-ctl tail` 的 UDS 端到端用例（计划册 §16 第 6 项）：真起 `rr3-ctl`
 //! 子进程，对一台行为写死的假 rrd 走完 注册 → 事件过滤 → 收满退出 / 超时退出 /
 //! 断链退出 / 注册失败 四条路径。

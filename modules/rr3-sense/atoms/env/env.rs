@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! env 原子件入口（五件套②，0.0.5 批C① 原子重铺）：只声明公开面，机制在 mech.rs。
 //!
 //! 占格 `sensor.env`（atom.toml）。**占位件**（方案 §12.1）：SURFACE 摘要落位，

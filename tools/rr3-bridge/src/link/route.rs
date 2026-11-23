@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 双向路由：UART↔UDS 的字节搬运、换流与丢弃计数。
 
 use std::io::{Read, Write};

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装配演练单测：entry 改写、sim 变换与仓内装机布局前提。
 
 use super::*;

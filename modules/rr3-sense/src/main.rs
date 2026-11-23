@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-sense 入口（0.0.8 W-A 批3 拆分，ADR-0017 五层表装配层，≤80 行）。
 //! 装配只做启动编排：SURFACE 自述 → manifest 路径 → [`rr3mod::bootstrap`]（收敛
 //! 序列前四段）→ config 就绪行 → 音频源探活（[`boot`]）→ Dispatcher 构造 →

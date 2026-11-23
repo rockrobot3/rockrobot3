@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 证据根、执行编排与 domain 读/计划/提交。
 
 use super::*;

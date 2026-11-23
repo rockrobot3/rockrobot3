@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装配单文本与改写：sim 变换、entry 绝对化、装机布局与旁件拷贝。
 
 use std::path::{Path, PathBuf};

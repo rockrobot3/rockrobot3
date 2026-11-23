@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! AudioQueue 手写外部声明与 ASBD/Buffer 结构。
 
 use std::ptr;

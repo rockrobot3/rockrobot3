@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! [slots] 段解读：present 物理在位格位集与 device_absent 器件缺席登记。
 
 use std::collections::BTreeMap;

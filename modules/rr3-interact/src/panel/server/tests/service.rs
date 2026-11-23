@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 服务面：ctl 短连、槽位 RAII、派生失败不退循环、回环判定。
 
 use std::path::Path;

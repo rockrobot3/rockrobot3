@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 解码面：DecodeState 滚动账、拆帧出尽、四道门与坏帧/重同步记账。
 
 use std::sync::atomic::Ordering;

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ⑨-e 行程真值单点步骤体（门 g：旧行程键名与板侧旧行程常量名全仓零命中；
 #  docs/target/.embuild 与含字面量的本文件自身豁免）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 fail。

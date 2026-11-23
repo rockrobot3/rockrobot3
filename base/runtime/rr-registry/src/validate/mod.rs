@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! manifest / topics 校验。规则语义全部来自 `module.schema.toml` 的 `[rules]`。
 //!
 //! 规则清单（方案 §4 表格逐行落地）：

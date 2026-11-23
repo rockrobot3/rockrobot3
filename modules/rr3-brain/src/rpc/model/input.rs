@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 模型行入参面：必填/域名/键引用/active 的逐项 fail-closed 校验。
 //!
 //! `Rr3ModelRowInput` 是 upsert 的唯一入参形状；`key_ref` 三态由

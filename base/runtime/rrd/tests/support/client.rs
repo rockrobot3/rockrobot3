@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 裸 UDS 测试客户端：按连接排队、按谓词取帧与诊断。
 
 use super::*;

@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// SPDX-License-Identifier: Apache-2.0
 //! M3 音频链三真进程端到端：rrd + rr3-sense(sim) + rr3-interact(sim) 全是**真二进制**。
 //!
 //! 前面的 e2e 用的都是 sim_peer 夹具（行为脚本）；这一组把仓里两个真模块拉进同一条总线，

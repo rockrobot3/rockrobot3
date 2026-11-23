@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! module manifest 的字段/未知键/跨字段/申报面校验主链。
 
 use std::path::{Path, PathBuf};

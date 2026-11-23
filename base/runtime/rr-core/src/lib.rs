@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! # rr-core —— 机制核切片：总线语义层
 //!
 //! 承 ADR-0018（docs/process/adr/ 在册）裁定 1：机制核与操作系统无关、`no_std`（core+alloc）可达、契约级冻结。字节协议层

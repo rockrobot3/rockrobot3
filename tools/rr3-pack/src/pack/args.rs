@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 参数面：用法、逐参解析与 entry 形制门。
 
 use super::*;

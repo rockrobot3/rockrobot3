@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 执行轴档案投影：单轴/双轴/坏件/副本/轴错配。
 
 use super::super::*;

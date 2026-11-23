@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! llm 原子件入口（五件套②，批N32 件四 Rust 拆分收敛，ADR-0016）：只声明
 //! 公开面，机制在 mech.rs。占格 `cognition.llm`（atom.toml）。
 //! brain 启动自述是组合件级逐字面（main.rs 自印 publish/subscribe/rpc——Python

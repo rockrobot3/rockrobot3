@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! espidf-std-hello —— 0.0.5 增补轮四 批W1 espidf std 构建链冒烟件。
 //!
 //! 职责（全案 §3.3 C1）：证明 `cargo +esp build --target xtensa-esp32-espidf`

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! axis_write 单测（文件头：本文件只放测试，生产面在 `axis_write.rs`）。
 //!
 //! 拆分动因：`axis_write.rs` 509 行、内联测试自 283 行起占近半，先按仓内同形搬出。

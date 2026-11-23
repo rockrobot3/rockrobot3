@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-ota-ctl 单测（文件头：本文件只放测试，生产面在 `main.rs`）。
 
 use super::*;

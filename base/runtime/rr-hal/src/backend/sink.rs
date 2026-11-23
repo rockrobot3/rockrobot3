@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 音频输入/输出面选择（ALSA、macOS 真件、sim 与 ESP32 旁路）。
 
 use crate::{Rr3AudioSink, Rr3AudioSource, Rr3UnavailableSource};

@@ -2,7 +2,7 @@
 name = "rr3-connect"
 version = "0.0.1"
 edition = "2021"
-license = "UNLICENSED"
+license = "Apache-2.0"
 publish = false
 
 # 独立工程：modules/ 不在 base/runtime workspace 内

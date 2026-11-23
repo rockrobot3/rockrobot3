@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! wav 落盘面：头构造、建档、恢复头/真头的位置改写。
 
 use std::fs::{File, OpenOptions};

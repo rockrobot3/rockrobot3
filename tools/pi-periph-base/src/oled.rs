@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! SSD1306 传输薄壳（Pi 档）——**编码真值在 `periph-mech::oled_codec`，面目几何在
 //! `atoms/face/mech.rs`，本文件只做 I2C 事务、分块与重试**。
 //!

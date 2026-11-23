@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! led 原子件机制主体（五件套③，批I F3/A-1 重构：去线程去 mpsc → 纯状态机）。
 //!
 //! 状态机不持 gpio、不自持节拍：[`rr3_led_tick`]（自由函数，`now_ms` 注入）

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! backend 选择面与环境变量裁决的单元测试。
 
 use super::selector::{rr3_backend_parse, rr3_desc_fail_note};

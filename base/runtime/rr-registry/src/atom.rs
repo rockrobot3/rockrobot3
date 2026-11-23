@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! Atom manifest（`atoms/<名>/atom.toml`）的字段契约与校验（0.0.5 批B①，ADR-0019）。
 //!
 //! Atom 层 manifest 只声明四事（0.0.5 方案 §9）：占哪个格（`provides.slots`，每格一件

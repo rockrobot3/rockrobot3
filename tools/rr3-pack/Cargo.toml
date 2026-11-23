@@ -3,7 +3,7 @@ name = "rr3-pack"
 version = "0.0.1"
 edition = "2021"
 rust-version = "1.82"
-license = "UNLICENSED"
+license = "Apache-2.0"
 publish = false
 description = "deb 打包器：注入产物 + 仓内契约/装配单装配成发行版快路 deb（0.0.2 T5，ADR-0013 裁定 5）"
 

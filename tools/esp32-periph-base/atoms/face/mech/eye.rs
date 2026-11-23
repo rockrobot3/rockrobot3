@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! face 原子件 · 眼形几何（自 `mech.rs` 按职责拆出）。
 //!
 //! 只做形状求值与眉形像素落位，依赖画布常量与 [`super::EyeStyle`]；

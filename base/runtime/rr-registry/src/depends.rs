@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 跨 manifest 依赖仲裁（ADR-0009）。单件校验（`validate.rs`）看不到全集，故
 //! "可满足性 + 环检测"只在这份全集视图上做——CI 全集检查与 rrd boot 共用本实现，
 //! 不允许第二处真值。

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! staging 装配：骨架/模块/真值/配置/落位与自检。
 
 use super::*;

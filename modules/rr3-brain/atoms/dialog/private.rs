@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! dialog 唯一私有头（五件套⑤）：原子件内部共享的类型与常量。
 //! 私有性纪律：本文件项不进入口 re-export，跨域不可见（architecture.md §4.0.4）。
 //!

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 器件型号词表（增补轮六 §4.1b）：`contracts/devices.toml` 的集合视图。
 //!
 //! 生产真相只有 `contracts/devices.toml`。本文件实现它的装载与形状检查：

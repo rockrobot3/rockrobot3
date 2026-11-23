@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 自检应答族：并列五腿取数与 verdict 判定（判据纯函数化）。
 
 use std::time::Duration;

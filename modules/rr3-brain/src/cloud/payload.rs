@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 云应答/请求体的共享纯函数 re-export（W2-1）+ mock 文本。
 //!
 //! 请求体字节与应答解析的真值迁至 `rr-cloud-proto`（Pi/MCU 共用）；本层只保留

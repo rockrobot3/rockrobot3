@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ⑨-y 跨平台可编面：Windows 红 crate 基线 + ESP 专用工程协议头字段漂移。
 # 由 check.sh 在启动段 source；函数只读写 check.sh 的全局 fail/root。
 

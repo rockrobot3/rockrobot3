@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-act 真模块的装配单正门端到端（0.0.2 T4a；0.0.3 T3 意图执行面；
 //! ADR-0007/0012；Q1 裁定）。
 //!

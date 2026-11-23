@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! cli 的单测（自同名单测模块原样抽出，判据不变）。
 
 use super::*;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 板帧分类与音频 Event 四道门解析。
 
 use rr_ipc::{rr3_base64_decode, rr3_body_split, Rr3Header, Rr3PayloadType};

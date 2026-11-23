@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 链接参数接力（0.0.5 增补轮四 批W1）。
 //!
 //! esp-idf-sys 的 build 脚本经 `cargo:rustc-link-arg` 发射的 `--ldproxy-linker`

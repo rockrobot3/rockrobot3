@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! face 原子件机制主体（五件套③，自原 src/face.rs 逐字迁入，逻辑零改动）。
 //!
 //! 每态配 8x8 点阵帧序列（blink/talk 双帧、其余单帧）；[`Rr3Face::rr3_face_tick`]

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 真值集记账推导出的写口路径集与槽位查册。
 
 use super::*;

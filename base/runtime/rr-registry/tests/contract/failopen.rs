@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! Fix round 1 的 fail-open 封口：非字符串项、rpc_exposes 查册、空注册表。
 
 use super::*;

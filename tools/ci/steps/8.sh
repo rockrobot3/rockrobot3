@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ⑧ 件级判据三门（门 ⑧ 步骤体：⑧-a 两腿对拍计数 / ⑧-b 依赖闭包 grep /
 #    ⑧-c 注入面校验；含 C10 stub 反例自证；全 fail-closed）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 fail，并调用入口的共享助手 mod_lang。

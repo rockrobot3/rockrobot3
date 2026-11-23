@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 底噪统计与 VAD 阈值整定：帧 RMS 环形样本 → 中位/分位；噪声统计 + 注入
 //! 剖面 → VAD 阈值组。机制件零策略载荷：倍率与上下界全在 [`Rr3VadTune`]，
 //! 由装配按现场注入。

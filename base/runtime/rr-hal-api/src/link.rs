@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 链路契约：链路状态摘要、SSID 定长文本与链路读数面。
 
 use crate::err::{rr3_copy_trim, Rr3HalError};

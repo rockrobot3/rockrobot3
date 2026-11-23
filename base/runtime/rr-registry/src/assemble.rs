@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装配清单（`atoms/<名>/assemble.toml`，五件套④）的形状契约与注入缺校验
 //! （ADR-0019 修订 1 ③：L3 注入面从口号变成被校验的数据，0.0.5 批J G4）。
 //!

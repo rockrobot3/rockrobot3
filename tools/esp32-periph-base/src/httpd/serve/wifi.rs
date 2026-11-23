@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! WiFi 面：底层配置手抄、AP/STA 装配、有界等连与配网事务、boot 起栈链。
 //!
 //! 全部是 unsafe 壳层（IDF 全局状态）：调用时序纪律逐函数写在 `# Safety` 段

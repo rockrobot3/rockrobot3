@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 主流程与节拍：注册握手、心跳 N 拍、时序对表与看门狗。
 
 use std::thread;

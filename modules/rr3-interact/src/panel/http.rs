@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 面板 HTTP 编解码面：**进程内唯一**读写 HTTP 字节的地方。
 //!
 //! 分层理由（解析 / 渲染两面自持）：路由（`server.rs`）只认

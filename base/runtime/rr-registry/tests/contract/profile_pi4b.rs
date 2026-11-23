@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! Pi 4B 宿主档：classic/S3 桥板差异面与 host-only（N44）形状。
 
 use super::*;

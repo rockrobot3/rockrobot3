@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! binding 归属与格位查册：缺格、跨模块认领、基础层禁入。
 
 use super::super::*;

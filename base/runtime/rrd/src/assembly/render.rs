@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装配快照渲染面（自 assembly.rs 抽出）：pin/domain/wire/axis/role/checks 行投影
 //! 与 `rr3.ctl.wiring` 应答壳；纯函数，不碰全局态。
 

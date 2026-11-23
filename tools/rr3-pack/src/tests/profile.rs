@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装配单参数化与打包预验单测（自 tests.rs 同判据抽出，判据不变）。
 //!
 //! 覆盖 0.0.5 批K 的 `--profile` 正/反例、基-25 真值集缺册反例，以及

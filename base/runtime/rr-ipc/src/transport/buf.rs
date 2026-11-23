@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 所有权移交的整帧缓冲（ADR-0007 §裁定 3 的零拷贝形状）。
 //!
 //! 单块连续内存：`[0..RR3_IPC_HDR_SIZE)` 为头预留区（seal 前保持全 0），其余为 payload。

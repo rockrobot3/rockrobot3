@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 仓根/二进制定位与清单文本装配（自 drill.rs 抽出的同源实现）。
 
 use std::path::{Path, PathBuf};

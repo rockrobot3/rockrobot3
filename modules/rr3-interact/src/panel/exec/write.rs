@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 写口应答族：总线透传、主循环代执行、装配侧写口与模型密钥面。
 
 use serde_json::{json, Value};

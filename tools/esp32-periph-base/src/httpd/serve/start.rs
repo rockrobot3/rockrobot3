@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 配置腿起栈面（自 serve.rs 抽出）：NVS 凭据读链、起栈线程、httpd 注册与起栈打印。
 //!
 //! unsafe 壳层仍集中于此；HTTP 原语与 endpoint 留在父模块。

@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// SPDX-License-Identifier: Apache-2.0
 //! `rr3.call` 的线级用例（M3）：真 rrd 进程 + 两条裸连接（调用方 / 被调方）。
 //!
 //! 钉的是路由协议的**线上形状**：

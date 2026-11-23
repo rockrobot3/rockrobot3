@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rpc 单测（文件头：本文件只放测试，生产面在 `rpc.rs`）。
 //!
 //! 拆分动因：`rpc.rs` 553 行、内联测试自 264 行起占近半，先按仓内同形搬出。

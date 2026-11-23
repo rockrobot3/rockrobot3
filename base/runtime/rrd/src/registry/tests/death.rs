@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // 死亡/收尸/崩溃预算：与到期互斥收费、重注册后的预算延续。
 use super::*;
 

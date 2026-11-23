@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rrd 各单测共享的夹具函数（仅测试面编入，`#[cfg(test)]`）。
 //!
 //! 抽取原则与 `tests/support/mod.rs` 同一条：同一段夹具代码出现第二次就该是个函数，

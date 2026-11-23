@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 云档、密钥双源与 secrets 现读（含 key_ref 语法与就位判据）。
 
 use serde_json::Value;

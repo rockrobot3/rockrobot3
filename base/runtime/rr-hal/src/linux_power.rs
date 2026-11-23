@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! linux（I2C）电池读数后端：INA219 总线电压（R18 扩围，0.0.6 方案 §5.4/
 //! 判据 12，BOM #5 定案在前——INA219@0x40，"电阻分压 + ADS1115"为存档备选）。
 //!

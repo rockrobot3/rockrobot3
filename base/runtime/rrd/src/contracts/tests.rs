@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! contracts 单测（文件头：本文件只放测试，生产面在 `contracts.rs`）。
 //!
 //! 拆分动因：`contracts.rs` 588 行、距 600 行门只剩十余行余量，先把测试面搬出。

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 摘要与错误：成功结论文案、逐模块登记、ota 留痕与日志尾部。
 
 use std::path::Path;

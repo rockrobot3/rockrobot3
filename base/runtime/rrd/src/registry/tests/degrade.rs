@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // 降级与恢复：能力提供者全灭/回归、依赖饱和、事实回读。
 use super::*;
 

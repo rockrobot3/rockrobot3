@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! uds 传输：M2 唯一落地实现（ADR-0006 §5 / ADR-0008）。
 //!
 //! `Rr3UdsListener` 实现 [`Rr3TransportEndpoint`] + [`Rr3TransportListener`]，

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-brain 协议面：ops 白名单读写与模型行 CRUD/连通性测试。
 
 mod model;

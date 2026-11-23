@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! PCM 环形缓冲与 s16le 解码。
 
 use std::collections::VecDeque;

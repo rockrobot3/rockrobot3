@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // registry 的单元测试：状态机全转移、索引维护、扇出与降级路径。
 // 测试是 registry 的后代模块，可触私有字段（与实现同口径）。
 use super::*;

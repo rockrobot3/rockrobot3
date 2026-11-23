@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-ota-ctl —— OTA 槽位查看/切换、回滚链与制品签名 CLI。
 //!
 //! 子命令：

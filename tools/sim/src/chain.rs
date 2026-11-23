@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! `--chain` 演练（0.0.6 批F4 sim 档，§5.2 判据 10）：六真进程全链 mock 闭环。
 //!
 //! rrd（boot spawn rr3-sense）+ 外部 rr3-brain + rr3-interact + rr3-act + 演练自带

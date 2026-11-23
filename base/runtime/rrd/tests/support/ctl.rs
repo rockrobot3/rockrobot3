@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! ctl 面集成助手：一问一答、夹具注册、应答后即断断言。
 //!
 //! 两个消费面（`e2e_ctl.rs` 的查询面与 `e2e_counters.rs` 的计数闭环）共用同一

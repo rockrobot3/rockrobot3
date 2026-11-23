@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-interact 接入层（0.0.8 W-A 批4 拆分，ADR-0017 五层表接入层）。
 //!
 //! config schema 解析（自原 composite.rs 迁入：MC-10 I-11 起四段活值面——

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! [[supplies.domain]] 段解读：键表驱动的逐域取数与未知键点名。
 
 use super::super::model::*;

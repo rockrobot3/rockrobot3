@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! # rr-bus-api
 //!
 //! 总线**承载契约面**（模块侧同步 UDS 客户端，基-35 窄化②，批N9 件一）：照

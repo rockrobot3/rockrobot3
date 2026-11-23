@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 音频契约：上行拾音源与下行播放面。
 
 use crate::cfg::Rr3AudioCfg;

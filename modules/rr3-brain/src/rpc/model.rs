@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 模型行面（ADR-0023）：行表快照、CRUD 落盘、连通性探测。
 
 use serde_json::{json, Value};

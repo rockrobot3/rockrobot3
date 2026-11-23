@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 连接建立、注册、心跳线程与超时收尾。
 
 use std::collections::{BTreeMap, HashMap};

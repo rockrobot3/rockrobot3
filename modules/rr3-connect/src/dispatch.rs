@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-connect 机制层注册面（0.0.8 W-A 批2 拆分，ADR-0017 五层表机制层）。
 //!
 //! [`Rr3ConnectDispatcher`] 实现 rr3mod [`Dispatcher`]（serve 骨架回调）：

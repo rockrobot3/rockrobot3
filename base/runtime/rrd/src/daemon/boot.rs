@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装配链与启动摘要：boot 产物构造、后端/降级点名、日志落盘与独占绑定。
 
 use std::collections::BTreeSet;

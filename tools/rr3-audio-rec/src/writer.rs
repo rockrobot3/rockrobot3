@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 写线程：占位头 → 逐片写透并推进盘侧真相（失败补恢复头退 1）。
 
 use std::fs::File;

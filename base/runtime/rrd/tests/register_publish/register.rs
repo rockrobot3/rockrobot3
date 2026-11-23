@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 注册面：发号/重复/保留名/坏 manifest/退订/应答点对点。
 
 use super::register_sima;

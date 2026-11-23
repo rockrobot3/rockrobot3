@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装配装载：装配单/契约册装载、装载期校验编排与 boot 输入构造。
 
 use std::collections::{BTreeMap, BTreeSet};

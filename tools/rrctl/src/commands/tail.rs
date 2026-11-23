@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! `tail` 子命令：订阅一个主题，把 Event 以 JSONL 逐条写 stdout（计划册 §15
 //! 第 2 项；DoA 标定与现场排障共用）。
 //!

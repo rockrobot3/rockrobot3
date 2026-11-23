@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 加载 `module.schema.toml` 字段契约。schema 与代码同仓，编译期即随二进制内嵌。
 
 use toml::Value;

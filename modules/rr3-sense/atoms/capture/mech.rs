@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! capture 原子件机制入口（W1-2 抽取后）：机制主体住在 `rr-audio-mech`，本文件
 //! 保留件面 re-export 与两腿对拍锚（⑧-a 按内容执法，机器锚必须留在机制源文件内）。
 //!

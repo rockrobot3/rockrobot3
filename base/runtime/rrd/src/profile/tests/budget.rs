@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 功耗与内存预算的单测（批B14 自 `tests.rs` 按被试族切出）。
 //!
 //! 覆盖 ⑨ 预算判据的实体反例组、装载链红绿三态（超 cap、power pin 未覆盖、

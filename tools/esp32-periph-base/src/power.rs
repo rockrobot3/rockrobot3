@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 5V 轨电压采样（平台适配薄壳）——判定机制已迁 `periph-mech`（P0-A A3）：
 //! 分压换算、双阈值电平分类与迟滞边沿全在机制核，本文件只留 ADC 通道装配与
 //! 一次采样（读 raw + 标定 mV 同拍一致）。

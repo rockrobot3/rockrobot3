@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 云 HTTP 传输面（W6-2 自 cloud.rs 抽出；W7-b2 增流式读）：`esp_http_client` +
 //! mbedTLS 证书束，单轮串行。请求体装配与应答解析在 `rr-cloud-proto`，本件只做
 //! 字节收发与状态码收敛；错误文案形状是重试判据的输入（`rr3_cloud_retryable` 同源）。

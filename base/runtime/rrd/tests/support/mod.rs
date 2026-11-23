@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 集成测试助手：起**真 rrd 子进程** + 裸 UDS 客户端，断言线级行为。
 //!
 //! M2 Task 9 起它还管**第二个真进程**：`SimPeer`（跑 `rrd` 包的 `sim_peer` 二进制）与

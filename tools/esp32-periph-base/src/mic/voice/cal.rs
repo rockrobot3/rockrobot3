@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! voice 开机底噪标定策略：满窗中位数 → 阈值剖面 → VAD/DoA 门限同步。
 
 use rr_audio_mech::{rr3_vad_tune, Rr3NoiseEst};

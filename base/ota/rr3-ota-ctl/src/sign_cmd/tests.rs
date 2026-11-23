@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 原子写的文件边界单测。
 //!
 //! 为什么单独成文件：`main.rs` 已贴着 600 行上限，文件边界新用例放这里，

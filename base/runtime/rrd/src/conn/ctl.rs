@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 控制旁支面（自 `conn.rs` 抽出，批B12 件三）：`rr3.ctl.*` 一次性查询连接。
 //!
 //! ADR-0010 裁定 2/4：ctl 连接不注册、不进在册表、不受 watchdog 管——在册表是

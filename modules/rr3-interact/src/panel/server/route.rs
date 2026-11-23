@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 面板路由面：方法 + 路径 + body → 分派（纯函数，无 I/O）。
 //!
 //! 端点真值单点 = [`super::RR3_PANEL_ROUTES`]；本文件只切判读面（sys/mod/cfg/act

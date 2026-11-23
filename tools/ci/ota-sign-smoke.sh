@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # OTA 签名/验签演练（ADR-0026，A1c）：CI 用临时测试种子走完整链路，
 # 不触碰真实私钥；正例一条 + 负例四条（镜像篡改/清单篡改/错公钥/降级）。
 #

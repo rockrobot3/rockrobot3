@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 引脚派生机制：平台词形匹配、九物理键取值法与字段在场判定。
 
 use rr_registry::Rr3PlatformTable;

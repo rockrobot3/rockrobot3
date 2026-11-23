@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 守护主循环骨架：装配、绑定、线程起序、boot 投递与 accept 交棒。
 
 use std::sync::{mpsc, Arc, Mutex};

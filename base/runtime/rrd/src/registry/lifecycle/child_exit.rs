@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 子进程退出码那一路：在册崩溃/不在册早退的记账与判定。
 
 use super::super::*;

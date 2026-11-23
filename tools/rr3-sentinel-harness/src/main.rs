@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-sentinel-harness —— 批D1 层③ 哨兵的宿主对手件。
 //!
 //! 扮演**总线侧**（rrd 位形，走 rr-ipc 的 Rr3UartConn + blanket conn 同源帧语义）：

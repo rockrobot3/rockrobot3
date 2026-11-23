@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ⑭ 装载门体量基线门步骤体（锚函数块行数 / 读表样板 / 同形函数，基线只降不升）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 fail 与 prof_src。
 

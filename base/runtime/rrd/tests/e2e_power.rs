@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-power 真模块的低电兜底端到端（0.0.2 T4b；ADR-0007/0012；Q4 裁定）。
 //!
 //! 走 `--profile` 装配单正门（与 e2e_act 同一装机布局）起**真 rr3-power**，钉 Q4 的

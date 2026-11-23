@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! counters 单测（文件头：本文件只放测试，生产面在 `counters.rs`）。
 //!
 //! 拆分动因：`counters.rs` 生产面（路径判定 / 原子写序 / 闸门 / 异步线程）与测试

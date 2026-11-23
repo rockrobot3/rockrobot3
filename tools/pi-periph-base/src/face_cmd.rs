@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 表情/点阵渲染臂与 OLED 文本重绘。
 
 use rr_periph_proto::ports::Rr3PwmChannel;

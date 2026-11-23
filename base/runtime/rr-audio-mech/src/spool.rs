@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 语音段 flash spool 记录机制（ADR-0031 裁定 1/3）：分区布局、记录头、顺序写、
 //! 分块读与 CRC 校验。零平台依赖——具体擦/写/读由调用方实现 [`Rr3SpoolIo`]。
 //!

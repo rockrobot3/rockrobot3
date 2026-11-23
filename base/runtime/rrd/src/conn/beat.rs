@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 心跳面（自 `conn.rs` 抽出，批B12 件五）：心跳计数归并 → D-6 三态回报 →
 //! Promoted 时的 running 广播与依赖恢复传播。
 //!

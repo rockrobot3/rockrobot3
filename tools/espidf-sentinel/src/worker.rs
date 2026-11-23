@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 哨兵线程循环面：心跳拍点、收帧分类、入站点名应答。
 //!
 //! crate root 只做启动装配（UART 半体拆分、共享态、注册、线程拉起）；本文件承接

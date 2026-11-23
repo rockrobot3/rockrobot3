@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! espidf-sentinel —— 0.0.7 批D1 层③ 哨兵（esp-rs std，机制核 `rr-core::runtime`
 //! 的真板消费者）。
 //!

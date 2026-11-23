@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! daemon 面单测：并发槽、低电点名帧、socket 放行、启动摘要与降级原因。
 
 use std::sync::atomic::{AtomicUsize, Ordering};

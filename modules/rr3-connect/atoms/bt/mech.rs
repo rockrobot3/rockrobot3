@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! bt 原子件机制主体（五件套③，自原 src/bt.rs 逐字迁入，逻辑零改动）。
 //!
 //! 蓝牙（BlueZ）：配网备选通道的链路状态机骨架（0.0.4 方案 D5/Q5）。

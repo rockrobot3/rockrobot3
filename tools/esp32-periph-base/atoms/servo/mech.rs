@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! servo 原子件 · 机制核（批N23 件一，MC-7 缺② 收编原子模块形态）。
 //!
 //! **格位对齐申报**：本件服务 `act.servo` 格位（esp32-mini 装配单格主 = rr3-act

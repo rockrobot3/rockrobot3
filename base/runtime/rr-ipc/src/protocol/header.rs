@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! A-IPC 128B 定长消息头（Layout C）常量与编解码。
 //!
 //! 偏移/长度必须与 `contracts/envelope.schema.json` 的 `x-offset-table` 完全一致，

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 执行/传感契约：GPIO、舵机、显示、环境采样、数字输入与执行件动作面。
 
 use crate::err::{Rr3ErrText, Rr3HalError};

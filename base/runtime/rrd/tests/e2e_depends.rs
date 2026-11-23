@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// SPDX-License-Identifier: Apache-2.0
 //! ADR-0009 裁定的线级证据：boot 依赖仲裁（裁定 1/2）与降级传播（裁定 3/4）。
 //!
 //! 三条用例对应三个裁定面：

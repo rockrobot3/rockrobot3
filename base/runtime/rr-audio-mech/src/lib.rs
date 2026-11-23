@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 本地语音机制核：VAD 边沿检测 + 双麦 TDOA 判向 + 多通道下混，整数运算，
 //! 零平台依赖。VAD 自 `rr3-sense` 的 vad 原子件抽出（W1-1），DoA/下混自
 //! capture 原子件抽出（W1-2），行为与 golden 向量逐字保留。

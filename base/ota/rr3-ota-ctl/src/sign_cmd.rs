@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! OTA 制品签名/验签子命令（ADR-0026）。
 //!
 //! 机制全在 `rr-ota::sign`；本文件只做参数形制、文件读写与原子落盘。

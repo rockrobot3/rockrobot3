@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-act 协议层（0.0.8 W-A 批5 拆分，ADR-0017 五层表协议层）。
 //!
 //! 点名执行两 handler（servo/command 低电闸门 → 拒动判据 → 参数裁决 → HAL 落角；

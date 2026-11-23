@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-connect 协议层（0.0.8 W-A 批2 拆分，ADR-0017 五层表协议层）。
 //!
 //! 四点名 handler（cloud/session / wifi/scan|connect|forget，自原 composite.rs

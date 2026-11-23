@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 语音段 flash spool 的 ESP 分区后端与写线程（ADR-0031，W7-b1a/W7-b3b）。
 //!
 //! 机制（记录头 magic/len/CRC、顺序写、分块读、断电语义）在

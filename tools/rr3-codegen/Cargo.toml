@@ -2,7 +2,7 @@
 name = "rr3-codegen"
 version = "0.1.0"
 edition = "2021"
-license = "UNLICENSED"
+license = "Apache-2.0"
 publish = false
 description = "0.0.5 增补轮六 批N1 n1-8：契约真值点 → 板侧常量表生成器（全案 §4.5 生成物表；重跑 diff 为空 = 门 f 拟 ⑨-d）"
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 模型行投影面：行表读取、字段读取、active 点名与单行投影。
 //!
 //! 只做"行数据 → 可回显视图"，不碰落盘与 CRUD；入口由父模块调用。

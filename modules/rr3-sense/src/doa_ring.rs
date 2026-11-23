@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 判向窗环形缓冲（0.0.8 批 b3b；批D1 自 dispatch.rs 迁出）。
 //!
 //! 双麦链路的 TDOA 积累器：原始多通道帧在下混**之前**按帧交错写入，onset

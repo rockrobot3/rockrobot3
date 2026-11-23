@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 事后校验与断言：等模块 running、rr3-ctl 巡检与 denied_publish 归零门。
 
 use std::path::Path;

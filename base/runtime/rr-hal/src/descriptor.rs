@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 物理绑定描述符（ADR-0018 裁定 4、批D④ 收口）：**这块板/平台是什么的唯一数据
 //! 事实源**。引脚/控制器编号/总线/设备名收进声明式描述符（`profiles/<机型>.toml`
 //! 的 `[hardware]` 段），由 rrd 装配链序列化注入 `RR3_HAL_BINDINGS`；`RR3_HAL_*`

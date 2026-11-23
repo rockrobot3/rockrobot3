@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 总线字节流窄缝（批J G1，ADR-0018 修订 1 ③ / 修订 3 ①，architecture §12.8 接缝二）。
 //!
 //! 机制核面的一条**两方法缝**：无错误类型、不引 `std::io`、不装箱——板侧要接总线

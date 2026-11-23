@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! [assemble] 表逐段校验：版本/顶层键/空面/handles/ops/demands/内存账。
 
 use super::*;

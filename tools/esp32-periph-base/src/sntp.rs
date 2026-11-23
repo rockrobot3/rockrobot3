@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 自治形态的网络时间（W3-2a）：开机 SNTP 对时，失败显式点名、不静默降级。
 //!
 //! 只在 `--features autonomy` 时编译；默认外设底座固件零行为变化。

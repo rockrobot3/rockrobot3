@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 证据引用校验（brain B-15，批N4 件一）：真板对拍/实测证据的唯一形制真值。
 //!
 //! D11 的 `armed=true` 界面门（"必须引用一条真板对拍证据的编号"）与

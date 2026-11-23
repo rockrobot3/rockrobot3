@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ⑩ 门 d 面板覆盖率对账·基线钉数门（门 10 步骤体：分子 covers 申报 + applies
 #    生效路径 / 分母字段级五路并集；基线双行 fail-closed）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 fail 与 ⑨-a 的 ga_* 临时文件

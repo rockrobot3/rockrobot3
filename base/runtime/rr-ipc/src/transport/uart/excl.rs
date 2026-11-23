@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 串口排他账本：flock 非阻塞抢占、进程内路径表与忙错文案。
 
 use super::*;

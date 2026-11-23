@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # rr-core 机制核 xtensa 对拍门（0.0.5 第 II 轮 批D⑤，ADR-0018 裁定 1/3/5）。
 # rr-core 是 no_std 机制核切片（总线语义 / 模块运行时 / 控制原语 / 安全核）：宿主 std
 # 测试面由 check.sh ①/①b 覆盖；本门补**无 OS 裸机面**——在 xtensa-esp32-none-elf（无

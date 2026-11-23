@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 握手面：首帧形状/dst 门禁与静默连接的收尾。
 
 use super::support::*;

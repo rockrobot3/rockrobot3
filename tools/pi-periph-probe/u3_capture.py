@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """U3 命令面 canonical digest 抓取（Pi 直连板，classic/S3 同口径）。
 
 用法: python3 u3_capture.py <输出文件路径>

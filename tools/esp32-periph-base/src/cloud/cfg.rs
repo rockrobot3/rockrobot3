@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 云配置与凭据（NVS）：TTS/ASR/LLM 的 base/model/voice/key 读写、形制门与写口解析。
 //! key 只存 NVS，永不出日志/回显（零回显墙同 `cred`）。本件不碰 HTTP/线程——
 //! 传输在 `cloud/http`，编排在 `cloud`，流式播放在 `cloud/tts`。

@@ -3,7 +3,7 @@ name = "rr3-mkmod"
 version = "0.0.1"
 edition = "2021"
 rust-version = "1.82"
-license = "UNLICENSED"
+license = "Apache-2.0"
 publish = false
 description = "rr3-mkmod：新模块脚手架（生成即过契约校验）"
 

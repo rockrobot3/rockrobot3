@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 整轮编排的总线窄化、应答体与云端客户端重建。
 
 use super::*;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 起进程的唯一漏斗：低电闸、旧 handle 清理、环境注入与成功/失败记账。
 
 use std::collections::BTreeMap;

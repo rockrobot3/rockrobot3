@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """V5 长跑稳定性探针——音频流 + 命令面 + 舵机动作并发 10 分钟，全程对账。
 
 并发形态（模拟真实宿主工作负载，比 full_smoke 的单项断续严苛）：

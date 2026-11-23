@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // 心跳与到期：提升、显式单调毫秒、到期回报内容。
 use super::*;
 

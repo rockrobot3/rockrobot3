@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """帧面（128B 头 + CRC32）实机验证：rr3.call 主题点名 + rr3.set_bindings 注入。
 
 用法: python3 frame_probe.py [termios 常量名，缺省 B1500000]

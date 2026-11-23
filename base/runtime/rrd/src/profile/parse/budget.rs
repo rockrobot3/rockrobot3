@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! [supplies.budget] 段解读：不适用位、三数键与分档自洽判据。
 
 use std::collections::BTreeMap;

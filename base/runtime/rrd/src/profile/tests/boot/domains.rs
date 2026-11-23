@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 电力域与证据判据：武装/测点/绑定位/证据形制与容器核验。
 
 use super::super::*;

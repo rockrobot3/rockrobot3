@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """串口控制台采集器：显式释放 DTR/RTS 后收原始字节（macOS/Linux 通用）。
 
 现场教训（W7 控制台根修）：`cat` 或裸 `stty` 打开 CH340 时 DTR/RTS 常停在

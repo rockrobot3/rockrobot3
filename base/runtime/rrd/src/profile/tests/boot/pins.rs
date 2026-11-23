@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 引脚装载判据：角色查册、per_instance、requires、direction、形状与供电轨。
 
 use super::super::*;

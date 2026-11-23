@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! periph-mech —— 外设机制核（P0-A，骨架轨与板侧后端的共同前置）。
 //!
 //! ## 为什么单独成 crate

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 整轮计账与唤醒用例。
 
 use super::*;

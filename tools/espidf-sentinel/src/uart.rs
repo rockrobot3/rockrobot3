@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! UART2 半分体 → 窄缝适配：TX/RX 两个 Read/Write 半体。
 //!
 //! 半体来自全双工 `UartDriver` 的 split；`unsafe impl Send` 的安全性论证

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 白名单序帧表与表情名查表：52 项帧序列，下标与白名单对齐。
 
 use super::super::{Rr3FaceFrame, RR3_FACE_EXPRESSIONS};

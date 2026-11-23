@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-brain 入口（批N32 迁移件1 立树，ADR-0017 五层表装配层，≤80 行）。
 //! 装配只做启动编排：SURFACE 自述（[`dispatch::rr3_brain_surface`]）→
 //! [`rr3mod::bootstrap`]（收敛序列前四段——启动序遵固定序，Python 侧「config 先于

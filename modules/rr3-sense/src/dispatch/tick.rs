@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 采集拍：读帧、判向窗积累、下混发布、VAD 边沿与 pacing。
 
 use std::time::Instant;

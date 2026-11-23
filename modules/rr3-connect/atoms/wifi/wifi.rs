@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! wifi 原子件入口（五件套②，0.0.5 批C④ 原子重铺）：只声明公开面，机制在 mech.rs。
 //!
 //! 占格 `net.wifi`（atom.toml）。SURFACE 是启动自述（组合件 rr3_connect_run 开头

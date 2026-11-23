@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! ESP32-S3 N16R8（xtensa-esp32s3-espidf）引脚装配对账锚。
 //!
 //! 与 classic 的关键差异：**GPIO26–37 被 16MB Flash / 8MB Octal PSRAM 占用**，

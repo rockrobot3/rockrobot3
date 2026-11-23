@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 拾音面：Rr3MacAudioSource 与输入流。
 
 use std::collections::VecDeque;

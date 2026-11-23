@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// SPDX-License-Identifier: Apache-2.0
 //! 门 r 留痕通道定形的线上级证据（批N4 件八）：rrd spawn 的子进程 stderr 落进
 //! per-unit 日志文件 `<socket>.log/<unit>.log`（append）——模块留痕不再进被丢弃的流
 //! （stdout 是 `Stdio::null()`，原先 45 处 `println!` 按设计不可达任何去处）。

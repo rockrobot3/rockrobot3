@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! probe 单测（文件头：本文件只放测试，生产面在 `probe.rs`）。
 //!
 //! 拆分动因：`probe.rs` 505 行、内联测试自 276 行起占近半，先按仓内同形搬出。

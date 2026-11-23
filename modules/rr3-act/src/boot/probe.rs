@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! HAL 执行面三面选择与开机探活编排（舵机 / LED / 继电器）。
 
 use rr3mod::BusHandle;

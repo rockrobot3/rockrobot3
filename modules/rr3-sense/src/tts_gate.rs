@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 播放期门控状态机（0.0.8 批 b2 订阅面，批D1 自 dispatch.rs 迁出）。
 //!
 //! 吃 brain 的 `tts_pcm` 帧流（帧体 `ms` = 块内样点时长），按"与上一帧间隔

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 运维计数聚合、装配缺项预降级与能力提供者表。
 
 use super::super::*;

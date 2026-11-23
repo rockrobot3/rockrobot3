@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 应答组帧（板侧）+ 应答解析（宿主侧）。
 //!
 //! 板侧：`result` 在位（业务性失败折 `{"error": 文案}`——宿主解析契约），

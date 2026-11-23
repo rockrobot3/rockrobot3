@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! OTA 制品签名与验签（ADR-0026）。
 //!
 //! 本模块只做三件事：严格解析/渲染行式 manifest、Ed25519 签名/验签、

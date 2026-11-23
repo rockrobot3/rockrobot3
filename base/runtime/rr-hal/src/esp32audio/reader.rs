@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 读线程：会话主循环、拆帧记账、命令排水与心跳节拍。
 
 use std::io::Write as _;

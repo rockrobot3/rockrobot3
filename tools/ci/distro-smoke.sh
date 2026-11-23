@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # distro-smoke —— 发行版快路轨冒烟（0.0.2 T5 / D8，ADR-0013 裁定 5 首证）。
 #
 # 单步容器（rust:bookworm，glibc 自洽）内完成：构建 → 打包器单测 → 组装注入产物 →

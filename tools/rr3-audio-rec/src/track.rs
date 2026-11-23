@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 记账面：seq 连续性/重启、DoA 冒烟出角、板侧声明率与连续段实测率。
 
 use std::sync::atomic::Ordering;

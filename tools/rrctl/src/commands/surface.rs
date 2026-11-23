@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装配与契约两个只读读面的渲染（续轮十五）：`rr3.ctl.wiring` /
 //! `rr3.ctl.contracts` 的应答在这里成人读表。判据真值在 rrd 的装配/契约面，
 //! 本文件只透传；`available:false`（`--manifest` 调试路径）如实报不可得。

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-power 装配数据形状（自 boot.rs 抽出，字段与语义逐字不变）。
 //!
 //! 独立成件让接入层（boot 解析/就绪编排）与机制层（dispatch 执行）共同依赖

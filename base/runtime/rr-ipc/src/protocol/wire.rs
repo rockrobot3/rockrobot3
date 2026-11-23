@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 帧数据形状与整帧字节化（ADR-0018 机制核切片：批D₁ 下沉）。
 //!
 //! 从 `transport::frame` 平移而来的**纯数据与纯逻辑**部分——`Rr3Frame` / `Rr3FrameError`

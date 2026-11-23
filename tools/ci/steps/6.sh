@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ⑥ 独立工程测试接线步骤体（find 与 ④ 同口径；0 工程即门禁失效）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 fail via run_tests。
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! [bindings] 与 [enabled_slots] 段解读：格位→模块与模块→格位集的收册。
 
 use std::collections::BTreeMap;

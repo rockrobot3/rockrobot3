@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # flash-artifact —— 烧录 CI 制品（ELF），**不构建**（W7-b4 起：本地资源有限，
 # 固件一律来自流水线制品；本脚本只做校验 + espflash）。
 #

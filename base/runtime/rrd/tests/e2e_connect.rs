@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-connect 真模块的装配单正门端到端（0.0.2 T4c；ADR-0007/0012）。
 //!
 //! 与 e2e_act / e2e_power 同一装机布局：`--profile` 装配单正门起**真

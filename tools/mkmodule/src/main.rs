@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! `rr3-mkmod` CLI：生成模块骨架五件与原子件五件套。
 //!
 //! 用法与参数裁决在 `usage`/`parse`；生成机制在库侧 `rr3_mkmod_generate`

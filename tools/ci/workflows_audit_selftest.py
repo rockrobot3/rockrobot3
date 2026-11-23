@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """流水线结构审计自检夹具：24 条正/负例（与规则核分离，保持单文件 <500 行）。"""
 
 import pathlib

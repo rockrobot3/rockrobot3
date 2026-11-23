@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr-hal-api —— 能力面契约（no_std，ADR-0018 修订 1 ③，0.0.5 批I F1）。
 //!
 //! 件 ↔ 硬件的唯一契约面：10 trait **同步签名**、去 `Send + Sync`、值类型去

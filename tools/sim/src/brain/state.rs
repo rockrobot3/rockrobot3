@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 会话与状态账：夹具、进程起停、有界等待与巡检报告。
 
 use std::path::Path;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr-hal —— 硬件抽象层实现层（architecture.md §5）。
 //!
 //! 契约层在 [`rr-hal-api`](../rr-hal-api)（no_std，ADR-0018 修订 1 ③，批I F1）：

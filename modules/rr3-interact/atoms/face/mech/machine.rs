@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 最小表情机：当前表情、talk 挂起恢复与帧指针推进。
 
 use super::super::{rr3_face_expr_lookup, RR3_FACE_TALK};

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! e2e-act 阶段助手（自 `e2e_act.rs` 主用例按阶段抽出，判据不变）。
 //!
 //! 每个助手只做一段可独立判读的线上事实：夹具落盘、正门启动、三面 RPC、三面

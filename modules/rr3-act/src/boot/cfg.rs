@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! config schema 解析：`[rr3-act.*]` 四段下钻与逐键点名。
 
 use crate::led::{Rr3LedEffect, RR3_LED_EFFECT_VALUES};

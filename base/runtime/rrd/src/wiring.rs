@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装机接线档 `hardware/<形态>/wiring.toml`（增补轮六 §4.3）：机器可查、人照它插线。
 //!
 //! 接线档把接线变成**可检查的数据**：面板出图、出厂自检逐条点名、`rated_a` 与

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! roles 单测（文件头：本文件只放测试，生产面在 `roles.rs`）。
 //!
 //! 拆分动因：`roles.rs` 516 行、内联测试自 268 行起占近半，先按仓内同形搬出。

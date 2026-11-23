@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 写口参数面：target/键/值的形状核与白名单（parse 层）。
 
 use super::*;

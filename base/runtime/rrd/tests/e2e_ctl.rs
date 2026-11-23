@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// SPDX-License-Identifier: Apache-2.0
 //! F3（ADR-0010）：`rr3.ctl.*` 控制查询面的线级用例。
 //!
 //! 判据形状：

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 子进程日志与等待助手：逐行收取、按内容等行、按 key 抽数、有界轮询。
 //!
 //! 与 `RrdTest`/`SimPeer` 共用一份口径（两处各写一份逐行读码，EOF 与超时的

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 板面音频会话握手（A 批 c2 自 tools/rr3-audio-rec 上提的机制单点）。
 //!
 //! 板面音频会话的行命令协议（`AUDIO OFF`/`AUDIO ON` + 行应答）与开口/断流

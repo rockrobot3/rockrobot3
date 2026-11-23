@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! sim 波形模式与 `RR3_HAL_SIM_WAVE` 取值解析。
 
 /// sim 波形模式（环境变量 `RR3_HAL_SIM_WAVE` 的取值集，见 `backend.rs`）

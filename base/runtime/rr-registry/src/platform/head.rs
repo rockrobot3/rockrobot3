@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 平台表顶面三事：七键封闭、schema_version、platform 名。
 
 use super::*;

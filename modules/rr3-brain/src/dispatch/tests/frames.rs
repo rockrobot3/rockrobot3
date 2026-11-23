@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! TTS 分帧用例：空/整块/尾块/水位单调与共享基准。
 
 use super::*;

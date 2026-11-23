@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装配单文本解读（B9 结构收口）：`toml::Value` → 模型，形状错误全收集。
 //!
 //! 段序即错误追加序（[os] → [platform] → [runtime] → [supplies] → [slots] →

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装载期校验①（[[pin]] 逐条）、host 档词形派生与派生漂移检查。
 
 use std::collections::BTreeMap;

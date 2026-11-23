@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rrd 日志面：stdout / 文件落盘 / 内存环三面同源，含启动回填与启动摘要/降级快照。
 //!
 //! 2026-11-17 自 `lib.rs` 结构化拆分（纯移位）：公开路径由 `lib.rs` 的 re-export

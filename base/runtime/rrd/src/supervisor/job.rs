@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! supervisor 的请求类型与 "我能起谁" 条目：manifest 解析与 entry 可执行门。
 
 use std::os::unix::fs::PermissionsExt;

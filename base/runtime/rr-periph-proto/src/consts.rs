@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 帧面共享常量：task 位形、主题、magic、波特率缺省、宿主 env 名。
 //!
 //! 这些值此前在宿主 `rr-hal::esp32_uart` 与板侧 `board.rs` 各写一遍（"两端常量

@@ -3,7 +3,7 @@ name = "periph-mech"
 version = "0.0.1"
 edition = "2021"
 rust-version = "1.82"
-license = "UNLICENSED"
+license = "Apache-2.0"
 publish = false
 description = "外设机制核（P0-A A2）：帧面收发 / OLED 编码 / 舵机与降档核心 / 轨压判定——泛型于五端口，零 esp-idf、零睡眠、零策略量"
 

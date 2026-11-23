@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! conn 单测（文件头：本文件只放测试，生产面在 `conn.rs`）。
 //!
 //! 拆分动因：`conn.rs` 已 592 行，续轮二十五的写超时用例再内联会触 600 行门。

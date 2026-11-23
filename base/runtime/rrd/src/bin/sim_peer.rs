@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! sim-peer —— 基座测试夹具二进制（spec §6 / R5）。
 //!
 //! 它是**第二个真进程**：走 rrd 的线上入口完成注册→心跳→发布→退场，用来证明协议层不是

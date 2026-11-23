@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! sim 音频播放面（虚拟扬声器）与尾窗裁剪。
 
 use std::sync::Mutex;

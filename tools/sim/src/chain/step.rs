@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 单个演练步执行：起进程、总线观察者取证、日志留痕与状态巡检。
 
 use std::os::unix::net::UnixStream;

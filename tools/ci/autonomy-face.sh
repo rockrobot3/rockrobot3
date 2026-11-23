@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # 自治健康面集成腿（W3-3/W4-2，2026-11-19）：真跑监督核状态迁移，不依赖 ESP 工具链。
 #
 # 判据载体：`rr-autonomy` 单测 + `tests/health_face.rs`（30 s 模拟：稳态零超时 →

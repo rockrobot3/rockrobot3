@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 格位缺席、平台词汇与引脚冲突判据单测（批B13 自 `surgery.rs` 按被试族切出）。
 //!
 //! 覆盖 `device_absent` 申报、platform 表缺档/空表、器件与角色词汇越界，以及

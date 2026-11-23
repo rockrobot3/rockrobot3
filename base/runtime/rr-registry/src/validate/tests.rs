@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! manifest 文本入口与主题契约交叉校验的单测。
 
 use super::*;

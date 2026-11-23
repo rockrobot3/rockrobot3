@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! `profile` 面的单测（批B14 自 `profile.rs` 尾部内联块原样迁出）。
 //!
 //! 共享夹具（真档文本、装配单装载、平台表夹具、预算夹具）在本文件；

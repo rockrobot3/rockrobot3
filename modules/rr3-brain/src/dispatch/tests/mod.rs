@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! dispatch 单测入口：共享夹具（配置/客户端/记录型总线）与三组用例。
 
 mod arms;

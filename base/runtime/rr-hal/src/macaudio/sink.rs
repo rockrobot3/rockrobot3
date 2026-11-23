@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 播放面：Rr3MacAudioSink 与输出流。
 
 use std::collections::VecDeque;

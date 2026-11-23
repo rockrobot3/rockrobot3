@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! raw termios 配置：波特率映射、VMIN/VTIME 与非阻塞位。
 
 use super::*;

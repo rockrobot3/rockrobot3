@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! ESP32-UART 板面音频源后端（A 批 c3）：板面 INMP441 双麦流 → 宿主环形缓冲 →
 //! [`Rr3AudioSource`](crate::Rr3AudioSource)（`rr3_audio_source()` esp32 档）。
 //!

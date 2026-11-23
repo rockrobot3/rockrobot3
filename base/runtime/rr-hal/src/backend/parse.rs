@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 各 `RR3_HAL_*` 环境变量取值的纯函数裁决。
 
 /// I2C 7-bit 从地址键的取值裁决（只认 `0x` 前缀十六进制——裸写有十进制歧义

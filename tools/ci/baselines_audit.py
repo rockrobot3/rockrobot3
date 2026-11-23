@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """基线只降不升审计：把 baseline 文件与 base ref 的同名文件逐键比对。
 
 判据（只做静态比对，不跑门禁本体）：

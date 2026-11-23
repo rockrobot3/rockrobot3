@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! [[controller]] 段：逐条收集、重复名点名与词表建映射。
 
 use super::*;

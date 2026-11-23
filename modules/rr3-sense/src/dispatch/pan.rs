@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 反射环 pan 目标换算（纯函数）。
 
 use super::{RR3_REFLEX_PAN_CENTER_DEG, RR3_REFLEX_PAN_SWING_DEG};

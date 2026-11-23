@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 能力格坐标系（ADR-0012 裁定 1）：`contracts/slots.toml` 的集合视图与查册门真值。
 //!
 //! 生产真相只有 `contracts/slots.toml`。查册门（ADR-0012 裁定 5②）只在本文件实现一次：

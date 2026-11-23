@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-pack —— 发行版快路 deb 打包器（0.0.2 T5 / ADR-0013 裁定 5）。
 //!
 //! 输入两份真值，装配各自薄装（保底轨 post-build.sh 读同一注入格式，两轨不互抄装配）：

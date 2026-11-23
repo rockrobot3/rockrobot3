@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-act 入口（0.0.8 W-A 批5 拆分，ADR-0017 五层表装配层，≤80 行）。
 //! 装配只做启动编排：SURFACE 自述 → [`rr3mod::bootstrap`]（收敛序列前四段）→ 轴状态
 //! 装载＋行程填值＋config 就绪行 → 三面探活 → reflex spawn（[`boot`]）→ Dispatcher →

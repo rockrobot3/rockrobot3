@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """板侧全功能冒烟（行面 11 条命令逐条断言 + 边界/交叉项）。
 
 用法: python3 full_smoke.py [termios 常量名，缺省 B1500000]

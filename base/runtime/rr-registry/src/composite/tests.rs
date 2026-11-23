@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! composite 单测（文件头：本文件只放测试，生产面在 `composite.rs`）。
 //!
 //! 拆分动因：`composite.rs` 524 行、内联测试自 383 行起，先按仓内同形搬出。

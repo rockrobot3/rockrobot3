@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 运行期任务面：作业执行、轨道采样、舵机动作与自主节拍。
 //!
 //! `exec_job` 是帧分派落地的唯一执行入口；`sample_rail` 按 `RAIL_SAMPLE_PERIOD_MS`

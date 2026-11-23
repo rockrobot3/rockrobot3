@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! [capabilities] 段：能力集四键与 input-only 集。
 
 use super::*;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 主题集：owner + topic 名 + kind + status 的集合视图。
 //!
 //! 生产真相只有 `contracts/topics.toml`。`rr3_topic_merge` 只服务**测试叠加层**

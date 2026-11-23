@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # 交叉平台产物门（多芯片共用一份机制）。
 #
 # 用法：cross-artifacts.sh <target-triple> <ELF 架构匹配串> [static|any] [with-brain]

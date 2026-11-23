@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 结果打印与退出码：PASS/FAIL 点名、直方图与 C12 证据文件。
 
 use serde_json::Value;

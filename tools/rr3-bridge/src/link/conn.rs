@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 连接与重连：UART 开口、UDS 接链、三态寿命管理与退避。
 
 use std::os::unix::net::UnixStream;

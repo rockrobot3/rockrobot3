@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 单元测试：wav 头字段、事件四道门、seq 记账、DoA 符号分离、参数档位门。
 
 use rr_ipc::{

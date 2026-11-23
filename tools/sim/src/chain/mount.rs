@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 演练环境与装配单副本准备：二进制定位、工作目录、manifest 与 config 文本落盘。
 
 use std::path::{Path, PathBuf};

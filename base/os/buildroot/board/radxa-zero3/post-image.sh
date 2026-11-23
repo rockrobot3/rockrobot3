@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # post-image.sh —— genimage.cfg 的容量参数注入（M1"板上就绪"档，实测=板上）。
 #
 # base/ota/README.md 明裁：容量不在文档/配置里冻结，"凭想象写下的 size 是最贵的

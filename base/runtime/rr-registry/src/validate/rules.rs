@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 单条规则的词形/枚举判据与失配文案。
 
 use crate::schema::rr3_rule_list;

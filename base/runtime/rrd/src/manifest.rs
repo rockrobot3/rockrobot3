@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 从 manifest 文本里取 rrd 运行期要用的"事实"（health / policy / entry / priority /
 //! depends / provides）。
 //!

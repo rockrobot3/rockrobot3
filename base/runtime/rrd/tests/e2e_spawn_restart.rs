@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// SPDX-License-Identifier: Apache-2.0
 //! supervisor 的线上级证据（spec §5.3 重启/退避/启动序 + §5.4"rrd 是父进程、role 由 rrd 注入"
 //! + §9 的"SIGKILL 夹具 → 判死 → 按策略重启 → 重新注册 → running""never 的夹具不重启并标 failed"）。
 //!

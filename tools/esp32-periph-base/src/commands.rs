@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 控制串口（UART0）命令行面：逐行解析与应答。
 //!
 //! 承载 `frame_round`（一行一答的帧级往返）、自由度参数解析与板侧运维命令

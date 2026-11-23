@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 电源契约：电池读数、轨压/域压档位与读数、折档判据。
 
 use crate::err::Rr3HalError;

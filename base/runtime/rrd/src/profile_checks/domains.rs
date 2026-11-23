@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 注入路径唯一（门 n）、供电轨与电力域面的校验判据。
 
 use std::collections::{BTreeMap, BTreeSet};

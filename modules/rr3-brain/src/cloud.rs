@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-brain 云端共享原语：云档/密钥、HTTP 传输与有界重试、三家客户端与应答体。
 
 mod cfg;

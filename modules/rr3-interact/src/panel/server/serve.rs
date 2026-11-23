@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 服务循环：监听、accept、连接线程与派生失败不退循环的守护。
 
 use super::*;

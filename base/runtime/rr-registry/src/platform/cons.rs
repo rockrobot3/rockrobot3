@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! [construction] 与 [wordform] 段：具名构造三元键与词形。
 
 use super::*;

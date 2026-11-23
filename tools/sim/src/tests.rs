@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 仿真入口单测：drill 报告与链/装配判据在宿主板面（host 档）的形状。
 
 use super::drill::*;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 拆帧器（批D④ 判据② 收流线程化的机制面上提）：大块裸字节 → 整帧，纯内存。
 //!
 //! 上提事实源 `tools/rr3-audio-rec/src/main.rs`（原收流端本地件，2026-10-18 A 批

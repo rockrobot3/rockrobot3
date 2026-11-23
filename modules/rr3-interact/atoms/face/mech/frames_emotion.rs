@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 九情绪/彩蛋态帧表：sleepy/surprised/angry/sad/confused/focus/love/dizzy/scared。
 
 use super::super::Rr3FaceFrame;

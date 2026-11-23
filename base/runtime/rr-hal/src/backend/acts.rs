@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 执行面选择：舵机、数字输出与显示（linux / esp32 / sim）。
 
 use crate::{Rr3GpioOut, Rr3PwmServo, Rr3UnavailableSource};

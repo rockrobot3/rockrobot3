@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 宿主对手件自测：帧形状、parity 向量与直方图分桶。
 
 use super::*;

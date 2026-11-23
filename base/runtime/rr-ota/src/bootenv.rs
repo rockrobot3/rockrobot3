@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! U-Boot 环境变量写侧（M6 回滚链的板侧件；解析/渲染/状态迁移主机可测）。
 //!
 //! 载体格式是 U-Boot 标准 raw env：`[crc32: u32 LE][k=v\0]…[\0]`，CRC 覆盖其后的

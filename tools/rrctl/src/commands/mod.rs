@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 子命令实现（F3 / ADR-0010；0.0.4 批B 起 CLI 与 ctl 白名单对齐）：
 //! 八个 `rr3.ctl.*` 查询经 UDS 送达 rrd 的事务面（续轮十五补 `wiring` / `contracts`
 //! 两个只读面——RPC 早已实装，运维面此前读不到）。

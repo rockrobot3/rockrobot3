@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 后端默认值、白名单裁决与能力面覆盖键，以及生效绑定获取。
 
 use super::*;

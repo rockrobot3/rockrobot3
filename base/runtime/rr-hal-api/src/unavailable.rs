@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 占位后端：所有能力显式回 `Unsupported`，不静默退化。
 
 use crate::act::{Rr3Actuator, Rr3Display, Rr3FaceFrame, Rr3GpioOut, Rr3Position, Rr3PwmServo};

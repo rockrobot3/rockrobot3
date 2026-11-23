@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装载计划与真值集：选册、轴档案装载投影、消费真值清单与定位。
 
 use std::collections::{BTreeMap, BTreeSet};

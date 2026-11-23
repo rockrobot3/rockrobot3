@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! descriptor 单测（文件头：本文件只放测试，生产面在 `descriptor.rs`）。
 //!
 //! 拆分动因：`descriptor.rs` 548 行、内联测试自 395 行起，先按仓内同形搬出。

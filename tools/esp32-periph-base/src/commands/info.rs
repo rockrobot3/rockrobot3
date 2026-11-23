@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! `INFO` 观测面（自 commands.rs 抽出）：一拍取齐状态快照后拼行。
 //!
 //! 快照结构成组命名，替代原 18 元组；取锁只此一次，避免拼行中途状态跳变。

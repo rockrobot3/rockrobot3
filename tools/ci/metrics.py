@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """质量度量门 CLI（B11，规约门第 ⑫ 步）：测量核在 metrics_core.py，本文件只做入口与自检。"""
 
 import os

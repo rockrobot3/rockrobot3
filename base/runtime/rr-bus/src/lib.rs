@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! # rr-bus
 //!
 //! 总线**语义常量 re-export 层**：真值在 `rr-core`（0.0.5 第 II 轮批D₁，ADR-0018

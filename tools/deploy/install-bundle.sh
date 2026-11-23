@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # 版本化部署包的原子安装 / 失败回滚（A10.2）。
 #
 # 用法：sudo bash tools/deploy/install-bundle.sh <bundle.tar.gz> [安装根]

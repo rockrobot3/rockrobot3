@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 控制面收尾：SIGTERM/SIGINT 强制 flush、self-pipe 与 socket 访问控制放行。
 
 use std::path::PathBuf;

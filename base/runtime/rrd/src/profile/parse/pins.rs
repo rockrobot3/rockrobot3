@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! [[pin]] 段解读：字段白名单、逐键类型与身份键 role/direction 的在场判据。
 
 use super::super::model::*;

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """规约门步骤清单审计：check.sh 的 step 序列必须与 gate_steps.txt 逐字同序。
 
 判据（只做静态比对，不执行门禁）：

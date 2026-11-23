@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-brain 机制层注册面（批N32 迁移件1 立树；迁移件2 cloud 三客户端；迁移件4
 //! 语音主链编排全接线）。
 //!

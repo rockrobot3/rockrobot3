@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! servo 原子件入口（五件套②，0.0.5 批C② 原子重铺）：只声明公开面，机制在 mech.rs。
 //!
 //! 占格 `act.servo`（atom.toml）。SURFACE 是启动自述（组合件 rr3_act_run 开头

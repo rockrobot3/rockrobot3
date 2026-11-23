@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ⑨-a 基-39 角色覆盖六表对账·执法（门 a）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 prof_src/fail。
 

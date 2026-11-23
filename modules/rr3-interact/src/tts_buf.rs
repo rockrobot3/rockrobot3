@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! tts_pcm 收流缓冲（自 dispatch.rs 抽出）：先流后点名的载荷通路与上限闸门。
 //!
 //! 独立成件让协议层（rpc 点名对账）与机制层（dispatch 收流）共同依赖缓冲

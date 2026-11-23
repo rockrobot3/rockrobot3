@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 发布面：前缀强制、命名空间冒充拒绝、主题在册与转发读法。
 
 use super::register_sima;

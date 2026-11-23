@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 组合件装配清单（`modules/<名>/composite.toml`，三层 manifest 的 Composite 层，
 //! 0.0.5 批C② 原子重铺落位）的形状契约——组合件申报面定形（增补轮六 N-11：
 //! §8 门 j 的前件之一，§5 N-11 行）。

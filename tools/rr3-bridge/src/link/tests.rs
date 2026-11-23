@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 链路机制集成测试（pty + UDS 对跑——宿主档的"假 rrd"半边）。
 
 // 线程在测试结束后自然随进程回收；shutdown 标志让 run_link 里的退避循环

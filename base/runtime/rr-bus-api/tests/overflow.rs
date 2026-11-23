@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// SPDX-License-Identifier: Apache-2.0
 //! 满箱饥饿路径回归（2026-11-22 Pi 真机实证，集成测试面：不进 ⑫ 生产度量）。
 
 use rr_bus_api::Rr3BusClient;

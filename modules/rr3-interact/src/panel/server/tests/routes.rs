@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 路由面：端点表、covers/applies 词表、越权形态与 HTTP 读请求。
 
 use super::*;

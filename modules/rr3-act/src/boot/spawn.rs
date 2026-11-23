@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 反射环宿主线程 spawn（进程内 1kHz 闭环，永不进总线）。
 
 use rr3mod::BusHandle;

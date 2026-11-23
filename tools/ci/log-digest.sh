@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # log-digest —— 构建失败日志的单点归因（CI 注解机制，2026-11-17 立）。
 #
 # 为什么单点：buildroot 轨的失败面（stage-build / br-defconfig / br-uboot /

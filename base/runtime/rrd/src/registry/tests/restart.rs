@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // 重启记账：重启策略、退避表、计数前缀合并与键上限。
 use super::*;
 

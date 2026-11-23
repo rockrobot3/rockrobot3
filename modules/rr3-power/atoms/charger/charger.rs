@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! charger 原子件入口（五件套②，0.0.5 批B③ 打样）：只声明公开面，机制在 mech.rs。
 //!
 //! 占格 `power.charger`（atom.toml）。SURFACE 是启动自述（逐字冻结，契约面零改动）；

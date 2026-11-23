@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! L-5 空面规则：两数组皆空须明写 no_injection，与注入面互斥。
 
 /// 两数组均在文本中出现且均为空（L-5 空面的前件）。

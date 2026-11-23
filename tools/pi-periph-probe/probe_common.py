@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """树莓派探针公共层——波特率解析 / 开口 / 收流 / 帧扫描与字节分类的唯一实现。
 
 本目录六支探针此前各自复制了一套 `baud_of` / termios 开口 / `pump` / 帧扫描，

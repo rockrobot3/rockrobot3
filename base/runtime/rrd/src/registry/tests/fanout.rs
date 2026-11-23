@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // 扇出/索引/快照/健康/相位名与错误 Display：纯查询与转发面。
 use super::*;
 

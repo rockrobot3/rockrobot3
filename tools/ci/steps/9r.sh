@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ⑨-r 留痕不进被丢弃的流（门 r）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 prof_src/fail。
 

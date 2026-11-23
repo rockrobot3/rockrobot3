@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! sim 音频后端：主机联调与 CI 的虚拟麦克风 / 虚拟扬声器（architecture.md §5）。
 //!
 //! 兑现 `tools/sim` devices.rs "波形注入（正弦/噪声）" 的承诺：四模式

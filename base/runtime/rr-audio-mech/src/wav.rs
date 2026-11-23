@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! WAV 容器头（PCM s16le 单声道），字节序与字段值逐字对位 legacy `asr.c`
 //! 的 `build_wav_header`。自 `rr3-brain` asr 原子件抽出（W1-3），供云 ASR
 //! 上传体与板端录音共用。

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 文本规则机制核（自 `rr3-brain` 抽出，W6-1）：
 //! - 意图：user_text → 结构化动作清单；
 //! - 唤醒：ASR 文本 → 唤醒判决（Ack / Command / FollowUp / Ignore）。

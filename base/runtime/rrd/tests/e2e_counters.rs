@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// SPDX-License-Identifier: Apache-2.0
 //! 运维计数闭环（0.0.4 批B Q1/Q2 裁定、0.0.5 增补轮四 批W3）：心跳 `counters`
 //! 字段 → rrd 按 `模块名/键` 归并 → `rr3.ctl.counters` 读回；`RR3_DATA_DIR` 注入
 //! 后的落盘、重启加载与关停冲刷。

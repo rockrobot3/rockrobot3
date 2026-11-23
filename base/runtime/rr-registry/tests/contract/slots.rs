@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 能力格查册门（ADR-0012）：基础层表内化与全量 manifest 能力查册。
 
 use super::*;

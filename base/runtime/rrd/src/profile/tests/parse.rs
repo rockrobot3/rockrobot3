@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装配单解析面单测（批B15 自 `tests.rs` 按被试族切出）。
 //!
 //! 覆盖 `rr3_profile_parse` 的正例、错误全收集与点名、缺段/空组、日志环上限、

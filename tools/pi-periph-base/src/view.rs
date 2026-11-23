@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 轨压周期采样与 INFO 应答。
 
 use rr_periph_proto::ports::Rr3PwmChannel;

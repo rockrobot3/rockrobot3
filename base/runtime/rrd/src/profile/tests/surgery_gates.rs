@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装配单结构门与真档钻取单测（批B13 自 `surgery.rs` 按被试族切出）。
 //!
 //! 覆盖 `rr3_boot_inputs` 的形状判据（[hardware] 物理键、SPI 稳态、role、新段、

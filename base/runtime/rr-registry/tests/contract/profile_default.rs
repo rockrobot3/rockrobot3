@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 默认/发行版档：器件词表形状、default 与 distro 两档的槽位绑定面。
 
 use super::*;

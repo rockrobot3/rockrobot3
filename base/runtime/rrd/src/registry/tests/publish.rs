@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // 发布归属：越权前缀、运行期冒充、保留命名空间、拒发布计数。
 use super::*;
 

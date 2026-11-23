@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! unsafe 壳层：WiFi STA 起栈、httpd_start 与白名单 endpoint 注册。
 
 use esp_idf_sys::httpd_req_get_hdr_value_str;

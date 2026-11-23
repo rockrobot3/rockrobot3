@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! ASR 上行（W7-b3a/b 自 `http.rs` 拆出）：PCM 源抽象 + multipart 分段写。
 //!
 //! 机制缝是 [`Rr3PcmSrc`]：调用方给"能按 4 KB 窗重复产出 s16le 字节"的源，

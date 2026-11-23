@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! wifi 原子件机制主体（五件套③，自原 src/wifi.rs 逐字迁入，逻辑零改动）。
 //!
 //! WiFi 链路：`rr3-connect/net/link` 状态机与周期流 + 配网面三 RPC（0.0.4 批D）。

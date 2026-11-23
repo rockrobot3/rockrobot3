@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! axis 单测（文件头：本文件只放测试，生产面在 `axis.rs`）。
 //!
 //! 拆分动因：`axis.rs` 591 行、距 600 行门只剩个位数余量，先把测试面搬出。

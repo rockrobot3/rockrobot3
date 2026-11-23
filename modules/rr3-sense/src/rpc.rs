@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-sense 协议层（0.0.8 W-A 批3 拆分，ADR-0017 五层表协议层）。
 //!
 //! 载荷组装与参数下钻面（自原 composite.rs 迁入——0.0.5 批I S-7 上移面，代码

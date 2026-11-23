@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr-ipc —— A-IPC（Airy IPC）协议层与传输层抽象。
 //!
 //! 字节级事实源是 `contracts/envelope.schema.json`（歧义裁定见 `contracts/README.md`）。

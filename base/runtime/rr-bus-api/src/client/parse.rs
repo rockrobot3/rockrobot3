@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! manifest 身份/entry 绝对化与帧 payload 解析。
 
 use std::path::Path;

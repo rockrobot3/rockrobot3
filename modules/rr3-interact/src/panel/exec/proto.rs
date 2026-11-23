@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 协议层应答族：路由判决（404/405/400）与自述（index/healthz/version）。
 
 use serde_json::json;

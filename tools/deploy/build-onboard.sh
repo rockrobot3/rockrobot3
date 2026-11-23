@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # build-onboard —— 板上原生构建承载件（0.0.6 批F1，洞 L；R13 音频件换装）。
 #
 # 为什么需要它：musl 全静态与 alsa 结构性互斥（alsa-sys 绑 C libasound 动态库 + 运行时

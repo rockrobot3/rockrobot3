@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 板外设语义命令 + 板帧分类（自 `rr-hal::esp32audio` 平迁）。
 //!
 //! - 命令面：[`Rr3PeriphCmd`] 语义命令 → 整帧，走 [`crate::host_call::

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 心跳相位提升与 watchdog 到期判活（含崩溃账的恢复归零）。
 
 use super::super::*;

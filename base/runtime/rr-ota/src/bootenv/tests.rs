@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! bootenv 单测（文件头：本文件只放测试，生产面在 `bootenv.rs`）。
 //!
 //! 拆分动因：`bootenv.rs` 543 行、内联测试自 364 行起，先按仓内同形搬出。

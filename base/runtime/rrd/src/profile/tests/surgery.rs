@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! TOML 键行手术面单测（B9 结构收口；批B13 按被试族切出，结构门与引脚面在
 //! `surgery_gates.rs` / `surgery_pins.rs`）。
 //!

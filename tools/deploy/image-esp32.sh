@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # image-esp32 —— 微型形态（ESP32）镜像装配件（0.0.5 增补轮六 批N18 件一，敞口 13
 # 产线闭环四件之"镜像装配"；另两件 OTA/回滚语义裁定随件二/件三同批落档）。
 #

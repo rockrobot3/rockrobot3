@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """DoA 判向判定实验——先测物理证据，再定判向算法（测量先行，不给结论留假设）。
 
 背景（为什么不是直接改 voice_respond）：v5 TDOA 实机 3 次触发 lag 全负

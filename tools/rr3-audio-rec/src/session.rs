@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 会话编排：首连开口/握手、读/写/看门狗起子、收兵与汇总汇报。
 
 use std::fs::File;

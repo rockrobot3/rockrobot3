@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 能力降级与解除传播（ADR-0009 裁定 3）。
 
 use super::super::*;

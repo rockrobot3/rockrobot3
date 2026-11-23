@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! brain 演练单测：契约身份、manifest 形状与 mock/real 云 config。
 
 use super::*;

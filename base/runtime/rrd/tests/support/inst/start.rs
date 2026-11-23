@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 监听面起法族：从 `rr3_start` 到 `rr3_start_profile_env` 的九个入口。
 //!
 //! 全部走 `rr3_spawn_inner`（唯一 spawn 实现），差异只在参数组合：叠加层有无、

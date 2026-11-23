@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! spool 记录机制的单测：记录头/CRC 对账、越界、IO 失败、写回不一致、掉电与
 //! 头损坏。全部走内存后端（`Rr3SpoolIo`），不依赖 ESP-IDF。
 

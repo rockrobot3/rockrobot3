@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装配扫描、预算判据（校验⑨⑩）与缺角色/缺格三源合一。
 
 use std::collections::{BTreeMap, BTreeSet};

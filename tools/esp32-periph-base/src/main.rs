@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! esp32-periph-base —— ESP32 classic / S3 双芯片板侧外设执行面固件。
 //!
 //! 职责（全案 §4 批B + 批C）：**SSD1306 I2C 驱动出字 + LEDC PWM 云台两轴逐度转向 +

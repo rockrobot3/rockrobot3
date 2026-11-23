@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 云对话协议机制核：ASR/LLM/TTS 请求体装配、应答解析与重试判据的纯函数。
 //!
 //! 自 `rr3-brain/src/cloud` 抽出（W2-1）：Pi 与 MCU 共用同一份请求字节形状，

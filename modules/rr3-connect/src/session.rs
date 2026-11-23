@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 云端会话：`rr3-connect/cloud/session`（request 事务面）。
 //!
 //! 会话建立/续期由 brain 侧发起，connect 只提供链路（骨架自述的原语义）。

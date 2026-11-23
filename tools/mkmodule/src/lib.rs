@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! # rr3-mkmod
 //!
 //! 生成 `modules/rr3-<名>/` 骨架：manifest + config + 空 Rust 程序 + README。

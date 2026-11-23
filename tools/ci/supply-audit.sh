@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # 供应链审计门（2026-11-16 建）：依赖许可证、RustSec 安全公告、来源白名单与
 # 通配依赖。判据唯一真源是 `.cargo/deny.toml`；本脚本只做两件事——枚举工程根、
 # 逐项调用 cargo-deny 并汇总，不发散任何策略。

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 仓根/装机布局夹具：模块二进制、装配单与 SimManifest 守卫。
 
 use super::*;

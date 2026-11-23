@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 异常退出收口：按盘侧真相补 wav 恢复头后再按码退出。
 
 use crate::state::WatchState;

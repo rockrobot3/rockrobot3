@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """unsafe 注释审计：生产面每个 `unsafe` 关键字都要有 SAFETY 前言。
 
 判据（只做静态扫描，不编译）：

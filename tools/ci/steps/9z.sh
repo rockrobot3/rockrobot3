@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ⑨-z 真值集三方成员判等（门 z）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 prof_src/fail。
 

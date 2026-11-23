@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! TTS 流式接收（W7-b2）：HTTPS 4 KB 读块 → WAV/裸 PCM 识别 → 全局淡入淡出 →
 //! 16 KB 播放环。不再把 512 KB 回包聚合成 Vec，也不再有"全量 PCM 播放队列"。
 //!

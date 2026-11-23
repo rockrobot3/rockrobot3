@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 总线契约形状：wire manifest 文本、主题常量与留痕判据。
 
 use std::path::Path;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 契约册形状的对拍用例：slots/roles/devices/topics/platform/wiring 的成员与判据。
 //!
 //! 判据源一律取仓内真册（`contracts/`、`profiles/`、`hardware/`），不手抄第二份；

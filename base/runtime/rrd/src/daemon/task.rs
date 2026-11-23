@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 任务与连接管理：boot 队列仲裁投递、accept 循环与并发槽守卫。
 
 use std::collections::{BTreeMap, BTreeSet};

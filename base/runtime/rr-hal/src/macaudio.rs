@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! macOS（CoreAudio/AudioQueue）音频后端：宿主真麦拾音 / 扬声器回放。
 //!
 //! 编译门是单重平台门 `target_os = "macos"`（同 linux_gpio/linux_power 先例，不挂

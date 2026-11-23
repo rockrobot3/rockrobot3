@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装载产物：manifest 路径、hal_bindings 注入文本与执行轴档案装载投影。
 
 use std::collections::{BTreeMap, BTreeSet};

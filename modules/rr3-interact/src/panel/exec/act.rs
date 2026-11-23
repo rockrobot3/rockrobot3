@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 进程内动作族：动作递主循环并等回执（beep/face 串行代执行）。
 
 use std::sync::mpsc::RecvTimeoutError;

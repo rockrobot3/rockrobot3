@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ⑬ 仓面卫生门（门 13 步骤体：追踪面本机路径 / 构建目录 / 未入册源码 /
 #    shell 展开截断；扫描器错误按 fail-closed 计红）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 fail 与 root。

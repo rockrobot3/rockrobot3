@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 板侧事实表与引脚/时序常量（S3 形态的唯一数据面）。
 //!
 //! 行程表与主题表由 `tools/rr3-codegen` 生成后 `include!` 进本文件条目流

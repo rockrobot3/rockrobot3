@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-bridge —— 0.0.7 批E 层④ 桥件（0.0.7 方案 §5.1 形状钉死直写，R15/R20 零冲突）。
 //!
 //! **定位**（§5.1.1）：UART↔UDS 的 transport 级字节中继（连接多路器）。不是模块——

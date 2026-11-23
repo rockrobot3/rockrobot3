@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! esp32-uart-echo —— 0.0.7 批C 层② UART 板级 round-trip 夹具（ESP32 裸金属）。
 //!
 //! 职责（方案 §9.2 ④⑤）：

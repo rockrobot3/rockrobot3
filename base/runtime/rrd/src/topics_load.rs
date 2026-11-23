@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 所有权表装载：`contracts/topics.toml` 全集（生产真相）+ 仅测试的叠加层。
 //!
 //! 叠加层不是生产放行口（spec §6 / R6）：默认不加载；加载时由 main 打印绝对路径

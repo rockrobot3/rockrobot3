@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 采样配置：`Rr3AudioCfg` 与 legacy 16k/单声道/16bit 缺省档。
 
 /// HAL 采样配置

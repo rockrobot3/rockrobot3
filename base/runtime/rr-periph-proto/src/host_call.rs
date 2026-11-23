@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 宿主侧请求组帧（自 `rr-hal::esp32_uart` 平迁，函数名与信封形状不变）。
 //!
 //! 信封：`{"jsonrpc":"2.0","id":N,"method":M,"params":P}`——`rr3.call` 与

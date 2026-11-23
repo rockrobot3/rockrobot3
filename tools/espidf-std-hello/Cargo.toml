@@ -3,7 +3,7 @@ name = "espidf-std-hello"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.82"
-license = "UNLICENSED"
+license = "Apache-2.0"
 publish = false
 description = "0.0.5 增补轮四 批W1 espidf std 构建链冒烟件（ESP-IDF std hello，独立 workspace）"
 

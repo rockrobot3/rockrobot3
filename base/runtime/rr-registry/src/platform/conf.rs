@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! [[conflict]] 段：组名唯一、成员非空、why 必填与在册核对。
 
 use super::*;

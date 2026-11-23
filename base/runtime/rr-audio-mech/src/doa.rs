@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! DoA 粗判向（自 `rr3-sense` capture 原子件抽出，W1-2；多通道下混已拆到
 //! [`crate::chan`]，本件只吃原始 L/R 对做时差判向）。
 //!

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! IPC-T-003 跨架构对拍夹具（x86 与 aarch64 字节布局一致，ADR-0006 后果项）。
 //!
 //! 打印七行 `<name> <hex 小写>`：

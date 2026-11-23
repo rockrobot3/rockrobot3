@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! CLI 共用参数面：用法错出口、用法全文与分离式 `--flag value` 取值。
 //!
 //! 各子命令只做自己的形制判据；"缺参/未知子命令"统一走 [`rr3_use`] 的

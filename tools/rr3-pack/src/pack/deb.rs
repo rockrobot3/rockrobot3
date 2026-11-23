@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! deb 面：control/postinst 文本与 dpkg-deb 出包。
 
 use super::*;

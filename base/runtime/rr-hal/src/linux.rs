@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! linux（ALSA）音频后端：Buildroot 根文件系统内的采集/回放（architecture.md §5、ADR-0007）。
 //!
 //! 编译门是双重的：`target_os = "linux"` **且** `alsa` feature（Cargo.toml 的目标门控依赖）。

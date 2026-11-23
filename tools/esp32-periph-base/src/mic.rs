@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 批D 采集冒烟 + 音频上行（INMP441 双麦 @ I2S0；0.0.5 增补轮五 全案 §4 批D）。
 //!
 //! 接线（README runbook 批D 节；两麦 L/R 时隙复用共一条总线）：

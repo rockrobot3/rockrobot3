@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 测试共享夹具（cfg(test)）：假 rrd（体例先例＝rr-bus-api client.rs 测试段，
 //! 行为写死的测试夹具不是通用服务器）+ env 串扰锁 + 临时目录助手。
 //!

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-interact 协议层（0.0.8 W-A 批4 拆分，ADR-0017 五层表协议层）。
 //!
 //! 载荷组装面（0.0.5 批I I-8：上移承载层，ADR-0019 修订 4——件的对外契约面 =

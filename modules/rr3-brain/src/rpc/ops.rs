@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! ops 读面子（白名单组体快照）与写臂（白名单/类型域校验、写源落位）。
 
 use serde_json::{json, Value};

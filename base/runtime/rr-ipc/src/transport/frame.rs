@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 帧收发：128B 定长头 + `payload_len` 字节 payload（事实源 `contracts/envelope.schema.json`）。
 //!
 //! 只做"读满一帧 / 整帧一次提交"，不含任何 socket 语义，因此平台无关：

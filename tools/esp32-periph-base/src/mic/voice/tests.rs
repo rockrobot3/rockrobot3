@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! voice 分段状态机单测（自 `voice.rs` 拆出，控制单文件规模）：内存路径的
 //! 起音/判停、超长强制收段、半双工门重置。spool 路径依赖真实分区，归真板批。
 

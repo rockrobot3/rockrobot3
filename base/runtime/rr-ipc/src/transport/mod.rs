@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 传输层：trait 定型 + uds 唯一实现（ADR-0008）。
 //!
 //! **门下沉（批J G1，ADR-0018 修订 3 ①）**：本模块在 `target_os = "none"` 下也编译

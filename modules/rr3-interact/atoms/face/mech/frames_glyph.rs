@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! char 单字符档帧表：charA..charZ + char0..char9 共 36 个 5×7 字模单帧。
 
 use super::super::Rr3FaceFrame;

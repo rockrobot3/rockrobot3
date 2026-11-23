@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! sim 后端波形、方位模型与模拟件的单元测试。
 
 use super::source::RR3_SIM_NOISE_AMP;

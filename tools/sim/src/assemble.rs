@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! `--profile` 装配演练（D9，0.0.2 方案）：装配单驱动 boot + 全模块真进程全链路巡检。
 //!
 //! 与既有两面演练（`--manifest` 手工清单）和 `--brain`（对话闭环）互补：本模式证

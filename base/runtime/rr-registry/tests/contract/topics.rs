@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 主题前缀规则：owner 命名空间、未注册 owner、契约自洽。
 
 use super::*;

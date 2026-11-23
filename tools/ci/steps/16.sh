@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ⑯ 源文件行数门步骤体（git ls-files 的 .rs/.py/.sh；500 行硬线）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 fail。
 #

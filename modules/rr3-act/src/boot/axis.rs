@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 执行轴状态装载：注入文本解析、坏形折保守缺省与策略面回显。
 
 /// rrd spawn 注入的执行轴状态（批N3 件三，supervisor 与 RR3_HAL_BINDINGS 同位注入）：

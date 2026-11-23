@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 运维计数聚合的持久化（0.0.4 批B，Q1/Q2 裁定；0.0.5 增补轮四 R26 改判落盘时机）。
 //!
 //! 聚合表（`registry.rs` 的 `RrdRegistry` 计数字段）的**断电尽量不丢**落点。

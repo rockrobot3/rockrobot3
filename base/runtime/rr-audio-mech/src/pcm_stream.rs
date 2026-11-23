@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 播放侧 PCM 流式整形（W7-b2）：源字节分块喂入 → I2S 立体声块输出，首块淡入、
 //! 末块淡出按**全局帧号**计算。与 [`crate::rr3_pcm_stereo`] 的整段整形逐位同源，
 //! 区别只在本件跨块保持帧边界与淡化相位——HTTP 4KB 收包不必先聚合成整段 Vec。

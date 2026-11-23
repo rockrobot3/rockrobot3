@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 面板密钥面（0.0.6 模型连接抽象批）：模型 API key 的面板维护面。
 //!
 //! key 只落**仓外** secrets 文件（JSON `{"keys": {ref: value}}`，0600）——代码/

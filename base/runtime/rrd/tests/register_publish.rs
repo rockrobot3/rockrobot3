@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// SPDX-License-Identifier: Apache-2.0
 //! 注册面与**发布面**的线级用例（spec §9 的注册/重复/保留名/坏 manifest/src_task 各条，
 //! 加 Task 8 的发布前缀强制与内建命名空间冒充拒绝）。
 //! 发布面共 7 条：合法转发、越权前缀、冒充 rr3-runtime/*、在册未登记主题、

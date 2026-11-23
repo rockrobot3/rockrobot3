@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 播放侧 PCM 机制核（W4-2）：WAV 容器抽取、单/双声道 → I2S 立体声、淡入淡出。
 //!
 //! 云 TTS 回包可能是裸 PCM，也可能是 WAV（契约只允许这两种）；板侧不解码

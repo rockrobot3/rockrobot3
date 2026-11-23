@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # post-build.sh —— 目标根文件系统装配（Buildroot post-build，宿主侧执行）。
 # 运行环境由 Buildroot 提供：${TARGET_DIR}（目标根）、${BINARIES_DIR}（镜像产物目录）、
 # ${HOST_DIR}（宿主工具）。档位：脚本就绪；实测=板上（串口出 shell + rrd 自启）。

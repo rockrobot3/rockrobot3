@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! [hardware] 段解读：可选的非引脚键，值只收字符串或整数标量。
 
 use std::collections::BTreeMap;

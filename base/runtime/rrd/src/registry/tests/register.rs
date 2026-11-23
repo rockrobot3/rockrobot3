@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // 注册面：重名/保留名/容量/看门狗断言/panic 留条目。
 use super::*;
 

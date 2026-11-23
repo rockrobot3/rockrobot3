@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! `logs --unit`：直读 per-unit 日志文件尾部（不走总线）。
 //!
 //! 与 rrd 的 `<socket>.log/<unit>.log` 派生同源（`rr3_unit_log_dir` 同一规则），

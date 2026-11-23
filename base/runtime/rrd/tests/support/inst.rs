@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 真 rrd 子进程夹具：启动、逐行收取、字段等待与 Drop 收尸。
 
 use super::*;

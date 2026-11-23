@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! voice 分段落盘/入队：起音开段、内存/spool 累积、收段交 dialog。
 
 use rr_audio_mech::rr3_pcm_best_channel;

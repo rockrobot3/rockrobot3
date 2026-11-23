@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 本地语音分段（W6-3）：I2S0 双麦帧 → DC/增益 → 20 ms 块 VAD + DoA →
 //! 语音段（PSRAM 堆缓冲）→ dialog 队列。
 //!

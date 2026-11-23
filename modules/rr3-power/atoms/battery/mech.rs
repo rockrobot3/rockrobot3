@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 电池采样与低电边沿（`rr3-power/battery/state` 周期流 + `rr3-power/battery/low`）。
 //! 原子件机制主体（五件套③，自原 src/battery.rs 逐字迁入，逻辑零改动）。
 //!

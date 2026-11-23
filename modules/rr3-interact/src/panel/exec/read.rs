@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 读口应答族：status/counters/logs/wiring 走 ctl 查询，自检与重启臂转 selftest。
 
 use serde_json::json;

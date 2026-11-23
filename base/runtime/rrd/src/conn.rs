@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 单连接服务：本线程 reader + 一条 writer 线程。
 //!
 //! 分面（批B12）：本文件留共享件（帧构造/应答/写出口/`Rr3Flow`/拒绝出口）、

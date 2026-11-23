@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 轴名与角度参数解码。
 
 use rr_periph_proto::ports::Rr3PwmChannel;

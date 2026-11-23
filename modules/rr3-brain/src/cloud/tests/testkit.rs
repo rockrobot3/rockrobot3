@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 本地假端点（对位 test_cloud.py FakeSiliconFlow：记录请求、回罐头；std
 //! TcpListener 手写微型 HTTP/1.1——仓内首个 HTTP 服务端测试夹具，仅测试编译）。
 //! asr/llm/tts 三家原子件 mech 测试与 cloud.rs 本域测试共用。

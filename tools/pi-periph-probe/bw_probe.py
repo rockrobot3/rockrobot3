@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """UART 带宽/误码连续性探针（树莓派直连 classic 板）。
 
 用法: python3 bw_probe.py [termios 常量名，缺省 B1500000] [音频秒数，缺省 60]

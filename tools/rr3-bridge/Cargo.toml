@@ -3,7 +3,7 @@ name = "rr3-bridge"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.82"
-license = "UNLICENSED"
+license = "Apache-2.0"
 publish = false
 description = "0.0.7 批E 层④ 桥件：UART↔UDS transport 级字节中继（R15 连接多路器，零策略零解析）"
 

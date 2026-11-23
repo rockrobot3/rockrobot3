@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 采集帧缓冲池与流级单声道化。
 
 use rr_hal::Rr3PcmStream;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! Pi 4B 单板全链档（W5-1）：`profiles/pi4b-solo.toml` 的形状钉。
 //!
 //! 与 pi4b-host 的差别是补齐全链缺的两格（audio.capture/vad 与 act.servo），

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! ESP32 档：esp32-mini 桥接微型形态与 esp32s3-mini 线束差异面。
 
 use super::*;

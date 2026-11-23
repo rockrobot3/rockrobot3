@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """行面 robustness 六探（超长行 / 半行超时 / 拼接检测 / 连发 / 写前记账）。
 
 用法: python3 robust_probe.py    （缺省 1.5M 档；换档 env `RR3_PROBE_BAUD`、

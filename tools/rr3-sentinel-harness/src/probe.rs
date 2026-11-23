@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 健康探测与断言：帧形状门、round-trip 与 parity 对拍。
 
 use std::time::Instant;

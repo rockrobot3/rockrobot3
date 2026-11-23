@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! Dispatcher trait（模块机制层注册面，0.0.8 方案 §2.3）：`serve` 骨架回调，
 //! 模块机制层实现本 trait——trait 在骨架（机制），实现在各模块机制层
 //! （机制/策略分离的注册面落点）。

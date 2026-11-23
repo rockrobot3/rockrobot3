@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # buildroot-assembly-smoke.sh —— 保底轨装配冒烟（本机可跑，无 Docker / 无 Buildroot）。
 # 构造最小 TARGET_DIR / BINARIES_DIR，以仓内真实 manifest 与 config 为源跑 post-build.sh，
 # 断言 0.0.2 保底轨修复的四点：manifest 归位 modules/<name>/module.toml、entry 装机绝对化

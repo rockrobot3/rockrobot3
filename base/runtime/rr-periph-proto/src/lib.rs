@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr-periph-proto —— 板-宿主外设帧面协议共享层（ADR-0024）。
 //!
 //! ## 为什么单独成 crate

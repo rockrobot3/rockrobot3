@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr-ota —— 升级通道（architecture.md §8、ADR-0007 决策二）。
 //!
 //! v0.0.1 冻结"双轨"的类型形状：整镜像 A/B（M6）与模块级 staging（M6+）。

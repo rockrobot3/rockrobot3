@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! I2S TX 功放/扬声器上板验收（W4-1）：I2S1 单声道提示音，默认固件不启用。
 //!
 //! 只在 `--features spk-tone` 时编译与启动；默认外设底座固件零行为变化。

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! ESP32 端口实现（薄壳）——契约本体在 [`rr_periph_proto::ports`]（P0-A A1 迁入），
 //! 本文件只留"把 esp-idf / 板载驱动包成端口"的实现侧，不含任何策略量。
 //!

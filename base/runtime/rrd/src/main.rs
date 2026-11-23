@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rrd —— base 层守护进程（architecture.md §6）。
 //!
 //! M2 起：装载所有权表 →（Unix）绑 UDS 监听、注册/心跳/看门狗/重启。

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! linux（I2C）SSD1306 OLED 显示后端：128x64 单色屏（W5-3 Pi 显示面换装）。
 //!
 //! 编译门是单重的：`target_os = "linux"`——依赖 libc 仅取 `ioctl`/`write`/`close`

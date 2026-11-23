@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! macaudio 的单测（只测纯逻辑；真设备证据走手跑实录，见 docs/status.md）。
 
 use std::sync::{Condvar, Mutex};

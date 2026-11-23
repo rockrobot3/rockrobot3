@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! bootstrap 收敛序列 + config 路径解析单点（0.0.8 方案 §2.4）。
 //!
 //! 收敛序列（ADR-0017 裁定 1 序列的前四段）：读 RR3_MANIFEST →

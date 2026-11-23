@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-brain 接入层（批N32 迁移件1 立树，ADR-0017 五层表接入层）。
 //!
 //! config schema 解析（自 Python composite.py 迁入，ADR-0016 裁定 2.4 键名逐键

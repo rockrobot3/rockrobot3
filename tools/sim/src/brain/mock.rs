@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! mock 云与行为问答：演练 config 文本、真云端点换算与后端缺省面。
 
 use crate::drill::Rr3SimArgs;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 错型与定长文本：`Rr3HalError` / `Rr3ErrText` 及 char 边界截断助手。
 
 /// 退到 char 边界：返回不劈多字节字符的最大前缀字节数（定长文本共用）。

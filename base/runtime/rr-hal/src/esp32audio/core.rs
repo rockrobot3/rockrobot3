@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 连接/重连、周期统计与原始流 tee。
 
 use std::path::{Path, PathBuf};

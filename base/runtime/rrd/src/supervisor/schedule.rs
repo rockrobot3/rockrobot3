@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 到期表与终态落点：退避计划、低电重试与收尸后的广播记账。
 
 use std::sync::{Arc, Mutex};

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 拒链与降级点名：装载期校验族、证据核验、装配扫描与预算判据。
 
 use std::collections::{BTreeMap, BTreeSet};

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 板侧云 TTS/对话 worker（W4-2b 起，W7-b2 改流式）：有界作业队列 → NVS 配置 →
 //! 4 KB 流式收 PCM → 16 KB 播放环；ASR/LLM 仍走整段小 JSON。
 //!

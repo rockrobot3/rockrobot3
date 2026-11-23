@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 与仓内 config.toml 同形状的测试夹具（boot/rpc/config_store 三侧共用一份真值）。
 
 /// 与仓内 config.toml 同形状的夹具段真值（boot/rpc/config_store 三侧测试共用，

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 引导配置与回滚链子命令（switch / factory / rollback arm|ok）。
 //!
 //! 判定与改写逻辑全在 `rr-ota`（`bootconf` / `bootenv`）；本文件只做参数形制、

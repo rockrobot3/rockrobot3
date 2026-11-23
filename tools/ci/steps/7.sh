@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ⑦ §13 静态断言（门 ⑦ 步骤体：⑦-a 零策略载荷 / ⑦-b F⊗F / ⑦-c 五件套 /
 #    ⑦-d 入口体量 / ⑦-e 门禁清单自指判等；全 fail-closed，逐条点名后整步 FAIL）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 fail，并调用入口的共享助手 mod_lang。

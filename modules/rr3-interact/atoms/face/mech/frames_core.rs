@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 七核心态帧表：idle/blink/talk/think/happy/listen/turn 的 8x8 帧序列。
 
 use super::super::Rr3FaceFrame;

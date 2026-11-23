@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # cargo 产物定位（规约门共享单点）。
 #
 # 仓根 .cargo/config.toml 把 target-dir 统一移出源码区（/tmp/rr3-build），

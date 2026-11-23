@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! [supplies] 段解读：看门狗/时序预算标量、子段分派与整数读取。
 
 use super::super::model::*;

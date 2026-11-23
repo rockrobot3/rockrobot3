@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # 质量度量核（B11，规约门第 ⑫ 步）：重复率 / 圈复杂度 / 生产 panic 落点 / 函数名长度。
 # 入口 = tools/ci/metrics.py（CLI + 自检）；本文件只放测量口径与扫描实现（<500 行）。
 #

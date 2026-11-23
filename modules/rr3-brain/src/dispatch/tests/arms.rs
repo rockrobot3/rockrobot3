@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 臂位用例：未知 topic、completion/ops/event/tick 四臂。
 
 use super::*;

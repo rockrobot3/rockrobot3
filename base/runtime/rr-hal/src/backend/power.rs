@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 电源面选择：INA219 电池读数与轨压/域压读数。
 
 use crate::{Rr3Power, Rr3Rail, Rr3UnavailableSource};

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! base64 编码（RFC 4648 标准字母表 + 填充）——线格式层的二进制承载原语。
 //!
 //! 0.0.5 批C① 自 rr3-sense 塌缩归一（方案 §12.3）：PCM 二进制进 JSON 的唯一通道

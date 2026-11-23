@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! assembly 的单测（自同名单测模块原样抽出，判据不变）。
 
 use serde_json::json;

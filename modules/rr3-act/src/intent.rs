@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! intent/result 订阅执行面（0.0.3 T3，方案 Q1 裁定）：brain 产出结构化
 //! `actions`（元素 `{topic, args}`，contracts/events/brain-intent-result.schema.json），
 //! 本模块广播认领——**两道归属门**后才执行：

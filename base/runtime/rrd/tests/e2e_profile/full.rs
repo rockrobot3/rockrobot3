@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! P1 满配正门用例（自 e2e_profile.rs 抽出，判据不变）：enabled_slots 决定起谁，
 //! 三条 spawn 行 + ctl.status 轮询全 running，并钉装配/契约两个读口的线上事实。
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! sim 音频源（虚拟麦克风）：波形生成与双麦方位注入。
 
 use std::sync::Mutex;

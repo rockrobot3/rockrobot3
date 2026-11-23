@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 模块侧同步总线客户端（M3，architecture.md §6）。
 //!
 //! rr-bus-api 的文档声明落点（lib.rs 头注）：总线的**承载契约面**——客户端逐字自

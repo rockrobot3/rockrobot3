@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 面板的 ctl 短连面（ADR-0010）：一问一答即断，与外部运维探针同权。
 
 use super::*;

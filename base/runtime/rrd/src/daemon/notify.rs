@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! systemd 自身看门狗：把 `WATCHDOG=1` 发到 `$NOTIFY_SOCKET`（P2-2）。
 //!
 //! 模块 watchdog 只能发现"模块死了"；rrd 自己死锁时，模块监督线程也随之停摆。

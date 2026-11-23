@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 链接参数接力（照 tools/espidf-sentinel/build.rs，批W1 同款；与
 //! modules/rr3-act/build.rs 同形）。
 //!

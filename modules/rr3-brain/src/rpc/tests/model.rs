@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 模型行面单测（ADR-0023；自 rpc/tests.rs 同判据抽出）。
 //!
 //! 覆盖行实效重解析、列表快照零密钥、upsert/activate/delete 规则与写面自守。

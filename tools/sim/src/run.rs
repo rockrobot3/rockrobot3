@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 默认演练编排（`--manifest` + 外部 sim_peer + rr3-ctl 四命令巡检）。
 //!
 //! 由 `main` 在 Unix 下调用；四个模式的分派也在这里（`--brain` / `--profile` /

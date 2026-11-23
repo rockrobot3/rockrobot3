@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 帧/事件字段解析：dst/Event/topic/字段四道门与 pcm_b64 解码。
 
 use rr_ipc::{rr3_base64_decode, rr3_body_split, Rr3Frame, Rr3PayloadType};

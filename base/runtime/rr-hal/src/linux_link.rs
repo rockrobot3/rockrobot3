@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! linux（NetworkManager）链路读数后端：R18 扩围（0.0.6 方案 §5.4，判据 13）。
 //!
 //! 编译门是单重的：`target_os = "linux"`。承载选 **nmcli 子进程轮询**而非

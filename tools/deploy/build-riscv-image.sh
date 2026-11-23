@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # RISC-V 运行镜像构建门（无 ghcr 推送）：交叉构建 → rr3-pack stage 树 →
 # QEMU 构建 linux/riscv64 镜像 → 文件面/运行面两段冒烟。
 #

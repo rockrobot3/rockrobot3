@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ⑨-n 注入路径唯一（门 n）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 prof_src/fail。
 

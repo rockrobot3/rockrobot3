@@ -3,7 +3,7 @@ name = "rr3-ctl"
 version = "0.0.1"
 edition = "2021"
 rust-version = "1.82"
-license = "UNLICENSED"
+license = "Apache-2.0"
 publish = false
 description = "总线侧运维 CLI：查在册模块、看健康状态、取日志、触发 OTA（ota 随 M6）"
 

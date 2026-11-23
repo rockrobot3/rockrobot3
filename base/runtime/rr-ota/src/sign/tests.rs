@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 use super::*;
 
 const SEED: [u8; 32] = [7u8; 32];

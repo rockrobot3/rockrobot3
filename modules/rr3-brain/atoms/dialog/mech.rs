@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! dialog 原子件机制主体（五件套③，批N32 件四 Rust 拆分定形：utterance 边界
 //! （onset 起轮 / offset 判停 / 时长上限判停）。纯逻辑不碰总线不碰网络不碰
 //! JSON——机制核（ADR-0017 五层表机制层；件面零 std/serde 直引，⑧-b 依赖闭包

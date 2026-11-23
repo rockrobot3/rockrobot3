@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 看门狗：跨线程共享账 + 武装后停滞判据（补恢复头退 3）。
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};

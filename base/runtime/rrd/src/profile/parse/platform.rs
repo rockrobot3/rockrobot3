@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! [platform] 段解读：tier 三档与 chip 平台事实表外键的必填判据。
 
 use super::super::model::*;

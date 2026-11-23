@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # image-smoke —— 发布镜像的两段冒烟（文件面 / 运行面）。
 #
 # 为什么单点：判据此前只住在 publish.yml 的两段内联 shell 里，本地无法复跑，

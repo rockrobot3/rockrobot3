@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装配单装载链（B9 结构收口）：选册 → 查册 → 探测 → 校验 → boot 输入。
 //!
 //! 全部发生在模块起之前（ADR-0012 裁定 4）。真值集/选册（[`rr3_truth_set`]、

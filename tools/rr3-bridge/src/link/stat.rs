@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 丢弃统计与日志：上行丢弃累计、恢复点与连接日志。
 
 use std::path::Path;

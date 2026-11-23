@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """写前记账 / 队列上限探针（长行程 120→60 的即时 INFO 判据）。
 
 用法: python3 probe2.py    （缺省 1.5M 档；换档 env `RR3_PROBE_BAUD`、换口

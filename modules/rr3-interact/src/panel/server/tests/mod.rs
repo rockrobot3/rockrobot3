@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 面板服务端测试：夹具（共享面板/单次服务/自检回环/假 rrd）与三组用例。
 
 mod routes;

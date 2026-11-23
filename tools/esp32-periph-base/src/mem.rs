@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 内部 SRAM / PSRAM 堆账采样（W7 内存门观测面）。
 //!
 //! 只读 IDF 堆账，不改分配；一行一阶段、字段固定，供 W7 Go/No-Go 逐阶段对账。

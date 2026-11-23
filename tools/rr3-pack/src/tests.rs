@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-pack 单测（自入口同名单测模块原样抽出，判据不变）。
 
 use super::*;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 对话整轮执行（W6-1/W6-2）：语音段 → 云 ASR → 意图 → 云 LLM → 云 TTS →
 //! 本板播放 → 表情回落。**线程归 cloud worker**（与 TTS 朗读共用一条 24 KB TLS
 //! 栈；W6-3 真板内存门实锤：独立 dialog 线程把 free heap 压到 18 KB，httpd 起栈

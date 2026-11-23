@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! servo 原子件机制主体（五件套③，自原 src/servo.rs 逐字迁入，逻辑零改动）。
 //!
 //! servo/command 的 Value 下钻（缺参/类型错/越 u16）已上移承载层（0.0.5 批I

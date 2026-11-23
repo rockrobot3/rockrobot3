@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """GitHub 流水线结构审计规则核：并发组 / job 超时 / action 版本矩阵 / 权限与失败显形 /
 五芯片覆盖。
 

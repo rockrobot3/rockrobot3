@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 原子件五件套生成（ADR-0019）：atom.toml / 入口 / mech / assemble / private。
 //!
 //! 入口 `rr3_mkmod_gen_atom` 由 crate root re-export；本模块只依赖父模块的错误

@@ -3,7 +3,7 @@ name = "rr3-ota-ctl"
 version = "0.0.1"
 edition = "2021"
 rust-version = "1.82"
-license = "UNLICENSED"
+license = "Apache-2.0"
 publish = false
 description = "OTA 槽位查看/切换 CLI（0.0.3 批D：switch/factory 引导配置改写实装；回滚链属板上件）"
 

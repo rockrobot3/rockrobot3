@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 启动期观测行（自 boot.rs 按"装配序 / 观测面"拆分）：堆账三点采样、芯片自证
 //! 横幅、PSRAM 点名。只读 IDF 账，不参与分配、不改装配序。
 //!

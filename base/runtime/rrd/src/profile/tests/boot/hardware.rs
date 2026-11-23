@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! [hardware] 标量串化、注入文本排序与 host 档派生。
 
 use super::super::*;

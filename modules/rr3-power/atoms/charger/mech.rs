@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 充电状态（`rr3-power/charger/state`）。
 //! 原子件机制主体（五件套③，自原 src/charger.rs 逐字迁入，逻辑零改动）。
 //!

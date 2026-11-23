@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 自检面：逐腿输出、wiring 展开、verdict 等值与 relay 缺省语义。
 
 use std::path::Path;

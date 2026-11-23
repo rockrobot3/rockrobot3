@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 演练准备面：二进制定位/存在性校验、工作目录与桩 manifest/config 落盘。
 //!
 //! 全部是"演练前一次成型"的夹具构造，不碰总线；产物路径回给 `state.rs` 的

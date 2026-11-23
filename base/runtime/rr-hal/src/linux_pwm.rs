@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! linux（sysfs PWM）舵机后端：SG90 硬件 PWM（R22 定案档，0.0.6 方案 §5.4 R11①）。
 //!
 //! 编译门是单重的：`target_os = "linux"`——纯 std（sysfs 读写），无外部依赖、

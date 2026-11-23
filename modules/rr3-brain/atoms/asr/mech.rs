@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! asr 原子件机制主体（五件套③，批N32 件四 Rust 拆分定形）：识别侧**纯机制**
 //! ——44B WAV 头与 multipart 请求体装配（字节级，无 IO 无环境读取无 JSON，
 //! ⑧-b 依赖闭包纪律）。云端档位/密钥/HTTP 传输/boundary 随机源在组合件级

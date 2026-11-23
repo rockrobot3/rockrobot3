@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 意图→动作规则面（自 Python rr3_brain/intent.py 逐语义迁入，批N32 迁移件四；
 //! 0.0.3 T3，方案 Q1 裁定）：user_text → 结构化 actions。
 //!

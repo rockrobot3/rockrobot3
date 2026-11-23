@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 落盘原语：目录树拷贝、清单改写、模块名枚举与 py shim。
 
 use super::*;

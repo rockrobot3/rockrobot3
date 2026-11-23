@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 自治壳（W3-2b 起，W3-3 接线）：把 `rr-autonomy` 监督核接到板侧，提供
 //! `/api/board/health` 真状态与"接线任务心跳 → 判死 → 整机复位"闭环。
 //!

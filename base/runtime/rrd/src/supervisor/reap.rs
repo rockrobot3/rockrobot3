@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 扫尸与到期执行：try_wait 收集、终态记账与到期计划重起。
 
 use std::collections::BTreeMap;

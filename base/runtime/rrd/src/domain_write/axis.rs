@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! axis 落点：轴档定位、证据门、单键手术与候选档。
 
 use super::*;

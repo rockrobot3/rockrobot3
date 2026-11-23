@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # matrix.sh —— 点验矩阵七列出数入口（0.0.5 批K H3/C12/C11；architecture §12.6 v0.9、
 # 0.0.5 方案 §13.2 D4 裁定：执行宿主 = 钉死版本的标准化环境，不是某台机器）。
 #

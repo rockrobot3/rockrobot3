@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ⑨-d 生成物一致性步骤体（rr3-codegen --check：真值点 → 板侧常量表 diff 为空）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 fail。
 

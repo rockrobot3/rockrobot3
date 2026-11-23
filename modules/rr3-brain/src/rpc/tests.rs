@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 use super::*;
 use crate::boot::{rr3_brain_cfg_parse, rr3_repo_cfg_fixture, Rr3BrainCfg};
 use serde_json::{json, Value};

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! HTTP 传输（共享 Agent/读体策略帽）与 asr/llm/tts 三家云客户端、multipart 随机源。
 
 use std::io::Read;

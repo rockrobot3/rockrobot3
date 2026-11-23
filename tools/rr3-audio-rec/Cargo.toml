@@ -3,7 +3,7 @@ name = "rr3-audio-rec"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.82"
-license = "UNLICENSED"
+license = "Apache-2.0"
 publish = false
 description = "0.0.5 增补轮五 批D③ 音频上行收流端：板面 rr3-sense/audio/pcm Event 帧 → wav 落盘（判据①）"
 

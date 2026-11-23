@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 链路面与配网凭据存储面选择（NetworkManager / sim / 占位）。
 
 use crate::provision_store::Rr3WifiStore;

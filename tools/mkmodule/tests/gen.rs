@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 生成器形状用例：模块骨架与原子件五件套的落盘成员/内容判据（临时根隔离）。
 //!
 //! 每个用例在 `std::env::temp_dir()` 下建 pid 唯一的根，只断言"生成器产出

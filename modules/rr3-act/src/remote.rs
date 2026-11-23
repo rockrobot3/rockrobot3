@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 远端舵机（A9.2）：桥单所有者纪律下的 act 侧客户端。
 //!
 //! 组合档里 `/dev/ttyAMA0` 由 `rr3-sense` 独占（音频流 + 命令旁路）。本件把

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 本地落盘原子序（全仓唯一实现，批N4 件四 I-20 下沉共享）。
 //!
 //! 写序：tmp 写全量 → `sync_all()` → 同目录 `rename` → 父目录 fsync（尽力而为）

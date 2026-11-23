@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-sim —— x86 全链路联调入口（F4 完整化）。
 //!
 //! 规划（architecture.md §3）：mock HAL + 假模块，让整条链路在无板设备上跑起来。

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! axis_write —— 执行件档案写入面的产线薄壳（批N3 件四）。
 //!
 //! 全部策略在 [`rrd::axis_write`]（模块头注释说清了职责边界与拒绝面）；

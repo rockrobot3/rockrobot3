@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! watchdog 的线上级证据（spec §5.0"心跳"段 / §9 的崩溃判死项）。
 //!
 //! 客户端一律是**第二个真进程** `sim_peer`（Task 9 立的夹具），不是测试自己手搓帧：

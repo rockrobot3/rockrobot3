@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """喊它要有回应：声音事件 → 表情/屏显/转向 的实机闭环。
 
 用法: python3 voice_respond.py [termios 常量名，缺省 B1500000] [秒数，缺省 90]

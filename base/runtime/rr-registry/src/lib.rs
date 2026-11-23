@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! # rr-registry
 //!
 //! [SC] 契约层的消费方：manifest 字段契约（`module.schema.toml`）与

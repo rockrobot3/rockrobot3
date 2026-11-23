@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # sim-assemble.sh —— D9 装配演练的构建 + 运行入口（CI 与本地同一脚本）。
 # 构建 rrd / rr3-ctl / rr3-sim / 六个 Rust 模块，然后 `rr3-sim --profile
 # profiles/default.toml`：装配单驱动 rrd 装配链正门 boot 全部 face 模块，

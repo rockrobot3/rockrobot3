@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 起进程与运行环境：工作目录、仓根定位、产物校验、rrd 命令面与收尾。
 
 use std::path::{Path, PathBuf};

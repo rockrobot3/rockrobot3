@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 心跳驱动器（自 conn.rs 抽出）：拍点等待、发拍、失败宽限与已发记账。
 //!
 //! 拍点真值在机制核状态机；本件只做 std 平台事（sleep / 组帧 / 失败收场）。

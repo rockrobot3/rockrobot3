@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装配单解读入口：根表 schema_version 门与各段解析的装配顺序（错误追加序＝段序）。
 
 use std::path::{Path, PathBuf};

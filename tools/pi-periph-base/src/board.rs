@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 板侧策略量单点（Pi 4B 档）——**只住数据与换算常数，不住机制**。
 //!
 //! 机制件（`periph-mech`）、端口契约（`rr-periph-proto::ports`）与协议面

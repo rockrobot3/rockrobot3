@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! P5 rrd 自身日志落盘与重启回填用例（自 e2e_profile.rs 抽出，判据不变）。
 
 use std::path::{Path, PathBuf};

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 读线程：大块裸读推裸字节通道；静默判据与就地重连闭环。
 
 use std::io::Write as _;

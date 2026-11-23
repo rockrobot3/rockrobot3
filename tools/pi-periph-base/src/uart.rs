@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! UART 行面/帧面收发与主循环。
 
 use std::time::Duration;

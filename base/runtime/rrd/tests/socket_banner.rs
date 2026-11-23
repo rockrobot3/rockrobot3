@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// SPDX-License-Identifier: Apache-2.0
 //! 启动横幅回显的必须是**解析后的绝对套接字路径**（Task 3 评审遗留）。
 //!
 //! 为什么值得单独一条：`--socket rel.sock` 时 daemon 绑的是"当前目录 + rel.sock"，

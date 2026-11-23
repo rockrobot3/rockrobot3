@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 后端标识与选择入口（architecture.md §5、ADR-0007）。
 //!
 //! | 后端 | 落地 | 承载 |

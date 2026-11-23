@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! battery 原子件入口（五件套②，0.0.5 批B③ 打样）：只声明公开面，机制在 mech.rs。
 //!
 //! 占格 `power.battery`（atom.toml）。SURFACE 是启动自述（组合件 rr3_power_run 开头

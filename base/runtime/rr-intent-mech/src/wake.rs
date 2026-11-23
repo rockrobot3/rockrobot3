@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 唤醒词门控机制核（自 `rr3-brain/src/dispatch/wake.rs` 抽出）：ASR 文本 →
 //! 唤醒判决（Ack / Command / FollowUp / Ignore）。Pi 与 MCU 共用同一份归一、
 //! 编辑距与短语匹配，板侧不再另写第二份规则。

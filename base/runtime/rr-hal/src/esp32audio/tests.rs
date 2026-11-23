@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! esp32audio 的单测（自同名模块原样抽出，判据不变）。
 
 use super::cmd::*;

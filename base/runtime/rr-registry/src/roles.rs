@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 角色词表（增补轮六 §4.1）：`contracts/roles.toml` 的集合视图与校验①真值。
 //!
 //! 生产真相只有 `contracts/roles.toml`。本文件实现它的装载与形状检查：

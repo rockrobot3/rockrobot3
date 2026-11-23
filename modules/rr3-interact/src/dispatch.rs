@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-interact 机制层注册面（0.0.8 W-A 批4 拆分，ADR-0017 五层表机制层）。
 //!
 //! [`Rr3InteractDispatcher`] 收拢原 composite.rs 主循环态（sink/face/display/

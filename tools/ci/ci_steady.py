@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 # ci_steady.py —— 只读取数：把 CI 的 sim-chain 稳态摘要从 check-run 注解里捞出来。
 #
 # 为什么不读 job 日志：匿名读日志 403（已实证），注解是唯一无需凭据的通道。

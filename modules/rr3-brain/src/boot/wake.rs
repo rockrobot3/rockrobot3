@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 唤醒词配置段（`[rr3-brain.wake]`，2026-10-31）：结构、缺省与四键解析。
 //!
 //! 语义：ASR 文本前缀匹配（不是本地 KWS）；命中即唤醒，`enable=false` 时

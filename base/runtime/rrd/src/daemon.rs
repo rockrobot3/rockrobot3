@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 监听、accept、连接线程编排（spec §4）。
 //!
 //! Task 10 加了**唯一的** watchdog 线程（`rr3_spawn_watchdog`）；Task 11b 加了**唯一的**

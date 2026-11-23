@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 行面命令解析与视图应答。
 
 use std::str::SplitWhitespace;

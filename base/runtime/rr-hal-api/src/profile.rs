@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 执行件档案契约：十四键词表、档案值面、轴 env 映射与载体窄缝。
 
 use crate::act::Rr3ActHardStop;

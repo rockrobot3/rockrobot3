@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装配在册表 pin：handle traits、描述符键与注册表键集同批。
 
 use super::*;

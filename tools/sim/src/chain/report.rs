@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 演练结论与失败点名：取证判定、收尾结论文案与现场位置。
 
 use std::process::Child;

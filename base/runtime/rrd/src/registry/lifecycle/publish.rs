@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 发布归属判定（三层安全顺序）与拒绝计数、全局低电闸。
 
 use super::super::*;

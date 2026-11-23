@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! tts 原子件机制主体（五件套③，批N32 件四 Rust 拆分定形）：合成侧**纯机制**
 //! ——voice 命名（legacy tts_config.h 女声 bella）与 mock 正弦 PCM（确定性
 //! 440Hz，时长随文本 80ms/字符；无 IO 无环境读取无 JSON，⑧-b 依赖闭包纪律，

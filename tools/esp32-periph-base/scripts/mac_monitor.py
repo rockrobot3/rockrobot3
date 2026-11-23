@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """mac_monitor.py —— Mac 实时数据 → ESP32 OLED 三行显示（批B 增量批演示件）。
 
 用法: python3 scripts/mac_monitor.py /dev/cu.usbserial-XXXX

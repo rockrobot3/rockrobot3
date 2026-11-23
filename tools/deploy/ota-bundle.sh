@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # ota-bundle —— OTA 发布制品的组包、签名与自复验（ADR-0028 的机制半边）。
 #
 # 为什么单点：签名链的顺序（规范名 → manifest → 签名 → 用公钥复验 → 摘要清单）

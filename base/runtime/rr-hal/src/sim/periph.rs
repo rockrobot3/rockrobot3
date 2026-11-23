@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! sim 执行/读数面模拟件：servo、gpio、display、电池、链路与扫描列表。
 
 use std::sync::Mutex;

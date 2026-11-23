@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 演练步骤编排：起跑段、外部模块上线、总线取证与留痕的分段调度。
 
 use std::os::unix::net::UnixStream;

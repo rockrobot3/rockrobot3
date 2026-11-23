@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """音频流 + 命令面混跑压测（树莓派直连 classic 板）。
 
 用法: python3 bw_mixed.py [termios 常量名，缺省 B1500000] [总秒数，缺省 30]

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 板侧共享状态与装配体（五端口 + 策略量 + 运行期状态）。
 
 use periph_mech::periph_core::Rr3ServoCore;

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """轨压两点采样探针（批N37 条目4：静止态 + WANDER 负载态各一次 RAIL）。
 
 用法: python3 rail2.py [termios 常量名，缺省 B1500000]

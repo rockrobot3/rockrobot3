@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! Pi 4B 板端点档（W4/P0-C）：双轴 pin 与板侧硬件的差异面。
 
 use super::*;

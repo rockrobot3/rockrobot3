@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 采集器装配构造与点头手势步伐推进。
 
 use std::time::{Duration, Instant};

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 模块间请求面（自 `conn.rs` 抽出，批B12 件六）：`rr3.call` 的转发与上行
 //! `Response` 的回程。
 //!

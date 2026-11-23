@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 崩溃账：重启策略、退避计划与达上限查询。
 
 use super::super::*;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-sense 接入层（0.0.8 W-A 批3 拆分，ADR-0017 五层表接入层）。
 //!
 //! config schema 解析（自原 composite.rs 迁入：缺键回落默认、类型错显式报错、

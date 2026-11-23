@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! TTS 下行流：突发节流发布与收尾判据。
 
 use super::*;

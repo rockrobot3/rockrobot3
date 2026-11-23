@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! `--brain` 演练（M4，ADR-0014 裁定 4）：rrd + rr3-sense(sim) + rr3-brain + rr3-interact
 //! 四真进程全语音对话闭环。
 //!

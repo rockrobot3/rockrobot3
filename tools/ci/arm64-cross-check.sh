@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # aarch64-musl 静态产物门（树莓派 / 瑞芯微部署面）——兼容入口。
 #
 # 机制已收归 tools/ci/cross-artifacts.sh（多芯片共用一份构建与断言）；

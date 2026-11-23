@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! I2S1 TX 真实 PCM 播放面（W4-2a → W7-b2 流式环）：源 PCM 边收边整形成立体声块，
 //! 写入 16 KB 有界环，播放线程按 4 KB 块写 I2S——不再聚合整段 PCM Vec，也不再有
 //! "2 条全量 PCM"的播放队列。

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 命令行解析：device/out/secs/baud/doa 逐项收集、值域校验与档位表白名单门。
 
 use std::path::PathBuf;

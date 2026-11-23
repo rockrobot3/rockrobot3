@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! # rr-mech —— 机制核切片：控制原语与安全核
 //!
 //! 承 ADR-0018（docs/process/adr/ 在册）裁定 5：控制原语与安全核是不读墙上时钟、不睡眠、时钟与输入由外部注入的

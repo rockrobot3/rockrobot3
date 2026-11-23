@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 帧级请求分派：`set_bindings` / `servo` / `face` 三臂的解码与应答组装。
 //!
 //! 上行帧按 topic 分派到本文件，参数裁决与状态迁移在 `state.rs`（机制/策略

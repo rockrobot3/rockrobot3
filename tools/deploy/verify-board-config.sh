@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # verify-board-config —— 装机面部署漂移门（批N38 件二，2026-11-02；2026-11-16 扩面）。
 #
 # 为什么需要它：批N37 现场批的 VAD 结构性失效，根因不是代码 bug，而是**仓内 config

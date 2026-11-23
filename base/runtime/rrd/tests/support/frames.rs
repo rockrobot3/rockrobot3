@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! manifest 文本与帧构造助手（与线上同一 rr-ipc 编码）。
 
 use super::*;

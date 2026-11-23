@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 # 锁内 I/O 审计门（续轮二十二）：把"人工巡检锁内日志"变成机器判据。
 #
 # 已实证的三类回潮（续轮十七/十九/二十各修一次，靠人眼复查不可持续）：

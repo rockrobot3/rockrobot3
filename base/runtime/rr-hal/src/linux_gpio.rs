@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! linux（chardev UAPI）GPIO 数字输出后端：LED / 继电器（R11②，0.0.6 方案
 //! §5.4 R8 引脚预算表 GPIO4/17 软件路行）。
 //!

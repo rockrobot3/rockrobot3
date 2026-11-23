@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 命令旁路：有界命令队列与产/耗两端。
 
 use std::collections::VecDeque;

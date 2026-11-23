@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 反射环宿主进程内的 1k–10kHz 闭环。
 //!
 //! **永不进总线**（ADR-0007 裁定 1）：闭环数据本身不过 IPC；本文件唯一出总线的

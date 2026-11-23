@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! player 原子件机制主体（五件套③，0.0.5 MC-1 重铺：占位合成退役，件面只搬运）。
 //!
 //! M3 的正弦 burst 占位合成（60ms/字符、封顶 10s）随 MC-1 退役：brain 的 TTS

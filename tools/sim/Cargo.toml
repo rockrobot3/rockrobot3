@@ -3,7 +3,7 @@ name = "rr3-sim"
 version = "0.0.1"
 edition = "2021"
 rust-version = "1.82"
-license = "UNLICENSED"
+license = "Apache-2.0"
 publish = false
 description = "x86 全链路联调：rrd + 两个真模块 + rr3-ctl 巡检的脚本化演练入口"
 

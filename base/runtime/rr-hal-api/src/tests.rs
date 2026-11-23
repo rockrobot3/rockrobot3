@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 契约面单元测试（原 lib.rs 内联测试整体搬出）。
 
 use crate::*;

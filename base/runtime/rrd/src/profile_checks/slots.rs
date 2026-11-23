@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 格位面查册门、档位一致性与结构自洽判据。
 
 use std::collections::BTreeSet;

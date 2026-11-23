@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! llm 原子件机制主体（五件套③，批N32 件四 Rust 拆分定形）：对话历史窗口
 //! **纯机制**——system 恒守首位 + 最近 [`RR3_LLM_HISTORY_ROUNDS`] 轮，裁剪只动
 //! 最旧的成对话轮，失败轮回滚（无 IO 无环境读取无 JSON，⑧-b 依赖闭包纪律；

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 上行调用、业务发布与点名应答路径。
 
 use std::time::Duration;

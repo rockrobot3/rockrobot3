@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ⑨-c 电流预算装载拒链（门 c）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 prof_src/fail。
 

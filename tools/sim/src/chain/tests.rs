@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 全链演练单测：manifest/config 形状、取证判定与参数互斥。
 
 use super::*;

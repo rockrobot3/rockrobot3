@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # 版本化部署包（A10）：把同一 commit 的二进制、装配单、契约、模块清单/配置打成
 # 一个单元，杜绝"只换 rrd 不换 profile/模块"的版本偏斜（2026-11-08 真板实录：
 # HEAD rrd + 旧 profile/旧模块 → 装载拒启 + 描述符键不认 → 模块崩溃循环）。

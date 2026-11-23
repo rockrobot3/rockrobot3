@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 经典 ESP32（xtensa-esp32-espidf）引脚装配对账锚。
 //!
 //! 真板接线（2026-10 验收档）：

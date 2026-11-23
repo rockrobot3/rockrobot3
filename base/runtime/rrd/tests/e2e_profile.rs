@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// SPDX-License-Identifier: Apache-2.0
 //! 装配单正门（`--profile`）的线级证据（0.0.2 方案 D2/T3，Q3 裁定；ADR-0009/0012）。
 //!
 //! 与 `profile.rs` 的 9 条单测分工：单测在库层钉解析/查册/缺格判定的**判定逻辑**

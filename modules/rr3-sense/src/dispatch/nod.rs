@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 点头手势两段计划与到点推进。
 
 use std::time::{Duration, Instant};

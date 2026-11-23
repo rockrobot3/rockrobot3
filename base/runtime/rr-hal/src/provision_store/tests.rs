@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! provision_store 单测（文件头：本文件只放测试，生产面在 `provision_store.rs`）。
 //!
 //! 拆分动因：`provision_store.rs` 499 行、内联测试自 237 行起占近半，先按仓内同形搬出。

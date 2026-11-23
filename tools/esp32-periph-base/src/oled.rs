@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! OLED（SSD1306，I2C）页面写实现：重试、分页与清屏。
 //!
 //! I2C 单次写有超时/重试策略（`board.rs` 常量），页写失败按整页重试；像素到

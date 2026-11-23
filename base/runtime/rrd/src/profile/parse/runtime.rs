@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! [runtime] 段解读：日志环容量、HAL 后端与三个可选后端覆盖键。
 
 use super::super::model::*;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! topics.toml 的 owner/topic 登记与命名空间校验。
 
 use toml::Value;

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """流水线 needs 图审计：引用存在性 + 成环判定（与规则核分离，保持单文件 <500 行）。"""
 
 import re

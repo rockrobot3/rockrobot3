@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 配网凭据存储后端（0.0.5 批M M-γ，MC-6：凭据持久化）。
 //!
 //! 分工铁律（工单 MC-6 原文）：**station 侧凭据由后端承载持久化**（linux =

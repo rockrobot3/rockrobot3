@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! spawn 与重启的唯一执行者（spec §5.3/§5.4）。一条线程、串行收尸与起进程。
 //!
 //! 为什么要有"所有权"这件事（`jobs` / `rr3_reg_own`）：没有 `SO_PEERCRED`（要 libc，破 K5），

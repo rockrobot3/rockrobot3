@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 板侧配置腿服务（N-13 服务本体，批N13 件一；connect 册 N-13 / 全案 §7 F-18）。
 //!
 //! rtos 形态"自己的配置/观测腿"——不经桥（[`crate::frame`] 的 `rr3.set_bindings`

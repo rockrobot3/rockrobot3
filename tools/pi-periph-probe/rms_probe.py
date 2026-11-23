@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """流内 PCM RMS 实测探针（VAD 阈值对表用，批N37 条目6/7 排查件）。
 
 用法: python3 rms_probe.py [termios 常量名，缺省 B1500000] [秒数，缺省 30]

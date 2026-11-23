@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 平台差异面：Linux（含 aarch64/musl，uapi asm-generic/termbits.h）与 macOS
 //! （BSD termios，SDK sys/termios.h 实测核对 2026-10-07）。两份定义都不得混用；
 //! 结构尺寸用 `const _` 断言在编译期钉死，先于任何运行路径拦 ABI 漂移。

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! linux（spidev UAPI）MAX7219 LED 点阵显示后端：真件档（0.0.6 批F5a③ R11③
 //! trait 立面，本档随链④真件到位实装）。
 //!

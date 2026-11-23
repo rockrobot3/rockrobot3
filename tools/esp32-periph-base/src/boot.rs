@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 板级启动装配：外设开箱（UART2/I2C0/ADC1/LEDC）→ 两平面线程 → 音频面 → 状态环。
 //!
 //! 本文件只做**装配序**：引脚真值仍以 `board/pins_*.rs` 对账锚为准，具名引脚

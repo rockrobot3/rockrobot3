@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 执行件档案装载器（批N3 件二，全案 §4.4——`hardware/<形态>/axis/<instance>.toml`）。
 //!
 //! 档案是行程的真值点（§1 坑 8 的收敛终点：config 侧字面量与板侧分轴字面量都要

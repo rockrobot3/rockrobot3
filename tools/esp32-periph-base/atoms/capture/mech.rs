@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! capture 原子件 · 机制核（批N23 件三，MC-7 缺② 收编原子模块形态）。
 //!
 //! **格位对齐申报**：本件服务 `audio.capture` 格位（esp32-mini 装配单格主 =

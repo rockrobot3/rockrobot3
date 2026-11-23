@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! # rr3mod —— 模块公共骨架（0.0.8 W-A 批0，ADR-0017 裁定 1）
 //!
 //! 五模块（批1–批5 收敛）与 brain 迁移件（ADR-0016）共用的**同构启动序列编排**：

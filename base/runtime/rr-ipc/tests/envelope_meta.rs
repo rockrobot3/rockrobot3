@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 契约**元数据**守护（最终整枝评审 Group A / C1 与 I3）。
 //!
 //! 这里每条断言读的都不是 Rust 常量自己对自己，而是 `contracts/envelope.schema.json`

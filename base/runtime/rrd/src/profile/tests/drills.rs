@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 真仓装配单钻取：default/distro/esp32-mini/pi4b 四档过完整装载门。
 //!
 //! 判据是"仓内真值两两闭合"：装配单 + 接线档 + devices.toml 三份真值同时命中；

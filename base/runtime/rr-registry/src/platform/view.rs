@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 表的只读视图（平台名、控制器与冲突集查询）。
 
 use super::*;

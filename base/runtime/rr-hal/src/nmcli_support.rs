@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! nmcli 子进程承载的公共机制层（0.0.5 批M M-γ，MC-6 抽共享）：terse 转义/字段
 //! 提取与"spawn + 超时守护 + 管道读"的执行函数，自 [`crate::linux_link`] 原样迁入——
 //! NM terse 协议语义与子进程超时守护各是一个事实，一个事实一个真值点，不允许

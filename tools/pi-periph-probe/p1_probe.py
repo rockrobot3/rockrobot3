@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """P1 稳健性四探（帧面残尾吞净 / 行面干净 / 观测面字段 / 突发回包）。
 
 用法: python3 p1_probe.py    （缺省 1.5M 档；换档 env `RR3_PROBE_BAUD`、换口

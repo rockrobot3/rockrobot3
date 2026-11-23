@@ -3,7 +3,7 @@ name = "pi-periph-base"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.82"
-license = "UNLICENSED"
+license = "Apache-2.0"
 publish = false
 description = "W4/P0-C 树莓派 4B 板侧五端口后端（std/Linux：UART/I2C/sysfs PWM/ADS1115/单调时钟）"
 

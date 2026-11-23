@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装配快照（批N4 件九笔4，门 d 余红四路 pin/role/domain/axis 转绿的判据源）：
 //! boot 装载链验收通过的不可变快照 + `rr3.ctl.wiring` 应答渲染 + [pins]×wiring
 //! 全交叉逐条点名（全案 §7 ⑤ 门"出厂自检必测 [pins]×wiring.toml 全交叉"）。

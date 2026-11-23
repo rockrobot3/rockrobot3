@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! Web 面板：设备端状态页 + 调试操作（0.0.4 批C，D3/Q3 裁定落地）。
 //!
 //! 面板**不是**第二条控制面：硬件控制只走 `rr3.call` 经 rrd 归属门（server.rs 的

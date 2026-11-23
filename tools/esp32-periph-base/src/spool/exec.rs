@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! spool 写线程执行面（自 `spool.rs` 拆出，控制单文件规模）：命令环、录制/
 //! 消费状态机与失败语义。分区绑定、全局发送端与公开 API 仍在父模块。
 //!

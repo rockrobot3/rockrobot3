@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # audio-rec —— 板面音频收流维护窗封装（#16 第二问取证入口，2026-11-16）。
 #
 # 为什么需要它：rr3-audio-rec 与 rr3-sense 竞争同一条板面 UART（flock 单消费者），

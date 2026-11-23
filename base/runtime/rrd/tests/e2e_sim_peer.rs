@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// SPDX-License-Identifier: Apache-2.0
 //! 跨进程端到端：第二个**真进程**（sim_peer）走 rrd 的线上入口完成 注册→心跳→发布→退场。
 //!
 //! 前面 19 条 `register_publish` 的客户端是**测试自己**（同进程、同二进制、手搓帧）。

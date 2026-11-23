@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 连接 EOF 的死亡处理、条目摘除与所有权标记。
 
 use super::super::*;

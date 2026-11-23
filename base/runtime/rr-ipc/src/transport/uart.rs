@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! UART 传输（0.0.7 批C，ADR-0008 第三实现位；Q1 裁定：线上帧格式不变）。
 //!
 //! 点对点字节流：宿主侧按 raw termios 打开串口设备（`/dev/ttyUSB*` /

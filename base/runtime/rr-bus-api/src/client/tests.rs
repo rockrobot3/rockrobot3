@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 客户端连接、发布、心跳与派发路径的单测。
 
 use super::conn::rr3_now_ns;

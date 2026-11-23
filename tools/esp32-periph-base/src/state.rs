@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 板侧共享状态：运行期状态机与作业队列。
 //!
 //! `PeriphState`/`Bus`/`Job` 是运行期状态与作业通道；`now_ms`/`esp_random_u32`

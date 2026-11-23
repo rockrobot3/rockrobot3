@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 模型行落盘写面（ADR-0023，面板模型面 `rr3-brain/model/set` 的写盘半边）。
 //!
 //! 两条职责严格分开：

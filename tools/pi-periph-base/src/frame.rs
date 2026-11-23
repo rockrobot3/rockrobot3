@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 帧面请求分发与绑定注入对账。
 
 use rr_ipc::{rr3_board_bind_entry, Rr3BoardBindings, RR3_METHOD_SET_BINDINGS};

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-connect 入口（0.0.8 W-A 批2 拆分，ADR-0017 五层表装配层，≤80 行）。
 //! 装配只做启动编排：SURFACE 自述 → [`rr3mod::bootstrap`]（收敛序列前四段）→
 //! config 就绪行 → 链路面/配网面探活（[`boot`]）→ bt 相位自述（装配段，方案

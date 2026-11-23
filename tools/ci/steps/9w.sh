@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ⑨-w 依赖面禁令（门 9w 步骤体：单元直依 rr-hal-api/rr-bus-api、use 面白名单冻结、
 #    白名单条目数基线钉数、板侧禁实现 crate；基-35，全 fail-closed）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 fail。

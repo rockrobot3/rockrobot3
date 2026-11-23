@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 在册模块表与生命周期状态机（architecture.md §4.2 的状态集，不新增状态）。
 //!
 //! 平台无关：只碰 BTreeMap / mpsc / u64 单调毫秒。UDS 与进程派生都在 daemon 层

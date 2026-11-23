@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 模拟设备源（`rr-hal` 的 sim 后端消费方）。
 //!
 //! 只使用 `rr-hal` 的真实数据类型，保证 sim 与 linux 后端将来交出同一种流；

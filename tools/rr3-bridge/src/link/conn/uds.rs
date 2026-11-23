@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! UDS 接链/看守面：attach、等待结局、交接与断链退避重连。
 //!
 //! 只处理上下游 UDS 半边与等待语义；UART 开路与线程编排留在父模块。

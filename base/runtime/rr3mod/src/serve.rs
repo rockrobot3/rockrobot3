@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! serve 主循环骨架（0.0.8 方案 §2.5，ADR-0017 裁定 1 序列的后三段：poll_wait →
 //! inbox 分发 → 传输性失败上抛）。poll_wait 作实参——五模块现值不同（rr3-act /
 //! rr3-interact 250ms、rr3-connect / rr3-power 100ms、rr3-sense 等价 0），不进

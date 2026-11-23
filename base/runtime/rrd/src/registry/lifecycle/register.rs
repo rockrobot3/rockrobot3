@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 注册入表与 exposes 索引维护。
 
 use super::super::*;

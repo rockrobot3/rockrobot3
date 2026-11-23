@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 源/汇共享件：入参门禁、锁与有界等待助手、跨线程共享态。
 
 use std::collections::VecDeque;

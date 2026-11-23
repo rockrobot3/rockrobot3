@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 模块 ↔ rrd 的上行 RPC：JSON-RPC 2.0（spec §5.0 + M3 的第 4 个方法）。
 //!
 //! 上行一律 `Rr3PayloadType::Request` + `dst_task = RR3_TASK_RRD`。

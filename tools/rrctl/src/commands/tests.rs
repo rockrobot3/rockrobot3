@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 命令面单测：命令表可派发与各应答格式化的形状判据。
 
 use super::*;

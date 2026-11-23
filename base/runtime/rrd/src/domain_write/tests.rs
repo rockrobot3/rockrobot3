@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! domain 写口单测（自同名单测模块原样抽出，判据不变）。
 
 use super::*;

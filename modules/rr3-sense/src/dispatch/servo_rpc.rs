@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 舵机命令面：pan/tilt 角度解码与命令旁路推送。
 
 use rr_hal::backend::Rr3AudioCmdProducer;

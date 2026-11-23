@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 面板 HTTP 服务（0.0.4 批C，D3/Q3 裁定落地）：std 手写 HTTP/1.1 子集，
 //! **零新 crates.io 依赖**——GET/POST + Content-Length + JSON body 就是全部，
 //! 不做 keep-alive、不做 chunked、不做 TLS（局域网可信面声明落 README，

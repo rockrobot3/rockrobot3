@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 收流共享账（自 watch.rs 抽出）：跨线程原子计数与武装标志的数据形状。
 //!
 //! 独立成件让退出收口（exit）、wav 恢复头（wav）与看门狗（watch）共同依赖

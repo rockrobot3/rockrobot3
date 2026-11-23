@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 逐模块装配面：manifest 事实解析、装机改写、config/包/可执行件/opt 落位。
 //!
 //! 判据要点：module.toml 的 name 必须与目录名一致（facts 交叉核验）；entry

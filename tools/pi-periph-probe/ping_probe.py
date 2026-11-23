@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """千次 ping 稳定性探针（T1 验收判据条目 5：1000 次往返 0 失败，RTT 记档）。
 
 用法: python3 ping_probe.py [termios 常量名，缺省 B1500000] [次数，缺省 1000]

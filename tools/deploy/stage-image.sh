@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # 铺镜像根目录（与 deb 装机同一份 rr3-pack stage 树，避免第二套装机布局）。
 #
 # 用法：stage-image.sh <stage-out> <arch> [version]

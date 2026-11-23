@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 签名子命令的文件读写面：私钥种子/权限、上界读取与原子落盘。
 //!
 //! 机制单点：私钥形制真值在 `rr-ota::sign`，原子写序在 `rr_ipc::persist`

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! PSRAM 定容缓冲（W6 内存门）：大块音频缓冲放外部 PSRAM，内部 SRAM 只留栈与
 //! 热路径（计划册 §3.2 内存策略）。
 //!

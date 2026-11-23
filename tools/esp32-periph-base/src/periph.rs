@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 外设句柄聚合：控制串口与运行期外设两套句柄的构造。
 //!
 //! `CtlUart` 是命令面 UART，`RtPeriph` 持有 I2C/舵机/UART2/ADC 四类驱动；

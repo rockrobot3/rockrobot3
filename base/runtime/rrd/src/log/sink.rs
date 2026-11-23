@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rrd 日志的落盘臂：常持句柄 + 进程内字节预算（续轮十四）。
 //!
 //! 原实现每行 `stat + open + write + close`（4 次系统调用，`rr3_log_rotate` 的

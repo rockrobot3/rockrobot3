@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 业务发布面（自 `conn.rs` 抽出，批B12 件四）：上行 `Event` 的解析 → 三层归属门
 //! → 排除发布者的广播 → 低电兜底。
 //!

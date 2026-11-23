@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # rock3 CI 漂红巡检：只读 GitHub REST 的 runs 列表，按 workflow 名取最新一条，
 # 回答"当前 dev 头在各条流水线上是什么结论"——把每拍手工 curl 的动作固化成一条命令。
 #

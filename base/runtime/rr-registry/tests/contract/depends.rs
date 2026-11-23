@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 依赖仲裁（ADR-0009）：提供者先启、优先级、环拒绝、全集可满足性。
 
 use super::*;

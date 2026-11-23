@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 请求帧 → 请求视图（板侧协议门）。
 //!
 //! 门序（全过才 `Ok`，任一失败 `Err` = 板侧**丢弃不回帧**，fail-closed）：

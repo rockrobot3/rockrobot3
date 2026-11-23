@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! per-unit 日志文件的定位与打开（append），供子进程 stderr 落盘。
 
 use std::path::{Path, PathBuf};

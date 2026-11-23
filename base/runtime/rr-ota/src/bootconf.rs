@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 引导配置（extlinux.conf）改写面（0.0.3 批D，方案 Q3 裁定）。
 //!
 //! 本版本范围 = **判定与文件改写逻辑**，临时文件夹具主机可测、字节级断言：

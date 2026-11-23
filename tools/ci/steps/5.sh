@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ⑤ 文档门步骤体（空文档 / 相对断链 / 导航漏链；列表打空即门禁失效）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 fail via run。
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 条目级解析：handles / ops / demands 三项数组的形状与语义校验。
 
 use super::*;

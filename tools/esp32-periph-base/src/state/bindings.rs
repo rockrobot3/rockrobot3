@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 板侧绑定单点（`rr3.set_bindings` 注入态，批N4 件七(c) / 批N9 件五）：宿主经桥上
 //! method 下发的引脚真值（esp32-mini `[hardware]` 十键 = 批N4 三键自愈/观测面 +
 //! 批N9 件五七键主驱动对账面 → rrd RR3_HAL_BINDINGS → supervisor env → 桥），落

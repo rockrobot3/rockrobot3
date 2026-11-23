@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 平台事实登记表（增补轮六 §4.6，基-22）：`contracts/platform/<平台>.toml` 的
 //! 装载与形状检查。
 //!

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 探针注入与缺格点名：逐格读探测结果、不整单连坐。
 
 use super::super::*;

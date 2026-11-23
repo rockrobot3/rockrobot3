@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 装配单数据模型（B9 结构收口，自 `profile.rs` 按"模型/解析/装载"三分）。
 //!
 //! 本文件只放**形状**：schema 版本、段键词表、三档 tier 词表、八个引脚派生键、

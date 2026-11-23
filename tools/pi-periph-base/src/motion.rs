@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 舵机命令解析与缓速移动。
 
 use std::time::Duration;

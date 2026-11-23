@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 演练步骤的可测实现（F4）。
 //!
 //! 约定：凡是"会碰真实进程/套接字"的动作都由 `main.rs` 编排，本模块只放

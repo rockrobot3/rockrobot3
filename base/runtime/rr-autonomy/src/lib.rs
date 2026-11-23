@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 自治运行核（supervisor-lite）：固定任务表、心跳、固定栅格看门狗与健康快照。
 //!
 //! 平台无关机制核（W3-1）：时间由调用方传入，核心零 IO、零线程、零分配

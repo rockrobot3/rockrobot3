@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! 时钟、心跳与看门狗节拍：到期判死、广播与降级传播。
 
 use std::sync::atomic::{AtomicU64, Ordering};

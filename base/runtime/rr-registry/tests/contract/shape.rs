@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! append-only 形状守护：44 条主题三元组 pin、退役主题、全量 manifest 过契约。
 
 use super::*;

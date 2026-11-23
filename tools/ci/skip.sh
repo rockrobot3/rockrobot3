@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # SKIP 纪律单点（机制）：本地缺工具链 = SKIP（exit 0），CI 内缺工具链 = FAIL（exit 1）。
 #
 # 为什么 CI 内不能 SKIP：esp 专用门是 check.sh ④/⑥ 显式排除面的唯一编译执法位；

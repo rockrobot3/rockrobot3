@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! rr3-ctl —— 总线侧运维 CLI。
 //!
 //! 规划能力（architecture.md §3）：查在册模块与健康状态、取日志、触发 OTA、

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # pack-arm64 —— 真板部署出包链（0.0.6 批B，方案 Q3 裁定：宿主交叉 + 板上出包）。
 #
 # 三步：①交叉编译（musl 静态 + rust-lld，零外部工具链——macOS 本机无 aarch64 glibc

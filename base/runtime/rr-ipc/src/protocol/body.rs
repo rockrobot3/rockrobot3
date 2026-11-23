@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! payload 体前缀：前 2 字节 = `Rr3PayloadType` 的冻结枚举值（LE），其后是 JSON 体。
 //!
 //! 契约把这一位显式留给 M2（`contracts/envelope.schema.json` 的
