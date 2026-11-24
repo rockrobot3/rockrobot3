@@ -130,10 +130,8 @@ def line(fd, cmd, wait, buf):
     return pump(fd, wait, buf).decode("utf-8", "replace")
 
 
-def main():
-    fd = open_tty(DEV, BAUD)
-    drain_until_quiet(fd, 0.5, 2.0)
-    print(f"=== V5 长跑 {SECS:.0f}s：音频流全程 + INFO@{INFO_PERIOD:.0f}s + 动作@{MOVE_PERIOD:.0f}s ===")
+def baseline(fd):
+    """基线：先关音频再读 INFO；板侧计数是开机累计，判据一律取增量。"""
     buf0 = bytearray()
     line(fd, "AUDIO OFF", 0.5, buf0)
     base_txt = line(fd, "INFO", 0.5, buf0)
@@ -143,11 +141,15 @@ def main():
         raise SystemExit(2)
     # 板侧 INFO 全部是**开机累计**计数——判据一律取增量；首版拿绝对值当本轮值，
     # seq=8378 其实是前序会话累计，min_free 也是历史最低水位（≈100KB 已知健康）。
-    (b_pan, b_tilt, _w, _a, b_seq, _sent, b_drop, _q, b_job, b_reply, _free, b_minfree) = m.groups()
+    (_pan, _tilt, _w, _a, b_seq, _sent, b_drop, _q, b_job, b_reply, _free, b_minfree) = m.groups()
     b_seq, b_drop, b_job, b_reply, b_minfree = map(int, (b_seq, b_drop, b_job, b_reply, b_minfree))
     print(f"  基线(累计): seq={b_seq} drop={b_drop} job_drop={b_job} reply_drop={b_reply} min_free={b_minfree}B")
     line(fd, "AUDIO ON", 0.5, buf0)  # 首版忘了 ON——"音频全程"形同虚设，判 V5 无效的根因
+    return (b_seq, b_drop, b_job, b_reply, b_minfree)
 
+
+def session(fd):
+    """SECS 秒会话：音频流全程 + 周期 INFO + 周期动作（两支独立判定，不用 elif）。"""
     buf = bytearray()
     frames = 0
     ack_miss = 0
@@ -158,7 +160,6 @@ def main():
     next_move = t0 + MOVE_PERIOD
     last_move = None
     info_n = 0
-
     while time.time() - t0 < SECS:
         now = time.time()
         # 首版用 elif：INFO 与 MOVE 同到期时 MOVE 被吞到下轮——两支独立判定
@@ -183,12 +184,20 @@ def main():
             if d:
                 buf.extend(d)
         frames += parse_pcm_stream(buf)
-    # 收尾：关音频（OFF 后队列余片照常发完，drain 2s 收干净）+ 末次 INFO
+    return buf, frames, ack_miss, moves_sent, info_n, last_move
+
+
+def settle(fd, buf):
+    """收尾：关音频（OFF 后队列余片照常发完，drain 2s 收干净）+ 末次 INFO 原文。"""
     line(fd, "AUDIO OFF", 1.0, buf)
     drain_until_quiet(fd, 1.0, 3.0)
-    frames += parse_pcm_stream(buf)
+    extra = parse_pcm_stream(buf)
     final = line(fd, "INFO", 0.5, buf)
-    m = INFO_RE.search(final.replace("\r\n", " "))
+    return extra, final
+
+
+def report_stream(frames, ack_miss, moves_sent, info_n):
+    """流面结算：探针解析量、CRC 面、动作 ack 与 INFO 次数。"""
     print("=== 结算（全部为**增量**口径）===")
     print(f"  探针解析音频帧 {frames}，CRC 不符 {crc_bad}（真帧坏 {len(crc_frame)} / 失步伪帧 {len(crc_sync)}），解析失败 {parse_errors}")
     if crc_frame:
@@ -196,55 +205,83 @@ def main():
     if crc_sync:
         print(f"  失步伪帧事件(t,plen)前 8: {crc_sync[:8]}")
     print(f"  动作 {moves_sent} 条 ack 缺失 {ack_miss}，INFO {info_n} 次")
+
+
+def probe_loss(sent_delta, frames):
+    """探针 RX 消化差额（跳帧 + 流尾截断片）：<1% 记仪器限制，返回 verdict 文案或 None。"""
+    if not sent_delta:
+        return None
+    loss = sent_delta - frames - crc_bad
+    pct = 100.0 * loss / sent_delta
+    if loss > 0 and pct < 1.0:
+        print(f"  （探针 RX 消化差额 {loss}/{sent_delta} = {pct:.2f}%，<1% 记仪器限制）")
+        return None
+    if loss > 0:
+        return f"✗ 探针侧丢帧 {loss}/{sent_delta} = {pct:.2f}%"
+    return None
+
+
+def heap_watermark(b_minfree, e_minfree):
+    """min_free 增量判定（历史最低水位单调不升）：超容差才返回 verdict 文案。"""
+    # 容差带：水位是分配器粒度，个位/百字节级之差是碎片噪声（A-2 实测 4B）。
+    if b_minfree - e_minfree > HEAP_LOW_TOL:
+        return (
+            f"✗ min_free 新低 {e_minfree} < 基线 {b_minfree}B（差 {b_minfree - e_minfree}B > 容差 {HEAP_LOW_TOL}B，查堆）"
+        )
+    if e_minfree < b_minfree:
+        print(f"  （min_free {b_minfree}B → {e_minfree}B，差 {b_minfree - e_minfree}B ≤ 容差 {HEAP_LOW_TOL}B：水位噪声，不判 FAIL）")
+    elif e_minfree < 96 * 1024:
+        print(f"  （min_free {e_minfree}B 低于 96KB 健康线：历史水位，本轮未刷新——记观察）")
+    return None
+
+
+def judge(m, base, frames, ack_miss, moves_sent, last_move):
+    """末次 INFO → 增量 / 探针消化差额 / 堆水位 / 末角；返回 verdict 列表。"""
+    b_seq, b_drop, b_job, b_reply, b_minfree = base
+    (pan, tilt, _w, _a, e_seq, _sent, e_drop, _q, e_job, e_reply, _free, e_minfree) = m.groups()
+    e_seq, e_drop, e_job, e_reply, e_minfree = map(int, (e_seq, e_drop, e_job, e_reply, e_minfree))
+    sent_delta = e_seq - b_seq
+    print(f"  板侧发送 seq 增量 {sent_delta}（探针解析 {frames}——差 = 探针侧丢失）")
+    print(f"  计数增量: audio drop={e_drop - b_drop} job_drop={e_job - b_job} reply_drop={e_reply - b_reply}")
+    print(f"  堆: min_free {b_minfree}B → {e_minfree}B（新低 = 本轮压出的水位）")
     verdict = []
+    if ack_miss:
+        verdict.append(f"✗ ack 缺失 {ack_miss}")
+    if e_job - b_job or e_reply - b_reply:
+        verdict.append(f"✗ 作业/应答丢失 job={e_job - b_job} reply={e_reply - b_reply}")
+    if e_drop - b_drop:
+        verdict.append(f"✗ 音频背压丢弃 {e_drop - b_drop}")
+    if crc_frame:
+        verdict.append(f"✗ 线面 CRC 不符 {len(crc_frame)}（真帧载荷损坏）")
+    if crc_sync:
+        print(f"  （失步伪帧 {len(crc_sync)}：丢帧后重扫撞 b64 内 MAGIC，探针侧记账）")
+    if parse_errors:
+        verdict.append(f"✗ CRC 过但解析失败 {parse_errors}（组帧面疑点）")
+    for msg in (probe_loss(sent_delta, frames), heap_watermark(b_minfree, e_minfree)):
+        if msg:
+            verdict.append(msg)
+    if free_samples:
+        print(
+            f"  free 采样 {len(free_samples)} 拍：首 {free_samples[0]}B / 末 {free_samples[-1]}B / "
+            f"min {min(free_samples)}B / max {max(free_samples)}B（趋势面，越小越接近泄漏）"
+        )
+    if last_move and last_move[0] == "PAN" and int(pan) != last_move[1]:
+        verdict.append(f"✗ 末角漂移 pan={pan} ≠ {last_move[1]}")
+    return verdict
+
+
+def main():
+    fd = open_tty(DEV, BAUD)
+    drain_until_quiet(fd, 0.5, 2.0)
+    print(f"=== V5 长跑 {SECS:.0f}s：音频流全程 + INFO@{INFO_PERIOD:.0f}s + 动作@{MOVE_PERIOD:.0f}s ===")
+    base = baseline(fd)
+    buf, frames, ack_miss, moves_sent, info_n, last_move = session(fd)
+    extra, final = settle(fd, buf)
+    frames += extra
+    report_stream(frames, ack_miss, moves_sent, info_n)
+    m = INFO_RE.search(final.replace("\r\n", " "))
     if m:
-        (pan, tilt, _w, _a, e_seq, _sent, e_drop, _q, e_job, e_reply, _free, e_minfree) = m.groups()
-        e_seq, e_drop, e_job, e_reply, e_minfree = map(int, (e_seq, e_drop, e_job, e_reply, e_minfree))
-        sent_delta = e_seq - b_seq
-        print(f"  板侧发送 seq 增量 {sent_delta}（探针解析 {frames}——差 = 探针侧丢失）")
-        print(f"  计数增量: audio drop={e_drop - b_drop} job_drop={e_job - b_job} reply_drop={e_reply - b_reply}")
-        print(f"  堆: min_free {b_minfree}B → {e_minfree}B（新低 = 本轮压出的水位）")
-        if ack_miss:
-            verdict.append(f"✗ ack 缺失 {ack_miss}")
-        if e_job - b_job or e_reply - b_reply:
-            verdict.append(f"✗ 作业/应答丢失 job={e_job - b_job} reply={e_reply - b_reply}")
-        if e_drop - b_drop:
-            verdict.append(f"✗ 音频背压丢弃 {e_drop - b_drop}")
-        if crc_frame:
-            verdict.append(f"✗ 线面 CRC 不符 {len(crc_frame)}（真帧载荷损坏）")
-        if crc_sync:
-            print(f"  （失步伪帧 {len(crc_sync)}：丢帧后重扫撞 b64 内 MAGIC，探针侧记账）")
-        if parse_errors:
-            verdict.append(f"✗ CRC 过但解析失败 {parse_errors}（组帧面疑点）")
-        # 探针 RX 消化差额（帧头被 RX 停顿打断而跳帧 + 流尾截断片）：<1% 记仪器
-        # 限制不判 FAIL——板侧发送计数、背压、CRC 三者干净时，丢在 Pi 收侧的帧
-        # 是 Python 解析停顿的仪器属性，不是系统故障。
-        if sent_delta:
-            probe_loss = sent_delta - frames - crc_bad
-            pct = 100.0 * probe_loss / sent_delta
-            if probe_loss > 0 and pct < 1.0:
-                print(f"  （探针 RX 消化差额 {probe_loss}/{sent_delta} = {pct:.2f}%，<1% 记仪器限制）")
-            elif probe_loss > 0:
-                verdict.append(f"✗ 探针侧丢帧 {probe_loss}/{sent_delta} = {pct:.2f}%")
-        # min_free 是**开机以来**最低水位（单调不升），判据取增量口径：本轮刷新
-        # 历史低点才算堆水位退化；绝对门槛只在首跑（基线 ≥96KB）时有意义——
-        # 旧实现拿绝对值对 96KB，历史低点一旦跌破，此后每次长跑都永久 FAIL（仪器缺陷）。
-        # 容差带：水位是分配器粒度，个位/百字节级之差是碎片噪声（A-2 实测 4B）。
-        if b_minfree - e_minfree > HEAP_LOW_TOL:
-            verdict.append(
-                f"✗ min_free 新低 {e_minfree} < 基线 {b_minfree}B（差 {b_minfree - e_minfree}B > 容差 {HEAP_LOW_TOL}B，查堆）"
-            )
-        elif e_minfree < b_minfree:
-            print(f"  （min_free {b_minfree}B → {e_minfree}B，差 {b_minfree - e_minfree}B ≤ 容差 {HEAP_LOW_TOL}B：水位噪声，不判 FAIL）")
-        elif e_minfree < 96 * 1024:
-            print(f"  （min_free {e_minfree}B 低于 96KB 健康线：历史水位，本轮未刷新——记观察）")
-        if free_samples:
-            print(
-                f"  free 采样 {len(free_samples)} 拍：首 {free_samples[0]}B / 末 {free_samples[-1]}B / "
-                f"min {min(free_samples)}B / max {max(free_samples)}B（趋势面，越小越接近泄漏）"
-            )
-        if last_move and last_move[0] == "PAN" and int(pan) != last_move[1]:
-            verdict.append(f"✗ 末角漂移 pan={pan} ≠ {last_move[1]}")
+        verdict = judge(m, base, frames, ack_miss, moves_sent, last_move)
         print("V5 结论:", "PASS" if not verdict else "；".join(verdict))
     else:
         print("V5 结论: FAIL（末次 INFO 解析失败）")
