@@ -41,6 +41,7 @@ ACTION_MATRIX = {
     "taiki-e/install-action": {"v2"},
     "softprops/action-gh-release": {"v3"},
     "oras-project/setup-oras": {"v2"},
+    "sigstore/cosign-installer": {"v3"},
 }
 
 USES = re.compile(r"^\s*-?\s*uses:\s*(\S+)")

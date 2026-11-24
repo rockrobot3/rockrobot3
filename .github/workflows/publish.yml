@@ -216,7 +216,12 @@ jobs:
   merge:
     needs: [build, build-riscv64]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+      # keyless 签名：GitHub OIDC token 换取 Fulcio 短期证书（runbook B.1）。
+      id-token: write
     steps:
       # 合并腿要跑仓内 image-smoke.sh：没有 checkout 时 `bash tools/deploy/...`
       # 直接 exit 127（2026-11-18 main 首跑实证；此前 publish 只在 tag 触发，
@@ -230,6 +235,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/setup-buildx-action@v4
       - name: 合并多架构清单
+        id: merge
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             tag="${{ inputs.tag }}"
@@ -252,8 +258,8 @@ jobs:
           # 判据只数**镜像清单**：buildx 构建会在每腿附一条 attestation manifest
           # （provenance/SBOM，platform=unknown/unknown），它合法存在但不能算进架构集
           # ——2026-11-15 v0.0.13 首跑就是被这条多出来的 unknown 判红（断言过严的假红）。
-          # 现行三腿走 `docker build` 直推（无 SBOM/签名附件），此处容忍保留：
-          # 未来启 buildx 证明面时无需再改判据；是否启用在发布面另议。
+          # 三腿均 `buildx --push` 附 provenance/SBOM attestation；合并清单另由
+          # cosign keyless 签名（runbook B.1），签名对象是合并后的 index digest。
           python3 - "${IMAGE}:${tag}" <<'PY'
           import json, subprocess, sys
           img = sys.argv[1]
@@ -278,6 +284,30 @@ jobs:
           # 合并标签本身必须可拉取且装机树完整：两只单架构腿绿不等于合并清单
           # 指向的层都在（清单指向丢失层是"看起来发布成功"的经典形态）。
           bash tools/deploy/image-smoke.sh file "${IMAGE}:${tag}"
+          digest=$(docker buildx imagetools inspect "${IMAGE}:${tag}" --format '{{json .Manifest}}' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')
+          [ -n "$digest" ] || { echo "::error title=merge-digest::合并 digest 为空"; exit 1; }
+          printf 'tag=%s\ndigest=%s\n' "$tag" "$digest" >> "$GITHUB_OUTPUT"
+          echo "PASS  合并 digest ${digest}"
+      - uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: "v2.6.5"
+      - name: keyless 签名合并 digest（正/负身份验证）
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          ref="${IMAGE}@${{ steps.merge.outputs.digest }}"
+          id_re='^https://github\.com/rockrobot3/rockrobot3/\.github/workflows/publish\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$'
+          issuer='https://token.actions.githubusercontent.com'
+          cosign sign --yes "$ref"
+          cosign verify "$ref" --certificate-identity-regexp "$id_re" \
+            --certificate-oidc-issuer "$issuer" >/dev/null
+          if cosign verify "$ref" --certificate-identity-regexp '^https://example\.invalid/$' \
+               --certificate-oidc-issuer "$issuer" >/dev/null 2>&1; then
+            echo "::error title=cosign-neg::错误 identity 未被拒绝"
+            exit 1
+          fi
+          echo "PASS  cosign keyless 签名 + 正/负验证（$ref）"
 
   # 板侧固件制品（2026-11-16 立；2026-11-20 扩双芯片 + ghcr；2026-11-22 补同版
   # bootloader、分区表真值与烧录说明）：
@@ -299,6 +329,8 @@ jobs:
     permissions:
       contents: write
       packages: write
+      # keyless 签名固件 OCI（runbook B.1）。
+      id-token: write
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -412,3 +444,25 @@ jobs:
             firmware-sha256.txt:text/plain
           oras manifest fetch "$ref" >/dev/null
           echo "PASS  已推送 $ref（双 ELF + 双 bootloader + 分区表 + 烧录说明 + sha256）"
+      - uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: "v2.6.5"
+      - name: keyless 签名固件 OCI（正/负身份验证）
+        run: |
+          set -euo pipefail
+          ref="ghcr.io/${GITHUB_REPOSITORY_OWNER}/rockrobot3-firmware:${GITHUB_REF_NAME}"
+          digest=$(oras manifest fetch --descriptor "$ref" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')
+          [ -n "$digest" ] || { echo "::error title=fw-digest::固件 OCI digest 为空"; exit 1; }
+          signed="ghcr.io/${GITHUB_REPOSITORY_OWNER}/rockrobot3-firmware@${digest}"
+          id_re='^https://github\.com/rockrobot3/rockrobot3/\.github/workflows/publish\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$'
+          issuer='https://token.actions.githubusercontent.com'
+          cosign sign --yes "$signed"
+          cosign verify "$signed" --certificate-identity-regexp "$id_re" \
+            --certificate-oidc-issuer "$issuer" >/dev/null
+          if cosign verify "$signed" --certificate-identity-regexp '^https://example\.invalid/$' \
+               --certificate-oidc-issuer "$issuer" >/dev/null 2>&1; then
+            echo "::error title=cosign-neg-fw::错误 identity 未被拒绝"
+            exit 1
+          fi
+          echo "PASS  cosign keyless 签名 + 正/负验证（$signed）"

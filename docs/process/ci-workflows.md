@@ -91,7 +91,10 @@ riscv64 发布镜像路径跑通（交叉产物 → `rr3-pack` stage → QEMU `d
 **证明面（2026-11-24 补）**：三条镜像腿以 `docker buildx build --push` 构建并附
 `--provenance=mode=max --sbom=true`，单架构清单各带 provenance + SBOM attestation
 （`docker build` 直推不会产生）；窗口判据见 runbook B 的 attestation 计数。
-签名（cosign）尚未启用，status 敞口照实记录。
+**签名（2026-11-25 接入）**：`merge` 对合并 index digest、`firmware` 对固件 OCI
+digest 执行 cosign keyless 签名（`id-token: write`，cosign 固定 v2.6.5），并在同一步
+做正/负身份验证（错误 identity 必须被拒）；签名只对 `refs/tags/v*` 执行。身份约束
+与验证命令见 runbook B.1；设计接入不等于已验证，正式 tag 回执前 status 仍记敞口。
 S3 门的 ⑨ release 与 `firmware` job 逐字同参（`esp32s3,autonomy,tts`），并在产出树
 断言同版 bootloader：tag 不是该形态的首次 release 编译。
 **固件制品（同日；2026-11-22 补同版 bootloader）**：tag 发布的 `firmware` job
