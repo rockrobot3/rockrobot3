@@ -84,18 +84,22 @@ fn fake_rrd(listener: UnixListener, hb_tx: mpsc::Sender<Value>) {
     }
 }
 
-/// 有界等待心跳自报的 inbox_backlog_drop 越过 64（3s 上界）。
+/// 有界等待心跳自报的 inbox_backlog_drop 越过 64（10s 上界；命中即止）。
+/// 判据必须等到达标值再退出：2026-11-24 riscv gnu 腿实录——首拍心跳先到、
+/// 当时只丢了个位数，旧实现见 `drops > 0` 就 break，QEMU 慢一拍即误红。
 fn await_drops(hb_rx: &mpsc::Receiver<Value>) -> u64 {
-    let deadline = Instant::now() + Duration::from_secs(3);
+    const NEED: u64 = 64;
+    let deadline = Instant::now() + Duration::from_secs(10);
     let mut drops = 0u64;
     while Instant::now() < deadline {
         let Ok(params) = hb_rx.recv_timeout(Duration::from_millis(500)) else {
             continue;
         };
-        drops = params["counters"]["inbox_backlog_drop"]
+        let n = params["counters"]["inbox_backlog_drop"]
             .as_u64()
             .unwrap_or(0);
-        if drops > 0 {
+        drops = drops.max(n);
+        if drops >= NEED {
             break;
         }
     }
