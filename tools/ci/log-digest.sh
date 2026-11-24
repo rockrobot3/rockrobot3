@@ -105,12 +105,9 @@ digest() {
 	fi
 }
 
-self_test() {
-	local out fail=0
-	ST_TMP=$(mktemp -d) || die "mktemp 失败"
-	trap 'rm -rf "$ST_TMP"' EXIT
-	local tmp=$ST_TMP
-	cat >"$tmp/build.log" <<'EOF'
+# 自检夹具：一条含真信号、噪音与 phase 行的构建日志。
+st_fixture() {
+	cat >"$ST_TMP/build.log" <<'EOF'
 >>> host-python3 3.11.8 Extracting
 make[2]: *** [Makefile:1270: all] Error 1 (ignored)
 Makeinfo is too old (4.13); documentation will not be built
@@ -118,59 +115,91 @@ Makeinfo is too old (4.13); documentation will not be built
 error: could not compile `rr3-act` due to previous error
 make: *** [package/pkg-generic.mk:283: /tmp/br-out/build/uboot-2024.10] Error 2
 EOF
-	# 正例：真信号进注解；噪音两行被滤掉；phase 行并入
-	out=$(bash "$0" --title t --log "$tmp/build.log" --phases --plain --tail 0)
+}
+
+# 正例：真信号进注解；噪音两行被滤掉；phase 行并入
+st_positive() {
+	local out
+	out=$(bash "$0" --title t --log "$ST_TMP/build.log" --phases --plain --tail 0)
 	case "$out" in
 	"phase: >>> host-python3"*) ;;
-	*) echo "FAIL  自检: phase 行未并入: $out"; fail=1 ;;
+	*) echo "FAIL  自检: phase 行未并入: $out"; st_fail=1 ;;
 	esac
 	case "$out" in
 	*"Error 2"*) ;;
-	*) echo "FAIL  自检: 真信号缺失: $out"; fail=1 ;;
+	*) echo "FAIL  自检: 真信号缺失: $out"; st_fail=1 ;;
 	esac
 	case "$out" in
 	*pyerrors.h* | *"(ignored)"* | *"Makeinfo"*)
 		echo "FAIL  自检: 噪音未被滤掉: $out"
-		fail=1
+		st_fail=1
 		;;
 	esac
-	# 负例 1：日志缺失也必须给归因，不能静默
-	out=$(bash "$0" --title t --log "$tmp/nope.log" --plain --tail 0)
+}
+
+# 负例 1：日志缺失也必须给归因，不能静默
+st_neg_missing() {
+	local out
+	out=$(bash "$0" --title t --log "$ST_TMP/nope.log" --plain --tail 0)
 	case "$out" in
 	*"日志缺失"*) ;;
-	*) echo "FAIL  自检: 缺日志未点名: $out"; fail=1 ;;
+	*) echo "FAIL  自检: 缺日志未点名: $out"; st_fail=1 ;;
 	esac
-	# 负例 2：--max 必须截断（--tail 0：回显会带出真信号，破坏"截断"断言）
-	out=$(bash "$0" --title t --log "$tmp/build.log" --plain --max 40 --tail 0)
+}
+
+# 负例 2：--max 必须截断（--tail 0：回显会带出真信号，破坏"截断"断言）
+st_neg_max() {
+	local out
+	out=$(bash "$0" --title t --log "$ST_TMP/build.log" --plain --max 40 --tail 0)
 	case "$out" in
-	*"Error 2"*) echo "FAIL  自检: --max 未截断: $out"; fail=1 ;;
+	*"Error 2"*) echo "FAIL  自检: --max 未截断: $out"; st_fail=1 ;;
 	esac
-	# 负例 3：末尾回显确实在 stdout（tail 1 = make 的 Error 2 行）
-	out=$(bash "$0" --title t --log "$tmp/build.log" --plain --tail 1)
+}
+
+# 负例 3：末尾回显确实在 stdout（tail 1 = make 的 Error 2 行）
+st_neg_tail() {
+	local out
+	out=$(bash "$0" --title t --log "$ST_TMP/build.log" --plain --tail 1)
 	case "$out" in
 	*"末 1 行"*) ;;
-	*) echo "FAIL  自检: 末段回显缺失: $out"; fail=1 ;;
+	*) echo "FAIL  自检: 末段回显缺失: $out"; st_fail=1 ;;
 	esac
-	# 负例 4：--head 优先取最早信号（供给类日志：命令级错误在前、逐项 FAIL 在后；
-	# 条目多于 12 条时 tail 会把命令级错误挤出注解）
+}
+
+# 负例 4：--head 优先取最早信号（供给类日志：命令级错误在前、逐项 FAIL 在后；
+# 条目多于 12 条时 tail 会把命令级错误挤出注解）
+st_neg_head() {
+	local out i
 	{
 		echo "error: unknown flag --strict"
 		for i in $(seq 1 14); do echo "FAIL  modules/m$i"; done
-	} >"$tmp/head.log"
-	out=$(bash "$0" --title t --log "$tmp/head.log" --sig '^error(\[|:)|^FAIL' \
+	} >"$ST_TMP/head.log"
+	out=$(bash "$0" --title t --log "$ST_TMP/head.log" --sig '^error(\[|:)|^FAIL' \
 		--head --plain --tail 0)
 	case "$out" in
 	*"unknown flag"*) ;;
-	*) echo "FAIL  自检: --head 未取到首条信号: $out"; fail=1 ;;
+	*) echo "FAIL  自检: --head 未取到首条信号: $out"; st_fail=1 ;;
 	esac
 	case "$out" in
 	*"m14"*)
 		echo "FAIL  自检: --head 取到了尾部信号: $out"
-		fail=1
+		st_fail=1
 		;;
 	esac
-	[ "$fail" -eq 0 ] && echo "PASS  log-digest 自检（正例 + 四条负例）"
-	return "$fail"
+}
+
+self_test() {
+	ST_TMP=$(mktemp -d) || die "mktemp 失败"
+	trap 'rm -rf "$ST_TMP"' EXIT
+	st_fail=0
+	st_fixture
+	st_positive
+	st_neg_missing
+	st_neg_max
+	st_neg_tail
+	st_neg_head
+	[ "$st_fail" -eq 0 ] && echo "PASS  log-digest 自检（正例 + 四条负例）"
+	return "$st_fail"
 }
 
 [ "${1:-}" = "--self-test" ] && { self_test; exit $?; }
