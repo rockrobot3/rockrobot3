@@ -95,14 +95,16 @@ impl RrdRegistry {
         out: &mut Vec<Rr3Expiry>,
     ) {
         if elapsed_ms >= watchdog_ms {
-            let facts = {
-                let e = self.modules.get_mut(&name).expect("刚读出、仍在册");
+            // 单次可变借用内标 Failed/摘句柄并 clone facts；守卫在 map 返回时释放，
+            // 后面的 rr3_charge 才能再借 `&mut self`。条目由调用方同拍列出，缺席即本拍无动作。
+            let Some(facts) = self.modules.get_mut(&name).map(|e| {
                 e.phase = Rr3Phase::Failed;
                 e.tx = None;
                 e.facts.clone()
+            }) else {
+                return;
             };
-            // clean_exit = false：超时就是崩溃，与 EOF 是不是 FIN 无关。facts 必须先 clone，
-            // 否则 `&mut self.modules` 的守卫会越过 `&mut self` 的 rr3_charge 活着。
+            // clean_exit = false：超时就是崩溃，与 EOF 是不是 FIN 无关。
             let restart = self.rr3_charge(&facts, false);
             out.push(Rr3Expiry {
                 name,

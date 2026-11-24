@@ -87,16 +87,23 @@ impl RrdRegistry {
     fn rr3_undegrade_apply(&mut self, candidates: Vec<String>) -> Vec<(String, u64)> {
         let mut out = Vec::new();
         for name in candidates {
-            let deps = self
+            let Some(deps) = self
                 .modules
                 .get(&name)
                 .map(|e| e.facts.depends_required.clone())
-                .unwrap_or_default();
-            if self.rr3_deps_satisfied(&deps) {
-                let e = self.modules.get_mut(&name).expect("刚读过、仍在册");
-                e.phase = Rr3Phase::Running;
-                out.push((name, e.src_task));
+            else {
+                continue;
+            };
+            if !self.rr3_deps_satisfied(&deps) {
+                continue;
             }
+            // 只读判据通过后再取可变借用（判据要读 providers/模块表，不能与写借用重叠）；
+            // 条目在本次 &mut self 内不会消失，缺席只为不 panic 兜底。
+            let Some(e) = self.modules.get_mut(&name) else {
+                continue;
+            };
+            e.phase = Rr3Phase::Running;
+            out.push((name, e.src_task));
         }
         out
     }
