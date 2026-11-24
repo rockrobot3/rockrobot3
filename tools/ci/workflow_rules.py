@@ -14,21 +14,18 @@
 - platforms.yml 的五芯片矩阵腿（英特尔/AMD x86_64、瑞芯微 aarch64、进迭时空
   riscv64、esp32、esp32s3）缺任一即红，腿内验证脚本缺一即红；riscv-image
   构建门（腿 + 脚本）同样钉住：覆盖缩水不能只靠评审记得。
-- publish.yml 的发布面完整性：build / build-riscv64 / merge / firmware 四腿
-  必须在；merge.needs 必须等两条构建腿、合并命令必须含三架构；firmware 必须
-  带 packages: write、推 rockrobot3-firmware 且资产集完整（双 ELF + 双
-  bootloader + 分区表 + 烧录说明 + sha256）——发布面缺腿只在 tag 暴露太晚。
-- buildroot.yml 的正式制品面：release 腿必须 tag 门、登录 ghcr、带
-  packages: write，并以 oras 推 rockrobot3-ota / rockrobot3-buildroot——
-  正式制品只发 release asset 不进 ghcr 等于托管面残缺。
+- publish.yml 的发布面完整性（四腿 / merge 三架构 / 固件资产集）与 buildroot.yml
+  的正式制品托管面，判据在 [`workflow_release.py`](workflow_release.py)——只在
+  tag 暴露，独立成篇。
 
 入口：`workflows_audit.py`（CLI）与 `workflows_audit_selftest.py`（自检）。
 """
 
-import pathlib
 import re
 
-from workflow_graph import graph_problems, needs_of
+from workflow_common import has_key, jobs_of, step_block, top_block, trigger_block
+from workflow_graph import graph_problems
+from workflow_release import REQUIRED_JOBS, release_artifacts_problems, release_problems
 
 # action 引用矩阵（升级 = 显式提交改本表；值 = 允许的完整引用）
 ACTION_MATRIX = {
@@ -47,7 +44,6 @@ ACTION_MATRIX = {
 }
 
 USES = re.compile(r"^\s*-?\s*uses:\s*(\S+)")
-JOB = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
 STEP_USES = re.compile(r"^\s*-\s*uses:\s*(\S+)")
 
 # 工具链基线与作业上限（结构真源 = docs/process/ci-workflows.md；升级走显式提交）
@@ -80,29 +76,6 @@ JOB_STEPS = {
         "rr3-act-sense-espidf-check.sh",
     ],
 }
-
-
-def step_block(lines, i):
-    """第 i 行（`- uses:`）之后的步骤块（缩进更深的行）。"""
-    indent = len(lines[i]) - len(lines[i].lstrip())
-    out = []
-    for line in lines[i + 1 :]:
-        if line.strip() and len(line) - len(line.lstrip()) <= indent:
-            break
-        out.append(line)
-    return out
-
-
-def has_key(block, key, value=None):
-    """块内 `key:` 是否存在（给了 value 则值必须相等，去引号）。"""
-    for line in block:
-        m = re.match(rf"^\s+{re.escape(key)}:\s*(.*)$", line)
-        if not m:
-            continue
-        got = m.group(1).strip().strip('"').strip("'")
-        if value is None or got == value:
-            return True
-    return False
 
 
 def step_problems(rel, jobs):
@@ -165,43 +138,6 @@ def uses_problems(text, where):
     return bad
 
 
-def jobs_of(text):
-    """返回 [(job 名, 块行)]——jobs: 之后的 2 空格键为 job 边界。"""
-    jobs, name, buf = [], None, []
-    in_jobs = False
-    for line in text.splitlines():
-        if re.match(r"^jobs:\s*$", line):
-            in_jobs, name, buf = True, None, []
-            continue
-        if in_jobs and re.match(r"^\S", line):
-            if name:
-                jobs.append((name, buf))
-            in_jobs, name, buf = False, None, []
-            continue
-        if not in_jobs:
-            continue
-        m = JOB.match(line)
-        if m:
-            if name:
-                jobs.append((name, buf))
-            name, buf = m.group(1), []
-        elif name:
-            buf.append(line)
-    if name:
-        jobs.append((name, buf))
-    return jobs
-
-
-def trigger_block(lines, i):
-    """`  push:` 之后的子块（缩进 ≥4 的行）。"""
-    out = []
-    for line in lines[i + 1 :]:
-        if line.strip() and not line.startswith("    "):
-            break
-        out.append(line)
-    return out
-
-
 def trigger_problems(text, rel):
     """触发面：必须有 on:；push 必须收窄到 branches/tags；publish 必须吃 tag。"""
     bad = []
@@ -223,19 +159,6 @@ def trigger_problems(text, rel):
 
 
 CONTINUE_ON_ERROR = re.compile(r"^\s*continue-on-error:\s*(.*)$")
-
-
-def top_block(lines, key):
-    """顶层键（缩进 0）之后的子块。"""
-    idx = next((i for i, l in enumerate(lines) if l.rstrip() == f"{key}:"), None)
-    if idx is None:
-        return []
-    out = []
-    for line in lines[idx + 1 :]:
-        if line.strip() and not line.startswith("  "):
-            break
-        out.append(line)
-    return out
 
 
 def policy_problems(text, rel):
@@ -282,158 +205,6 @@ def chip_problems(text, rel):
     return bad
 
 
-# 发布运行面十件（rrd + 六模块 + 三工具）：镜像根按名装这十件，少编任何一件
-# 只在装机后才暴露——build 腿的清单按名钉住，增删须同批评审。
-PUBLISH_MODULES = ("act", "brain", "connect", "interact", "sense", "power")
-PUBLISH_TOOLS = (
-    "tools/rrctl/Cargo.toml",
-    "base/ota/rr3-ota-ctl/Cargo.toml",
-    "tools/rr3-pack/Cargo.toml",
-)
-
-
-def runtime_problems(joined, rel):
-    """发布构建清单：rrd + 六模块 + 三工具逐名在场。"""
-    bad = []
-    if "-p rrd" not in joined:
-        bad.append(f"{rel} build 缺 -p rrd（运行面十件之一）")
-    m = re.search(r"for m in ([\w ]+); do", joined)
-    seen = set(m.group(1).split()) if m else set()
-    for mod in PUBLISH_MODULES:
-        if mod not in seen:
-            bad.append(f"{rel} build 运行面缺模块 {mod}（六模块清单被削）")
-    for path in PUBLISH_TOOLS:
-        if path not in joined:
-            bad.append(f"{rel} build 缺 {path}（运行面工具件被削）")
-    return bad
-
-
-def release_problems(text, rel):
-    """发布面完整性：四腿齐、merge 等两条构建腿并覆盖三架构、固件进 ghcr。"""
-    if rel.name != "publish.yml":
-        return []
-    jobs = dict(jobs_of(text))
-    bad = []
-    for job in ("build", "build-riscv64", "merge", "firmware"):
-        if job not in jobs:
-            bad.append(f"{rel} 缺发布 job {job}（发布面被削）")
-    build = jobs.get("build")
-    if build is not None:
-        joined = "\n".join(build)
-        for needle in (
-            "arch: amd64",
-            "arch: arm64",
-            "platform: linux/amd64",
-            "platform: linux/arm64",
-            "ubuntu-24.04-arm",
-        ):
-            if needle not in joined:
-                bad.append(f"{rel} build 矩阵缺 {needle}（原生发布腿缩水）")
-        for needle in ("stage-image.sh", "image-smoke.sh file", "image-smoke.sh run"):
-            if needle not in joined:
-                bad.append(f"{rel} build 缺 {needle}（发布镜像未按装机面验证）")
-        bad.extend(runtime_problems(joined, rel))
-    riscv = jobs.get("build-riscv64")
-    if riscv is not None:
-        joined = "\n".join(riscv)
-        if "build-riscv-image.sh" not in joined:
-            bad.append(f"{rel} build-riscv64 未复用 build-riscv-image.sh（发布路径分叉）")
-        # 推送机制二选一：显式 docker push，或脚本 --push（buildx 推并附证明面）。
-        # 判据是"发布腿必须真推送"，不是钉死某条命令形状。
-        if "docker push" not in joined and "build-riscv-image.sh --push" not in joined:
-            bad.append(f"{rel} build-riscv64 未推送（需 docker push 或 build-riscv-image.sh --push）")
-    merge = jobs.get("merge")
-    if merge is not None:
-        needs = needs_of(merge)
-        for dep in ("build", "build-riscv64"):
-            if dep not in needs:
-                bad.append(f"{rel} merge.needs 缺 {dep}（少一条腿就合并 = 少架构发布）")
-        joined = "\n".join(merge)
-        for arch in ("amd64", "arm64", "riscv64"):
-            if f"-{arch}" not in joined:
-                bad.append(f"{rel} merge 未合并 {arch} 单架构镜像")
-        if "image-smoke.sh file" not in joined:
-            bad.append(f"{rel} merge 缺 image-smoke（合并清单未验证可拉取）")
-    firmware = jobs.get("firmware")
-    if firmware is not None:
-        joined = "\n".join(firmware)
-        if "rockrobot3-firmware" not in joined:
-            bad.append(f"{rel} firmware 未推 rockrobot3-firmware（正式制品必须进 ghcr）")
-        if not re.search(r"^\s+packages:\s*write\s*$", joined, re.M):
-            bad.append(f"{rel} firmware 缺 packages: write（无法推 ghcr）")
-        if "xtensa-esp32s3-espidf" not in joined:
-            bad.append(f"{rel} firmware 未构建 S3 目标（双芯片覆盖缺失）")
-        if "MCU=esp32s3" not in joined or "--features esp32s3" not in joined:
-            bad.append(f"{rel} firmware S3 档缺 MCU/feature（芯片档漂移）")
-        # 资产契约（2026-11-22）：双 ELF + 双 bootloader + 分区表 CSV + 烧录说明
-        # + sha256 清单，release 与 ghcr 同集，缺一即红。ELF 不内嵌 bootloader/
-        # 分区表，espflash 自带的引导镜像与 app 的 IDF 版本不保证一致。
-        for asset in (
-            "rr3-periph-base-esp32-safe-dev.elf",
-            "rr3-periph-base-esp32s3-full-dev.elf",
-            "rr3-bootloader-esp32-dev.bin",
-            "rr3-bootloader-esp32s3-dev.bin",
-            "rr3-partitions.csv",
-            "FLASHING.md",
-            "firmware-sha256.txt",
-        ):
-            if asset not in joined:
-                bad.append(f"{rel} firmware 资产缺 {asset}（发布集不完整）")
-    return bad
-
-
-# 作业覆盖面（按名钉住）：门禁/集成/平台/发布/固件的 job 是覆盖契约的一部分，
-# 删除或改名即"某类验证不再跑"——必须同批改本表，不许静默缩水。
-REQUIRED_JOBS = {
-    # 风格/lint 面并入 conventions（check.sh ①c/①d/④b 单点），不再单列 lint job：
-    # 同一批 fmt/clippy 判据只跑一处，避免"CI 绿本地红"的双实现。
-    "gate.yml": (
-        "conventions", "release", "supply", "alsa", "ota-bundle", "scripts",
-    ),
-    "integration.yml": (
-        "distro-smoke", "ota-sign", "rk3566-onboard", "buildroot-assembly",
-        "sim-assemble", "sim-chain", "matrix",
-    ),
-    "platforms.yml": (
-        "cross-artifacts", "riscv-image", "esp32-gates", "autonomy-face",
-        "ipct003", "host-windows", "host-macos",
-    ),
-    "publish.yml": ("build", "build-riscv64", "merge", "firmware"),
-    "buildroot.yml": ("dtb-backport", "image", "release"),
-}
-
-# 正式制品面（buildroot.yml）：job 名 → 必须进 ghcr 的制品名。
-# 与 publish.yml 的镜像/固件同一条纪律：正式发布物只进 release asset 不算托管完成。
-GHCR_ARTIFACTS = {
-    "buildroot.yml": ("release", ("rockrobot3-ota", "rockrobot3-buildroot")),
-}
-
-
-def release_artifacts_problems(text, rel):
-    """正式制品托管面：OTA 与 buildroot 镜像必须由 tag 门作业推 ghcr。"""
-    spec = GHCR_ARTIFACTS.get(rel.name)
-    if spec is None:
-        return []
-    job, names = spec
-    block = dict(jobs_of(text)).get(job)
-    if block is None:
-        return [f"{rel} 缺发布 job {job}（正式制品面被删）"]
-    joined = "\n".join(block)
-    bad = []
-    for name in names:
-        if name not in joined:
-            bad.append(f"{rel} job {job} 未推 {name}（正式制品必须进 ghcr）")
-    if "oras push" not in joined:
-        bad.append(f"{rel} job {job} 缺 oras push（ghcr 制品未发布）")
-    if not re.search(r"^\s+packages:\s*write\s*$", joined, re.M):
-        bad.append(f"{rel} job {job} 缺 packages: write（无法推 ghcr）")
-    if "startsWith(github.ref, 'refs/tags/v')" not in joined:
-        bad.append(f"{rel} job {job} 必须 tag 门（v* 才发布）")
-    if "docker/login-action" not in joined:
-        bad.append(f"{rel} job {job} 缺 ghcr 登录步骤")
-    return bad
-
-
 def workflow_problems(path, root):
     text = path.read_text(encoding="utf-8")
     rel = path.relative_to(root)
@@ -476,5 +247,3 @@ def audit(root):
     for p in sorted((root / ".github" / "actions").glob("*/action.yml")):
         bad.extend(uses_problems(p.read_text(encoding="utf-8"), str(p.relative_to(root))))
     return bad
-
-
