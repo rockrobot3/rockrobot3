@@ -194,6 +194,62 @@ def _account_segment(st, seg):
             st["noise_samples"].append(bytes(seg[:24]))
 
 
+def _new_stats():
+    """初始化扫描统计 dict（帧面与段口径的全部计数键）。"""
+    return {
+        "frames": 0, "seqs": [], "lens": [], "torn": 0, "leading": 0,
+        "text_bytes": 0, "noise_bytes": 0, "noise_samples": [], "lines": [],
+        "crc_bad": 0, "crc_samples": [],
+    }
+
+
+def _feed_frame(st, buf, i, plen):
+    """解析并记账 i 处已确认完整的一帧，返回下一帧偏移。"""
+    p = bytes(buf[i + HEADER_LEN:i + HEADER_LEN + plen])
+    st["frames"] += 1
+    # 载荷 CRC32（与固件 `rr3_crc32` 同一算法：zlib.crc32 = IEEE 反射多项式）
+    declared = int.from_bytes(
+        buf[i + OFF_PAYLOAD_CRC32:i + OFF_PAYLOAD_CRC32 + LEN_PAYLOAD_CRC32], "little")
+    actual = zlib.crc32(p) & 0xFFFF_FFFF
+    if declared != actual:
+        st["crc_bad"] += 1
+        if len(st["crc_samples"]) < 3:
+            st["crc_samples"].append((declared, actual))
+    m = re.search(rb'"seq":(\d+)', p)
+    if m:
+        st["seqs"].append(int(m.group(1)))
+    b = re.search(rb'"pcm_b64":"([^"]*)"', p)
+    if b:
+        s = b.group(1)
+        # 流尾截断片会抓出半截 b64（padding 非法）——记 -1 不算板缺陷
+        try:
+            st["lens"].append(len(base64.b64decode(s + b"=" * ((4 - len(s) % 4) % 4))))
+        except Exception:
+            st["lens"].append(-1)
+    else:
+        st["lens"].append(-2)
+    return i + HEADER_LEN + plen
+
+
+def _scan_step(st, buf, i, n):
+    """从 i 推进一个帧起点，返回下一位置（None=尾部截断）。"""
+    if buf[i:i + 4] != MAGIC:
+        j = buf.find(MAGIC, i + 1)
+        if j < 0:
+            j = n
+        _account_segment(st, buf[i:j])
+        return j
+    plen = int.from_bytes(
+        buf[i + OFF_PAYLOAD_LEN:i + OFF_PAYLOAD_LEN + LEN_PAYLOAD_LEN], "little")
+    if plen == 0 or plen > MAX_PAYLOAD:
+        st["torn"] += 1
+        return i + 1
+    if i + HEADER_LEN + plen > n:
+        st["torn"] += 1
+        return None
+    return _feed_frame(st, buf, i, plen)
+
+
 def scan_frames(buf):
     """扫描音频帧并按段分类统计。返回 dict（键见下）。
 
@@ -207,11 +263,7 @@ def scan_frames(buf):
     """
     n = len(buf)
     first = buf.find(MAGIC)
-    st = {
-        "frames": 0, "seqs": [], "lens": [], "torn": 0, "leading": 0,
-        "text_bytes": 0, "noise_bytes": 0, "noise_samples": [], "lines": [],
-        "crc_bad": 0, "crc_samples": [],
-    }
+    st = _new_stats()
     if first < 0:
         st["leading"] = n
         _account_segment(st, buf)
@@ -220,46 +272,10 @@ def scan_frames(buf):
     _account_segment(st, buf[:first])
     i = first
     while i + HEADER_LEN <= n:
-        if buf[i:i + 4] != MAGIC:
-            j = buf.find(MAGIC, i + 1)
-            if j < 0:
-                j = n
-            _account_segment(st, buf[i:j])
-            i = j
-            continue
-        plen = int.from_bytes(
-            buf[i + OFF_PAYLOAD_LEN:i + OFF_PAYLOAD_LEN + LEN_PAYLOAD_LEN], "little")
-        if plen == 0 or plen > MAX_PAYLOAD:
-            st["torn"] += 1
-            i += 1
-            continue
-        if i + HEADER_LEN + plen > n:
-            st["torn"] += 1
+        nxt = _scan_step(st, buf, i, n)
+        if nxt is None:
             break
-        p = bytes(buf[i + HEADER_LEN:i + HEADER_LEN + plen])
-        st["frames"] += 1
-        # 载荷 CRC32（与固件 `rr3_crc32` 同一算法：zlib.crc32 = IEEE 反射多项式）
-        declared = int.from_bytes(
-            buf[i + OFF_PAYLOAD_CRC32:i + OFF_PAYLOAD_CRC32 + LEN_PAYLOAD_CRC32], "little")
-        actual = zlib.crc32(p) & 0xFFFF_FFFF
-        if declared != actual:
-            st["crc_bad"] += 1
-            if len(st["crc_samples"]) < 3:
-                st["crc_samples"].append((declared, actual))
-        m = re.search(rb'"seq":(\d+)', p)
-        if m:
-            st["seqs"].append(int(m.group(1)))
-        b = re.search(rb'"pcm_b64":"([^"]*)"', p)
-        if b:
-            s = b.group(1)
-            # 流尾截断片会抓出半截 b64（padding 非法）——记 -1 不算板缺陷
-            try:
-                st["lens"].append(len(base64.b64decode(s + b"=" * ((4 - len(s) % 4) % 4))))
-            except Exception:
-                st["lens"].append(-1)
-        else:
-            st["lens"].append(-2)
-        i += HEADER_LEN + plen
+        i = nxt
     # 末帧之后的尾段（AUDIO OFF 回包等）同样是帧外字节，必须入账
     _account_segment(st, buf[i:])
     return st
