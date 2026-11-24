@@ -37,7 +37,7 @@ def runtime_problems(joined, rel):
 
 
 def release_problems(text, rel):
-    """发布面完整性：四腿齐、merge 等两条构建腿并覆盖三架构、固件进 ghcr。"""
+    """发布面完整性：四腿齐；逐腿判据分给下方四个小函数（单函数 <50 行）。"""
     if rel.name != "publish.yml":
         return []
     jobs = dict(jobs_of(text))
@@ -45,68 +45,89 @@ def release_problems(text, rel):
     for job in ("build", "build-riscv64", "merge", "firmware"):
         if job not in jobs:
             bad.append(f"{rel} 缺发布 job {job}（发布面被削）")
-    build = jobs.get("build")
-    if build is not None:
-        joined = "\n".join(build)
-        for needle in (
-            "arch: amd64",
-            "arch: arm64",
-            "platform: linux/amd64",
-            "platform: linux/arm64",
-            "ubuntu-24.04-arm",
-        ):
-            if needle not in joined:
-                bad.append(f"{rel} build 矩阵缺 {needle}（原生发布腿缩水）")
-        for needle in ("stage-image.sh", "image-smoke.sh file", "image-smoke.sh run"):
-            if needle not in joined:
-                bad.append(f"{rel} build 缺 {needle}（发布镜像未按装机面验证）")
-        bad.extend(runtime_problems(joined, rel))
-    riscv = jobs.get("build-riscv64")
-    if riscv is not None:
-        joined = "\n".join(riscv)
-        if "build-riscv-image.sh" not in joined:
-            bad.append(f"{rel} build-riscv64 未复用 build-riscv-image.sh（发布路径分叉）")
-        # 推送机制二选一：显式 docker push，或脚本 --push（buildx 推并附证明面）。
-        # 判据是"发布腿必须真推送"，不是钉死某条命令形状。
-        if "docker push" not in joined and "build-riscv-image.sh --push" not in joined:
-            bad.append(f"{rel} build-riscv64 未推送（需 docker push 或 build-riscv-image.sh --push）")
-    merge = jobs.get("merge")
-    if merge is not None:
-        needs = needs_of(merge)
-        for dep in ("build", "build-riscv64"):
-            if dep not in needs:
-                bad.append(f"{rel} merge.needs 缺 {dep}（少一条腿就合并 = 少架构发布）")
-        joined = "\n".join(merge)
-        for arch in ("amd64", "arm64", "riscv64"):
-            if f"-{arch}" not in joined:
-                bad.append(f"{rel} merge 未合并 {arch} 单架构镜像")
-        if "image-smoke.sh file" not in joined:
-            bad.append(f"{rel} merge 缺 image-smoke（合并清单未验证可拉取）")
-    firmware = jobs.get("firmware")
-    if firmware is not None:
-        joined = "\n".join(firmware)
-        if "rockrobot3-firmware" not in joined:
-            bad.append(f"{rel} firmware 未推 rockrobot3-firmware（正式制品必须进 ghcr）")
-        if not re.search(r"^\s+packages:\s*write\s*$", joined, re.M):
-            bad.append(f"{rel} firmware 缺 packages: write（无法推 ghcr）")
-        if "xtensa-esp32s3-espidf" not in joined:
-            bad.append(f"{rel} firmware 未构建 S3 目标（双芯片覆盖缺失）")
-        if "MCU=esp32s3" not in joined or "--features esp32s3" not in joined:
-            bad.append(f"{rel} firmware S3 档缺 MCU/feature（芯片档漂移）")
-        # 资产契约（2026-11-22）：双 ELF + 双 bootloader + 分区表 CSV + 烧录说明
-        # + sha256 清单，release 与 ghcr 同集，缺一即红。ELF 不内嵌 bootloader/
-        # 分区表，espflash 自带的引导镜像与 app 的 IDF 版本不保证一致。
-        for asset in (
-            "rr3-periph-base-esp32-safe-dev.elf",
-            "rr3-periph-base-esp32s3-full-dev.elf",
-            "rr3-bootloader-esp32-dev.bin",
-            "rr3-bootloader-esp32s3-dev.bin",
-            "rr3-partitions.csv",
-            "FLASHING.md",
-            "firmware-sha256.txt",
-        ):
-            if asset not in joined:
-                bad.append(f"{rel} firmware 资产缺 {asset}（发布集不完整）")
+    for name, check in (
+        ("build", build_problems),
+        ("build-riscv64", riscv_problems),
+        ("merge", merge_problems),
+        ("firmware", firmware_problems),
+    ):
+        block = jobs.get(name)
+        if block is not None:
+            bad.extend(check(block, rel))
+    return bad
+
+
+def build_problems(block, rel):
+    """原生双架构腿：amd64/arm64 矩阵 + 装机面两段冒烟 + 运行面十件。"""
+    joined = "\n".join(block)
+    bad = []
+    for needle in (
+        "arch: amd64",
+        "arch: arm64",
+        "platform: linux/amd64",
+        "platform: linux/arm64",
+        "ubuntu-24.04-arm",
+    ):
+        if needle not in joined:
+            bad.append(f"{rel} build 矩阵缺 {needle}（原生发布腿缩水）")
+    for needle in ("stage-image.sh", "image-smoke.sh file", "image-smoke.sh run"):
+        if needle not in joined:
+            bad.append(f"{rel} build 缺 {needle}（发布镜像未按装机面验证）")
+    bad.extend(runtime_problems(joined, rel))
+    return bad
+
+
+def riscv_problems(block, rel):
+    """riscv 腿：构建路径单点复用 + 推送机制二选一（判据是"必须真推送"）。"""
+    joined = "\n".join(block)
+    bad = []
+    if "build-riscv-image.sh" not in joined:
+        bad.append(f"{rel} build-riscv64 未复用 build-riscv-image.sh（发布路径分叉）")
+    if "docker push" not in joined and "build-riscv-image.sh --push" not in joined:
+        bad.append(f"{rel} build-riscv64 未推送（需 docker push 或 build-riscv-image.sh --push）")
+    return bad
+
+
+def merge_problems(block, rel):
+    """合并腿：必须等两条构建腿，三架构齐全且合并清单可拉取。"""
+    bad = []
+    for dep in ("build", "build-riscv64"):
+        if dep not in needs_of(block):
+            bad.append(f"{rel} merge.needs 缺 {dep}（少一条腿就合并 = 少架构发布）")
+    joined = "\n".join(block)
+    for arch in ("amd64", "arm64", "riscv64"):
+        if f"-{arch}" not in joined:
+            bad.append(f"{rel} merge 未合并 {arch} 单架构镜像")
+    if "image-smoke.sh file" not in joined:
+        bad.append(f"{rel} merge 缺 image-smoke（合并清单未验证可拉取）")
+    return bad
+
+
+def firmware_problems(block, rel):
+    """固件腿：双芯片档、ghcr 托管与资产集（双 ELF/bootloader/分区表/说明/sha256）。"""
+    joined = "\n".join(block)
+    bad = []
+    if "rockrobot3-firmware" not in joined:
+        bad.append(f"{rel} firmware 未推 rockrobot3-firmware（正式制品必须进 ghcr）")
+    if not re.search(r"^\s+packages:\s*write\s*$", joined, re.M):
+        bad.append(f"{rel} firmware 缺 packages: write（无法推 ghcr）")
+    if "xtensa-esp32s3-espidf" not in joined:
+        bad.append(f"{rel} firmware 未构建 S3 目标（双芯片覆盖缺失）")
+    if "MCU=esp32s3" not in joined or "--features esp32s3" not in joined:
+        bad.append(f"{rel} firmware S3 档缺 MCU/feature（芯片档漂移）")
+    # 资产契约（2026-11-22）：ELF 不内嵌 bootloader/分区表，espflash 自带的引导
+    # 镜像与 app 的 IDF 版本不保证一致——发布集缺一即红。
+    for asset in (
+        "rr3-periph-base-esp32-safe-dev.elf",
+        "rr3-periph-base-esp32s3-full-dev.elf",
+        "rr3-bootloader-esp32-dev.bin",
+        "rr3-bootloader-esp32s3-dev.bin",
+        "rr3-partitions.csv",
+        "FLASHING.md",
+        "firmware-sha256.txt",
+    ):
+        if asset not in joined:
+            bad.append(f"{rel} firmware 资产缺 {asset}（发布集不完整）")
     return bad
 
 
