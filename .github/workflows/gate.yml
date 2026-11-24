@@ -313,7 +313,7 @@ jobs:
       - name: 流水线语法与表达式校验（actionlint）
         run: |
           set -o pipefail
-          if out="$(actionlint -color=never -shellcheck= -pyflakes= .github/workflows/*.yml 2>&1)"; then
+          if out="$(actionlint -shellcheck= -pyflakes= .github/workflows/*.yml 2>&1)"; then
             printf '%s\n' "$out"
             exit 0
           fi
