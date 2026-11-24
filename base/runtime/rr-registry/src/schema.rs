@@ -22,14 +22,14 @@ fn rr3_str_field(table: &toml::Table, key: &str) -> Option<String> {
     table.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
-/// 解析内嵌 schema，返回字段规格列表（顺序与契约文件一致）
-pub fn rr3_field_specs() -> Vec<Rr3FieldSpec> {
-    let root: Value = toml::from_str(RR3_MODULE_SCHEMA_TOML)
-        .unwrap_or_else(|e| panic!("module.schema.toml 解析失败: {e}"));
+/// 解析内嵌 `[[field]]` 契约（module/atom 两份同构，共用本实现）。
+/// 两份文本都是编译期常量：解析失败即构建期契约缺陷，启动即点名，不静默降级。
+pub fn rr3_fields_parse(label: &str, text: &str) -> Vec<Rr3FieldSpec> {
+    let root: Value = toml::from_str(text).unwrap_or_else(|e| panic!("{label} 解析失败: {e}"));
     let fields = root
         .get("field")
         .and_then(Value::as_array)
-        .unwrap_or_else(|| panic!("module.schema.toml 缺少 [[field]] 数组"));
+        .unwrap_or_else(|| panic!("{label} 缺少 [[field]] 数组"));
     fields
         .iter()
         .filter_map(Value::as_table)
@@ -40,6 +40,11 @@ pub fn rr3_field_specs() -> Vec<Rr3FieldSpec> {
             rule: rr3_str_field(f, "rule"),
         })
         .collect()
+}
+
+/// 解析内嵌 schema，返回字段规格列表（顺序与契约文件一致）
+pub fn rr3_field_specs() -> Vec<Rr3FieldSpec> {
+    rr3_fields_parse("module.schema.toml", RR3_MODULE_SCHEMA_TOML)
 }
 
 /// schema 的 `[rules]` 表（字符串列表类规则）

@@ -19,7 +19,7 @@
 use std::path::{Path, PathBuf};
 use toml::Value;
 
-use crate::schema::{rr3_get_by_path, Rr3FieldSpec};
+use crate::schema::{rr3_fields_parse, rr3_get_by_path, Rr3FieldSpec};
 
 /// Atom manifest 契约 schema 版本（对应 `atom.schema.toml` 的 `schema_version` 键）
 pub const RR3_ATOM_SCHEMA_VERSION: u32 = 1;
@@ -60,29 +60,10 @@ const RR3_BOARD_TOKENS: &[&str] = &[
     "mpu6050",
 ];
 
-fn rr3_atom_str_field(table: &toml::Table, key: &str) -> Option<String> {
-    table.get(key).and_then(Value::as_str).map(str::to_string)
-}
-
 /// 解析内嵌 atom schema，返回字段规格列表（顺序与契约文件一致；类型与
 /// module 侧 `Rr3FieldSpec` 复用，校验器共用 `rr3_registry_check`）
 pub fn rr3_atom_field_specs() -> Vec<Rr3FieldSpec> {
-    let root: Value = toml::from_str(RR3_ATOM_SCHEMA_TOML)
-        .unwrap_or_else(|e| panic!("atom.schema.toml 解析失败: {e}"));
-    let fields = root
-        .get("field")
-        .and_then(Value::as_array)
-        .unwrap_or_else(|| panic!("atom.schema.toml 缺少 [[field]] 数组"));
-    fields
-        .iter()
-        .filter_map(Value::as_table)
-        .map(|f| Rr3FieldSpec {
-            path: rr3_atom_str_field(f, "path").expect("field.path 必填"),
-            kind: rr3_atom_str_field(f, "kind").expect("field.kind 必填"),
-            required: f.get("required").and_then(Value::as_bool).unwrap_or(false),
-            rule: rr3_atom_str_field(f, "rule"),
-        })
-        .collect()
+    rr3_fields_parse("atom.schema.toml", RR3_ATOM_SCHEMA_TOML)
 }
 
 /// 板无关断言：文本命中任一禁词即报错（点名 token 与规则出处）。
