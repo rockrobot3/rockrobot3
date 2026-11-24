@@ -2,17 +2,24 @@
 # ⑨-w 依赖面禁令（门 9w 步骤体：单元直依 rr-hal-api/rr-bus-api、use 面白名单冻结、
 #    白名单条目数基线钉数、板侧禁实现 crate；基-35，全 fail-closed）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 fail。
+# 六条判据各成一函数（dep_hal_direct / dep_use_allow / dep_board_crate /
+# dep_bus_direct / dep_bus_use / dep_wl_base），枚举与临时件在 dep_init，
+# 编排与 fail 汇总留在 rr3_step_9w。
 
-rr3_step_9w() {
-  local self="${BASH_SOURCE[0]}"
+# 枚举面与临时件：单元清单（判据 1/4 共用）与命中文件；枚举打空即门禁失效。
+dep_init() {
   dep_fail=0
   dep_hits="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
-  # 1) rr-hal-api 必依（逐单元点名；枚举打空即门禁失效，与 ④/⑥ 同口径）
   unit_manifests="$(find modules -maxdepth 2 -name Cargo.toml -not -path '*/target/*' | sort)"
   if [ -z "$unit_manifests" ]; then
     printf 'FAIL  ⑨-w 单元 Cargo.toml 枚举打空（门禁失效，不放行）\n'
     dep_fail=1
   fi
+}
+
+# 判据 1：rr-hal-api 必依（逐单元点名；枚举打空即门禁失效，与 ④/⑥ 同口径）。
+dep_hal_direct() {
+  local c
   for c in $unit_manifests; do
     if grep -q 'rr-hal-api' "$c"; then
       printf 'PASS  ⑨-w %s 直依 rr-hal-api（契约依赖面在 Cargo 清单可证）\n' "$c"
@@ -21,7 +28,11 @@ rr3_step_9w() {
       dep_fail=1
     fi
   done
-  # 2) use 面白名单（modules/** 全部 .rs；行注释先剥；白名单外逐行点名）
+}
+
+# 判据 2：use 面白名单（modules/** 全部 .rs；行注释先剥；白名单外逐行点名）。
+dep_use_allow() {
+  local f
   unit_rs=0
   while IFS= read -r -d '' f; do
     unit_rs=$((unit_rs + 1))
@@ -41,7 +52,11 @@ rr3_step_9w() {
     printf 'PASS  ⑨-w 单元 use 面白名单（%s 份 .rs 全扫，rr_hal:: 引用皆装配/承载白名单四类）\n' "$unit_rs"
   fi
   rm -f "$dep_hits"
-  # 3) 板侧禁实现 crate（rr-hal/rr-bus/rrd；用 `名 =` 形状匹配依赖键，不误伤 rr-hal-api）
+}
+
+# 判据 3：板侧禁实现 crate（rr-hal/rr-bus/rrd；用 `名 =` 形状匹配依赖键，不误伤 rr-hal-api）。
+dep_board_crate() {
+  local board_dep
   board_dep="$(grep -E '^[[:space:]]*(rr-hal|rr-bus|rrd)[[:space:]]*=' tools/esp32-periph-base/Cargo.toml 2>/dev/null || true)"
   if [ -n "$board_dep" ]; then
     printf '%s\n' "$board_dep"
@@ -50,8 +65,12 @@ rr3_step_9w() {
   else
     printf 'PASS  ⑨-w 板侧零实现 crate 依赖（esp32-periph-base，rr-hal/rr-bus/rrd 三件钉住）\n'
   fi
-  # 4) 承载面必依 rr-bus-api 且禁列 rr-bus（依赖键 = 形状匹配，同判据 3 口径，不误伤
-  #    注释与 rr-bus-api 自身；枚举复用判据 1 的 ${unit_manifests}）
+}
+
+# 判据 4：承载面必依 rr-bus-api 且禁列 rr-bus（依赖键 = 形状匹配，同判据 3 口径，
+# 不误伤注释与 rr-bus-api 自身；枚举复用判据 1 的 ${unit_manifests}）。
+dep_bus_direct() {
+  local c
   for c in $unit_manifests; do
     if grep -qE '^[[:space:]]*rr-bus-api[[:space:]]*=' "$c" \
        && ! grep -qE '^[[:space:]]*rr-bus[[:space:]]*=' "$c"; then
@@ -61,8 +80,12 @@ rr3_step_9w() {
       dep_fail=1
     fi
   done
-  # 5) 单元 use 面 rr_bus:: 零命中（rr_bus_api:: 不含子串 rr_bus:: 不误伤；rrd/tools 的
-  #    re-export 路径不在扫描面——它们消费 rr-bus 是工具层既有 import，豁免同判据 3 注）
+}
+
+# 判据 5：单元 use 面 rr_bus:: 零命中（rr_bus_api:: 不含子串 rr_bus:: 不误伤；rrd/tools 的
+# re-export 路径不在扫描面——它们消费 rr-bus 是工具层既有 import，豁免同判据 3 注）。
+dep_bus_use() {
+  local f bus_hits
   bus_hits="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
   while IFS= read -r -d '' f; do
     sed 's://.*$::' "$f" \
@@ -77,9 +100,14 @@ rr3_step_9w() {
     printf 'PASS  ⑨-w 单元 use 面零 rr_bus::（%s 份 .rs 全扫，承载面已契约化）\n' "$unit_rs"
   fi
   rm -f "$bus_hits"
-  # 6) 白名单条目数基线钉数（判据 2) 白名单正则交替项数对基线；基-35 窄化①/§25.8 #1）。
-  #    条目数从本文件判据 2) 的白名单行提取（单真值点自执法面自身导出，不抄第二份——
-  #    同 ⑨-n 键名单从代码常量导出口径）；提取打空即门禁失效。
+}
+
+# 判据 6：白名单条目数基线钉数（判据 2 白名单正则交替项数对基线；基-35 窄化①/§25.8 #1）。
+# 条目数从本文件判据 2 的白名单行提取（单真值点自执法面自身导出，不抄第二份——
+# 同 ⑨-n 键名单从代码常量导出口径）；提取打空即门禁失效。
+dep_wl_base() {
+  local self wl_line wl_count gate_w_base wl_baseline
+  self="${BASH_SOURCE[0]}"
   wl_line="$(grep -m1 -oE "grep -vE 'rr_hal::\([^)]*\)'" "$self" || true)"
   wl_count="$(printf '%s' "$wl_line" | sed -n 's/.*rr_hal::(\([^)]*\)).*/\1/p' | awk -F'|' '{print NF}')"
   if [ -z "$wl_count" ] || [ "$wl_count" -eq 0 ] 2>/dev/null; then
@@ -113,6 +141,16 @@ rr3_step_9w() {
       esac
     fi
   fi
+}
+
+rr3_step_9w() {
+  dep_init
+  dep_hal_direct
+  dep_use_allow
+  dep_board_crate
+  dep_bus_direct
+  dep_bus_use
+  dep_wl_base
   if [ "$dep_fail" -ne 0 ]; then
     fail=1
   fi
