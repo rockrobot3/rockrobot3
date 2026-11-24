@@ -289,18 +289,23 @@ jobs:
           ACTIONLINT_VER: "1.7.7"
         run: |
           set -o pipefail
+          die() { printf '::error title=actionlint-install::%s\n' "$1"; exit 1; }
           base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VER}"
           curl -fsSL --retry 3 --retry-delay 2 -o /tmp/actionlint.tgz \
-            "${base}/actionlint_${ACTIONLINT_VER}_linux_amd64.tar.gz"
+            "${base}/actionlint_${ACTIONLINT_VER}_linux_amd64.tar.gz" \
+            || die "下载 tar 失败（${base}）"
           curl -fsSL --retry 3 --retry-delay 2 -o /tmp/actionlint.sha256 \
-            "${base}/actionlint_${ACTIONLINT_VER}_checksums.txt"
+            "${base}/actionlint_${ACTIONLINT_VER}_checksums.txt" \
+            || die "下载 checksums 失败（${base}）"
           ( cd /tmp && grep -E " actionlint_${ACTIONLINT_VER}_linux_amd64\.tar\.gz$" \
-              actionlint.sha256 | sha256sum -c - )
+              actionlint.sha256 | sha256sum -c - ) \
+            || die "sha256 校验失败"
           # 装到用户目录并写入 GITHUB_PATH：/usr/local/bin 在 runner 上属 root，
           # 无 sudo 的 tar 会在此失败（2026-11-24 实跑实证）。
-          mkdir -p "$HOME/.local/bin"
-          tar -xzf /tmp/actionlint.tgz -C "$HOME/.local/bin" actionlint
-          "$HOME/.local/bin/actionlint" --version
+          mkdir -p "$HOME/.local/bin" || die "创建用户 bin 目录失败"
+          tar -xzf /tmp/actionlint.tgz -C "$HOME/.local/bin" actionlint \
+            || die "解包 actionlint 失败"
+          "$HOME/.local/bin/actionlint" --version || die "actionlint 无法执行"
           printf '%s\n' "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: 流水线语法与表达式校验（actionlint）
         run: |
