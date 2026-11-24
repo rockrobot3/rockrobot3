@@ -66,6 +66,10 @@ with 入参），不依赖 runner 镜像预装版本；交叉 job 同时显式�
 政策变更须同批改脚本与自检夹具。**作业覆盖契约（2026-11-20 补）**：gate /
 integration / platforms / publish / buildroot 的 job 名按 `REQUIRED_JOBS` 钉住——
 删一个 job 就是某类验证静默停跑，必须同批评审改表，不得只靠记忆。
+**YAML/表达式语法面（2026-11-24 补盲）**：`workflows_audit` 是文本扫描器，workflow
+被改坏缩进或表达式类型时 GitHub 会直接不跑/整文件失败，而文本判据仍绿——gate
+`scripts` job 因此增 `actionlint`（官方 schema 解析；关 shellcheck/pyflakes，只留
+语法与上下文判据）。
 
 **五芯片覆盖（2026-11-20）**：`platforms.yml` 的 `cross-artifacts` 必须含
 英特尔/AMD `x86_64-unknown-linux-gnu`、瑞芯微 `aarch64-unknown-linux-musl`、

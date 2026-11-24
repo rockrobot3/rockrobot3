@@ -278,6 +278,16 @@ jobs:
         run: python3 tools/ci/workflows_audit.py --self-test
       - name: 流水线结构审计（并发组 / job 超时 / action 版本矩阵 / 五芯片覆盖）
         run: python3 tools/ci/workflows_audit.py
+      # YAML/表达式语法面（2026-11-24 补盲）：workflows_audit 是文本扫描器，workflow
+      # 若被改坏缩进/表达式类型，GitHub 直接不跑或整个文件失败，而文本门仍全绿——
+      # 覆盖会静默消失。actionlint 用官方 schema 解析触发面/上下文/表达式；
+      # shellcheck/pyflakes 关掉，只保留语法与上下文判据，不吃风格噪音。
+      - name: 安装 actionlint
+        uses: taiki-e/install-action@v2
+        with:
+          tool: actionlint
+      - name: 流水线语法与表达式校验（actionlint）
+        run: actionlint -color=never -shellcheck= -pyflakes= .github/workflows/*.yml
       # 度量核自检（2026-11-24）：门 ⑫ 此前只有执法（check.sh ⑫ 调 metrics.py）、
       # 无自检回执——扫描面（生产/测试剔除、重复窗口、函数行数、超长名、长睡、
       # panic 落点）一旦腐化会静默少计/多计。九例夹具先钉判据，再落执法。
