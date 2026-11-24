@@ -267,6 +267,17 @@ jobs:
     name: esp32-gates / ${{ matrix.label }}
     steps:
       - uses: actions/checkout@v7
+      # crates 注册表缓存（2026-11-24）：ESP 腿此前每次全量重下依赖，rsproxy 504
+      # 一次就整腿红。只缓存注册表与 git 检出面；target 树（ESP-IDF 产物）不在此处，
+      # 体积大且与工具链缓存面分开治理。锁文件变即换键，旧键经 restore-keys 兜底。
+      - name: 缓存 crates 注册表（ESP 腿）
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-esp-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-esp-${{ runner.os }}-
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.100.0"
