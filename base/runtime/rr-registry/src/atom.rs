@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use toml::Value;
 
 use crate::schema::{rr3_fields_parse, rr3_get_by_path, Rr3FieldSpec};
-use crate::validate::rr3_type_err;
+use crate::validate::{rr3_item_err, rr3_type_err};
 
 /// Atom manifest 契约 schema 版本（对应 `atom.schema.toml` 的 `schema_version` 键）
 pub const RR3_ATOM_SCHEMA_VERSION: u32 = 1;
@@ -261,11 +261,7 @@ fn rr3_atom_list_item(
     errs: &mut Vec<String>,
 ) {
     let Some(s) = item.as_str() else {
-        errs.push(format!(
-            "字段 {} 第 {} 项应为字符串，实际为 {item:?}",
-            spec.path,
-            idx + 1
-        ));
+        errs.push(rr3_item_err(&spec.path, idx, item));
         return;
     };
     if let Some(rule) = &spec.rule {

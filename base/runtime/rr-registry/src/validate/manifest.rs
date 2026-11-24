@@ -327,11 +327,7 @@ fn rr3_chk_list(
     };
     for (idx, item) in arr.iter().enumerate() {
         let Some(s) = item.as_str() else {
-            errs.push(format!(
-                "字段 {} 第 {} 项应为字符串，实际为 {item:?}",
-                spec.path,
-                idx + 1
-            ));
+            errs.push(rr3_item_err(&spec.path, idx, item));
             continue;
         };
         if let Some(rule) = spec.rule.as_deref() {

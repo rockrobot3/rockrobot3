@@ -30,3 +30,8 @@ pub use topics::{rr3_topics_chk, rr3_topics_names, rr3_topics_owners};
 pub(crate) fn rr3_type_err(path: &str, kind: &str, v: &toml::Value) -> String {
     format!("字段 {path} 类型应为 {kind}，实际为 {v:?}")
 }
+
+/// list 项形状不符的统一文案（序号从 1 起）：module/atom 两侧共用。
+pub(crate) fn rr3_item_err(path: &str, idx: usize, v: &toml::Value) -> String {
+    format!("字段 {path} 第 {} 项应为字符串，实际为 {v:?}", idx + 1)
+}
