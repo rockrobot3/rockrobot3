@@ -157,10 +157,8 @@ def quietest_window(chunk, win=2048, hop=512):
                for off in range(0, len(chunk) - win + 1, hop))
 
 
-def main():
-    fd = open_tty(DEV, BAUD)
-    flush_input(fd)
-    pump(fd, 1.0)
+def calibrate(fd):
+    """启动音频与 2s 底噪标定 → 触发阈值依据 floor128（dB 化前的联合 RMS）。"""
     print("=== 启动音频（先关再开，杜绝上一会话遗留流）===")
     # 清屏：屏幕上若有旧版写入的文字（OLED 持久显示），FACE 命令会重开表情
     # 模式把它盖掉——不然后续每轮验证用户都看着"旧画面"误判系统没变
@@ -185,7 +183,25 @@ def main():
     )
     print(f"底噪 128ms 联合 RMS median={floor128:.0f}（{len(samples)} 样本对）→ "
           f"触发阈值={floor128 * TRIG_RATIO:.0f}")
+    return floor128
 
+
+def respond(fd, level, ild, floor128, n, elapsed):
+    """回应 = 大动作序列（每个动作都要目视可辨）：表情 → 点头 → PAN 回中。"""
+    # v7.2：方向声明撤除期——回应不转向，只回中；ILD 照打印进账簿，
+    # 供白天带真值标注的定向采集重建锚点（依据见 PAN_CENTER 注）
+    pan, where = PAN_CENTER, "不判向(待标定)"
+    print(f"  ★ 听到了 #{n}（t={elapsed:.1f}s 128ms窗RMS "
+          f"{level:.0f}/{floor128:.0f}={level / floor128:.2f}× "
+          f"ild={ild:+.2f}dB→{where}）→ 回应：FACE happy + 点头 + PAN {pan}")
+    print("    ", line(fd, "FACE happy", 0.6).strip()[:60])
+    for t in TILT_NOD:
+        print(f"    TILT {t}:", line(fd, f"TILT {t}", 1.2).strip()[:60])
+    print(f"    PAN {pan}:", line(fd, f"PAN {pan}", 1.5).strip()[:60])
+
+
+def listen(fd, floor128):
+    """倾听 SECS 秒：窗满即评，命中即回应，底噪滚动跟踪（下探即时/上探受限）。"""
     print(f"=== 倾听 {SECS}s：请喊「你好洛克」===")
     responses = 0
     buf = bytearray()
@@ -206,20 +222,8 @@ def main():
                       f"{level:.0f}（阈值 {floor128 * TRIG_RATIO:.0f}）")
                 last_report = now
             if level >= floor128 * TRIG_RATIO and now >= cooldown_until:
-                # v7.2：方向声明撤除期——回应不转向，只回中；ILD 照打印进账簿，
-                # 供白天带真值标注的定向采集重建锚点（依据见 PAN_CENTER 注）
-                pan, where = PAN_CENTER, "不判向(待标定)"
                 responses += 1
-                # 回应 = 大动作序列（每个动作都要**目视可辨**——v4 的 PAN 20° 静音
-                # 微调 + FACE talk 微动作被实测判"没反应"）：
-                #   表情切换 → TILT 点头（低头→抬头→回中）→ PAN 回中
-                print(f"  ★ 听到了 #{responses}（t={now-t0:.1f}s 128ms窗RMS "
-                      f"{level:.0f}/{floor128:.0f}={level / floor128:.2f}× "
-                      f"ild={ild:+.2f}dB→{where}）→ 回应：FACE happy + 点头 + PAN {pan}")
-                print("    ", line(fd, "FACE happy", 0.6).strip()[:60])
-                for t in TILT_NOD:
-                    print(f"    TILT {t}:", line(fd, f"TILT {t}", 1.2).strip()[:60])
-                print(f"    PAN {pan}:", line(fd, f"PAN {pan}", 1.5).strip()[:60])
+                respond(fd, level, ild, floor128, responses, now - t0)
                 cooldown_until = time.time() + COOLDOWN
             # ---- 滚动底噪跟踪（与触发同统计量）----
             # 估计值 = 本分片最安静 128ms 窗：下探即时、上探每窗最多 +0.5%（语音
@@ -230,12 +234,25 @@ def main():
                 floor128 = quiet
             else:
                 floor128 = min(floor128 * 1.005, quiet)
+    return responses
 
+
+def report(fd, responses):
+    """收尾：关音频、回中性表情、打印结算并以退出码给出结论。"""
     line(fd, "AUDIO OFF", 1.0)
     line(fd, "FACE idle", 0.8)  # 退场回中性表情：不给板子留下 happy 定格/文本模式残留
     print(f"\n回应 {responses} 次 / 监听 {SECS}s ｜ 解析失败 {parse_errors} 帧")
     os.close(fd)
     sys.exit(0 if responses > 0 else 1)
+
+
+def main():
+    fd = open_tty(DEV, BAUD)
+    flush_input(fd)
+    pump(fd, 1.0)
+    floor128 = calibrate(fd)
+    responses = listen(fd, floor128)
+    report(fd, responses)
 
 
 if __name__ == "__main__":
