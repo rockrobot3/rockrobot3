@@ -278,6 +278,11 @@ jobs:
         run: python3 tools/ci/workflows_audit.py --self-test
       - name: 流水线结构审计（并发组 / job 超时 / action 版本矩阵 / 五芯片覆盖）
         run: python3 tools/ci/workflows_audit.py
+      # 度量核自检（2026-11-24）：门 ⑫ 此前只有执法（check.sh ⑫ 调 metrics.py）、
+      # 无自检回执——扫描面（生产/测试剔除、重复窗口、函数行数、超长名、长睡、
+      # panic 落点）一旦腐化会静默少计/多计。九例夹具先钉判据，再落执法。
+      - name: 质量度量自检（九例夹具）
+        run: python3 tools/ci/metrics.py --self-test
       # 锁内 I/O 机器判据（续轮二十二）：人工巡检三轮归零后改为门——三类已实证
       # 回潮形态（lock·log 同行 / 条件位临时 guard / 直调 reg 日志方法）。
       - name: 锁内 I/O 审计自检（好例 + 三类负例）
