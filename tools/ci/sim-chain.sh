@@ -11,13 +11,13 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
 
 echo "== 构建 rrd + rr3-ctl + rr3-sim =="
-( cd base/runtime && cargo build -q -p rrd )
-cargo build -q --manifest-path tools/rrctl/Cargo.toml
-cargo build -q --manifest-path tools/sim/Cargo.toml
+( cd base/runtime && cargo build --locked -q -p rrd )
+cargo build --locked -q --manifest-path tools/rrctl/Cargo.toml
+cargo build --locked -q --manifest-path tools/sim/Cargo.toml
 
 echo "== 构建全链四模块 =="
 for m in rr3-act rr3-sense rr3-interact rr3-brain; do
-        cargo build -q --manifest-path "modules/$m/Cargo.toml"
+        cargo build --locked -q --manifest-path "modules/$m/Cargo.toml"
 done
 
 echo "== rr3-sim --chain（采集→意图→判向→转向→表情，六真进程 mock 闭环）=="
@@ -40,7 +40,7 @@ log="${TMPDIR:-/tmp}/rr3-sim-chain.log"
 rc=0
 for attempt in 1 2; do
         rc=0
-        cargo run -q --manifest-path tools/sim/Cargo.toml -- "${args[@]}" 2>&1 | tee "$log" || rc=$?
+        cargo run --locked -q --manifest-path tools/sim/Cargo.toml -- "${args[@]}" 2>&1 | tee "$log" || rc=$?
         [ "$rc" -eq 0 ] && break
         if [ "$attempt" -eq 1 ] && grep -Eq 'log_sink_slow=[1-9]' "$log"; then
                 echo "::warning title=sim-chain::首次稳态失败为落盘慢写抖动（log_sink_slow>0），重跑一拍"

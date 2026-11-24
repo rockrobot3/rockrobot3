@@ -91,7 +91,7 @@ for mod in rr3-act rr3-sense; do
       fail=1
       continue
     }
-    if cargo +esp build --target xtensa-esp32-espidf \
+    if cargo +esp build --locked --target xtensa-esp32-espidf \
          --config 'source.crates-io.replace-with="rsproxy-sparse"' \
          --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
       if [ -f "$elf" ]; then
@@ -110,7 +110,7 @@ for mod in rr3-act rr3-sense; do
   # 工具链不认该目标 = 本地 SKIP 该腿 / CI 即红；classic 腿跳过。
   if [ "${chip}" != esp32 ]; then
     if rustc +esp --print target-list 2>/dev/null | grep -qx 'xtensa-esp32s3-espidf'; then
-      if MCU=esp32s3 cargo +esp check --target xtensa-esp32s3-espidf \
+      if MCU=esp32s3 cargo +esp check --locked --target xtensa-esp32s3-espidf \
            --config 'source.crates-io.replace-with="rsproxy-sparse"' \
            --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
         echo "PASS  $mod xtensa-esp32s3-espidf check（S3 芯片档编译面）"

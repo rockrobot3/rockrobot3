@@ -50,7 +50,7 @@ elf="$(rr3_cargo_artifact xtensa-esp32-none-elf release esp32-uart-echo)" || {
   exit 1
 }
 # 仓库源不硬编码镜像（他人环境各异），rsproxy 注入随本机
-if cargo +esp build --release \
+if cargo +esp build --locked --release \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
   if [ -f "$elf" ]; then

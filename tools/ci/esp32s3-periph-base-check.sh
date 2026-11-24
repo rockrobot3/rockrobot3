@@ -91,7 +91,7 @@ elf="$(rr3_cargo_artifact xtensa-esp32s3-espidf debug esp32-periph-base)" || {
   echo "FAIL  无法解析 cargo target_directory（metadata 不可用）" >&2
   exit 1
 }
-if cargo +esp build \
+if cargo +esp build --locked \
      --target xtensa-esp32s3-espidf \
      --no-default-features --features esp32s3 \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
@@ -108,7 +108,7 @@ else
 fi
 
 # ⑦b W4-1 I2S TX 验收档编译面（spk-tone feature；默认固件零行为变化）
-if cargo +esp build \
+if cargo +esp build --locked \
      --target xtensa-esp32s3-espidf \
      --no-default-features --features esp32s3,spk-tone \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
@@ -120,7 +120,7 @@ else
 fi
 
 # ⑦c W3-2a 自治档编译面（autonomy feature：SNTP 对时；默认固件零行为变化）
-if cargo +esp build \
+if cargo +esp build --locked \
      --target xtensa-esp32s3-espidf \
      --no-default-features --features esp32s3,autonomy \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
@@ -133,7 +133,7 @@ fi
 
 # ⑦d W4-2 播放面编译（tts feature；与 autonomy 组合＝W6 全链固件形态；
 #     与 spk-tone 互斥，故单独一条腿）
-if cargo +esp build \
+if cargo +esp build --locked \
      --target xtensa-esp32s3-espidf \
      --no-default-features --features esp32s3,autonomy,tts \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
@@ -159,7 +159,7 @@ fi
 # config 的 target rustflags，故整条重写（与 [target.xtensa-esp32s3-espidf] 同值）。
 s3_test_log=/tmp/rr3-esp32s3-periph-test.log
 s3_test_rf="--cfg espidf_time64 -Zunstable-options -Cpanic=immediate-abort -Zpanic_abort_tests"
-if RUSTFLAGS="$s3_test_rf" cargo +esp test --no-run \
+if RUSTFLAGS="$s3_test_rf" cargo +esp test --locked --no-run \
      --target xtensa-esp32s3-espidf \
      --no-default-features --features esp32s3,spk-tone,autonomy \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
@@ -175,7 +175,7 @@ fi
 
 # ⑧b W4-2b 云 TTS/播放面测试码编译（tts 与 spk-tone 互斥，故单列一条）
 s3_tts_test_log=/tmp/rr3-esp32s3-periph-tts-test.log
-if RUSTFLAGS="$s3_test_rf" cargo +esp test --no-run \
+if RUSTFLAGS="$s3_test_rf" cargo +esp test --locked --no-run \
      --target xtensa-esp32s3-espidf \
      --no-default-features --features esp32s3,autonomy,tts \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
@@ -196,7 +196,7 @@ rel_elf="$(rr3_cargo_artifact xtensa-esp32s3-espidf release esp32-periph-base)" 
   echo "FAIL  无法解析 cargo target_directory（metadata 不可用）" >&2
   exit 1
 }
-if cargo +esp build --release \
+if cargo +esp build --locked --release \
      --target xtensa-esp32s3-espidf \
      --no-default-features --features esp32s3,autonomy,tts \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \

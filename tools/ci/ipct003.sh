@@ -51,7 +51,7 @@ skip=0
 
 # 宿主（当前架构）dump
 echo "=== [1/4] 宿主 dump ==="
-if ! cargo run -q --manifest-path "$manifest" -p rr-ipc --bin ipct003_dump > "$tmp/host.txt"; then
+if ! cargo run --locked -q --manifest-path "$manifest" -p rr-ipc --bin ipct003_dump > "$tmp/host.txt"; then
   echo "FAIL  宿主 ipct003_dump 运行失败"
   exit 1
 fi
@@ -69,7 +69,7 @@ fi
 # aarch64 交叉编译（const 断言求值；无需链接器）
 echo "=== [2/4] aarch64 交叉编译（编译期 const 断言） ==="
 if rustup target list --installed 2>/dev/null | grep -q '^aarch64-unknown-linux-gnu$'; then
-  if cargo check -q --manifest-path "$manifest" -p rr-ipc \
+  if cargo check --locked -q --manifest-path "$manifest" -p rr-ipc \
       --target aarch64-unknown-linux-gnu; then
     echo "PASS  rr-ipc 在 aarch64-unknown-linux-gnu 目标编译通过（const 布局断言已在该目标求值）"
   else
@@ -84,7 +84,7 @@ fi
 # riscv64 交叉编译（编译期 const 断言求值；同 aarch64 口径，不需要链接器）
 echo "=== [3/5] riscv64 交叉编译（编译期 const 断言） ==="
 if rustup target list --installed 2>/dev/null | grep -q '^riscv64gc-unknown-linux-gnu$'; then
-  if cargo check -q --manifest-path "$manifest" -p rr-ipc --lib \
+  if cargo check --locked -q --manifest-path "$manifest" -p rr-ipc --lib \
       --target riscv64gc-unknown-linux-gnu; then
     echo "PASS  rr-ipc 在 riscv64gc-unknown-linux-gnu 目标编译通过（const 布局断言已在该目标求值）"
   else
@@ -103,7 +103,7 @@ if command -v docker > /dev/null 2>&1; then
   if docker run --rm --platform linux/arm64 \
       -v "$root":/w -w /w -e CARGO_TARGET_DIR=/tmp/ipct003-target \
       rust:1-slim \
-      cargo run -q --manifest-path base/runtime/Cargo.toml -p rr-ipc --bin ipct003_dump \
+      cargo run --locked -q --manifest-path base/runtime/Cargo.toml -p rr-ipc --bin ipct003_dump \
       > "$tmp/arm64.txt"; then
     if diff -u "$tmp/host.txt" "$tmp/arm64.txt"; then
       echo "PASS  宿主与 linux/arm64 容器输出逐字节一致（IPC-T-003 成立）"
@@ -133,7 +133,7 @@ if rustup toolchain list 2>/dev/null | grep -q '^esp'; then
       --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'
     )
   fi
-  if cargo +esp check -q --manifest-path "$manifest" -p rr-ipc --lib \
+  if cargo +esp check --locked -q --manifest-path "$manifest" -p rr-ipc --lib \
       --target xtensa-esp32-none-elf -Z build-std=alloc,core \
       ${extra_cfg[@]+"${extra_cfg[@]}"}; then
     echo "PASS  rr-ipc 在 xtensa-esp32-none-elf 编译通过——golden 头 const 对拍已在该目标编译期求值（IPC-T-003 第④路）"

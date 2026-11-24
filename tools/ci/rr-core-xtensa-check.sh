@@ -60,7 +60,7 @@ fi
 #    const 断言随依赖链在该目标编译期重求值 = xtensa 编译期 golden 对拍（0.0.7 第④路机制）。
 #    0.0.5 批J G1/C6：transport 拆门后 rr-ipc 的总线窄缝 Rr3ByteStream + 帧缓冲
 #    Rr3FrameBuf + conn blanket impl 随依赖链同面编译——"窄缝在 none 目标可编译"在此出数。
-if cargo +esp check -q -Zbuild-std=core,alloc -p rr-mech -p rr-core -p rr-hal-api --target xtensa-esp32-none-elf; then
+if cargo +esp check --locked -q -Zbuild-std=core,alloc -p rr-mech -p rr-core -p rr-hal-api --target xtensa-esp32-none-elf; then
   echo "PASS  机制核切片（总线语义/运行时/控制/安全核 + 能力面契约 rr-hal-api）在 xtensa-esp32-none-elf 编译成立；rr-ipc 总线窄缝 Rr3ByteStream + 帧缓冲 + conn blanket 同面编译，golden 头 const 断言已在该目标重求值"
 else
   echo "FAIL  机制核面（rr-core/rr-hal-api）xtensa-esp32-none-elf 编译失败（no_std 面被破坏）" >&2
@@ -70,7 +70,7 @@ fi
 # ④ 宿主面对拍：同一份源的 std 测试面真跑（golden 形状 / 逐拍一致），≥1 通过才算数
 hostout="$(mktemp)" || { echo "ERROR: mktemp 失败，无法捕获宿主面输出。" >&2; exit 1; }
 trap 'rm -f "$hostout"' EXIT
-if cargo test -p rr-mech -p rr-core -p rr-hal-api 2>&1 | tee "$hostout"; then
+if cargo test --locked -p rr-mech -p rr-core -p rr-hal-api 2>&1 | tee "$hostout"; then
   if grep -qE '^running [1-9][0-9]* tests?' "$hostout" \
      && grep -qE '^test result: ok\. [1-9][0-9]* passed' "$hostout"; then
     echo "PASS  机制核宿主面对拍（rr-mech + rr-core + rr-hal-api）：golden 形状 / 控制图逐拍一致用例全绿"

@@ -90,7 +90,7 @@ esp_probe_rf="--cfg espidf_time64 -Zunstable-options -Cpanic=immediate-abort -Zp
 if ! cargo +esp clippy --version >/tmp/rr3-esp-clippy-ver 2>&1; then
   echo "FAIL  esp clippy 不可用（esp 工具链缺 clippy 组件）: $(tail -1 /tmp/rr3-esp-clippy-ver)" >&2
   fail=1
-elif RUSTFLAGS="$esp_probe_rf" cargo +esp clippy --all-targets --features autonomy,tts \
+elif RUSTFLAGS="$esp_probe_rf" cargo +esp clippy --locked --all-targets --features autonomy,tts \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
      -- -D warnings >"$esp_clippy_log" 2>&1; then
@@ -108,7 +108,7 @@ elf="$(rr3_cargo_artifact xtensa-esp32-espidf debug esp32-periph-base)" || {
   echo "FAIL  无法解析 cargo target_directory（metadata 不可用）" >&2
   exit 1
 }
-if cargo +esp build \
+if cargo +esp build --locked \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
   if [ -f "$elf" ]; then
@@ -123,7 +123,7 @@ else
 fi
 
 # ⑦b W4-1 I2S TX 验收档编译面（spk-tone feature；默认固件零行为变化）
-if cargo +esp build --features spk-tone \
+if cargo +esp build --locked --features spk-tone \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
   echo "PASS  classic spk-tone 档构建（W4-1 I2S TX 验收面）"
@@ -133,7 +133,7 @@ else
 fi
 
 # ⑦c W3-2a 自治档编译面（autonomy feature：SNTP 对时；默认固件零行为变化）
-if cargo +esp build --features autonomy \
+if cargo +esp build --locked --features autonomy \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
   echo "PASS  classic autonomy 档构建（W3-2a SNTP）"
@@ -144,7 +144,7 @@ fi
 
 # ⑦e ADR-0030 全链档 no-http 编译面（网络照常起，HTTP 配置面关闭；W7 探针）
 nohttp_elf=""
-if cargo +esp build --features autonomy,tts,no-http \
+if cargo +esp build --locked --features autonomy,tts,no-http \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
   nohttp_elf="$(rr3_cargo_artifact xtensa-esp32-espidf debug esp32-periph-base)" \
@@ -163,7 +163,7 @@ fi
 
 # ⑦d W4-2 播放面编译（tts feature；与 autonomy 组合＝W6 全链固件形态；
 #     与 spk-tone 互斥，故单独一条腿）
-if cargo +esp build --features autonomy,tts \
+if cargo +esp build --locked --features autonomy,tts \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
   echo "PASS  classic autonomy+tts 档构建（W4-2 播放面）"
@@ -192,7 +192,7 @@ esp_test_log=/tmp/rr3-esp32-periph-test.log
 # `-Zpanic_abort_tests`：panic=abort 下测试 harness 的唯一合法形状，缺失时 rustc
 # 直接拒编（"building tests with panic=abort is not supported"）。
 esp_test_rf="--cfg espidf_time64 -Zunstable-options -Cpanic=immediate-abort -Zpanic_abort_tests"
-if RUSTFLAGS="$esp_test_rf" cargo +esp test --no-run --features spk-tone,autonomy \
+if RUSTFLAGS="$esp_test_rf" cargo +esp test --locked --no-run --features spk-tone,autonomy \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
      >"$esp_test_log" 2>&1; then
@@ -209,7 +209,7 @@ fi
 # ⑧b W4-2b 云 TTS/播放面测试码编译（tts 与 spk-tone 互斥，故单列一条；
 #     xtensa 目标只验编译，用例执行归宿主机制核与真板）
 esp_tts_test_log=/tmp/rr3-esp32-periph-tts-test.log
-if RUSTFLAGS="$esp_test_rf" cargo +esp test --no-run --features autonomy,tts \
+if RUSTFLAGS="$esp_test_rf" cargo +esp test --locked --no-run --features autonomy,tts \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
      >"$esp_tts_test_log" 2>&1; then
@@ -227,7 +227,7 @@ rel_elf="$(rr3_cargo_artifact xtensa-esp32-espidf release esp32-periph-base)" ||
   echo "FAIL  无法解析 cargo target_directory（metadata 不可用）" >&2
   exit 1
 }
-if cargo +esp build --release \
+if cargo +esp build --locked --release \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
   if [ -f "$rel_elf" ]; then

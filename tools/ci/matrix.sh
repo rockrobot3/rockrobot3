@@ -111,7 +111,7 @@ echo
 #    输出落 $scratch/last.out 供 FAIL 时点名；通过返 0，否则返 1。
 cargo_test_ok() {
   local dir="$1"; shift
-  if ( cd "$dir" && cargo test -q "$@" ) >"$scratch/last.out" 2>&1; then
+  if ( cd "$dir" && cargo test --locked -q "$@" ) >"$scratch/last.out" 2>&1; then
     grep -qE '^running [1-9][0-9]* tests?' "$scratch/last.out" &&
       grep -qE '^test result: ok\. [1-9][0-9]* passed' "$scratch/last.out" && return 0
     return 1

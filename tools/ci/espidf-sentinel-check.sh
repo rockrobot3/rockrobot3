@@ -76,7 +76,7 @@ elf="$(rr3_cargo_artifact xtensa-esp32-espidf debug espidf-sentinel)" || {
   echo "FAIL  无法解析 cargo target_directory（metadata 不可用）" >&2
   exit 1
 }
-if cargo +esp build \
+if cargo +esp build --locked \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
   if [ -f "$elf" ]; then

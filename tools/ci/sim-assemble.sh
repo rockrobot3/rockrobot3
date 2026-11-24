@@ -9,16 +9,16 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
 
 echo "== 构建 rrd + rr3-ctl + rr3-sim =="
-( cd base/runtime && cargo build -q -p rrd )
-cargo build -q --manifest-path tools/rrctl/Cargo.toml
-cargo build -q --manifest-path tools/sim/Cargo.toml
+( cd base/runtime && cargo build --locked -q -p rrd )
+cargo build --locked -q --manifest-path tools/rrctl/Cargo.toml
+cargo build --locked -q --manifest-path tools/sim/Cargo.toml
 
 echo "== 构建 6 个 Rust 模块 =="
 for m in rr3-act rr3-sense rr3-power rr3-connect rr3-interact rr3-brain; do
-        cargo build -q --manifest-path "modules/$m/Cargo.toml"
+        cargo build --locked -q --manifest-path "modules/$m/Cargo.toml"
 done
 
 echo "== rr3-sim --profile（装配单驱动 boot，六模块真进程）=="
 # 产物落点随仓根 target-dir（源码区外）：cargo run 复用同一 target-dir，
 # 不写死 `<crate>/target`（写死会因产物不在源码区而误报缺件）。
-exec cargo run -q --manifest-path tools/sim/Cargo.toml -- --profile profiles/default.toml
+exec cargo run --locked -q --manifest-path tools/sim/Cargo.toml -- --profile profiles/default.toml
