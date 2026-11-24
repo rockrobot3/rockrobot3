@@ -72,18 +72,17 @@ jobs:
           fi
           tar -xJf /tmp/linux.tar.xz -C /tmp
           src="/tmp/linux-${LINUX_VER}"
-          if ! patch -p1 --forward -d "$src" < "$PATCH" > /tmp/patch.log 2>&1; then
-            echo "::error title=dts-patch::回移补丁未干净应用（见 /tmp/patch.log 摘要）"
+          # 用 git apply 而不是 patch：本补丁三件是纯新增文件、Makefile 是纯插入
+          # hunk——GNU patch 对纯插入 hunk 即使上下文逐字命中也会报 "with fuzz 1"
+          # （2026-11-24 用 2.7.6 实测复现），于是旧告警永远响、无法当信号用。
+          # git apply 严格比对上下文（--check 同判据），偏移/漂移即红，不打补丁。
+          patch_abs="$PWD/$PATCH"
+          if ! ( cd "$src" && git apply --check -p1 "$patch_abs" ) > /tmp/patch.log 2>&1; then
+            echo "::error title=dts-patch::回移补丁上下文不匹配（git apply --check 拒绝）"
             tail -8 /tmp/patch.log
             exit 1
           fi
-          if grep -qE "fuzz|FAILED|Hunk .* FAILED" /tmp/patch.log; then
-            # 告警必须自带定位行：只写"带 fuzz"而把细节留在日志里，读面要鉴权、
-            # 排查只能靠猜（2026-11-24 巡检实录）。命中行进注解，日志仍全量留档。
-            hit="$(grep -m3 -E 'fuzz|FAILED|Hunk .* FAILED' /tmp/patch.log | tr '\n' ' ')"
-            echo "::warning title=dts-patch::补丁应用带 fuzz/失败行（检查上下文）: ${hit}"
-            cat /tmp/patch.log
-          fi
+          ( cd "$src" && git apply -p1 "$patch_abs" ) >> /tmp/patch.log 2>&1
           grep -nE "radxa-zero-3[ew]" "$src/arch/arm64/boot/dts/rockchip/Makefile"
 
       - name: 构建两个变体的 dtb（6.6 基线）
