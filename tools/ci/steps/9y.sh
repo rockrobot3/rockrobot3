@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # ⑨-y 跨平台可编面：Windows 红 crate 基线 + ESP 专用工程协议头字段漂移。
 # 由 check.sh 在启动段 source；函数只读写 check.sh 的全局 fail/root。
+# Windows 基线与 ESP 协议头两项各成一函数（gy_windows / gy_header），
+# 临时件与 fail 汇总留在 rr3_step_9y。
 
-rr3_step_9y() {
-  gate_y_fail=0
-  gy_log="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
+# Windows 红 crate 基线：target 未装即 fail-closed；装了就跑 cross check 取红 crate 数。
+gy_windows() {
   if rustup target list --installed 2>/dev/null | grep -q '^x86_64-pc-windows-msvc$'; then
     gy_red=0
     if ! cargo check --locked --manifest-path base/runtime/Cargo.toml \
@@ -36,16 +37,15 @@ rr3_step_9y() {
     printf 'FAIL  ⑨-y Windows target 未安装（rustup target add x86_64-pc-windows-msvc）——fail-closed 不设 SKIP（能跑的机器越少，漂移越没人发现）\n'
     gate_y_fail=1
   fi
-  rm -f "$gy_log"
-  if [ "$gate_y_fail" -ne 0 ]; then
-    fail=1
-  fi
+}
 
-  # —— ⑨-y 附加判据：ESP 专用工程不进门禁 ④/⑥，宿主编译看不见协议头字段漂移
-  #    （0.0.8 静态审计实锤：payload_crc32 进场后 esp32-uart-echo 的 Rr3Header
-  #    字面量未跟，xtensa 固件 E0063 编不过）。按构造点计数 fail-closed：
-  #    剥注释后"构造数（扣除 -> Rr3Header 返回型）"必须 ≤ payload_crc32 字段数。
-  #    工具链不在位的机器也能跑，是这些工程唯一不依赖 esp 环境的漂移防线。
+# —— ⑨-y 附加判据：ESP 专用工程不进门禁 ④/⑥，宿主编译看不见协议头字段漂移
+#    （0.0.8 静态审计实锤：payload_crc32 进场后 esp32-uart-echo 的 Rr3Header
+#    字面量未跟，xtensa 固件 E0063 编不过）。按构造点计数 fail-closed：
+#    剥注释后"构造数（扣除 -> Rr3Header 返回型）"必须 ≤ payload_crc32 字段数。
+#    工具链不在位的机器也能跑，是这些工程唯一不依赖 esp 环境的漂移防线。
+gy_header() {
+  local f h r c need hdr_bad
   hdr_bad=0
   while IFS= read -r f; do
     [ -f "$f" ] || continue
@@ -64,4 +64,15 @@ rr3_step_9y() {
   else
     printf 'PASS  ⑨-y 协议头字段齐全（ESP 专用工程 Rr3Header 构造均带 payload_crc32）\n'
   fi
+}
+
+rr3_step_9y() {
+  gate_y_fail=0
+  gy_log="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
+  gy_windows
+  rm -f "$gy_log"
+  if [ "$gate_y_fail" -ne 0 ]; then
+    fail=1
+  fi
+  gy_header
 }
