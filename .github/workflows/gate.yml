@@ -283,6 +283,10 @@ jobs:
       # panic 落点）一旦腐化会静默少计/多计。九例夹具先钉判据，再落执法。
       - name: 质量度量自检（九例夹具）
         run: python3 tools/ci/metrics.py --self-test
+      # 文档门自检（2026-11-24）：⑤ 的三条 fail-closed 路径（空文档/断链/导航漏链）
+      # 与"好档通过"由夹具仓四例钉住；判据腐化时先在这里红，而不是真仓静默放行。
+      - name: 文档门自检（好档/空文档/断链/导航漏链四例）
+        run: bash tools/ci/docs_gate_selftest.sh
       # 锁内 I/O 机器判据（续轮二十二）：人工巡检三轮归零后改为门——三类已实证
       # 回潮形态（lock·log 同行 / 条件位临时 guard / 直调 reg 日志方法）。
       - name: 锁内 I/O 审计自检（好例 + 三类负例）

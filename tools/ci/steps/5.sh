@@ -44,3 +44,47 @@ check_docs() {
 rr3_step_5() {
   run check_docs
 }
+
+# 自检（2026-11-24）：夹具仓四例——好档通过 / 空文档红 / 断链红 / 导航漏链红。
+# 文档门的判据（列表打空、链接归一、README 覆盖）腐化时先在这里红，而不是在
+# 真仓上静默放行。调用方见 tools/ci/docs_gate_selftest.sh。
+check_docs_selftest() {
+  local root td ok=1 d out rc
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
+  td="$(mktemp -d)" || return 1
+
+  mk_case() {
+    d="$td/$1"
+    mkdir -p "$d/docs/sub" || return 1
+    ( cd "$d" && git init -q . ) || return 1
+    printf '# 索引\n\n[a](sub/a.md)\n' > "$d/docs/README.md"
+    printf '# A\n' > "$d/docs/sub/a.md"
+    printf '%s\n' "$d"
+  }
+  expect() {
+    rc=0
+    out="$( ( cd "$1" && . "$root/5.sh" && check_docs ) 2>&1 )" || rc=$?
+    rc="${rc:-0}"
+    if { [ "$2" = 0 ] && [ "$rc" -eq 0 ]; } \
+       || { [ "$2" = 1 ] && [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -qF "$3"; }; then
+      echo "PASS  ⑤ 自检：$4"
+      rc=0
+    else
+      echo "FAIL  ⑤ 自检：$4（rc=$rc）: $(printf '%s' "$out" | head -2 | tr '\n' ' ')" >&2
+      ok=0
+      rc=1
+    fi
+    return "$rc"
+  }
+
+  mk_case good >/dev/null && ( cd "$td/good" && git add -A ) && expect "$td/good" 0 "" "好档通过" || ok=0
+  mk_case empty >/dev/null && : > "$td/empty/docs/sub/empty.md" \
+    && ( cd "$td/empty" && git add -A ) && expect "$td/empty" 1 "空文档" "空文档即红" || ok=0
+  mk_case broken >/dev/null && printf '[x](missing.md)\n' > "$td/broken/docs/sub/b.md" \
+    && ( cd "$td/broken" && git add -A ) && expect "$td/broken" 1 "断链" "断链即红" || ok=0
+  mk_case nav >/dev/null && printf '# Sub\n' > "$td/nav/docs/sub/README.md" \
+    && ( cd "$td/nav" && git add -A ) && expect "$td/nav" 1 "导航漏链" "导航漏链即红" || ok=0
+
+  rm -rf "$td"
+  [ "$ok" -eq 1 ]
+}
