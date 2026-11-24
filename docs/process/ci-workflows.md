@@ -102,6 +102,14 @@ esp-toolchain 的 `targets` 允许逗号（espup 语法），归一必须在 act
 （逗号→短横），不得让调用方各自清洗。组合档键为
 `esp-Linux-esp32-esp32s3-v0.17.1-idf5.2.2`；单 target 键字面不变、既有缓存不失效。
 
+**运行时基线（2026-11-24 弃用面巡检）**：GitHub 已强制 Node 24 运行 action，
+Node 20 档引用会在 annotations 里持续告警并将于后续移除。现行矩阵（真源 =
+`tools/ci/workflow_rules.py` 的 `ACTION_MATRIX`）：`actions/cache@v5`、
+`docker/login-action@v4`、`docker/setup-buildx-action@v4`、
+`softprops/action-gh-release@v3`（release 路径三件原本只在 tag 时执行，告警此前
+未暴露）；`setup-buildx@v4` 移除的输入本仓未使用，升级无行为变化。升级动作
+仍走"显式提交改矩阵 + 同批换引用"，与 rust-toolchain 钉版同一纪律。
+
 **权限与失败显形（2026-11-18 续轮十六）**：
 
 - 每个 workflow 必须有顶层 `permissions:`，至少 `contents: read`，不得

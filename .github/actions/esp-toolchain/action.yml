@@ -30,7 +30,7 @@ runs:
         TARGETS: ${{ inputs.targets }}
       run: echo "key=esp-${RUNNER_OS}-${TARGETS//,/-}-v0.17.1-idf5.2.2" >> "$GITHUB_OUTPUT"
     - name: 缓存 esp 工具链与 ESP-IDF
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: |
           ~/.local/bin/espup

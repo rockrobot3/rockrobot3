@@ -128,7 +128,7 @@ macaudio `ffi.rs`）已逐块核对：调用点 SAFETY 全覆盖（生产面审�
 [workflows_audit.py](workflows_audit.py) 把 CI 自身的结构面纳入门禁（2026-11-17 立）：
 每个 workflow 必须有顶层 `on:` 与 `concurrency:`、每个 job 必须有 `timeout-minutes:`、
 第三方 `uses:` 必须命中 `ACTION_MATRIX`（`checkout@v7`、`upload-artifact@v7`、
-`download-artifact@v8`、`cache@v4`、`setup-qemu@v4` 等）；本地 action（`./`）不查。
+`download-artifact@v8`、`cache@v5`、`setup-qemu@v4` 等）；本地 action（`./`）不查。
 **版本升级 = 显式改矩阵**，同一工作流两版 action 并存即红（首查抓到 ipct003 的
 qemu v3 残留并修复）。**触发与依赖图**：`push:` 必须收窄到 `branches`/`tags`
 （全分支推送会白烧 CI），`publish.yml` 必须由 tag 触发；job `needs` 不得指向

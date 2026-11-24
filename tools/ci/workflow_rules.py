@@ -35,14 +35,14 @@ ACTION_MATRIX = {
     "actions/checkout": {"v7"},
     "actions/upload-artifact": {"v7"},
     "actions/download-artifact": {"v8"},
-    "actions/cache": {"v4"},
+    "actions/cache": {"v5"},
     "Swatinem/rust-cache": {"v2"},
     "dtolnay/rust-toolchain": {"stable"},
     "docker/setup-qemu-action": {"v4"},
-    "docker/setup-buildx-action": {"v3"},
-    "docker/login-action": {"v3"},
+    "docker/setup-buildx-action": {"v4"},
+    "docker/login-action": {"v4"},
     "taiki-e/install-action": {"v2"},
-    "softprops/action-gh-release": {"v2"},
+    "softprops/action-gh-release": {"v3"},
     "oras-project/setup-oras": {"v2"},
 }
 
