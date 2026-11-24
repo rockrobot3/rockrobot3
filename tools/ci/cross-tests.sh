@@ -82,9 +82,14 @@ if [ -z "$bins" ]; then
 fi
 
 # 三种执行方式：原生直跑 / musl 进目标架构容器 / gnu 走 qemu 用户态。
-# gnu 腿不注册 binfmt，`uart_excl_cross_rej` 的 self-exec（current_exe 再执行）
-# 在跨架构下无法成立，显式跳过并点名；该用例的 flock 排他语义由宿主 gate 与
-# musl 腿（binfmt 在）覆盖，不是静默丢测。
+# gnu 腿的 self-exec 用例依赖宿主 binfmt（platforms.yml 注册 rr3-riscv64 包装器：
+# 带 -L sysroot 的 qemu）；注册可见则全跑，不可见（本地直跑）才显式跳过并点名
+# ——不是静默丢测。
+skip_selfexec=""
+if [ "$mode" = gnu ] && [ ! -e /proc/sys/fs/binfmt_misc/rr3-riscv64 ]; then
+  skip_selfexec="--skip uart_excl_cross_rej"
+  echo "NOTE  gnu 腿未见 rr3-riscv64 binfmt 注册，跳过 uart_excl_cross_rej（CI 注册后全跑）"
+fi
 run_one() {
   case "$mode" in
   native) "$1" ;;
@@ -94,12 +99,9 @@ run_one() {
       -v "$CARGO_TARGET_DIR:$CARGO_TARGET_DIR:ro" \
       -w "$root" alpine:3.20 "$1"
     ;;
-  gnu) qemu-riscv64 -L /usr/riscv64-linux-gnu "$1" --skip uart_excl_cross_rej ;;
+  gnu) qemu-riscv64 -L /usr/riscv64-linux-gnu "$1" $skip_selfexec ;;
   esac
 }
-if [ "$mode" = gnu ]; then
-  echo "NOTE  gnu 腿跳过 uart_excl_cross_rej（跨架构 self-exec 需 binfmt；musl 腿与宿主 gate 已覆盖）"
-fi
 
 fail=0
 n=0

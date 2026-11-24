@@ -78,7 +78,7 @@ jobs:
         with:
           workspaces: base/runtime
       # riscv64 缺 musl 交叉工具链（rust-lld 找不到 -lc/-lgcc_s），故该腿走 gnu：
-      # apt 交叉 gcc + qemu-user-static（执行用 -L 指向 riscv64 sysroot）。
+      # apt 交叉 gcc + qemu-user（执行用 -L 指向 riscv64 sysroot）。
       # 2026-11-16 首跑实证：cross 镜像链路不可控（链接走宿主 cc 直接失败）。
       - name: 安装 riscv64 交叉工具链与 qemu（gnu 目标）
         if: matrix.mode == 'gnu'
@@ -87,7 +87,7 @@ jobs:
           ok=0
           for i in 1 2 3; do
             sudo apt-get update -qq 2>&1 | tail -3 || true
-            if sudo apt-get install -y -qq gcc-riscv64-linux-gnu qemu-user 2>&1 | tee /tmp/apt.log; then
+            if sudo apt-get install -y -qq gcc-riscv64-linux-gnu qemu-user binfmt-support 2>&1 | tee /tmp/apt.log; then
               ok=1
               break
             fi
@@ -100,6 +100,25 @@ jobs:
             exit 1
           fi
           command -v riscv64-linux-gnu-gcc && command -v qemu-riscv64
+          # binfmt 注册（2026-11-24）：跨架构 self-exec 用例需要宿主内核把 riscv64
+          # ELF 交给 qemu；解释器用带 sysroot 的包装脚本，避免动态二进制找不到
+          # /usr/riscv64-linux-gnu 下的 ld.so。注册可见即视为建立。
+          sudo tee /usr/local/bin/rr3-qemu-riscv64 >/dev/null <<'SH'
+          #!/bin/sh
+          exec /usr/bin/qemu-riscv64 -L /usr/riscv64-linux-gnu "$@"
+          SH
+          sudo chmod 0755 /usr/local/bin/rr3-qemu-riscv64
+          if [ ! -e /proc/sys/fs/binfmt_misc/register ]; then
+            sudo mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc || true
+          fi
+          sudo update-binfmts --install rr3-riscv64 /usr/local/bin/rr3-qemu-riscv64 \
+            --magic '\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xf3\x00' \
+            --mask '\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff'
+          if [ ! -e /proc/sys/fs/binfmt_misc/rr3-riscv64 ]; then
+            echo "::error title=binfmt-riscv::riscv64 binfmt 未注册（self-exec 用例无法成立）"
+            exit 1
+          fi
+          echo "PASS  riscv64 binfmt 已注册（wrapper -L /usr/riscv64-linux-gnu）"
       # binfmt 走 setup-qemu（与 ipct003 同源，已在本仓长期验证）：musl 腿的执行
       # 冒烟在目标 ISA 容器里跑。riscv-gnu 腿改用 apt 的 qemu-user-static（不经 docker）。
       - uses: docker/setup-qemu-action@v4
