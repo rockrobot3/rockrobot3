@@ -30,6 +30,9 @@ fi
 tag="${1:-rr3-riscv-image:local}"
 ver="${RR3_VER:-$(cat VERSION)}"
 target="riscv64gc-unknown-linux-gnu"
+# 目标平台显式选择：发布腿在 amd64 runner 上拉回 riscv64-only 索引，docker pull/run
+# 不带 --platform 会按宿主平台挑清单而失败（amd64/arm64 腿宿主匹配，故只有 riscv 腿暴露）。
+pl="linux/riscv64"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/rr3-build}"
 # 交叉工具链按目标三元组命名（调用方未注入时取 apt 的规范名）。
 export CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER="${CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER:-riscv64-linux-gnu-gcc}"
@@ -64,17 +67,17 @@ labels=(
   --label "org.opencontainers.image.source=${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-rockrobot/rockrobot3}"
 )
 if [ "$push" -eq 1 ]; then
-  docker buildx build --platform linux/riscv64 "${labels[@]}" \
+  docker buildx build --platform "$pl" "${labels[@]}" \
     --provenance=mode=max --sbom=true \
     -f tools/deploy/Containerfile -t "$tag" --push /tmp/rr3-image-riscv
   # 冒烟打在发布物上：拉回同一 digest，判据与推送内容一致。
-  docker pull "$tag" >/dev/null
+  docker pull --platform "$pl" "$tag" >/dev/null
 else
-  docker build --platform linux/riscv64 "${labels[@]}" \
+  docker build --platform "$pl" "${labels[@]}" \
     -f tools/deploy/Containerfile -t "$tag" /tmp/rr3-image-riscv
 fi
 
-# 5) 两段冒烟与发布面同一脚本（判据不抄第二份）。
-bash tools/deploy/image-smoke.sh file "$tag"
-bash tools/deploy/image-smoke.sh run "$tag"
+# 5) 两段冒烟与发布面同一脚本（判据不抄第二份）；平台显式传，避免宿主平台误选。
+DOCKER_DEFAULT_PLATFORM="$pl" bash tools/deploy/image-smoke.sh file "$tag"
+DOCKER_DEFAULT_PLATFORM="$pl" bash tools/deploy/image-smoke.sh run "$tag"
 echo "PASS  riscv64 运行镜像构建门（${tag}，version=${ver}，三件产物+brain 来自交叉构建）"
