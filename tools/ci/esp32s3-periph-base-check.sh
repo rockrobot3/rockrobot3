@@ -78,7 +78,7 @@ export PIP_DEFAULT_TIMEOUT=60
 export MCU=esp32s3
 
 # ⑦ venv dist-info 兼容（同 classic 门 ⑥）
-venv_sp="/tmp/rr3-embuild/espressif/python_env/idf5.2_py3.9_env/lib/python3.9/site-packages"
+venv_sp=".embuild/espressif/python_env/idf5.2_py3.9_env/lib/python3.9/site-packages"
 for d in "$venv_sp"/ruamel_yaml-*.dist-info; do
   if [ -d "$d" ]; then
     mv "$d" "${d/ruamel_yaml-/ruamel.yaml-}"

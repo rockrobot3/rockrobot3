@@ -345,13 +345,21 @@ jobs:
           command: bash tools/ci/rr3-act-sense-espidf-check.sh ${{ matrix.chip }}
       # 缓存评估数据（2026-11-24）：把 target 树与 embuild 体积打到可匿名读取的
       # 注解上（日志 403 不可读）。只读数，不改变任何判据；用于决定 ESP 构建缓存
-      # 是否值得做（体积 × 每芯片键 × 恢复耗时）。
+      # 是否值得做（体积 × 每芯片键 × 恢复耗时）。crate_embuild 一栏用于核实
+      # `EMBUILD_ROOT` 是否真的生效：esp-idf-sys 0.35 的 `.embuild` 由 workspace
+      # 根推导、无该环境变量读取点（2026-11-24 源码核对），实测值决定下一拍。
       - name: 构建树体积快照（缓存评估用）
         run: |
           t=$(du -sh /tmp/rr3-build 2>/dev/null | cut -f1)
           e=$(du -sh /tmp/rr3-embuild 2>/dev/null | cut -f1)
-          echo "target=${t:-na} embuild=${e:-na}"
-          echo "::notice title=esp-build-size::${{ matrix.chip }} target=${t:-na} embuild=${e:-na}"
+          eb=""
+          for d in tools/esp32-periph-base tools/espidf-sentinel tools/espidf-std-hello \
+                   tools/esp32-uart-echo modules/rr3-act modules/rr3-sense; do
+            s=$(du -sh "$d/.embuild" 2>/dev/null | cut -f1)
+            if [ -n "$s" ]; then eb="${eb}${d##*/}=${s} "; fi
+          done
+          echo "target=${t:-na} embuild_root=${e:-na} crate=${eb:-none}"
+          echo "::notice title=esp-build-size::${{ matrix.chip }} target=${t:-na} embuild_root=${e:-na} crate=${eb:-none}"
       # 全链固件制品：真板全链复验必须用 **release** 档（debug 档内部 SRAM 余量
       # 更低，TLS 会 mbedtls_ssl_setup -0x7F00 分配失败）；debug 制品仅作编译
       # 门产物保留。两芯片分别上传，W7 classic 重烧不再依赖本地构建。

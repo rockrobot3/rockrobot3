@@ -102,10 +102,11 @@ ELF="$( cd "$PROJ" && rr3_cargo_artifact xtensa-esp32-espidf "$BUILD" "$ELF_NAME
 echo "PASS  ELF 在树: $ELF"
 
 echo "== ④ descriptor 校验（.flash.appdesc 三查）=="
-# 工具链根随装机布局而异：embuild 本地根（EMBUILD_ROOT，仓根 config 已移到 /tmp）
-# 或 ESP-IDF 全局工具目录（ESP_IDF_TOOLS_INSTALL_DIR=global）。两处都查，找不到
-# 显式 die——原实现只看 crate 内 .embuild，路径迁移后 find 非零被 set -e 静默吞掉，
-# 干跑门变成"看起来过了"的假绿。
+# 工具链根随装机布局而异：crate 本地 `.embuild`（esp-idf-sys 按 workspace 根推导；
+# 外部显式注入 EMBUILD_ROOT 时优先）或 ESP-IDF 全局工具目录
+# （ESP_IDF_TOOLS_INSTALL_DIR=global）。两处都查，找不到显式 die——原实现只看
+# crate 内 .embuild，路径迁移后 find 非零被 set -e 静默吞掉，干跑门变成"看起来
+# 过了"的假绿。
 objdump_bin="$(find \
   "${EMBUILD_ROOT:-$PROJ/.embuild}/espressif/tools" \
   "$HOME/.espressif/tools" \
