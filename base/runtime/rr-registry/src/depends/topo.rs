@@ -15,7 +15,7 @@ pub(super) fn rr3_kahn(
     excluded: &BTreeSet<String>,
     edges: &BTreeSet<(usize, usize)>,
 ) -> Vec<String> {
-    let (mut indegree, dependents) = rr3_kahn_tables(edges);
+    let (mut indegree, dependents) = rr3_kahn_tables(facts.len(), edges);
     let mut ready = rr3_kahn_ready(facts, excluded, &indegree);
     let mut order = Vec::with_capacity(facts.len());
     while let Some(&(prio, name, idx)) = ready.iter().next() {
@@ -26,14 +26,16 @@ pub(super) fn rr3_kahn(
     order
 }
 
-/// 入度表与反邻接表（边去重后一次建成）。
+/// 入度表与反邻接表（边去重后一次建成）。入度按模块下标定长直取——边由
+/// `facts` 的枚举下标构造，表长即模块数，查不到键这一态在结构上不存在。
 fn rr3_kahn_tables(
+    n: usize,
     edges: &BTreeSet<(usize, usize)>,
-) -> (BTreeMap<usize, usize>, BTreeMap<usize, Vec<usize>>) {
-    let mut indegree: BTreeMap<usize, usize> = BTreeMap::new();
+) -> (Vec<usize>, BTreeMap<usize, Vec<usize>>) {
+    let mut indegree = vec![0usize; n];
     let mut dependents: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
     for (ci, pi) in edges {
-        *indegree.entry(*ci).or_insert(0) += 1;
+        indegree[*ci] += 1;
         dependents.entry(*pi).or_default().push(*ci);
     }
     (indegree, dependents)
@@ -43,7 +45,7 @@ fn rr3_kahn_tables(
 fn rr3_kahn_ready<'a>(
     facts: &'a [Rr3DependsFacts],
     excluded: &BTreeSet<String>,
-    indegree: &BTreeMap<usize, usize>,
+    indegree: &[usize],
 ) -> BTreeSet<(i64, &'a str, usize)> {
     let mut ready: BTreeSet<(i64, &str, usize)> = BTreeSet::new();
     for (idx, f) in facts.iter().enumerate() {
@@ -59,16 +61,16 @@ fn rr3_ready_at(
     f: &Rr3DependsFacts,
     idx: usize,
     excluded: &BTreeSet<String>,
-    indegree: &BTreeMap<usize, usize>,
+    indegree: &[usize],
 ) -> bool {
-    !excluded.contains(&f.name) && indegree.get(&idx).copied().unwrap_or(0) == 0
+    !excluded.contains(&f.name) && indegree[idx] == 0
 }
 
 /// 出一个模块后释放其下游：入度减一，归零者入就绪集合。
 fn rr3_kahn_release<'a>(
     facts: &'a [Rr3DependsFacts],
     dependents: &BTreeMap<usize, Vec<usize>>,
-    indegree: &mut BTreeMap<usize, usize>,
+    indegree: &mut [usize],
     ready: &mut BTreeSet<(i64, &'a str, usize)>,
     idx: usize,
 ) {
@@ -83,13 +85,12 @@ fn rr3_kahn_release<'a>(
 /// 释放单条下游边：入度减一，归零者入就绪集合。
 fn rr3_release_one<'a>(
     facts: &'a [Rr3DependsFacts],
-    indegree: &mut BTreeMap<usize, usize>,
+    indegree: &mut [usize],
     ready: &mut BTreeSet<(i64, &'a str, usize)>,
     d: usize,
 ) {
-    let e = indegree.get_mut(&d).expect("边表里出现过的消费者必有入度");
-    *e -= 1;
-    if *e == 0 {
+    indegree[d] -= 1;
+    if indegree[d] == 0 {
         let f = &facts[d];
         ready.insert((f.start_priority, f.name.as_str(), d));
     }

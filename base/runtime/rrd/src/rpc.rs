@@ -232,18 +232,23 @@ pub fn rr3_rpc_counters(params: &Value) -> Option<BTreeMap<String, u64>> {
     (!out.is_empty()).then_some(out)
 }
 
+/// JSON-RPC 2.0 应答帧。`Value` 的 `Display` 输出紧凑 JSON 且不返回错误
+/// （`to_vec` 的错误面对 `Value` 不可达）——用 Display 让"序列化不可失败"
+/// 由类型保证，而不是靠 expect 断言。
 pub fn rr3_rpc_build_result(id: u64, result: &Value) -> Vec<u8> {
-    serde_json::to_vec(&serde_json::json!({"jsonrpc":"2.0","id":id,"result":result}))
-        .expect("serde_json 序列化自身构造的值不会失败")
+    serde_json::json!({"jsonrpc":"2.0","id":id,"result":result})
+        .to_string()
+        .into_bytes()
 }
 
 pub fn rr3_rpc_build_error(id: u64, code: Rr3StatusCode, message: &str) -> Vec<u8> {
-    serde_json::to_vec(&serde_json::json!({
+    serde_json::json!({
         "jsonrpc": "2.0",
         "id": id,
         "error": {"code": code as i32, "message": message}
-    }))
-    .expect("serde_json 序列化自身构造的值不会失败")
+    })
+    .to_string()
+    .into_bytes()
 }
 
 pub fn rr3_rpc_reg_status(e: &Rr3RegisterError) -> Rr3StatusCode {
