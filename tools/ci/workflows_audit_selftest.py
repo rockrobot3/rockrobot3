@@ -7,115 +7,128 @@ import pathlib
 from workflow_rules import MAX_JOBS, audit
 
 
-def self_test():
-    import tempfile
+def _write_good(wf):
+    """写入 good.yml 零误报夹具。"""
+    (wf / "good.yml").write_text(
+        "name: good\non:\n  push:\n    branches: [main]\n"
+        "permissions:\n  contents: read\n"
+        "concurrency:\n  group: g\njobs:\n"
+        "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        "    steps:\n      - uses: actions/checkout@v7\n"
+        "      - uses: dtolnay/rust-toolchain@stable\n"
+        '        with:\n          toolchain: "1.100.0"\n'
+        "      - uses: Swatinem/rust-cache@v2\n"
+        "        with:\n          workspaces: base/runtime\n",
+        encoding="utf-8",
+    )
 
-    with tempfile.TemporaryDirectory() as td:
-        root = pathlib.Path(td)
-        wf = root / ".github" / "workflows"
-        wf.mkdir(parents=True)
-        (wf / "good.yml").write_text(
-            "name: good\non:\n  push:\n    branches: [main]\n"
-            "permissions:\n  contents: read\n"
-            "concurrency:\n  group: g\njobs:\n"
-            "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
-            "    steps:\n      - uses: actions/checkout@v7\n"
-            "      - uses: dtolnay/rust-toolchain@stable\n"
-            '        with:\n          toolchain: "1.100.0"\n'
-            "      - uses: Swatinem/rust-cache@v2\n"
-            "        with:\n          workspaces: base/runtime\n",
-            encoding="utf-8",
-        )
-        (wf / "bad.yml").write_text(
-            "name: bad\non:\n  push:\njobs:\n  b:\n    runs-on: ubuntu-latest\n"
-            "    needs: [nope]\n"
-            "    steps:\n      - uses: actions/checkout@v5\n"
-            "      - uses: dtolnay/rust-toolchain@stable\n"
-            "      - uses: Swatinem/rust-cache@v2\n"
-            "      - run: echo hi\n        continue-on-error: true\n",
-            encoding="utf-8",
-        )
-        (wf / "noperm.yml").write_text(
-            "name: noperm\non:\n  push:\n    branches: [main]\n"
-            "concurrency:\n  group: n\njobs:\n"
-            "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
-            "    steps:\n      - uses: actions/checkout@v7\n",
-            encoding="utf-8",
-        )
-        (wf / "integration.yml").write_text(
-            "name: integ\non:\n  push:\n    branches: [main]\n  pull_request:\n"
-            "concurrency:\n  group: i\njobs:\n"
-            "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
-            "    steps:\n      - uses: actions/checkout@v7\n",
-            encoding="utf-8",
-        )
-        (wf / "publish.yml").write_text(
-            "name: pub\non:\n  push:\n    tags: [\"v*\"]\n"
-            "concurrency:\n  group: p\n  cancel-in-progress: true\njobs:\n"
-            "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
-            "    steps:\n      - uses: actions/checkout@v7\n"
-            "  build:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
-            "    strategy:\n      matrix:\n        include:\n"
-            "          - arch: amd64\n            platform: linux/amd64\n"
-            "    steps:\n      - uses: actions/checkout@v7\n"
-            "      - run: |\n"
-            "          cargo build -q --locked --release -p rrd\n"
-            "          for m in act brain connect interact power; do\n"
-            '            cargo build -q --locked --release --manifest-path "modules/rr3-$m/Cargo.toml"\n'
-            "          done\n"
-            "          cargo build -q --locked --release --manifest-path tools/rrctl/Cargo.toml\n"
-            "          cargo build -q --locked --release --manifest-path base/ota/rr3-ota-ctl/Cargo.toml\n"
-            "          cargo build -q --locked --release --manifest-path tools/rr3-pack/Cargo.toml\n"
-            "  firmware:\n    if: startsWith(github.ref, 'refs/tags/v')\n"
-            "    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
-            "    steps:\n      - run: echo classic\n",
-            encoding="utf-8",
-        )
-        many = "".join(
-            f"  j{i}:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
-            for i in range(MAX_JOBS + 1)
-        )
-        (wf / "big.yml").write_text(
-            "name: big\non:\n  push:\n    branches: [main]\n"
-            "concurrency:\n  group: b\njobs:\n" + many,
-            encoding="utf-8",
-        )
-        (wf / "cycle.yml").write_text(
-            "name: cyc\non:\n  push:\n    branches: [main]\n"
-            "concurrency:\n  group: c\njobs:\n"
-            "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    needs: [b]\n"
-            "  b:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    needs: [a]\n",
-            encoding="utf-8",
-        )
-        (wf / "platforms.yml").write_text(
-            "name: platforms\non:\n  push:\n    branches: [main]\n"
-            "permissions:\n  contents: read\n"
-            "concurrency:\n  group: p\njobs:\n"
-            "  cross-artifacts:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
-            "    steps:\n      - run: echo x86_64-unknown-linux-gnu\n",
-            encoding="utf-8",
-        )
-        (wf / "gate.yml").write_text(
-            "name: g\non:\n  push:\n    branches: [main]\n"
-            "permissions:\n  contents: read\n"
-            "concurrency:\n  group: g\njobs:\n"
-            "  lint:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
-            "    steps:\n      - uses: actions/checkout@v7\n",
-            encoding="utf-8",
-        )
-        (wf / "buildroot.yml").write_text(
-            "name: br\non:\n  push:\n    tags: [\"v*\"]\n"
-            "permissions:\n  contents: read\n"
-            "concurrency:\n  group: br\njobs:\n"
-            "  release:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
-            "    if: startsWith(github.ref, 'refs/tags/v')\n"
-            "    permissions:\n      contents: read\n      packages: write\n"
-            "    steps:\n      - run: oras push ghcr.io/o/rockrobot3-ota:1\n",
-            encoding="utf-8",
-        )
-        bad = audit(root)
 
-    cases = [
+def _write_bad(wf):
+    """写入 bad.yml 常规违规夹具。"""
+    (wf / "bad.yml").write_text(
+        "name: bad\non:\n  push:\njobs:\n  b:\n    runs-on: ubuntu-latest\n"
+        "    needs: [nope]\n"
+        "    steps:\n      - uses: actions/checkout@v5\n"
+        "      - uses: dtolnay/rust-toolchain@stable\n"
+        "      - uses: Swatinem/rust-cache@v2\n"
+        "      - run: echo hi\n        continue-on-error: true\n",
+        encoding="utf-8",
+    )
+
+
+def _write_flows(wf):
+    """写入 noperm/integration/publish 流程夹具。"""
+    (wf / "noperm.yml").write_text(
+        "name: noperm\non:\n  push:\n    branches: [main]\n"
+        "concurrency:\n  group: n\njobs:\n"
+        "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        "    steps:\n      - uses: actions/checkout@v7\n",
+        encoding="utf-8",
+    )
+    (wf / "integration.yml").write_text(
+        "name: integ\non:\n  push:\n    branches: [main]\n  pull_request:\n"
+        "concurrency:\n  group: i\njobs:\n"
+        "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        "    steps:\n      - uses: actions/checkout@v7\n",
+        encoding="utf-8",
+    )
+    (wf / "publish.yml").write_text(
+        "name: pub\non:\n  push:\n    tags: [\"v*\"]\n"
+        "concurrency:\n  group: p\n  cancel-in-progress: true\njobs:\n"
+        "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        "    steps:\n      - uses: actions/checkout@v7\n"
+        "  build:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        "    strategy:\n      matrix:\n        include:\n"
+        "          - arch: amd64\n            platform: linux/amd64\n"
+        "    steps:\n      - uses: actions/checkout@v7\n"
+        "      - run: |\n"
+        "          cargo build -q --locked --release -p rrd\n"
+        "          for m in act brain connect interact power; do\n"
+        '            cargo build -q --locked --release --manifest-path "modules/rr3-$m/Cargo.toml"\n'
+        "          done\n"
+        "          cargo build -q --locked --release --manifest-path tools/rrctl/Cargo.toml\n"
+        "          cargo build -q --locked --release --manifest-path base/ota/rr3-ota-ctl/Cargo.toml\n"
+        "          cargo build -q --locked --release --manifest-path tools/rr3-pack/Cargo.toml\n"
+        "  firmware:\n    if: startsWith(github.ref, 'refs/tags/v')\n"
+        "    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        "    steps:\n      - run: echo classic\n",
+        encoding="utf-8",
+    )
+
+
+def _write_limits(wf):
+    """写入 big/cycle 规模与成环夹具。"""
+    many = "".join(
+        f"  j{i}:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        for i in range(MAX_JOBS + 1)
+    )
+    (wf / "big.yml").write_text(
+        "name: big\non:\n  push:\n    branches: [main]\n"
+        "concurrency:\n  group: b\njobs:\n" + many,
+        encoding="utf-8",
+    )
+    (wf / "cycle.yml").write_text(
+        "name: cyc\non:\n  push:\n    branches: [main]\n"
+        "concurrency:\n  group: c\njobs:\n"
+        "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    needs: [b]\n"
+        "  b:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    needs: [a]\n",
+        encoding="utf-8",
+    )
+
+
+def _write_platforms(wf):
+    """写入 platforms/gate/buildroot 平台与门禁夹具。"""
+    (wf / "platforms.yml").write_text(
+        "name: platforms\non:\n  push:\n    branches: [main]\n"
+        "permissions:\n  contents: read\n"
+        "concurrency:\n  group: p\njobs:\n"
+        "  cross-artifacts:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        "    steps:\n      - run: echo x86_64-unknown-linux-gnu\n",
+        encoding="utf-8",
+    )
+    (wf / "gate.yml").write_text(
+        "name: g\non:\n  push:\n    branches: [main]\n"
+        "permissions:\n  contents: read\n"
+        "concurrency:\n  group: g\njobs:\n"
+        "  lint:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        "    steps:\n      - uses: actions/checkout@v7\n",
+        encoding="utf-8",
+    )
+    (wf / "buildroot.yml").write_text(
+        "name: br\non:\n  push:\n    tags: [\"v*\"]\n"
+        "permissions:\n  contents: read\n"
+        "concurrency:\n  group: br\njobs:\n"
+        "  release:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        "    if: startsWith(github.ref, 'refs/tags/v')\n"
+        "    permissions:\n      contents: read\n      packages: write\n"
+        "    steps:\n      - run: oras push ghcr.io/o/rockrobot3-ota:1\n",
+        encoding="utf-8",
+    )
+
+
+def _cases(bad):
+    """返回 25 条断言用例表。"""
+    return [
         ("缺 concurrency 被抓", any("concurrency" in b for b in bad)),
         ("缺 timeout 被抓", any("timeout-minutes" in b for b in bad)),
         ("版本漂移被抓", any("版本漂移" in b for b in bad)),
@@ -142,6 +155,24 @@ def self_test():
         ("制品面缺名被抓", any("未推 rockrobot3-buildroot" in b for b in bad)),
         ("好例零误报", not any("good.yml" in b for b in bad)),
     ]
+
+
+def self_test():
+    """建临时夹具跑 audit 并逐条打印 25 条断言结果。"""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        root = pathlib.Path(td)
+        wf = root / ".github" / "workflows"
+        wf.mkdir(parents=True)
+        _write_good(wf)
+        _write_bad(wf)
+        _write_flows(wf)
+        _write_limits(wf)
+        _write_platforms(wf)
+        bad = audit(root)
+
+    cases = _cases(bad)
     for name, ok in cases:
         print(("PASS  " if ok else "FAIL  ") + name)
     return 0 if all(ok for _, ok in cases) else 1
