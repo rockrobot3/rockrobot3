@@ -299,7 +299,17 @@ jobs:
           tar -xzf /tmp/actionlint.tgz -C /usr/local/bin actionlint
           actionlint --version
       - name: 流水线语法与表达式校验（actionlint）
-        run: actionlint -color=never -shellcheck= -pyflakes= .github/workflows/*.yml
+        run: |
+          set -o pipefail
+          if out="$(actionlint -color=never -shellcheck= -pyflakes= .github/workflows/*.yml 2>&1)"; then
+            printf '%s\n' "$out"
+            exit 0
+          fi
+          # 失败必须自带定位行：日志读面要鉴权，逐条压成注解才可归因。
+          printf '%s\n' "$out" | head -10 | while IFS= read -r line; do
+            printf '::error title=actionlint::%s\n' "${line}"
+          done
+          exit 1
       # 度量核自检（2026-11-24）：门 ⑫ 此前只有执法（check.sh ⑫ 调 metrics.py）、
       # 无自检回执——扫描面（生产/测试剔除、重复窗口、函数行数、超长名、长睡、
       # panic 落点）一旦腐化会静默少计/多计。九例夹具先钉判据，再落执法。
