@@ -282,10 +282,22 @@ jobs:
       # 若被改坏缩进/表达式类型，GitHub 直接不跑或整个文件失败，而文本门仍全绿——
       # 覆盖会静默消失。actionlint 用官方 schema 解析触发面/上下文/表达式；
       # shellcheck/pyflakes 关掉，只保留语法与上下文判据，不吃风格噪音。
-      - name: 安装 actionlint
-        uses: taiki-e/install-action@v2
-        with:
-          tool: actionlint
+      # 安装走官方 release 并校验 sha256：taiki-e/install-action 的工具表不含
+      # actionlint（2026-11-24 实跑 exit 76 实证），不能靠猜工具名。
+      - name: 安装 actionlint（官方 release，校验 sha256）
+        env:
+          ACTIONLINT_VER: "1.7.7"
+        run: |
+          set -o pipefail
+          base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VER}"
+          curl -fsSL --retry 3 --retry-delay 2 -o /tmp/actionlint.tgz \
+            "${base}/actionlint_${ACTIONLINT_VER}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 --retry-delay 2 -o /tmp/actionlint.sha256 \
+            "${base}/actionlint_${ACTIONLINT_VER}_checksums.txt"
+          ( cd /tmp && grep -E " actionlint_${ACTIONLINT_VER}_linux_amd64\.tar\.gz$" \
+              actionlint.sha256 | sha256sum -c - )
+          tar -xzf /tmp/actionlint.tgz -C /usr/local/bin actionlint
+          actionlint --version
       - name: 流水线语法与表达式校验（actionlint）
         run: actionlint -color=never -shellcheck= -pyflakes= .github/workflows/*.yml
       # 度量核自检（2026-11-24）：门 ⑫ 此前只有执法（check.sh ⑫ 调 metrics.py）、
