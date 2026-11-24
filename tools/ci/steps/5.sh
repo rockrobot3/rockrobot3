@@ -70,7 +70,7 @@ check_docs_selftest() {
       echo "PASS  ⑤ 自检：$4"
       rc=0
     else
-      echo "FAIL  ⑤ 自检：$4（rc=$rc）: $(printf '%s' "$out" | head -2 | tr '\n' ' ')" >&2
+      echo "FAIL  ⑤ 自检：${4}（rc=${rc}）: $(printf '%s' "$out" | head -2 | tr '\n' ' ')" >&2
       ok=0
       rc=1
     fi
