@@ -183,64 +183,74 @@ cleanup_selftest() {
 	return 0
 }
 
-self_test() {
-	local tmp rc fail=0
-	tmp="$(mktemp -d)"
-	SELFTEST_TMP="$tmp"
+# 自检夹具：仓内/装机侧各一套三类齐全资产（模块 config / 装配单 / unit / 板级资产）。
+st_prepare() {
+	st_dir="$(mktemp -d)"
+	SELFTEST_TMP="$st_dir"
 	trap cleanup_selftest EXIT
-	UNIT_DIR="$tmp/inst-units"
-	ETC_DIR="$tmp/inst-etc"
-	mkdir -p "$tmp/repo/modules/rr3-a" "$tmp/inst/modules/rr3-a" \
-		"$tmp/repo/profiles" "$tmp/inst/profiles" \
-		"$tmp/repo/base/os/distro/units" "$UNIT_DIR" \
-		"$tmp/repo/base/os/distro/boards/p/etc/systemd/system/rrd.service.d" \
-		"$tmp/inst-etc/systemd/system/rrd.service.d"
-	printf 'rms_start = 650\n' >"$tmp/repo/modules/rr3-a/config.toml"
-	cp "$tmp/repo/modules/rr3-a/config.toml" "$tmp/inst/modules/rr3-a/config.toml"
-	printf '[hardware]\nalsa_device = "plughw:CARD=Device"\n' >"$tmp/repo/profiles/p.toml"
-	cp "$tmp/repo/profiles/p.toml" "$tmp/inst/profiles/p.toml"
+	UNIT_DIR="$st_dir/inst-units"
+	ETC_DIR="$st_dir/inst-etc"
+	mkdir -p "$st_dir/repo/modules/rr3-a" "$st_dir/inst/modules/rr3-a" \
+		"$st_dir/repo/profiles" "$st_dir/inst/profiles" \
+		"$st_dir/repo/base/os/distro/units" "$UNIT_DIR" \
+		"$st_dir/repo/base/os/distro/boards/p/etc/systemd/system/rrd.service.d" \
+		"$st_dir/inst-etc/systemd/system/rrd.service.d"
+	printf 'rms_start = 650\n' >"$st_dir/repo/modules/rr3-a/config.toml"
+	cp "$st_dir/repo/modules/rr3-a/config.toml" "$st_dir/inst/modules/rr3-a/config.toml"
+	printf '[hardware]\nalsa_device = "plughw:CARD=Device"\n' >"$st_dir/repo/profiles/p.toml"
+	cp "$st_dir/repo/profiles/p.toml" "$st_dir/inst/profiles/p.toml"
 	# unit 口径：装机侧 ExecStart 已被 rr3-pack 改写（换 --profile），其余行必须一致。
 	printf '[Service]\nExecStartPre=-/usr/bin/amixer -c Device sset PCM 100%%\nExecStart=/usr/bin/rrd --profile /x\n' \
-		>"$tmp/repo/base/os/distro/units/rrd.service"
+		>"$st_dir/repo/base/os/distro/units/rrd.service"
 	printf '[Service]\nExecStartPre=-/usr/bin/amixer -c Device sset PCM 100%%\nExecStart=/usr/bin/rrd --profile /y\n' \
 		>"$UNIT_DIR/rrd.service"
 	BOARD_REL="base/os/distro/boards/p/etc/systemd/system/rrd.service.d/d.conf"
-	printf '[Service]\nEnvironment=RR3_HAL_ALSA_DEVICE=rr3\n' >"$tmp/repo/$BOARD_REL"
-	cp "$tmp/repo/$BOARD_REL" "$ETC_DIR/systemd/system/rrd.service.d/d.conf"
+	printf '[Service]\nEnvironment=RR3_HAL_ALSA_DEVICE=rr3\n' >"$st_dir/repo/$BOARD_REL"
+	cp "$st_dir/repo/$BOARD_REL" "$ETC_DIR/systemd/system/rrd.service.d/d.conf"
+}
 
-	run_case() { # 名称 期望码
-		set +e
-		verify "$tmp/repo" local "$tmp/inst" "$tmp/inst" "" >/dev/null 2>&1
-		rc=$?
-		set -e
-		if [ "$rc" -eq "$2" ]; then
-			printf 'PASS  self-test/%s（退出码 %d）\n' "$1" "$rc"
-		else
-			printf 'FAIL  self-test/%s（期望 %d 实得 %d）\n' "$1" "$2" "$rc"
-			fail=1
-		fi
-	}
+# 单例判定：跑一次 verify，退出码对期望码。
+st_case() { # 名称 期望码
+	local rc
+	set +e
+	verify "$st_dir/repo" local "$st_dir/inst" "$st_dir/inst" "" >/dev/null 2>&1
+	rc=$?
+	set -e
+	if [ "$rc" -eq "$2" ]; then
+		printf 'PASS  self-test/%s（退出码 %d）\n' "$1" "$rc"
+	else
+		printf 'FAIL  self-test/%s（期望 %d 实得 %d）\n' "$1" "$2" "$rc"
+		st_fail=1
+	fi
+}
 
-	run_case 三类齐全过 0
-	run_case unit口径忽略ExecStart 0
-	printf 'rms_start = 700\n' >"$tmp/inst/modules/rr3-a/config.toml"
-	run_case 改一字节红 1
-	printf 'rms_start = 650\n' >"$tmp/inst/modules/rr3-a/config.toml"
-	printf '[hardware]\nalsa_device = "plughw:CARD=sndrpigooglevoi"\n' >"$tmp/inst/profiles/p.toml"
-	run_case 装配单漂移红 1
-	printf '[hardware]\nalsa_device = "plughw:CARD=Device"\n' >"$tmp/inst/profiles/p.toml"
+# 逐例：先过两例（三类齐全 / unit 口径），再逐类制造漂移并回滚。
+st_cases() {
+	st_case 三类齐全过 0
+	st_case unit口径忽略ExecStart 0
+	printf 'rms_start = 700\n' >"$st_dir/inst/modules/rr3-a/config.toml"
+	st_case 改一字节红 1
+	printf 'rms_start = 650\n' >"$st_dir/inst/modules/rr3-a/config.toml"
+	printf '[hardware]\nalsa_device = "plughw:CARD=sndrpigooglevoi"\n' >"$st_dir/inst/profiles/p.toml"
+	st_case 装配单漂移红 1
+	printf '[hardware]\nalsa_device = "plughw:CARD=Device"\n' >"$st_dir/inst/profiles/p.toml"
 	printf '[Service]\nExecStartPre=-/usr/bin/amixer -c Device sset PCM 100%%\nExecStart=/usr/bin/rrd --profile /x\n' \
 		>"$UNIT_DIR/rrd.service"
 	printf '[Service]\nExecStartPre=-\nExecStart=/usr/bin/rrd --profile /y\n' >"$UNIT_DIR/rrd.service"
-	run_case unit非ExecStart行漂移红 1
+	st_case unit非ExecStart行漂移红 1
 	rm "$UNIT_DIR/rrd.service"
-	run_case unit缺件红 1
+	st_case unit缺件红 1
 	printf '[Service]\nEnvironment=RR3_HAL_ALSA_DEVICE=hw:9\n' \
 		>"$ETC_DIR/systemd/system/rrd.service.d/d.conf"
-	run_case 板级资产漂移红 1
-	cp "$tmp/repo/$BOARD_REL" "$ETC_DIR/systemd/system/rrd.service.d/d.conf"
+	st_case 板级资产漂移红 1
+	cp "$st_dir/repo/$BOARD_REL" "$ETC_DIR/systemd/system/rrd.service.d/d.conf"
+}
 
-	[ "$fail" -eq 0 ] || return 3
+self_test() {
+	st_fail=0
+	st_prepare
+	st_cases
+	[ "$st_fail" -eq 0 ] || return 3
 	return 0
 }
 
