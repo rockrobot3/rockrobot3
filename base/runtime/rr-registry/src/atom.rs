@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use toml::Value;
 
 use crate::schema::{rr3_fields_parse, rr3_get_by_path, Rr3FieldSpec};
+use crate::validate::rr3_type_err;
 
 /// Atom manifest 契约 schema 版本（对应 `atom.schema.toml` 的 `schema_version` 键）
 pub const RR3_ATOM_SCHEMA_VERSION: u32 = 1;
@@ -227,10 +228,7 @@ fn rr3_atom_req<'a>(
 /// string 型：类型判定 + 词形规则校验
 fn rr3_atom_str(spec: &Rr3FieldSpec, value: &Value, errs: &mut Vec<String>) {
     let Some(s) = value.as_str() else {
-        errs.push(format!(
-            "字段 {} 类型应为 string，实际为 {value:?}",
-            spec.path
-        ));
+        errs.push(rr3_type_err(&spec.path, "string", value));
         return;
     };
     if let Some(rule) = &spec.rule {
@@ -246,10 +244,7 @@ fn rr3_atom_list(
     errs: &mut Vec<String>,
 ) {
     let Some(arr) = value.as_array() else {
-        errs.push(format!(
-            "字段 {} 类型应为 list，实际为 {value:?}",
-            spec.path
-        ));
+        errs.push(rr3_type_err(&spec.path, "list", value));
         return;
     };
     for (idx, item) in arr.iter().enumerate() {
@@ -299,7 +294,7 @@ fn rr3_atom_slot_field(spec: &Rr3FieldSpec) -> bool {
 /// int 型：JSON 整数判定（浮点/字符串不算）
 fn rr3_atom_int(spec: &Rr3FieldSpec, value: &Value, errs: &mut Vec<String>) {
     if value.as_integer().is_none() {
-        errs.push(format!("字段 {} 类型应为 int，实际为 {value:?}", spec.path));
+        errs.push(rr3_type_err(&spec.path, "int", value));
     }
 }
 

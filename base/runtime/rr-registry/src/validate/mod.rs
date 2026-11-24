@@ -25,3 +25,8 @@ pub use manifest::{rr3_manifest_chk, rr3_manifest_gate, rr3_no_unknown_keys};
 pub use report::Rr3ValidationReport;
 pub use rules::rr3_registry_check;
 pub use topics::{rr3_topics_chk, rr3_topics_names, rr3_topics_owners};
+
+/// 字段类型不符的统一文案：module/atom 两侧共用一份格式串，避免文案漂移。
+pub(crate) fn rr3_type_err(path: &str, kind: &str, v: &toml::Value) -> String {
+    format!("字段 {path} 类型应为 {kind}，实际为 {v:?}")
+}

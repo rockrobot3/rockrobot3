@@ -5,12 +5,9 @@ use std::path::{Path, PathBuf};
 use toml::Value;
 
 use super::report::Rr3ValidationReport;
+use super::rr3_type_err;
 use super::rules::rr3_registry_check;
 use crate::schema::{rr3_field_specs, rr3_get_by_path, Rr3FieldSpec};
-
-fn rr3_type_err(path: &str, kind: &str, v: &Value) -> String {
-    format!("字段 {path} 类型应为 {kind}，实际为 {v:?}")
-}
 
 /// manifest 未知字段反向断言（0.0.5 收口批 E'，fail-closed）：schema 正向遍历只查
 /// "必填在位、类型与规则合法"，manifest 里多出来的键（typo 如 `uses.slost`）无人看，
@@ -315,8 +312,9 @@ fn rr3_kind_str(spec: &Rr3FieldSpec, value: &Value, errs: &mut Vec<String>) -> b
     true
 }
 
-/// 列表字段：无规则只看数组形状；有规则逐项过 `rr3_chk_item`。非字符串项必须
-/// 点名（F1：filter_map 静默丢弃会让同段合法项掩盖类型错，fail-open）。
+/// 列表字段：逐项验字符串形状（无规则也验，与 atom 侧同构——契约演进出无规则
+/// list 时不 fail-open）；有规则项再逐条过 `rr3_chk_item`。非字符串项必须点名
+/// （F1：filter_map 静默丢弃会让同段合法项掩盖类型错）。
 fn rr3_chk_list(
     spec: &Rr3FieldSpec,
     value: &Value,
@@ -327,9 +325,6 @@ fn rr3_chk_list(
     let Some(arr) = value.as_array() else {
         return false;
     };
-    let Some(rule) = spec.rule.as_deref() else {
-        return true;
-    };
     for (idx, item) in arr.iter().enumerate() {
         let Some(s) = item.as_str() else {
             errs.push(format!(
@@ -339,7 +334,9 @@ fn rr3_chk_list(
             ));
             continue;
         };
-        rr3_chk_item(spec, rule, s, self_name, topics, errs);
+        if let Some(rule) = spec.rule.as_deref() {
+            rr3_chk_item(spec, rule, s, self_name, topics, errs);
+        }
     }
     true
 }
@@ -432,3 +429,6 @@ fn rr3_subs_one(topic: &str, topics: &crate::topics::Rr3TopicSet, errs: &mut Vec
         ));
     }
 }
+
+#[cfg(test)]
+mod tests;
