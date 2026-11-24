@@ -84,26 +84,26 @@ fn fake_rrd(listener: UnixListener, hb_tx: mpsc::Sender<Value>) {
     }
 }
 
-/// 有界等待心跳自报的 inbox_backlog_drop 越过 64（10s 上界；命中即止）。
-/// 判据必须等到达标值再退出：2026-11-24 riscv gnu 腿实录——首拍心跳先到、
-/// 当时只丢了个位数，旧实现见 `drops > 0` 就 break，QEMU 慢一拍即误红。
+/// 有界累计心跳自报的 inbox_backlog_drop **增量**到 64（30s 上界；命中即止）。
+/// 心跳 counters 的语义是"自上一拍以来的增量"（conn.rs 心跳口径），不能取单拍
+/// 最大值：QEMU 慢时 64 次丢弃会摊到多拍，单拍最大只有个位数（2026-11-24 riscv
+/// 实录：10s 内 max 未达 64，测试误红）。按拍累加才是总量。
 fn await_drops(hb_rx: &mpsc::Receiver<Value>) -> u64 {
     const NEED: u64 = 64;
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let mut drops = 0u64;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut total = 0u64;
     while Instant::now() < deadline {
         let Ok(params) = hb_rx.recv_timeout(Duration::from_millis(500)) else {
             continue;
         };
-        let n = params["counters"]["inbox_backlog_drop"]
+        total += params["counters"]["inbox_backlog_drop"]
             .as_u64()
             .unwrap_or(0);
-        drops = drops.max(n);
-        if drops >= NEED {
+        if total >= NEED {
             break;
         }
     }
-    drops
+    total
 }
 
 /// 主循环被长动作（ASR 超时重试、整段 TTS 播放）占住、inbox 被广播帧填满时，
