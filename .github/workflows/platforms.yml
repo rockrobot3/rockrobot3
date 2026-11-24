@@ -36,6 +36,12 @@ jobs:
   cross-artifacts:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # 交叉链接器与目标 C 工具链（只对 riscv64 gnu 目标生效，其他腿 cargo 不读取）。
+    # 构建步与目标 ISA 单测步共用同一份注入，避免两处各写一套。
+    env:
+      CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
+      CC_riscv64_unknown_linux_gnu: riscv64-linux-gnu-gcc
+      AR_riscv64_unknown_linux_gnu: riscv64-linux-gnu-ar
     strategy:
       fail-fast: false
       matrix:
@@ -109,13 +115,6 @@ jobs:
             exit 1
           }
       - name: 目标平台构建（七件产物 + brain 视工具链 + ELF 断言；失败压成单行注解）
-        env:
-          # gnu 交叉腿的链接器：cargo 按目标三元组读该变量，其他腿目标名不同不读取。
-          # 原生腿与 musl 腿不受影响（musl 走 rust-lld，原生走系统 cc）。
-          CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
-          # brain 的 ring 需要目标 C 编译器与归档器（只有 with-brain 腿构建 brain）。
-          CC_riscv64_unknown_linux_gnu: riscv64-linux-gnu-gcc
-          AR_riscv64_unknown_linux_gnu: riscv64-linux-gnu-ar
         run: |
           set -o pipefail
           if ! bash tools/ci/cross-artifacts.sh "${{ matrix.triple }}" "${{ matrix.arch }}" "${{ matrix.assert }}" "${{ matrix.extra }}" 2>&1 | tee /tmp/cross.log; then
@@ -169,6 +168,12 @@ jobs:
             exit 1
           fi
           echo "PASS  128B 头 golden 在 ${{ matrix.chip }}（${{ matrix.triple }}）执行环境逐字节一致"
+      # 目标 ISA 单测最小面（2026-11-24）：协议与契约两 crate 的测试二进制在目标
+      # 环境真跑。此前只有"构建 + 打印用法 + 128B 头对拍"，语义断言仍只在宿主；
+      # 原生腿由 gate ①b 全量覆盖，此处只跑交叉腿（musl/gnu）。
+      - name: 目标 ISA 单测（rr-ipc / rr-registry）
+        if: matrix.mode != 'native'
+        run: bash tools/ci/cross-tests.sh "${{ matrix.triple }}" "${{ matrix.mode }}" "${{ matrix.platform }}"
       - name: 上传产物
         uses: actions/upload-artifact@v7
         with:
