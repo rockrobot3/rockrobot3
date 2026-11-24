@@ -69,7 +69,8 @@ integration / platforms / publish / buildroot 的 job 名按 `REQUIRED_JOBS` 钉
 **YAML/表达式语法面（2026-11-24 补盲）**：`workflows_audit` 是文本扫描器，workflow
 被改坏缩进或表达式类型时 GitHub 会直接不跑/整文件失败，而文本判据仍绿——gate
 `scripts` job 因此增 `actionlint`（官方 schema 解析；关 shellcheck/pyflakes，只留
-语法与上下文判据）。
+语法与上下文判据）。现行基线 **actionlint 1.7.7**（`gate.yml` 的
+`ACTIONLINT_VER` 单点，官方 release + sha256 校验）；升级走显式提交改该 env。
 
 **五芯片覆盖（2026-11-20）**：`platforms.yml` 的 `cross-artifacts` 必须含
 英特尔/AMD `x86_64-unknown-linux-gnu`、瑞芯微 `aarch64-unknown-linux-musl`、
