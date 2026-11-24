@@ -78,7 +78,10 @@ jobs:
             exit 1
           fi
           if grep -qE "fuzz|FAILED|Hunk .* FAILED" /tmp/patch.log; then
-            echo "::warning title=dts-patch::补丁应用带 fuzz/失败行（检查上下文）"
+            # 告警必须自带定位行：只写"带 fuzz"而把细节留在日志里，读面要鉴权、
+            # 排查只能靠猜（2026-11-24 巡检实录）。命中行进注解，日志仍全量留档。
+            hit="$(grep -m3 -E 'fuzz|FAILED|Hunk .* FAILED' /tmp/patch.log | tr '\n' ' ')"
+            echo "::warning title=dts-patch::补丁应用带 fuzz/失败行（检查上下文）: ${hit}"
             cat /tmp/patch.log
           fi
           grep -nE "radxa-zero-3[ew]" "$src/arch/arm64/boot/dts/rockchip/Makefile"
