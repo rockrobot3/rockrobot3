@@ -296,8 +296,12 @@ jobs:
             "${base}/actionlint_${ACTIONLINT_VER}_checksums.txt"
           ( cd /tmp && grep -E " actionlint_${ACTIONLINT_VER}_linux_amd64\.tar\.gz$" \
               actionlint.sha256 | sha256sum -c - )
-          tar -xzf /tmp/actionlint.tgz -C /usr/local/bin actionlint
-          actionlint --version
+          # 装到用户目录并写入 GITHUB_PATH：/usr/local/bin 在 runner 上属 root，
+          # 无 sudo 的 tar 会在此失败（2026-11-24 实跑实证）。
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf /tmp/actionlint.tgz -C "$HOME/.local/bin" actionlint
+          "$HOME/.local/bin/actionlint" --version
+          printf '%s\n' "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: 流水线语法与表达式校验（actionlint）
         run: |
           set -o pipefail
