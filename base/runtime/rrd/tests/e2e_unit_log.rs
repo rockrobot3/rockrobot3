@@ -110,6 +110,12 @@ fn spawned_per_unit_log() {
 
     let log_file = e2e_unit_log_dir(&rrd.socket).join("rr3-ulog.log");
     assert_stderr_landed(&log_file);
+    // 边界行：append 会保留历次重启输出，没有边界就无法分段（批29 补）。
+    let text = std::fs::read_to_string(&log_file).unwrap_or_default();
+    assert!(
+        text.contains("rrd spawn rr3-ulog attempt=0"),
+        "per-unit 日志缺 spawn 边界行（重启分段不可读）: {text}"
+    );
     let _ = std::fs::remove_file(&script);
     let _ = std::fs::remove_file(&manifest);
     let _ = std::fs::remove_dir_all(e2e_unit_log_dir(&rrd.socket));

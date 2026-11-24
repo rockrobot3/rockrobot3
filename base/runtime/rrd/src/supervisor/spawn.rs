@@ -2,6 +2,7 @@
 //! 起进程的唯一漏斗：低电闸、旧 handle 清理、环境注入与成功/失败记账。
 
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -64,7 +65,7 @@ fn rr3_boot_launch(
     boot_role: &str,
 ) {
     rr3_lock(shared).rr3_reg_own(name);
-    match rr3_spawn_build(job, bus_path, boot_role).spawn() {
+    match rr3_spawn_build(job, bus_path, boot_role, attempt).spawn() {
         Ok(child) => rr3_spawn_ok(children, name, child, job, attempt),
         Err(e) => rr3_spawn_err(shared, t0, due, job, name, e),
     }
@@ -106,7 +107,7 @@ fn rr3_boot_kill_old(children: &mut BTreeMap<String, Child>, name: &str) {
 
 /// 起进程命令的组装：E-6 三件环境（连哪儿/是谁/做什么）+ 四路后端覆盖与描述符、
 /// 执行轴状态，空值一律不注入；stderr 接 per-unit 日志（append），打不开回退 inherit。
-fn rr3_spawn_build(job: &Rr3SpawnJob, bus_path: &Path, boot_role: &str) -> Command {
+fn rr3_spawn_build(job: &Rr3SpawnJob, bus_path: &Path, boot_role: &str, attempt: u32) -> Command {
     let name = job.facts.name.as_str();
     // E-6 的三件环境：连哪儿（rrd 自己的 socket 绝对路径）、是谁（该 job 的 manifest
     // 绝对路径，每次重启重读）、做什么（`--boot-role` 的值，原样透传、rrd 不解释）。
@@ -121,7 +122,7 @@ fn rr3_spawn_build(job: &Rr3SpawnJob, bus_path: &Path, boot_role: &str) -> Comma
     // stderr 接 per-unit 日志文件（门 r 留痕通道定形，批N4 件八）：模块留痕唯一可达
     // 通道——append 语义让"一次重启后仍能取到崩溃前的最后 N 行"（§17 同轨判据）天然
     // 成立；文件打不开回退 inherit 并点名，观测通道故障降级、不挡起跑。
-    let stderr_stdio = rr3_unit_stderr(bus_path, name);
+    let stderr_stdio = rr3_unit_stderr(bus_path, name, attempt);
     cmd.stdout(Stdio::null()).stderr(stderr_stdio);
     // 父死子收（Linux）：rrd 崩溃/被杀时子进程不能变孤儿继续占 UART/声卡。
     // 2026-11-09 真板实录：部署停旧栈后新 sense 连报两次 `HAL 设备忙`——旧 sense
@@ -149,9 +150,19 @@ fn rr3_pdeath_signal(cmd: &mut Command) {
 }
 
 /// per-unit 日志 stderr；打不开回退 inherit 并点名（观测降级不挡起跑）。
-fn rr3_unit_stderr(bus_path: &Path, name: &str) -> Stdio {
+/// 每次 spawn 先写一行边界：append 语义保留历次重启的输出，没有边界就无法把
+/// "第 N 次重启后的行"与旧行分开（attempt 与 rrd.log 的 `spawn` 行同值，
+/// 真板卡住时可先把 unit 日志按界分段，再对时间戳）。
+fn rr3_unit_stderr(bus_path: &Path, name: &str, attempt: u32) -> Stdio {
     match rr3_open_unit_log(bus_path, name) {
-        Ok(f) => Stdio::from(f),
+        Ok(mut f) => {
+            let ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            let _ = writeln!(f, "===== rrd spawn {name} attempt={attempt} at {ms} =====");
+            Stdio::from(f)
+        }
         Err(e) => {
             rr3_log(&format!(
                 "per-unit 日志打不开（{name}）: {e} —— stderr 回退 inherit"
