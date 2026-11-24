@@ -210,9 +210,13 @@ log_max_us=66 boot_max=60`，续命余量 2.5×、落盘余量约 750×。阈值
   串口出 shell / maskrom 实烧仍待硬件；
 - **ADR-0028 release job**：码面在案（`c345c1f`）；缺一次 `v*` 标签 + Secret
   `RR3_OTA_SIGNING_KEY` 的正回执；
-- **action 运行时升级**：checkout / upload / download / setup-qemu 已升 Node 24 档；
-  docker/login、setup-buildx 维持 v3（历史 main 发布回执 run `44257954571` 已验证可用；
-  本流程只动 `dev/hubs-01`，升级单独立项）；
+- **action 运行时升级**：全量引用已升 Node 24 档（checkout / upload / download /
+  setup-qemu / cache v5）；2026-11-24 再升发布路径三件——`docker/login v4`、
+  `docker/setup-buildx v4`、`gh-release v3`（v4 仅运行时/ESM 变更，buildx 移除的
+  输入本仓未使用；v3 历史回执 run `44257954571` **不覆盖**这次升级）。
+  `buildroot` 的 dtb 腿已用 cache v5 实跑成功（2026-11-24）；login/buildx/gh-release
+  只在 tag 执行，**待 `v*` 窗口取 v4/v3 正回执**；platforms 的 esp32 腿 cache v5
+  回执同批核对；
 - **unsafe 注释审计**：生产面 122 处全部带前言，基线 **0**（`96972e0` + `a47693c`）；
   新代码由 gate `scripts` job 执法；
 - **CI 冷启动基线取回**：`rr3-sim --chain` 的「启动基线」行数值需 job 日志鉴权，
