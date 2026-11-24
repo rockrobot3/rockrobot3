@@ -37,9 +37,14 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/rr3-build}"
 cd "$root"
 
 json="/tmp/rr3-cross-tests-${target}.jsonl"
-cargo test -q --locked --no-run --target "$target" \
+build_log="/tmp/rr3-cross-tests-${target}.build.log"
+if ! cargo test -q --locked --no-run --target "$target" \
   --manifest-path base/runtime/Cargo.toml -p rr-ipc -p rr-registry \
-  --message-format=json >"$json"
+  --message-format=json >"$json" 2>"$build_log"; then
+  errs="$(grep -E '^error' "$build_log" | head -3 | tr '\n' ' ')"
+  echo "::error title=isa-tests::${target} 测试二进制构建失败: ${errs:0:800}"
+  exit 1
+fi
 
 # 从 cargo 的 JSON 事件里收集可执行测试二进制（包归属按 package_id 过滤）。
 bins="$(python3 - "$json" <<'PY'
@@ -68,6 +73,9 @@ if [ -z "$bins" ]; then
 fi
 
 # 三种执行方式：原生直跑 / musl 进目标架构容器 / gnu 走 qemu 用户态。
+# gnu 腿不注册 binfmt，`uart_excl_cross_rej` 的 self-exec（current_exe 再执行）
+# 在跨架构下无法成立，显式跳过并点名；该用例的 flock 排他语义由宿主 gate 与
+# musl 腿（binfmt 在）覆盖，不是静默丢测。
 run_one() {
   case "$mode" in
   native) "$1" ;;
@@ -77,9 +85,12 @@ run_one() {
       -v "$CARGO_TARGET_DIR:$CARGO_TARGET_DIR:ro" \
       -w "$root" alpine:3.20 "$1"
     ;;
-  gnu) qemu-riscv64 -L /usr/riscv64-linux-gnu "$1" ;;
+  gnu) qemu-riscv64 -L /usr/riscv64-linux-gnu "$1" --skip uart_excl_cross_rej ;;
   esac
 }
+if [ "$mode" = gnu ]; then
+  echo "NOTE  gnu 腿跳过 uart_excl_cross_rej（跨架构 self-exec 需 binfmt；musl 腿与宿主 gate 已覆盖）"
+fi
 
 fail=0
 n=0
@@ -88,7 +99,9 @@ for b in $bins; do
   if run_one "$b" >/tmp/rr3-cross-test-one.log 2>&1; then
     echo "PASS  $(basename "$b") 在 $target 执行通过"
   else
-    echo "FAIL  $(basename "$b") 在 $target 执行失败: $(tail -3 /tmp/rr3-cross-test-one.log | tr '\n' ' ')" >&2
+    errs="$(tail -8 /tmp/rr3-cross-test-one.log | tr '\n' ' ' | tr -s ' ')"
+    echo "FAIL  $(basename "$b") 在 $target 执行失败: ${errs:0:600}" >&2
+    echo "::error title=isa-tests::$(basename "$b") 在 ${target} 失败: ${errs:0:800}"
     fail=1
   fi
 done
