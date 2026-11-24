@@ -3,6 +3,7 @@
 
 mod cfg;
 mod client;
+mod http;
 mod payload;
 mod retry;
 
@@ -19,7 +20,9 @@ pub(crate) use cfg::{
     RR3_MOCK_TEXT_ENV, RR3_SECRETS_FILE_ENV, RR3_TTS_BACKEND_ENV,
 };
 #[cfg(test)]
-pub(crate) use client::{rr3_boundary_hex, rr3_http_post, rr3_read_capped_body};
+pub(crate) use client::rr3_boundary_hex;
+#[cfg(test)]
+pub(crate) use http::{rr3_http_post, rr3_read_capped_body};
 #[cfg(test)]
 pub(crate) use retry::rr3_cloud_retryable;
 
