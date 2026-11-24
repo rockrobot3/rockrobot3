@@ -337,7 +337,7 @@ fn main() -> ! {
     let mut console = console.with_tx(peripherals.GPIO1);
     let Ok(link) = esp_hal::uart::Uart::new(peripherals.UART2, esp_hal::uart::Config::default())
     else {
-        log!(&mut *console, "startup: uart2 init failed — halt");
+        log!(&mut console, "startup: uart2 init failed — halt");
         halt()
     };
     let link = link.with_tx(peripherals.GPIO17).with_rx(peripherals.GPIO16);
