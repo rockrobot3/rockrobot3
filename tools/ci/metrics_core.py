@@ -336,60 +336,82 @@ def significant(lines):
     return keep
 
 
-def measure(root):
-    dup_occ = {}
-    total_lines = 0
-    ccs = []
-    long_names = []
-    unwrap_sites = 0
-    long_sleeps = []
-    fn_over = []
-    fn_over60 = []
-    fn_over50 = []
-    for rel in rust_files(root):
-        base_name = os.path.basename(rel)
-        if ("/tests/" in rel or rel.startswith("tests/")
-                or base_name == "tests.rs" or base_name in TEST_ONLY_FILES):
-            continue
-        path = os.path.join(root, rel)
-        try:
-            raw = open(path, encoding="utf-8", errors="ignore").read()
-        except OSError as e:
-            print(f"FAIL  ⑫ 读取失败 {rel}: {e}", file=sys.stderr)
-            sys.exit(1)
-        head = "\n".join(raw.splitlines()[:5])
-        if "@generated" in head or "自动生成" in raw[:400]:
-            continue
-        src = production_part(strip_code(raw))
-        # 生产面 panic 落点（unwrap/expect）：测试面已被 production_part 截掉。
-        # 此项不判"越少越好"的绝对值，只钉"不回涨"——新增落点必须同批给理由。
-        unwrap_sites += len(re.findall(r"\.unwrap\(\)|\.expect\(", src))
-        long_sleeps.extend(_long_sleeps(rel, src))
-        for name, body in functions(src):
-            ccs.append(cyclomatic(body))
-            n = len(body.splitlines())
-            if n > FN_LINES_MAX:
-                fn_over.append((rel, name, n))
-            if n > FN_TIGHT_MAX:
-                fn_over60.append((rel, name, n))
-            if n > FN_NEXT_MAX:
-                fn_over50.append((rel, name, n))
-            if len(name.encode()) > NAME_MAX and not name.startswith(FFI_PREFIXES):
-                long_names.append(name)
-        lines = significant(src.splitlines())
-        total_lines += len(lines)
-        for i in range(len(lines) - WINDOW + 1):
-            h = hashlib.md5("\n".join(lines[i : i + WINDOW]).encode()).hexdigest()
-            dup_occ.setdefault(h, []).append((rel, i))
+def _src_of(root, rel):
+    """读一份生产源并去注释；生成物返回 None（读取失败按门禁口径直接退出）。"""
+    path = os.path.join(root, rel)
+    try:
+        raw = open(path, encoding="utf-8", errors="ignore").read()
+    except OSError as e:
+        print(f"FAIL  ⑫ 读取失败 {rel}: {e}", file=sys.stderr)
+        sys.exit(1)
+    head = "\n".join(raw.splitlines()[:5])
+    if "@generated" in head or "自动生成" in raw[:400]:
+        return None
+    return production_part(strip_code(raw))
+
+
+def _scan_file(rel, src):
+    """单文件生产面：panic 落点 / 长睡 / 函数指标 / 有效行。"""
+    unwrap_sites = len(re.findall(r"\.unwrap\(\)|\.expect\(", src))
+    long_sleeps = _long_sleeps(rel, src)
+    ccs, long_names = [], []
+    over, over60, over50 = [], [], []
+    for name, body in functions(src):
+        ccs.append(cyclomatic(body))
+        n = len(body.splitlines())
+        if n > FN_LINES_MAX:
+            over.append((rel, name, n))
+        if n > FN_TIGHT_MAX:
+            over60.append((rel, name, n))
+        if n > FN_NEXT_MAX:
+            over50.append((rel, name, n))
+        if len(name.encode()) > NAME_MAX and not name.startswith(FFI_PREFIXES):
+            long_names.append(name)
+    lines = significant(src.splitlines())
+    return unwrap_sites, long_sleeps, ccs, long_names, over, over60, over50, lines
+
+
+def _dup_hits(dup_occ):
+    """重复窗口命中的行坐标集合（同一窗口出现多次即全记）。"""
     dup = set()
     for occ in dup_occ.values():
         if len(occ) > 1:
             for rel, i in occ:
                 for k in range(WINDOW):
                     dup.add((rel, i + k))
+    return dup
+
+
+def measure(root):
+    dup_occ = {}
+    total_lines = 0
+    ccs, long_names = [], []
+    unwrap_sites = 0
+    long_sleeps = []
+    fn_over, fn_over60, fn_over50 = [], [], []
+    for rel in rust_files(root):
+        base_name = os.path.basename(rel)
+        if ("/tests/" in rel or rel.startswith("tests/")
+                or base_name == "tests.rs" or base_name in TEST_ONLY_FILES):
+            continue
+        src = _src_of(root, rel)
+        if src is None:
+            continue
+        (u, sleeps, f_ccs, names, over, over60, over50, lines) = _scan_file(rel, src)
+        unwrap_sites += u
+        long_sleeps.extend(sleeps)
+        ccs.extend(f_ccs)
+        long_names.extend(names)
+        fn_over.extend(over)
+        fn_over60.extend(over60)
+        fn_over50.extend(over50)
+        total_lines += len(lines)
+        for i in range(len(lines) - WINDOW + 1):
+            h = hashlib.md5("\n".join(lines[i : i + WINDOW]).encode()).hexdigest()
+            dup_occ.setdefault(h, []).append((rel, i))
     return (
-        total_lines, len(dup), ccs, long_names, unwrap_sites, long_sleeps,
-        fn_over, fn_over60, fn_over50,
+        total_lines, len(_dup_hits(dup_occ)), ccs, long_names, unwrap_sites,
+        long_sleeps, fn_over, fn_over60, fn_over50,
     )
 
 
