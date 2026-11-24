@@ -104,17 +104,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 构建并推送单架构镜像
+      # 发布件带 provenance + SBOM（2026-11-24 立）：buildx 只有在 --push 时才把
+      # 证明面作为 attestation manifest 附进单架构清单；docker build 直推没有。
+      # 证明面在 tag 窗口验证（runbook B 的 imagetools 检查），日常三线只验语法。
+      - uses: docker/setup-buildx-action@v4
+      - name: 构建并推送单架构镜像（含 provenance/SBOM）
         run: |
           tag="${{ steps.meta.outputs.tag }}"
-          docker build --platform "${{ matrix.platform }}" \
+          docker buildx build --platform "${{ matrix.platform }}" \
+            --provenance=mode=max --sbom=true \
             --label "org.opencontainers.image.title=rockrobot3" \
             --label "org.opencontainers.image.version=${{ steps.meta.outputs.version }}" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
             --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
             -f tools/deploy/Containerfile \
-            -t "${IMAGE}:${tag}-${{ matrix.arch }}" /tmp/rr3-image
-          docker push "${IMAGE}:${tag}-${{ matrix.arch }}"
+            -t "${IMAGE}:${tag}-${{ matrix.arch }}" \
+            --push /tmp/rr3-image
 
       # 推完即验：镜像能起来、装机树在、二进制能执行。判据住在
       # tools/deploy/image-smoke.sh（与本地同一份，改判据不必靠打标签等 CI），
@@ -170,6 +175,7 @@ jobs:
       - uses: docker/setup-qemu-action@v4
         with:
           platforms: riscv64
+      - uses: docker/setup-buildx-action@v4
       - name: 计算发布标签（版本唯一真源 = 仓根 VERSION）
         id: meta
         run: |
@@ -193,18 +199,17 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: 构建 riscv64 镜像（含两段冒烟）并推送
+      - name: 构建 riscv64 镜像（含两段冒烟）并推送（带 provenance/SBOM）
         env:
           RR3_VER: ${{ steps.meta.outputs.version }}
         run: |
           set -o pipefail
           ref="${IMAGE}:${{ steps.meta.outputs.tag }}-riscv64"
-          if ! bash tools/deploy/build-riscv-image.sh "$ref" 2>&1 | tee /tmp/riscv-publish.log; then
+          if ! bash tools/deploy/build-riscv-image.sh --push "$ref" 2>&1 | tee /tmp/riscv-publish.log; then
             errs=$(grep -iE "error(\[|:)|failed|FAIL|undefined reference|manifest unknown" /tmp/riscv-publish.log | tail -5 | tr '\n' ' ')
             echo "::error title=riscv-publish::${errs:0:900}"
             exit 1
           fi
-          docker push "$ref"
           docker manifest inspect "$ref" >/dev/null
           echo "PASS  已推送 $ref"
 

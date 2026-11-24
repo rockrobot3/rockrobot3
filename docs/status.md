@@ -215,8 +215,11 @@ log_max_us=66 boot_max=60`，续命余量 2.5×、落盘余量约 750×。阈值
   `docker/setup-buildx v4`、`gh-release v3`（v4 仅运行时/ESM 变更，buildx 移除的
   输入本仓未使用；v3 历史回执 run `44257954571` **不覆盖**这次升级）。
   `buildroot` 的 dtb 腿已用 cache v5 实跑成功（2026-11-24）；login/buildx/gh-release
-  只在 tag 执行，**待 `v*` 窗口取 v4/v3 正回执**；platforms 的 esp32 腿 cache v5
-  回执同批核对；
+  只在 tag 执行，**待 `v*` 窗口取 v4/v3 正回执**；platforms 的 esp32 双腿 cache v5
+  已实跑成功（`9aebdd5`，注解只剩 build-size notice）；
+- **发布面 provenance/SBOM**：码面在案（2026-11-24，三条镜像腿 `buildx --push` 附
+  `--provenance=mode=max --sbom=true`；riscv 走 `build-riscv-image.sh --push`）；
+  缺一次 `v*` 窗口回执（runbook B 的 attestation 计数 ≥2）；签名（cosign）未启用；
 - **unsafe 注释审计**：生产面 122 处全部带前言，基线 **0**（`96972e0` + `a47693c`）；
   新代码由 gate `scripts` job 执法；
 - **CI 冷启动基线取回**：`rr3-sim --chain` 的「启动基线」行数值需 job 日志鉴权，

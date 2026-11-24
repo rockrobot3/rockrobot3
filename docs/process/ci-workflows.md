@@ -85,9 +85,13 @@ riscv64 发布镜像路径跑通（交叉产物 → `rr3-pack` stage → QEMU `d
 复用同一脚本，tag/main 时推送并把 riscv64 并入三架构清单（merge 判据同步）。
 **发布面判据（2026-11-20 补）**：`build` 矩阵必须同时含 amd64/arm64 原生腿
 （`ubuntu-24.04-arm`），且必须经 `stage-image.sh` 铺根与 `image-smoke.sh file|run`
-两段冒烟；`build-riscv64` 必须复用 `build-riscv-image.sh` 并推送；`merge` 必须对
-合并清单再跑 `image-smoke.sh file`；`firmware` 的 S3 档须同时带目标三元组、
+两段冒烟；`build-riscv64` 必须复用 `build-riscv-image.sh --push` 并推送；`merge`
+必须对合并清单再跑 `image-smoke.sh file`；`firmware` 的 S3 档须同时带目标三元组、
 `MCU=esp32s3` 与 `esp32s3` feature——原生腿/发布路径/装机面验证/芯片档任一缩水即红。
+**证明面（2026-11-24 补）**：三条镜像腿以 `docker buildx build --push` 构建并附
+`--provenance=mode=max --sbom=true`，单架构清单各带 provenance + SBOM attestation
+（`docker build` 直推不会产生）；窗口判据见 runbook B 的 attestation 计数。
+签名（cosign）尚未启用，status 敞口照实记录。
 S3 门的 ⑨ release 与 `firmware` job 逐字同参（`esp32s3,autonomy,tts`），并在产出树
 断言同版 bootloader：tag 不是该形态的首次 release 编译。
 **固件制品（同日；2026-11-22 补同版 bootloader）**：tag 发布的 `firmware` job

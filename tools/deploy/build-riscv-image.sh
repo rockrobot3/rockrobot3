@@ -9,7 +9,10 @@
 #
 # 前置（platforms 的 riscv-image job 负责装）：rustup target
 # riscv64gc-unknown-linux-gnu、apt gcc-riscv64-linux-gnu、qemu binfmt、docker。
-# 用法：build-riscv-image.sh [镜像tag]（缺省 rr3-riscv-image:local）
+# 用法：build-riscv-image.sh [--push] [镜像tag]（缺省 rr3-riscv-image:local）
+#   --push：发布腿用——buildx 构建并推送，单架构清单附 provenance/SBOM
+#   attestation（docker build + docker push 不会产生），推后拉回同一 digest 再冒烟；
+#   缺省：构建门用——本地 docker build + 两段冒烟，无网络推送。
 set -euo pipefail
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "ERROR: 不在 git 仓库内" >&2
@@ -17,6 +20,11 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 }
 cd "$root"
 
+push=0
+if [ "${1:-}" = "--push" ]; then
+  push=1
+  shift
+fi
 tag="${1:-rr3-riscv-image:local}"
 ver="${RR3_VER:-$(cat VERSION)}"
 target="riscv64gc-unknown-linux-gnu"
@@ -47,12 +55,22 @@ RR3_PACK_BIN="$pack" CARGO_TARGET_DIR="$CARGO_TARGET_DIR/$target" \
   bash tools/deploy/stage-image.sh /tmp/rr3-image-riscv riscv64 "$ver"
 
 # 4) 镜像：Containerfile 的 apt-get 层在 QEMU 下执行（binfmt 由 setup-qemu 注册）。
-docker build --platform linux/riscv64 \
-  --label "org.opencontainers.image.title=rockrobot3" \
-  --label "org.opencontainers.image.version=$ver" \
-  --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
-  --label "org.opencontainers.image.source=${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-rockrobot/rockrobot3}" \
-  -f tools/deploy/Containerfile -t "$tag" /tmp/rr3-image-riscv
+labels=(
+  --label "org.opencontainers.image.title=rockrobot3"
+  --label "org.opencontainers.image.version=$ver"
+  --label "org.opencontainers.image.revision=$(git rev-parse HEAD)"
+  --label "org.opencontainers.image.source=${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-rockrobot/rockrobot3}"
+)
+if [ "$push" -eq 1 ]; then
+  docker buildx build --platform linux/riscv64 "${labels[@]}" \
+    --provenance=mode=max --sbom=true \
+    -f tools/deploy/Containerfile -t "$tag" --push /tmp/rr3-image-riscv
+  # 冒烟打在发布物上：拉回同一 digest，判据与推送内容一致。
+  docker pull "$tag" >/dev/null
+else
+  docker build --platform linux/riscv64 "${labels[@]}" \
+    -f tools/deploy/Containerfile -t "$tag" /tmp/rr3-image-riscv
+fi
 
 # 5) 两段冒烟与发布面同一脚本（判据不抄第二份）。
 bash tools/deploy/image-smoke.sh file "$tag"

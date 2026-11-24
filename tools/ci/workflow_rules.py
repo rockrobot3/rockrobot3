@@ -338,8 +338,10 @@ def release_problems(text, rel):
         joined = "\n".join(riscv)
         if "build-riscv-image.sh" not in joined:
             bad.append(f"{rel} build-riscv64 未复用 build-riscv-image.sh（发布路径分叉）")
-        if "docker push" not in joined:
-            bad.append(f"{rel} build-riscv64 缺 docker push")
+        # 推送机制二选一：显式 docker push，或脚本 --push（buildx 推并附证明面）。
+        # 判据是"发布腿必须真推送"，不是钉死某条命令形状。
+        if "docker push" not in joined and "build-riscv-image.sh --push" not in joined:
+            bad.append(f"{rel} build-riscv64 未推送（需 docker push 或 build-riscv-image.sh --push）")
     merge = jobs.get("merge")
     if merge is not None:
         needs = needs_of(merge)
