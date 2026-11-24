@@ -176,6 +176,62 @@ def _raw_string_at(src, i):
     return j, hashes
 
 
+def _skip_line_comment(src, i, n):
+    """`//` 行注释：跳到行尾换行（保留换行本身）。"""
+    j = src.find("\n", i)
+    return n if j < 0 else j
+
+
+def _skip_block_comment(src, i, n, out):
+    """`/* */` 块注释：内容折成等量换行（行结构不丢）。"""
+    j = src.find("*/", i + 2)
+    end = n if j < 0 else j + 2
+    out.append("\n" * src.count("\n", i, end))
+    return end
+
+
+def _skip_string(src, i, n, out):
+    """字符串字面量（含 `r#"..."#` 生字符串）：内容折 `""`，换行照留。"""
+    if src[i] == '"':
+        out.append('""')
+        j, term = i + 1, None
+    else:
+        q, hashes = _raw_string_at(src, i)
+        out.append('""')
+        j, term = q + 1, '"' + "#" * hashes
+    while j < n:
+        if term is None and src[j] == "\\":
+            j += 2
+        elif term is not None and src.startswith(term, j):
+            j += len(term)
+            break
+        elif term is None and src[j] == '"':
+            j += 1
+            break
+        else:
+            if src[j] == "\n":
+                out.append("\n")
+            j += 1
+    return j
+
+
+def _skip_char(src, i, n, out):
+    """字符/字节字面量（`'x'` / `'\\…'`）：折 `''`，换行照留。"""
+    out.append("''")
+    j = i + 1
+    while j < n:
+        if src[j] == "\\":
+            j += 2
+        elif src[j] == "'":
+            j += 1
+            break
+        else:
+            if src[j] == "\n":
+                out.append("\n")
+            j += 1
+    return j
+
+
 def strip_code(src):
     """去注释；字符串/字符字面量/生字符串内容折占位符，保留换行与代码行结构。
 
@@ -189,52 +245,13 @@ def strip_code(src):
     while i < n:
         c = src[i]
         if c == "/" and i + 1 < n and src[i + 1] == "/":
-            j = src.find("\n", i)
-            i = n if j < 0 else j
+            i = _skip_line_comment(src, i, n)
         elif c == "/" and i + 1 < n and src[i + 1] == "*":
-            j = src.find("*/", i + 2)
-            end = n if j < 0 else j + 2
-            out.append("\n" * src.count("\n", i, end))
-            i = end
-        elif c == '"' or (rs := _raw_string_at(src, i)):
-            if c == '"':
-                out.append('""')
-                j = i + 1
-                term = None
-            else:
-                q, hashes = rs
-                out.append('""')
-                j = q + 1
-                term = '"' + "#" * hashes
-            while j < n:
-                if term is None and src[j] == "\\":
-                    j += 2
-                elif term is not None and src.startswith(term, j):
-                    j += len(term)
-                    break
-                elif term is None and src[j] == '"':
-                    j += 1
-                    break
-                else:
-                    if src[j] == "\n":
-                        out.append("\n")
-                    j += 1
-            i = j
+            i = _skip_block_comment(src, i, n, out)
+        elif c == '"' or _raw_string_at(src, i):
+            i = _skip_string(src, i, n, out)
         elif c == "'" and (i + 2 < n and src[i + 2] == "'" or i + 1 < n and src[i + 1] == "\\"):
-            # 字符/字节字面量：'x' 或 '\…'；折 '' 占位
-            out.append("''")
-            j = i + 1
-            while j < n:
-                if src[j] == "\\":
-                    j += 2
-                elif src[j] == "'":
-                    j += 1
-                    break
-                else:
-                    if src[j] == "\n":
-                        out.append("\n")
-                    j += 1
-            i = j
+            i = _skip_char(src, i, n, out)
         else:
             out.append(c)
             i += 1
