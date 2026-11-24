@@ -214,16 +214,16 @@ fn rr3_validate_inner(text: &str, topics: &crate::topics::Rr3TopicSet) -> Vec<St
         .and_then(Value::as_str)
         .unwrap_or("");
 
-    // 0) 未知字段反向断言（收口批 E'，fail-closed）——先于逐字段：契约外的键不进任何正路
-    report.errors.extend(rr3_no_unknown_keys(
-        &root,
-        &rr3_field_specs(),
-        "module manifest",
-    ));
+    // 0) 未知字段反向断言（收口批 E'，fail-closed）——先于逐字段：契约外的键不进任何正路。
+    //    字段规格一次解析、两处共用：同一份内嵌契约在本轮校验里不再重复解析。
+    let specs = rr3_field_specs();
+    report
+        .errors
+        .extend(rr3_no_unknown_keys(&root, &specs, "module manifest"));
 
     // 1) 逐字段：存在性 + 类型 + 规则
-    for spec in rr3_field_specs() {
-        rr3_chk_field(&spec, &root, self_name, topics, &mut report.errors);
+    for spec in &specs {
+        rr3_chk_field(spec, &root, self_name, topics, &mut report.errors);
     }
 
     // 2) 跨字段：heartbeat < watchdog（方案 §4 [health] 约束）

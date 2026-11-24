@@ -133,15 +133,17 @@ pub fn rr3_atom_chk(text: &str, slots: &crate::slots::Rr3SlotTable) -> Vec<Strin
     errs.extend(rr3_board_free_chk(text));
 
     // 0b) 未知字段反向断言（收口批 E'，fail-closed，与 module 侧共用同一实现）：
-    //     契约外的键（typo 如 uses.slost）不报错即静默丢依赖
+    //     契约外的键（typo 如 uses.slost）不报错即静默丢依赖。
+    //     字段规格一次解析、两处共用，同一份内嵌契约不重复解析。
+    let specs = rr3_atom_field_specs();
     errs.extend(crate::validate::rr3_no_unknown_keys(
         &root,
-        &rr3_atom_field_specs(),
+        &specs,
         "atom manifest",
     ));
 
     // 1) 逐字段：存在性 + 类型 + 规则（与 validate.rs 逐字段循环同构，字段集来自 atom.schema.toml）
-    rr3_atom_fields(&root, slots, &mut errs);
+    rr3_atom_fields(&root, slots, &specs, &mut errs);
 
     // 2) 跨字段：每格一件（ADR-0019 裁定 1——Atom 填一个格、不可再分，恰一项）
     rr3_atom_one_slot(&root, &mut errs);
@@ -158,10 +160,15 @@ fn rr3_atom_root(text: &str, errs: &mut Vec<String>) -> Option<Value> {
     parsed.ok()
 }
 
-/// 逐字段校验（字段集来自 atom.schema.toml）。
-fn rr3_atom_fields(root: &Value, slots: &crate::slots::Rr3SlotTable, errs: &mut Vec<String>) {
-    for spec in rr3_atom_field_specs() {
-        rr3_atom_one(&spec, root, slots, errs);
+/// 逐字段校验（字段集由调用方一次解析后传入）。
+fn rr3_atom_fields(
+    root: &Value,
+    slots: &crate::slots::Rr3SlotTable,
+    specs: &[Rr3FieldSpec],
+    errs: &mut Vec<String>,
+) {
+    for spec in specs {
+        rr3_atom_one(spec, root, slots, errs);
     }
 }
 
