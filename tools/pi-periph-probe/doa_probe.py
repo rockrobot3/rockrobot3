@@ -255,173 +255,185 @@ def xcorr_profile(L, R, start, nwin=2048, max_lag=8):
     return lags, cs, lags[kmax], lags[kmin], lags[kabs], frac
 
 
-def main():
-    fd = open_tty(DEV, BAUD)
-    drain_until_quiet(fd, 0.5, 2.0)
+def prepare(fd):
+    """开场：模式行、AUDIO OFF、底噪标定（FAST 跳过）→ 通道偏差 dB。"""
     mode = (f"3×{TRIALS} 验收（{'→'.join(ACC_SIDES)}）" if ACC
             else f"快跑单侧 {ROUNDS}" if FAST
             else f"{len(ROUNDS)} 轮（计划 {'→'.join(ROUNDS)}）")
     print(f"=== DoA 判定实验：{mode}，每轮 {SHOT_SECS}s ===")
     line(fd, "AUDIO OFF", 0.5)  # 杜绝上一会话遗留流
     if FAST:
-        bias_db = 0.0  # 三轮标定实测 ≤0.04dB，快跑跳过（见 FAST 注）
-    else:
-        line(fd, "FACE idle", 0.5)  # 清掉旧 OLED 文字，进表情模式
-        # ---- 底噪标定：通道 L/R 增益偏差（v5 观测 L 恒高 1-2% 的量刑定准）----
-        print("=== 底噪标定（3s 静默）===")
-        line(fd, "AUDIO ON", 0.5)
-        noise = collect(fd, 3.0)
-        line(fd, "AUDIO OFF", 0.8)
-        drain_until_quiet(fd, 0.4, 1.5)
-        ambL = rms([p[0] for p in noise])
-        ambR = rms([p[1] for p in noise])
-        bias_db = db(ambL / ambR) if ambR > 0 else 0.0
-        print(f"  底噪 {len(noise)} 对：rms L={ambL:.0f} R={ambR:.0f} → 通道偏差 {bias_db:+.2f} dB（ILD 判读一律减它）")
+        return 0.0  # 三轮标定实测 ≤0.04dB，快跑跳过（见 FAST 注）
+    line(fd, "FACE idle", 0.5)  # 清掉旧 OLED 文字，进表情模式
+    # ---- 底噪标定：通道 L/R 增益偏差（v5 观测 L 恒高 1-2% 的量刑定准）----
+    print("=== 底噪标定（3s 静默）===")
+    line(fd, "AUDIO ON", 0.5)
+    noise = collect(fd, 3.0)
+    line(fd, "AUDIO OFF", 0.8)
+    drain_until_quiet(fd, 0.4, 1.5)
+    ambL = rms([p[0] for p in noise])
+    ambR = rms([p[1] for p in noise])
+    bias_db = db(ambL / ambR) if ambR > 0 else 0.0
+    print(f"  底噪 {len(noise)} 对：rms L={ambL:.0f} R={ambR:.0f} → 通道偏差 {bias_db:+.2f} dB（ILD 判读一律减它）")
+    return bias_db
 
-    rows = []
-    prev_side = None
-    for idx, side in enumerate(ROUNDS, 1):
-        if ACC:
-            if prev_side is not None and side != prev_side:
-                where = {"L": "左", "C": "中间", "R": "右"}[side]
-                print(f"  （{ACC_BLOCK_GAP_SECS:.0f}s 换位：请走到【{where}】）")
-                time.sleep(ACC_BLOCK_GAP_SECS)
-            print(f"--- 第 {idx}/{len(ROUNDS)} 轮：真值 = {side}（可听侧别 { {'L':1,'C':2,'R':3}[side] } 声 + OLED 倒数 3..1）---")
-            rr3_beep({"L": 1, "C": 2, "R": 3}[side])  # 侧别节拍（距采集 3s，已衰减）
-            for n in ACC_COUNTDOWN:
-                line(fd, f"OLED T{idx}:{side} {n}", 0.25)
-                time.sleep(0.75)
-            prev_side = side
-        elif FAST:
-            print(f"--- 第 {idx} 轮：你的【{'左' if side == 'L' else '右'}】手边"
-                  f"（12s 内任意时刻喊两声）---")
-            if len(ROUNDS) > 1 and idx > 1:
-                print(f"  （{AB_GAP_SECS:.0f}s 换位：请走到你的【右】手边）")
-                time.sleep(AB_GAP_SECS)
-        else:
-            print(f"--- 第 {idx} 轮：真值方位 = {side}（OLED 已亮提示，请喊两声）---")
-            line(fd, f"OLED R{idx}:{side}", 0.6)
-        flush_input(fd)
-        line(fd, "AUDIO ON", 0.5)
-        if ACC:
-            # 丢弃起流瞬态（AUDIO ON 的 pop/首帧），避免 onset 落在 0.00s 的假触发。
-            time.sleep(0.5)
-            flush_input(fd)
-        pairs = collect(fd, SHOT_SECS)
-        line(fd, "AUDIO OFF", 0.8)
-        drain_until_quiet(fd, 0.4, 1.5)
-        # 分侧落盘：逐侧块重跑时不再互相覆盖（L/C/R 各保留自己的 1..N）。
-        with open(f"/tmp/doa_{side}_r{idx}.pcm", "wb") as f:
-            f.write(b"".join(
-                p[0].to_bytes(2, "little", signed=True) + p[1].to_bytes(2, "little", signed=True)
-                for p in pairs
-            ))
-        n = len(pairs)
-        if n < 8192:
-            print(f"  !! 样本不足（{n} 对），本轮作废")
-            rows.append((side, None, None, None, None, None))
-            continue
-        L = [p[0] for p in pairs]
-        R = [p[1] for p in pairs]
-        on, base, v, imax = onset_index(pairs)
-        if on is None:
-            print(f"  （无触发：基线 {base:.0f}，全程最大比值 {v:.2f}×——"
-                  f">1.15 说明喊了但没过线，<1.1 说明这轮没收到声音）")
-            rows.append((side, None, None, None, None, None))
-            continue
-        # 起始段 ILD：onset 后 64ms（1024 采样），减通道偏差
-        seg = 1024
-        ild_on = db(rms(L[on:on + seg])) - db(rms(R[on:on + seg])) - bias_db
-        # 全窗 ILD：onset 后 256ms
-        seg2 = min(4096, n - on)
-        ild_full = db(rms(L[on:on + seg2])) - db(rms(R[on:on + seg2])) - bias_db
-        # 最响窗 ILD（onset 可能抓到走动声；最响窗更可能是真喊声峰值段）
-        m2 = min(imax + 4096, n)
-        ild_max = db(rms(L[imax:m2])) - db(rms(R[imax:m2])) - bias_db
-        # 互相关：常规用 onset 后 16ms（上升沿混响未稳）；ACC 验收改用**最响窗**起点
-        # （短促喊声的低 SNR 下，onset 落在辅音/碰桌瞬态会让相关峰落在噪声上）。
-        xc_start = imax if ACC else on + 256
-        xc_start = max(0, min(xc_start, n - 2048))
-        lags, cs, kmax, kmin, kabs, frac = xcorr_profile(L, R, xc_start)
-        # 主峰（argmax）分数 lag：ACC 验收用真峰，不用 |c|（负相关伪峰会抬 lag）。
-        # 注意 kmax 是 **lag 值**不是下标；抛物线插值须先换回下标。
-        ki = lags.index(kmax)
-        frac_max = float(kmax)
-        if 0 < ki < len(cs) - 1:
-            den = cs[ki - 1] - 2 * cs[ki] + cs[ki + 1]
-            if den < 0:
-                frac_max = kmax + 0.5 * (cs[ki - 1] - cs[ki + 1]) / den
-        print(f"  onset@{on / 16000.0:.2f}s 基线={base:.0f} 触发值={v:.0f} 最响窗@{imax / 16000.0:.2f}s")
-        print(f"  起始ILD={ild_on:+.2f}dB 全窗ILD={ild_full:+.2f}dB 最响窗ILD={ild_max:+.2f}dB")
-        print(f"  xcorr: argmax={kmax:+d}({cs[lags.index(kmax)]:+.3f}) "
-              f"argmin={kmin:+d}({cs[lags.index(kmin)]:+.3f}) "
-              f"argmax|c|={kabs:+d} |c|={abs(cs[lags.index(kabs)]):.3f} frac={frac:+.2f} "
-              f"声程={frac * CM_PER_SAMPLE:+.1f}cm")
-        print(f"  剖面: {' '.join(f'{lag:+d}:{c:+.3f}' for lag, c in zip(lags, cs))}")
-        if ACC:
-            print(f"  主峰 frac={frac_max:+.2f} c={cs[ki]:+.3f}（ACC 判据用主峰）")
-            rows.append((side, ild_on, ild_full, ild_max, frac_max, cs[ki]))
-        else:
-            rows.append((side, ild_on, ild_full, ild_max, frac, abs(cs[lags.index(kabs)])))
 
+def announce(fd, idx, side, prev_side):
+    """每轮提示：ACC 换位/倒数/蜂鸣、FAST 换位、普通 OLED；返回新 prev_side。"""
     if ACC:
-        # ---- 3×N 形式验收：只用 xcorr 分数 lag；映射由 AB 实录钉死（MIRROR）----
-        # 先减通道固定偏置 BIAS，再用中位死区 CENTER_BAND 判 C（两侧仍按符号判 L/R）。
-        def judge_xc(frac):
-            r = frac - BIAS
-            if abs(r) <= CENTER_BAND:
-                return "C"
-            if MIRROR:
-                return "L" if r < 0 else "R"
-            return "L" if r > 0 else "R"
+        if prev_side is not None and side != prev_side:
+            where = {"L": "左", "C": "中间", "R": "右"}[side]
+            print(f"  （{ACC_BLOCK_GAP_SECS:.0f}s 换位：请走到【{where}】）")
+            time.sleep(ACC_BLOCK_GAP_SECS)
+        print(f"--- 第 {idx}/{len(ROUNDS)} 轮：真值 = {side}（可听侧别 { {'L':1,'C':2,'R':3}[side] } 声 + OLED 倒数 3..1）---")
+        rr3_beep({"L": 1, "C": 2, "R": 3}[side])  # 侧别节拍（距采集 3s，已衰减）
+        for n in ACC_COUNTDOWN:
+            line(fd, f"OLED T{idx}:{side} {n}", 0.25)
+            time.sleep(0.75)
+        return side
+    if FAST:
+        print(f"--- 第 {idx} 轮：你的【{'左' if side == 'L' else '右'}】手边"
+              f"（12s 内任意时刻喊两声）---")
+        if len(ROUNDS) > 1 and idx > 1:
+            print(f"  （{AB_GAP_SECS:.0f}s 换位：请走到你的【右】手边）")
+            time.sleep(AB_GAP_SECS)
+        return prev_side
+    print(f"--- 第 {idx} 轮：真值方位 = {side}（OLED 已亮提示，请喊两声）---")
+    line(fd, f"OLED R{idx}:{side}", 0.6)
+    return prev_side
 
-        need = (TRIALS * 8 + 9) // 10
-        stat = {s: {"total": 0, "valid": 0, "ok": 0} for s in ("L", "C", "R")}
-        print("=== 3×N 验收（xcorr 镜像映射；偏置 %.3f、中位死区 ±%.2f；每侧 ≥%d/%d 通过）===" % (
-            BIAS, CENTER_BAND, need, TRIALS))
-        for i, (side, io, ifu, imx, frac, cabs) in enumerate(rows, 1):
-            st = stat[side]
-            st["total"] += 1
-            if frac is None:
-                print(f"T{i:<2}{side:<3}（无触发/作废）")
-                continue
-            if cabs < ACC_MIN_PEAK:
-                print(f"T{i:<2}{side:<3} frac={frac:+6.2f} c={cabs:.3f}（主峰置信不足，记无效）")
-                continue
-            st["valid"] += 1
-            j = judge_xc(frac)
-            ok = j == side
-            st["ok"] += int(ok)
-            print(f"T{i:<2}{side:<3} frac={frac:+6.2f} adj={frac - BIAS:+6.2f} c={cabs:.3f} 判={j} {'✓' if ok else '✗'}")
-        all_ok = True
-        for s in ACC_SIDES:
-            st = stat[s]
-            ok = st["ok"] >= need
-            all_ok = all_ok and ok
-            print("  %s: %d/%d 正确（有效 %d/%d）%s" % (
-                {"L": "左", "C": "中", "R": "右"}[s], st["ok"], st["total"],
-                st["valid"], st["total"], "PASS" if ok else "FAIL"))
-        print("[%s] %s×%d DoA 验收（镜像映射=%s）" % (
-            "PASS" if all_ok else "FAIL", "/".join(ACC_SIDES), TRIALS,
-            "是" if MIRROR else "否"))
-        print(f"解析失败 {parse_errors} 次")
-        line(fd, "FACE idle", 0.5)
-        return
 
-    # ---- 汇总：真值一致率（H1=正证据判左；H2=镜像）----
+def capture(fd, idx, side):
+    """一轮采集：flush → AUDIO ON → 收 SHOT_SECS → OFF → drain → 原样落盘。"""
+    flush_input(fd)
+    line(fd, "AUDIO ON", 0.5)
+    if ACC:
+        # 丢弃起流瞬态（AUDIO ON 的 pop/首帧），避免 onset 落在 0.00s 的假触发。
+        time.sleep(0.5)
+        flush_input(fd)
+    pairs = collect(fd, SHOT_SECS)
+    line(fd, "AUDIO OFF", 0.8)
+    drain_until_quiet(fd, 0.4, 1.5)
+    # 分侧落盘：逐侧块重跑时不再互相覆盖（L/C/R 各保留自己的 1..N）。
+    with open(f"/tmp/doa_{side}_r{idx}.pcm", "wb") as f:
+        f.write(b"".join(
+            p[0].to_bytes(2, "little", signed=True) + p[1].to_bytes(2, "little", signed=True)
+            for p in pairs
+        ))
+    return pairs
+
+
+def analyze(side, pairs, bias_db):
+    """单轮证据：onset / 三口径 ILD / 互相关剖面；返回汇总行元组。"""
+    n = len(pairs)
+    if n < 8192:
+        print(f"  !! 样本不足（{n} 对），本轮作废")
+        return (side, None, None, None, None, None)
+    L = [p[0] for p in pairs]
+    R = [p[1] for p in pairs]
+    on, base, v, imax = onset_index(pairs)
+    if on is None:
+        print(f"  （无触发：基线 {base:.0f}，全程最大比值 {v:.2f}×——"
+              f">1.15 说明喊了但没过线，<1.1 说明这轮没收到声音）")
+        return (side, None, None, None, None, None)
+    # 起始段 ILD：onset 后 64ms（1024 采样），减通道偏差
+    seg = 1024
+    ild_on = db(rms(L[on:on + seg])) - db(rms(R[on:on + seg])) - bias_db
+    # 全窗 ILD：onset 后 256ms
+    seg2 = min(4096, n - on)
+    ild_full = db(rms(L[on:on + seg2])) - db(rms(R[on:on + seg2])) - bias_db
+    # 最响窗 ILD（onset 可能抓到走动声；最响窗更可能是真喊声峰值段）
+    m2 = min(imax + 4096, n)
+    ild_max = db(rms(L[imax:m2])) - db(rms(R[imax:m2])) - bias_db
+    # 互相关：常规用 onset 后 16ms（上升沿混响未稳）；ACC 验收改用**最响窗**起点
+    # （短促喊声的低 SNR 下，onset 落在辅音/碰桌瞬态会让相关峰落在噪声上）。
+    xc_start = imax if ACC else on + 256
+    xc_start = max(0, min(xc_start, n - 2048))
+    lags, cs, kmax, kmin, kabs, frac = xcorr_profile(L, R, xc_start)
+    frac_max = peak_frac(lags, cs, kmax)
+    print(f"  onset@{on / 16000.0:.2f}s 基线={base:.0f} 触发值={v:.0f} 最响窗@{imax / 16000.0:.2f}s")
+    print(f"  起始ILD={ild_on:+.2f}dB 全窗ILD={ild_full:+.2f}dB 最响窗ILD={ild_max:+.2f}dB")
+    print(f"  xcorr: argmax={kmax:+d}({cs[lags.index(kmax)]:+.3f}) "
+          f"argmin={kmin:+d}({cs[lags.index(kmin)]:+.3f}) "
+          f"argmax|c|={kabs:+d} |c|={abs(cs[lags.index(kabs)]):.3f} frac={frac:+.2f} "
+          f"声程={frac * CM_PER_SAMPLE:+.1f}cm")
+    print(f"  剖面: {' '.join(f'{lag:+d}:{c:+.3f}' for lag, c in zip(lags, cs))}")
+    if ACC:
+        print(f"  主峰 frac={frac_max:+.2f} c={cs[lags.index(kmax)]:+.3f}（ACC 判据用主峰）")
+        return (side, ild_on, ild_full, ild_max, frac_max, cs[lags.index(kmax)])
+    return (side, ild_on, ild_full, ild_max, frac, abs(cs[lags.index(kabs)]))
+
+
+def peak_frac(lags, cs, kmax):
+    """主峰分数 lag：抛物线插值（kmax 是 lag 值，不是下标，须先换回下标）。"""
+    ki = lags.index(kmax)
+    frac = float(kmax)
+    if 0 < ki < len(cs) - 1:
+        den = cs[ki - 1] - 2 * cs[ki] + cs[ki + 1]
+        if den < 0:
+            frac = kmax + 0.5 * (cs[ki - 1] - cs[ki + 1]) / den
+    return frac
+
+
+def report_acc(fd, rows):
+    """3×N 形式验收：只用 xcorr 分数 lag；映射由 AB 实录钉死（MIRROR）。"""
+    # 先减通道固定偏置 BIAS，再用中位死区 CENTER_BAND 判 C（两侧仍按符号判 L/R）。
+    def judge_xc(frac):
+        r = frac - BIAS
+        if abs(r) <= CENTER_BAND:
+            return "C"
+        if MIRROR:
+            return "L" if r < 0 else "R"
+        return "L" if r > 0 else "R"
+
+    need = (TRIALS * 8 + 9) // 10
+    stat = {s: {"total": 0, "valid": 0, "ok": 0} for s in ("L", "C", "R")}
+    print("=== 3×N 验收（xcorr 镜像映射；偏置 %.3f、中位死区 ±%.2f；每侧 ≥%d/%d 通过）===" % (
+        BIAS, CENTER_BAND, need, TRIALS))
+    for i, (side, io, ifu, imx, frac, cabs) in enumerate(rows, 1):
+        st = stat[side]
+        st["total"] += 1
+        if frac is None:
+            print(f"T{i:<2}{side:<3}（无触发/作废）")
+            continue
+        if cabs < ACC_MIN_PEAK:
+            print(f"T{i:<2}{side:<3} frac={frac:+6.2f} c={cabs:.3f}（主峰置信不足，记无效）")
+            continue
+        st["valid"] += 1
+        j = judge_xc(frac)
+        ok = j == side
+        st["ok"] += int(ok)
+        print(f"T{i:<2}{side:<3} frac={frac:+6.2f} adj={frac - BIAS:+6.2f} c={cabs:.3f} 判={j} {'✓' if ok else '✗'}")
+    all_ok = True
+    for s in ACC_SIDES:
+        st = stat[s]
+        ok = st["ok"] >= need
+        all_ok = all_ok and ok
+        print("  %s: %d/%d 正确（有效 %d/%d）%s" % (
+            {"L": "左", "C": "中", "R": "右"}[s], st["ok"], st["total"],
+            st["valid"], st["total"], "PASS" if ok else "FAIL"))
+    print("[%s] %s×%d DoA 验收（镜像映射=%s）" % (
+        "PASS" if all_ok else "FAIL", "/".join(ACC_SIDES), TRIALS,
+        "是" if MIRROR else "否"))
+    print(f"解析失败 {parse_errors} 次")
+    line(fd, "FACE idle", 0.5)
+
+
+def report_summary(fd, rows):
+    """非验收汇总：真值一致率（H1=正证据判左；H2=镜像）。"""
     print("=== 汇总（真值 → 各特征判读；判读阈值 ILD ±0.5dB / xcorr ±0.5 采样点）===")
     acc = {"ild_on": [0, 0], "ild_full": [0, 0], "ild_max": [0, 0], "xc": [0, 0]}  # [H1对, H2对]
     print(f"{'轮':<4}{'真值':<4}{'起始ILD':>10}{'判1':>3}{'全窗ILD':>10}{'判1':>3}{'最响ILD':>10}{'判1':>3}{'xc':>7}{'|c|':>6}")
+
+    def vote(v, thr):
+        if v is None or abs(v) < thr:
+            return "C"
+        return "L" if v > 0 else "R"
+
     for i, (side, io, ifu, imx, frac, cabs) in enumerate(rows, 1):
         if io is None:
             print(f"R{i:<3}{side:<4}（无触发/作废）")
             continue
-
-        def vote(v, thr):
-            if v is None or abs(v) < thr:
-                return "C"
-            return "L" if v > 0 else "R"
-
         v1, v2, v3, v4 = vote(io, 0.5), vote(ifu, 0.5), vote(imx, 0.5), vote(frac, 0.5)
         for key, vv in (("ild_on", v1), ("ild_full", v2), ("ild_max", v3), ("xc", v4)):
             if vv != "C":
@@ -434,6 +446,22 @@ def main():
         print(f"  {name}: H1={h1} H2={h2}")
     print(f"解析失败 {parse_errors} 次")
     line(fd, "FACE idle", 0.5)
+
+
+def main():
+    fd = open_tty(DEV, BAUD)
+    drain_until_quiet(fd, 0.5, 2.0)
+    bias_db = prepare(fd)
+    rows = []
+    prev_side = None
+    for idx, side in enumerate(ROUNDS, 1):
+        prev_side = announce(fd, idx, side, prev_side)
+        pairs = capture(fd, idx, side)
+        rows.append(analyze(side, pairs, bias_db))
+    if ACC:
+        report_acc(fd, rows)
+    else:
+        report_summary(fd, rows)
 
 
 if __name__ == "__main__":
