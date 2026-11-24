@@ -183,13 +183,17 @@ impl MicStats {
 /// 诊断位图对账：每 ~[`MIC_DUMP_READS`] 读比一次前 16B 原始位图——**只有与上
 /// 一窗完全相同才打印**（正常采集字节窗逐窗都在变 → 静默）。逐窗恒等（0x00E0FF00
 /// 一类固定模式）= SD 三态残留（硬件断/虚接）或驱动停摆，此时每 6.4s 一行告警即够。
-fn dump_watch(buf: &[u8], n: usize, last_dump: &mut [u8; 16], dump_count: u32) {
+///
+/// 首个采样窗只播种不比较：`last_dump` 初值是全 0，而暖机期首窗也可能全 0，
+/// 直接比较会在每次启动误报"停摆"（2026-11-25 classic 真板实证）。播种推迟
+/// 一个诊断窗（≈6.4s）；真停摆从第二窗起仍逐窗告警，判据不放宽。
+fn dump_watch(buf: &[u8], n: usize, last_dump: &mut [u8; 16], seen: &mut bool, dump_count: u32) {
     if dump_count % MIC_DUMP_READS != 1 {
         return;
     }
     let w = 16.min(n);
     let now = &buf[..w];
-    if now == &last_dump[..w] {
+    if *seen && now == &last_dump[..w] {
         let hex: String = now
             .iter()
             .map(|b| format!("{b:02X}"))
@@ -198,6 +202,7 @@ fn dump_watch(buf: &[u8], n: usize, last_dump: &mut [u8; 16], dump_count: u32) {
         println!("[mic] dump 逐窗不变（疑似 SD 虚接/停摆） {hex}");
     }
     last_dump[..w].copy_from_slice(now);
+    *seen = true;
 }
 
 /// A9.3 宿主失联看门狗：见过心跳（host_ms != 0）才启用（旧宿主无 PING，混版
@@ -332,6 +337,8 @@ struct MicRun {
     /// 只有**卡死**（SD 三态残留/虚接/驱动停摆）才会逐窗完全相同——故只在"与上次
     /// 相同"时打印一次，正常采集全程静默。
     last_dump: [u8; 16],
+    /// 诊断位图是否已播种（首窗只记基线不比较，避免暖机期全零误报停摆）。
+    dump_seen: bool,
     /// 批D③ 分片累积（交错 L,R 原始 24bit；堆上，16KB——栈 16KB 只放 buf 4KB）。
     chunk: Vec<i32>,
     /// 跨分片连续的 DC 阻断器（2026-10-31 S3 订正：逐片减均值会在 128ms 边界造
@@ -348,6 +355,7 @@ impl MicRun {
             stats: MicStats::new(),
             dump_count: 0,
             last_dump: [0u8; 16],
+            dump_seen: false,
             // W6 内存门：上行分片缓冲**懒分配**（AUDIO ON 才长到 16 KB）——单板
             // 全链档不跑 UART 音频，省出的内部 RAM 留给 httpd/TLS。
             chunk: Vec::new(),
@@ -361,7 +369,13 @@ impl MicRun {
     fn batch(&mut self, buf: &[u8], n: usize, bus: &Arc<Mutex<Bus>>) {
         self.stats.reads += 1;
         self.dump_count += 1;
-        dump_watch(buf, n, &mut self.last_dump, self.dump_count);
+        dump_watch(
+            buf,
+            n,
+            &mut self.last_dump,
+            &mut self.dump_seen,
+            self.dump_count,
+        );
         let (audio_on, host_ms, gated) = {
             let b = lock_bus(bus);
             (b.st.audio_on, b.st.audio_host_ms, b.st.tts_gate)
