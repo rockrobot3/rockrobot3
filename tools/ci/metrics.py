@@ -19,8 +19,8 @@ from metrics_core import (
 )
 
 
-def _selftest_repo(td):
-    """自检夹具：生产/测试/夹具/生成物四类文件各就位，并纳入临时 git 索引。"""
+def _selftest_files():
+    """自检夹具文件集（数据与写盘分开，单函数 <50 行）。"""
     files = {
         "base/prod.rs": (
             "fn short() { let _ = 1; }\n"
@@ -65,7 +65,12 @@ def _selftest_repo(td):
     dup = "".join(f"const D{i}: u8 = {i};\n" for i in range(WINDOW))
     files["base/src/dup_a.rs"] = dup
     files["base/src/dup_b.rs"] = dup
-    for rel, text in files.items():
+    return files
+
+
+def _selftest_repo(td):
+    """自检夹具：把文件集写盘并纳入临时 git 索引。"""
+    for rel, text in _selftest_files().items():
         path = os.path.join(td, rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
@@ -107,6 +112,80 @@ def self_test():
     return 0 if all(ok for _, ok in checks) else 1
 
 
+def check_dup(total, dup_lines, base):
+    """重复率：窗口行占有效行的比例。"""
+    pct = dup_lines / total * 100
+    if pct <= base["dup_max_pct"]:
+        print(f"PASS  ⑫ 重复率 {pct:.2f}% ≤ 门槛 {base['dup_max_pct']:.2f}%"
+              f"（有效行 {total}，重复 {dup_lines}，W={WINDOW}）")
+        return True
+    print(f"FAIL  ⑫ 重复率 {pct:.2f}% > 门槛 {base['dup_max_pct']:.2f}%"
+          f"（有效行 {total}，重复 {dup_lines}；先合公共件，别复制粘贴）",
+          file=sys.stderr)
+    return False
+
+
+def check_cc(ccs, base):
+    """圈复杂度：均值与单函数最大值双基线。"""
+    mean = round(sum(ccs) / len(ccs), 2)
+    top = max(ccs)
+    if mean <= base["cc_mean_max"] + 1e-9 and top <= base["cc_max_fn"]:
+        print(f"PASS  ⑫ 圈复杂度 均值 {mean} ≤ 基线 {base['cc_mean_max']:.2f}，"
+              f"最大 {top} ≤ 基线 {base['cc_max_fn']}（目标均值 2.5，已达标）")
+        return True
+    print(f"FAIL  ⑫ 圈复杂度回归：均值 {mean}（基线 {base['cc_mean_max']:.2f}）、"
+          f"最大 {top}（基线 {base['cc_max_fn']}）——拆函数或下调基线须评审",
+          file=sys.stderr)
+    return False
+
+
+def check_fn_tier(rows, base, key, limit, note):
+    """生产函数行数档位（80/60/50 三档同形，只降不升）。"""
+    cap = base[key]
+    if len(rows) <= cap:
+        print(f"PASS  ⑫ 生产函数 >{limit} 行 {len(rows)} ≤ 基线 {cap}（{note}）")
+        return True
+    top = sorted(rows, key=lambda x: -x[2])[:5]
+    print(f"FAIL  ⑫ 生产函数 >{limit} 行回涨：{len(rows)} > 基线 {cap}："
+          f"{top}", file=sys.stderr)
+    return False
+
+
+def check_unwrap(sites, base):
+    """生产面 panic 落点（unwrap/expect）。"""
+    if sites <= base["unwrap_max"]:
+        print(f"PASS  ⑫ 生产面 panic 落点 {sites} ≤ 基线 {base['unwrap_max']}"
+              f"（unwrap/expect；测试面已截除，只钉不回涨）")
+        return True
+    print(f"FAIL  ⑫ 生产面 panic 落点回涨：{sites} > 基线 {base['unwrap_max']}"
+          f"——新增落点须同批给理由或改成 Result", file=sys.stderr)
+    return False
+
+
+def check_names(names, base):
+    """生产函数名长度（>20B）。"""
+    if len(names) <= base["long_names_max"]:
+        print(f"PASS  ⑫ 超长生产函数名 {len(names)} ≤ 基线 {base['long_names_max']}"
+              f"（>{NAME_MAX}B，FFI AudioQueue* 豁免；目标 0）")
+        return True
+    print(f"FAIL  ⑫ 超长生产函数名 {len(names)} > 基线 {base['long_names_max']}："
+          f"{sorted(names)[:8]}", file=sys.stderr)
+    return False
+
+
+def check_sleep(sleeps, base):
+    """生产长睡字面量（>=LONG_SLEEP_MS）。"""
+    cap = base.get("long_sleep_max", 0)
+    if len(sleeps) <= cap:
+        print(f"PASS  ⑫ 生产长睡字面量 {len(sleeps)} ≤ 基线 {cap}"
+              f"（≥{LONG_SLEEP_MS}ms，模块/rrd 主循环面；动态等待不在扫面）")
+        return True
+    print(f"FAIL  ⑫ 生产长睡字面量 {len(sleeps)} > 基线 {cap}："
+          f"{sleeps[:5]}——秒级 sleep 不得进主循环，改事件等待或拆线程",
+          file=sys.stderr)
+    return False
+
+
 def main():
     if "--self-test" in sys.argv[1:]:
         return self_test()
@@ -117,85 +196,21 @@ def main():
     if total == 0 or not ccs:
         print("FAIL  ⑫ 度量面为空（git ls-files 无生产 Rust 行）", file=sys.stderr)
         return 1
-    dup_pct = dup_lines / total * 100
-    mean_cc = round(sum(ccs) / len(ccs), 2)
-    max_cc = max(ccs)
-    ok = True
-
-    if dup_pct <= base["dup_max_pct"]:
-        print(f"PASS  ⑫ 重复率 {dup_pct:.2f}% ≤ 门槛 {base['dup_max_pct']:.2f}%"
-              f"（有效行 {total}，重复 {dup_lines}，W={WINDOW}）")
-    else:
-        print(f"FAIL  ⑫ 重复率 {dup_pct:.2f}% > 门槛 {base['dup_max_pct']:.2f}%"
-              f"（有效行 {total}，重复 {dup_lines}；先合公共件，别复制粘贴）",
-              file=sys.stderr)
-        ok = False
-
-    if mean_cc <= base["cc_mean_max"] + 1e-9 and max_cc <= base["cc_max_fn"]:
-        print(f"PASS  ⑫ 圈复杂度 均值 {mean_cc} ≤ 基线 {base['cc_mean_max']:.2f}，"
-              f"最大 {max_cc} ≤ 基线 {base['cc_max_fn']}（目标均值 2.5，已达标）")
-    else:
-        print(f"FAIL  ⑫ 圈复杂度回归：均值 {mean_cc}（基线 {base['cc_mean_max']:.2f}）、"
-              f"最大 {max_cc}（基线 {base['cc_max_fn']}）——拆函数或下调基线须评审",
-              file=sys.stderr)
-        ok = False
-
-    if len(fn_over) <= base["fn_over_max"]:
-        print(f"PASS  ⑫ 生产函数 >{FN_LINES_MAX} 行 {len(fn_over)} ≤ 基线 {base['fn_over_max']}"
-              f"（测试面不计；目标逐档降到 0）")
-    else:
-        top = sorted(fn_over, key=lambda x: -x[2])[:5]
-        print(f"FAIL  ⑫ 生产函数 >{FN_LINES_MAX} 行回涨：{len(fn_over)} > 基线 {base['fn_over_max']}："
-              f"{top}", file=sys.stderr)
-        ok = False
-
-    tight_max = base["fn_over60_max"]
-    if len(fn_over60) <= tight_max:
-        print(f"PASS  ⑫ 生产函数 >{FN_TIGHT_MAX} 行 {len(fn_over60)} ≤ 基线 {tight_max}"
-              f"（只降不升{worst_row(fn_over60)}；下一档目标逐批拆到 0）")
-    else:
-        top = sorted(fn_over60, key=lambda x: -x[2])[:5]
-        print(f"FAIL  ⑫ 生产函数 >{FN_TIGHT_MAX} 行回涨：{len(fn_over60)} > 基线 {tight_max}："
-              f"{top}", file=sys.stderr)
-        ok = False
-
-    next_max = base["fn_over50_max"]
-    if len(fn_over50) <= next_max:
-        print(f"PASS  ⑫ 生产函数 >{FN_NEXT_MAX} 行 {len(fn_over50)} ≤ 基线 {next_max}"
-              f"（目标档；只降不升{worst_row(fn_over50)}，逐批拆到 0 = <{FN_NEXT_MAX} 行）")
-    else:
-        top = sorted(fn_over50, key=lambda x: -x[2])[:5]
-        print(f"FAIL  ⑫ 生产函数 >{FN_NEXT_MAX} 行回涨：{len(fn_over50)} > 基线 {next_max}："
-              f"{top}", file=sys.stderr)
-        ok = False
-
-    if unwrap_sites <= base["unwrap_max"]:
-        print(f"PASS  ⑫ 生产面 panic 落点 {unwrap_sites} ≤ 基线 {base['unwrap_max']}"
-              f"（unwrap/expect；测试面已截除，只钉不回涨）")
-    else:
-        print(f"FAIL  ⑫ 生产面 panic 落点回涨：{unwrap_sites} > 基线 {base['unwrap_max']}"
-              f"——新增落点须同批给理由或改成 Result", file=sys.stderr)
-        ok = False
-
-    if len(long_names) <= base["long_names_max"]:
-        print(f"PASS  ⑫ 超长生产函数名 {len(long_names)} ≤ 基线 {base['long_names_max']}"
-              f"（>{NAME_MAX}B，FFI AudioQueue* 豁免；目标 0）")
-    else:
-        print(f"FAIL  ⑫ 超长生产函数名 {len(long_names)} > 基线 {base['long_names_max']}："
-              f"{sorted(long_names)[:8]}", file=sys.stderr)
-        ok = False
-
-    sleep_max = base.get("long_sleep_max", 0)
-    if len(long_sleeps) <= sleep_max:
-        print(f"PASS  ⑫ 生产长睡字面量 {len(long_sleeps)} ≤ 基线 {sleep_max}"
-              f"（≥{LONG_SLEEP_MS}ms，模块/rrd 主循环面；动态等待不在扫面）")
-    else:
-        print(f"FAIL  ⑫ 生产长睡字面量 {len(long_sleeps)} > 基线 {sleep_max}："
-              f"{long_sleeps[:5]}——秒级 sleep 不得进主循环，改事件等待或拆线程",
-              file=sys.stderr)
-        ok = False
-
-    return 0 if ok else 1
+    results = [
+        check_dup(total, dup_lines, base),
+        check_cc(ccs, base),
+        check_fn_tier(fn_over, base, "fn_over_max", FN_LINES_MAX,
+                      "测试面不计；目标逐档降到 0"),
+        check_fn_tier(fn_over60, base, "fn_over60_max", FN_TIGHT_MAX,
+                      f"只降不升{worst_row(fn_over60)}；下一档目标逐批拆到 0"),
+        check_fn_tier(fn_over50, base, "fn_over50_max", FN_NEXT_MAX,
+                      f"目标档；只降不升{worst_row(fn_over50)}，"
+                      f"逐批拆到 0 = <{FN_NEXT_MAX} 行"),
+        check_unwrap(unwrap_sites, base),
+        check_names(long_names, base),
+        check_sleep(long_sleeps, base),
+    ]
+    return 0 if all(results) else 1
 
 
 if __name__ == "__main__":
