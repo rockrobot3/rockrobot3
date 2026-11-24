@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # 目标 ISA 单测最小面（2026-11-24）：纯逻辑 crate 的测试二进制在交叉目标上
 # 构建并按平台方式真跑——"能构建 + 能打印用法 + 128B 头对拍"不能证明语义断言
-# 在目标 ABI 上成立。当前集合：协议/契约/运行核/音频机制/云协议五件。
+# 在目标 ABI 上成立。当前集合：协议/契约/运行核/音频机制/云协议/总线客户端/
+# 机械控制/意图唤醒八件。
 #
 # 用法：cross-tests.sh <target-triple> <native|musl|gnu> [容器平台串]
 #   cross-tests.sh aarch64-unknown-linux-musl musl linux/arm64
@@ -40,7 +41,8 @@ json="/tmp/rr3-cross-tests-${target}.jsonl"
 build_log="/tmp/rr3-cross-tests-${target}.build.log"
 # 构建集合（单点）：全部无平台依赖的纯逻辑 crate。新增成员必须同批评估其测试
 # 是否依赖 self-exec/binfmt（见下方 gnu 腿说明）。
-crates=(rr-ipc rr-registry rr-core rr-audio-mech rr-cloud-proto)
+crates=(rr-ipc rr-registry rr-core rr-audio-mech rr-cloud-proto
+        rr-bus-api rr-mech rr-intent-mech)
 pkgs=()
 for c in "${crates[@]}"; do pkgs+=(-p "$c"); done
 if ! cargo test -q --locked --no-run --target "$target" \
