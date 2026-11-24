@@ -244,9 +244,11 @@ jobs:
           docker buildx imagetools inspect "${IMAGE}:${tag}"
           # 合并结果必须真含三架构：单腿都绿但合并丢一条，是"看起来绿"的经典形态
           # （inspect 只打印不判等，所以这里把平台集合当判据）。python3 是 runner 自带面。
-          # 判据只数**镜像清单**：buildx 默认给每腿附一条 attestation manifest
+          # 判据只数**镜像清单**：buildx 构建会在每腿附一条 attestation manifest
           # （provenance/SBOM，platform=unknown/unknown），它合法存在但不能算进架构集
           # ——2026-11-15 v0.0.13 首跑就是被这条多出来的 unknown 判红（断言过严的假红）。
+          # 现行三腿走 `docker build` 直推（无 SBOM/签名附件），此处容忍保留：
+          # 未来启 buildx 证明面时无需再改判据；是否启用在发布面另议。
           python3 - "${IMAGE}:${tag}" <<'PY'
           import json, subprocess, sys
           img = sys.argv[1]
