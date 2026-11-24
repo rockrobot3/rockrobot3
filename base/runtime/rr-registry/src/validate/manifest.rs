@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use toml::Value;
 
 use super::report::Rr3ValidationReport;
-use super::rr3_type_err;
 use super::rules::rr3_registry_check;
+use super::{rr3_item_err, rr3_type_err};
 use crate::schema::{rr3_field_specs, rr3_get_by_path, Rr3FieldSpec};
 
 /// manifest 未知字段反向断言（0.0.5 收口批 E'，fail-closed）：schema 正向遍历只查
