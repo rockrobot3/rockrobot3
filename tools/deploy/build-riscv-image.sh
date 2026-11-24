@@ -14,6 +14,8 @@
 #   attestation（docker build + docker push 不会产生），推后拉回同一 digest 再冒烟；
 #   缺省：构建门用——本地 docker build + 两段冒烟，无网络推送。
 set -euo pipefail
+# 失败归因：set -e 下任何命令非零退出时，点名行号与原命令，避免只留 "exit code 1"。
+trap 'echo "FAIL  build-riscv-image 第 ${LINENO} 行: ${BASH_COMMAND}" >&2' ERR
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "ERROR: 不在 git 仓库内" >&2
   exit 1
