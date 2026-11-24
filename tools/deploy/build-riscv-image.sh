@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# RISC-V 运行镜像构建门（无 ghcr 推送）：交叉构建 → rr3-pack stage 树 →
-# QEMU 构建 linux/riscv64 镜像 → 文件面/运行面两段冒烟。
+# RISC-V 运行镜像构建门（缺省只构建+冒烟；--push 供发布腿推送 ghcr）：
+# 交叉构建 → rr3-pack stage 树 → QEMU 构建 linux/riscv64 镜像 → 文件面/运行面两段冒烟。
+# 平台在拉回与冒烟处一律显式 --platform linux/riscv64：发布腿跑在 amd64 runner 上，
+# 不带平台会按宿主挑 riscv64-only 索引而失败（v0.0.22 两次确定性失败根因）。
 #
 # 为什么先做构建门而不是直接进 publish：发布面只在 tag/main 触发，改判据只能靠
 # "打标签→等 CI"往返；本门在每次 push 的 platforms 里真跑镜像路径，先把
