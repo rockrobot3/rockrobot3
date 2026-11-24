@@ -14,6 +14,16 @@ use crate::panel::exec::{
     rr3_bus_reply_status, rr3_leg_relay, rr3_relay_expect, rr3_selftest_verdict,
 };
 
+/// 进程级 env 互斥（RR3_BUS_PATH_ENV 是进程全局）：本 crate 内并行用例改动它
+/// 必须串行，否则一处的 remove 会把另一处的连接翻到缺省套接字（2026-11-24
+/// gate 实测 `selftest_legs_fail` 偶发连不上假 rrd）。
+pub(super) static RR3_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// 取 env 锁：用例失败不应连带其余用例（毒锁内继续）。
+pub(super) fn rr3_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    RR3_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// 面板测试底座（四处同款）：缺省限流/期望 + 无主循环 link 的共享面
 fn panel_shared(
     bus: BusHandle,

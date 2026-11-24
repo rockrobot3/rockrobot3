@@ -17,6 +17,7 @@ fn fake_bus(dir: &Path, sock: &str, canned: Value, contracts: Value) -> (BusHand
             contracts,
         )
     });
+    let _env = rr3_env_lock();
     std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
     let bus = BusHandle::wrap(Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功"));
     std::env::remove_var(rr_ipc::RR3_BUS_PATH_ENV);

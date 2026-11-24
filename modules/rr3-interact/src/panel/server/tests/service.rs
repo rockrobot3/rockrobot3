@@ -82,6 +82,7 @@ fn fake_bus(dir: &Path) -> (BusHandle, Arc<Mutex<Vec<Value>>>, String) {
         let beats = beats.clone();
         std::thread::spawn(move || rr3_i4_fake_rrd(listener, beats, json!({}), json!({})));
     }
+    let _env = rr3_env_lock();
     std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
     let bus = BusHandle::wrap(Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功"));
     std::env::remove_var(rr_ipc::RR3_BUS_PATH_ENV);
