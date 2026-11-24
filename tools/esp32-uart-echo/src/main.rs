@@ -63,11 +63,17 @@ const IDLE_TIMEOUT: Duration = Duration::from_millis(50);
 
 // ---------------------------------------------------------------------------
 // 最小 panic handler：夹具无 backtrace 依赖，死循环即可（板级调试看 reject 日志）。
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
+
+/// 不可恢复失败的统一停机：不返回半装配态（腾空即停，复位靠按键/BOD）。
+fn halt() -> ! {
     loop {
         core::hint::spin_loop();
     }
+}
+
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    halt()
 }
 
 // ---------------------------------------------------------------------------
@@ -312,27 +318,6 @@ fn echo_frame(
     }
 }
 
-/// 串口打开：UART0 = 控制台（GPIO1=TX / GPIO3=RX，devkit USB 板载 CP2102，只写
-/// 不读）；UART2 = 链路（GPIO17=TX2 / GPIO16=RX2，方案 §9.2 ① 接线表；115200），
-/// 收发拆分后交 echo 状态机。
-fn open_ports(
-    p: esp_hal::peripherals::Peripherals,
-) -> (
-    UartTx<'static, Blocking>,
-    UartRx<'static, Blocking>,
-    UartTx<'static, Blocking>,
-) {
-    let console = esp_hal::uart::UartTx::new(p.UART0, esp_hal::uart::Config::default())
-        .expect("uart0 init")
-        .with_tx(p.GPIO1);
-    let link = esp_hal::uart::Uart::new(p.UART2, esp_hal::uart::Config::default())
-        .expect("uart2 init")
-        .with_tx(p.GPIO17)
-        .with_rx(p.GPIO16);
-    let (rx, tx) = link.split();
-    (console, rx, tx)
-}
-
 #[esp_hal::main]
 fn main() -> ! {
     // 64 KiB 内部堆：payload 回发缓冲按 8 KiB 封顶分配（先验头再分配，见
@@ -340,7 +325,23 @@ fn main() -> ! {
     esp_alloc::heap_allocator!(size: 65536);
 
     let peripherals = esp_hal::init(esp_hal::Config::default());
-    let (mut console, mut rx, mut tx) = open_ports(peripherals);
+    // 串口打开：UART0 = 控制台（GPIO1=TX / GPIO3=RX，devkit USB 板载 CP2102，只写
+    // 不读）；UART2 = 链路（GPIO17=TX2 / GPIO16=RX2，方案 §9.2 ① 接线表；115200），
+    // 收发拆分后交 echo 状态机。两处都是不可恢复的启动失败：控制台缺则无可打印，
+    // 链路缺则先在控制台点名再停机（不 panic，panic 文案在本夹具不落地）。
+    let Ok(console) =
+        esp_hal::uart::UartTx::new(peripherals.UART0, esp_hal::uart::Config::default())
+    else {
+        halt()
+    };
+    let mut console = console.with_tx(peripherals.GPIO1);
+    let Ok(link) = esp_hal::uart::Uart::new(peripherals.UART2, esp_hal::uart::Config::default())
+    else {
+        log!(&mut *console, "startup: uart2 init failed — halt");
+        halt()
+    };
+    let link = link.with_tx(peripherals.GPIO17).with_rx(peripherals.GPIO16);
+    let (mut rx, mut tx) = link.split();
 
     boot_dump(&mut console);
     echo_loop(&mut rx, &mut tx, &mut console)
