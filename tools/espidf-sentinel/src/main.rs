@@ -1,43 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
-//! espidf-sentinel —— 0.0.7 批D1 层③ 哨兵（esp-rs std，机制核 `rr-core::runtime`
-//! 的真板消费者）。
+//! espidf-sentinel —— 机制核 `rr-core::runtime` 的真板消费者（esp-rs std）。
 //!
-//! 职责（0.0.7 方案 §2.1 修订版 9 口径 + §9.3 层③ runbook）：**内跑
-//! `rr-core::runtime`**——连接态转移 [`Rr3LinkState`]、心跳拍点
-//! [`Rr3ModuleRuntime`]、收帧分类 [`rr3_dispatch_class`]——**不另写状态机**；
-//! 传输下底只写窄缝 [`Rr3ByteStream`] 两方法（esp-idf-hal UART2 半分体，经
-//! rr-ipc std 单向 adapter + blanket conn 免费获得与 uds/uart 宿主侧同源的
-//! 帧语义）。本文件只做平台事：UART 装配、注册、线程拉起、堆采样；reader/心跳
-//! 两线程循环与入站分发在 `worker.rs`（std 驱动器 rr-bus client 同构：reader 线程
-//! + 心跳线程 + 一次一答 pending 表）。
+//! 职责：内跑 `rr-core::runtime`——连接态转移 [`Rr3LinkState`]、心跳拍点
+//! [`Rr3ModuleRuntime`]、收帧分类 [`rr3_dispatch_class`]，**不另写状态机**；传输下底
+//! 只写窄缝 [`Rr3ByteStream`] 两方法，帧语义由 rr-ipc blanket conn 免费获得。本文件
+//! 只做平台事：UART 装配、注册、线程拉起、堆采样；reader/心跳两线程与入站分发在
+//! `worker.rs`。
 //!
-//! 双证之一（编译面）：`cargo +esp build` 在 xtensa-esp32-espidf 上编译
-//! rr-core + rr-ipc + 本哨兵（专用门 tools/ci/platform/espidf-sentinel-check.sh）；
-//! 双证之二（板上真跑）：注册→心跳→round-trip + 三点堆采样（README runbook）。
-//! D1→D2 触发判据：实测运行峰值剩余堆 < 20% 总堆（§9.3 ④）。
+//! 双证：① 编译面——`cargo +esp build` 在 xtensa-esp32-espidf 上编 rr-core + rr-ipc +
+//! 本哨兵（专用门）；② 板上真跑——注册→心跳→round-trip + 三点堆采样。D1→D2 触发判据：
+//! 实测运行峰值剩余堆 < 20% 总堆。
 //!
-//! 批G 扩面（⑤ 列安全核逐拍用例的板上腿，载体裁定=扩本哨兵不另立 crate）：
-//! manifest exposes 增 `rr3-sentinel/diag/parity`，点名应答跑
-//! `rr_core::control::parity::rr3_parity_run()` 的**真实原语**（限速门/低电
-//! 边沿/饱和检测/节拍方案/窗结算/速率折算/钳位），输出经 serde_json 手工展开
-//! 回带——**不回显 RR3_PARITY_EXPECTED**（对拍的有效性前提：板上输出与期望
-//! 向量相互独立，两腿汇合在宿主 harness）。输入序列与语义出处全部单源在
-//! rr-core::control::parity，本文件零向量复制。
+//! 安全核逐拍对拍（载体裁定：扩本哨兵，不另立 crate）：manifest 增 `rr3-sentinel/diag/parity`，
+//! 点名应答跑 `rr_core::control::parity::rr3_parity_run()` 的**真实原语**，输出经 serde_json
+//! 手工展开回带——**不回显 RR3_PARITY_EXPECTED**（板上输出与期望向量必须相互独立，两腿
+//! 在宿主 harness 汇合）。输入序列与语义单源在 rr-core，本文件零向量复制。
 //!
-//! 板侧接线（批C 载体同款硬约束）：UART2 = GPIO17→适配器 RXD / GPIO16←适配器
-//! TXD，115200，3.3V TTL，共地；UART0 = 控制台（monitor 观测面）。
+//! 板侧接线：UART2 = GPIO17→适配器 RXD / GPIO16←适配器 TXD，115200，3.3V TTL，共地；
+//! UART0 控制台（monitor 观测面）。
 //!
-//! esp-idf-hal 0.44.1 API 对表实录（vendored 源码核对，批D1）：
-//! - 构造走 `UartDriver::new(uart, tx, rx, cts: Option, rts: Option, &config)`
-//!   ——TX/RX 半体的两个独立 `new()` 会对同一 UART 口各做一次
-//!   `uart_driver_install`（IDF 一口一装，第二装必败），故整装后
-//!   `Box::leak` + `split()` 出 `'static` 半体；
-//! - 半体驱动的 io 面是 `embedded_io`（固有 `read(buf, delay)` / `write` /
-//!   `flush`，错误面 `EspError`），std::io 的 Read/Write 桥在 `uart.rs` 手写；
-//! - 上游只给全双工 `UartDriver` 标了 `unsafe Send + Sync`，半体驱动漏标——
-//!   `uart.rs` 以两个 `unsafe impl Send` 补齐（安全性论证见各结构体注记）；
-//! - xtensa LX6 无 64 位原子，`AtomicU64` 不可用，id 发号/task 号/计数全部
-//!   `AtomicU32`。
+//! 平台事实（esp-idf-hal 0.44.1，vendored 核对）：① 同一 UART 口只能 `uart_driver_install`
+//! 一次，故整装 `UartDriver` 后 `Box::leak` + `split()` 出 `'static` 半体，不能两个
+//! `new()`；② 半体 io 面是 `embedded_io`（`read(buf, delay)`/`write`/`flush`，错误
+//! `EspError`），std::io 桥在 `uart.rs` 手写；③ 上游只给全双工驱动标了 `unsafe Send+Sync`，
+//! 半体漏标，`uart.rs` 以两个 `unsafe impl Send` 补齐（安全性论证见各结构体注记）；
+//! ④ xtensa LX6 无 64 位原子，id 发号/计数全用 `AtomicU32`。
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
