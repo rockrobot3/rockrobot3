@@ -14,6 +14,8 @@ MCU 无 A/B 分区，升级一律线下重烧。每个芯片平台独立部署�
 |---|---|
 | `rr3-periph-base-esp32-safe-dev.elf` | ESP32 classic safe 档（默认 feature：外设底座 + 麦克风采集，不含云/播放） |
 | `rr3-periph-base-esp32s3-full-dev.elf` | ESP32-S3 full 档（`esp32s3,autonomy,tts`：全链） |
+| `rr3-esp32-safe-merged.bin` | **classic 整片镜像（4 MB）**：bootloader + 分区表 + app，直烧 `0x0` |
+| `rr3-esp32s3-full-merged.bin` | **S3 整片镜像（16 MB）**：同上 |
 | `rr3-bootloader-esp32-dev.bin` | classic bootloader，与 app 同一 IDF v5.2.2 构建树 |
 | `rr3-bootloader-esp32s3-dev.bin` | S3 bootloader，同上 |
 | `rr3-partitions.csv` | 分区表真值（factory 0x2F0000 + spool 1MB） |
@@ -32,6 +34,20 @@ bash tools/deploy/flash-artifact.sh ./rr3-periph-base-esp32-safe-dev.elf \
 bash tools/deploy/flash-artifact.sh ./rr3-periph-base-esp32s3-full-dev.elf \
   --chip esp32s3 --bootloader ./rr3-bootloader-esp32s3-dev.bin
 ```
+
+## 整片直烧（basic 功能交付态，推荐产线/无工具链机器）
+
+整片镜像已含 bootloader、分区表与 app，**一条命令即可**（`esptool`）：
+
+```bash
+esptool.py --chip esp32   write_flash 0x0 rr3-esp32-safe-merged.bin
+esptool.py --chip esp32s3 write_flash 0x0 rr3-esp32s3-full-merged.bin
+```
+
+写入后按 §验收 读串口自证。镜像由 `tools/deploy/image-esp32.sh` 装配，
+流水线每次推送都跑同一脚本（三点 magic + 整片尺寸 fail-closed）；
+分区表仍以 `rr3-partitions.csv` 为真值，`nvs` 不落在整片覆盖之外时保留凭据
+（整片写入会覆盖 nvs——需保留 WiFi 时改用上面的单件烧录）。
 
 ## 裸 espflash（不经脚本时三件必须显式给）
 

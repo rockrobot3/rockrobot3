@@ -377,6 +377,31 @@ jobs:
                     rr3-bootloader-esp32-dev.bin rr3-bootloader-esp32s3-dev.bin \
                     rr3-partitions.csv FLASHING.md \
             | tee firmware-sha256.txt
+      - name: 安装 espflash 4.6.0（整片镜像装配，预编译件 + sha256）
+        run: |
+          set -euo pipefail
+          d=/tmp/espflash
+          mkdir -p "$d"
+          curl -fsSL --retry 3 --retry-delay 3 -o "$d/espflash.zip" \
+            https://github.com/esp-rs/espflash/releases/download/v4.6.0/espflash-x86_64-unknown-linux-gnu.zip
+          echo "c4fcfa32ddc3155608f003a230e6f3c184eff9641ec9cfa8eb54f1b515d403e7  $d/espflash.zip" \
+            | sha256sum -c -
+          unzip -o -q "$d/espflash.zip" -d "$d"
+          install -m 0755 "$d/espflash" /usr/local/bin/espflash
+          espflash --version
+      # 整片烧录镜像 = basic 功能交付态：产线与无工具链机器只需 write_flash 0x0。
+      # 装配逻辑与逐推验证面同源（tools/deploy/image-esp32.sh）。
+      - name: 装配整片烧录镜像（classic safe / S3 full）
+        run: |
+          set -euo pipefail
+          bash tools/deploy/image-esp32.sh --elf rr3-periph-base-esp32-safe-dev.elf \
+            --chip esp32 --flash-size 4mb --out rr3-esp32-safe-merged.bin \
+            --bootloader rr3-bootloader-esp32-dev.bin --partitions rr3-partitions.csv
+          bash tools/deploy/image-esp32.sh --elf rr3-periph-base-esp32s3-full-dev.elf \
+            --chip esp32s3 --flash-size 16mb --out rr3-esp32s3-full-merged.bin \
+            --bootloader rr3-bootloader-esp32s3-dev.bin --partitions rr3-partitions.csv
+          sha256sum -b rr3-esp32-safe-merged.bin rr3-esp32s3-full-merged.bin \
+            | tee -a firmware-sha256.txt
       - name: 上传 release 资产（双芯片 + 同版 bootloader + 分区表 + 烧录说明）
         uses: softprops/action-gh-release@v3
         with:
@@ -384,6 +409,8 @@ jobs:
           files: |
             rr3-periph-base-esp32-safe-dev.elf
             rr3-periph-base-esp32s3-full-dev.elf
+            rr3-esp32-safe-merged.bin
+            rr3-esp32s3-full-merged.bin
             rr3-bootloader-esp32-dev.bin
             rr3-bootloader-esp32s3-dev.bin
             rr3-partitions.csv
@@ -412,6 +439,8 @@ jobs:
             --artifact-type application/vnd.rr3.firmware.v1+json \
             rr3-periph-base-esp32-safe-dev.elf:application/octet-stream \
             rr3-periph-base-esp32s3-full-dev.elf:application/octet-stream \
+            rr3-esp32-safe-merged.bin:application/octet-stream \
+            rr3-esp32s3-full-merged.bin:application/octet-stream \
             rr3-bootloader-esp32-dev.bin:application/octet-stream \
             rr3-bootloader-esp32s3-dev.bin:application/octet-stream \
             rr3-partitions.csv:text/csv \

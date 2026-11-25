@@ -222,4 +222,24 @@ else
   fail=1
 fi
 
+# ⑩ 生产烧录档装配（full 档 = 单文件整片镜像）：产线与无工具链机器只需整片
+#    直烧 0x0。espflash 缺位按 SKIP 纪律（CI 预装 4.6.0）。
+if [ -f "$rel_elf" ]; then
+  if ! command -v espflash >/dev/null 2>&1; then
+    rr3_skip "espflash 缺位——整片镜像装配不执行"
+  fi
+  merged=/tmp/rr3-build/esp32s3-full-merged.bin
+  img_args=(--elf "$rel_elf" --chip esp32s3 --flash-size 16mb --out "$merged"
+            --partitions "$root/tools/esp32-periph-base/partitions.csv")
+  [ -n "${rel_boot:-}" ] && img_args+=(--bootloader "$rel_boot")
+  if bash "$root/tools/deploy/image-esp32.sh" ${img_args[@]+"${img_args[@]}"} \
+       >/tmp/rr3-esp32s3-merge.log 2>&1; then
+    echo "PASS  S3 整片镜像: ${merged}（$(wc -c <"$merged" | tr -d ' ') B，直烧 0x0）"
+  else
+    echo "FAIL  S3 整片镜像装配失败" >&2
+    tail -5 /tmp/rr3-esp32s3-merge.log >&2
+    fail=1
+  fi
+fi
+
 exit "$fail"
