@@ -58,25 +58,13 @@ jobs:
           workspaces: base/runtime
           cache-all-crates: "true"
 
-      - name: 计算发布标签（版本唯一真源 = 仓根 VERSION）
+      - name: 计算发布标签（版本唯一真源 = 仓根 VERSION；tag 须指向 release 提交）
         id: meta
-        run: |
-          ver="$(cat VERSION)"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            tag="${{ inputs.tag }}"
-          elif [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
-            tag="${GITHUB_REF_NAME}"
-            # 正式 tag 必须与 VERSION 同源；rc 等预发布只出镜像、不更新 latest。
-            if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ && "${tag#v}" != "$ver" ]]; then
-              echo "::error title=version::tag ${tag} 与 VERSION ${ver} 不一致（先升 VERSION 再打 tag）"
-              exit 1
-            fi
-          else
-            tag=edge
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=$ver" >> "$GITHUB_OUTPUT"
-
+        # 版本纪律的执法点：VERSION 只能在 release(vX.Y.Z) 提交内变更，tag 与之同名；
+        # 判据单点在 release-tag.sh（自检在 gate scripts job），不同源或非 release 提交即红。
+        run: >-
+          bash tools/ci/release-tag.sh "${{ github.event_name }}" "${{ github.ref }}"
+          "${{ github.ref_name }}" "${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
       - name: 原生构建运行面（rrd / 六模块 / rr3-ctl / rr3-ota-ctl / rr3-pack）
         env:
           CARGO_TARGET_DIR: /tmp/rr3-build
@@ -176,23 +164,11 @@ jobs:
         with:
           platforms: riscv64
       - uses: docker/setup-buildx-action@v4
-      - name: 计算发布标签（版本唯一真源 = 仓根 VERSION）
+      - name: 计算发布标签（版本唯一真源 = 仓根 VERSION；tag 须指向 release 提交）
         id: meta
-        run: |
-          ver="$(cat VERSION)"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            tag="${{ inputs.tag }}"
-          elif [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
-            tag="${GITHUB_REF_NAME}"
-            if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ && "${tag#v}" != "$ver" ]]; then
-              echo "::error title=version::tag ${tag} 与 VERSION ${ver} 不一致（先升 VERSION 再打 tag）"
-              exit 1
-            fi
-          else
-            tag=edge
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=$ver" >> "$GITHUB_OUTPUT"
+        run: >-
+          bash tools/ci/release-tag.sh "${{ github.event_name }}" "${{ github.ref }}"
+          "${{ github.ref_name }}" "${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
       - name: 登录 ghcr.io
         uses: docker/login-action@v4
         with:
@@ -227,6 +203,11 @@ jobs:
       # 直接 exit 127（2026-11-18 main 首跑实证；此前 publish 只在 tag 触发，
       # 合并腿从未在 main 面被执行过）。
       - uses: actions/checkout@v7
+      - name: 计算发布标签（版本唯一真源 = 仓根 VERSION；tag 须指向 release 提交）
+        id: meta
+        run: >-
+          bash tools/ci/release-tag.sh "${{ github.event_name }}" "${{ github.ref }}"
+          "${{ github.ref_name }}" "${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
       - name: 登录 ghcr.io
         uses: docker/login-action@v4
         with:
@@ -237,18 +218,12 @@ jobs:
       - name: 合并多架构清单
         id: merge
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            tag="${{ inputs.tag }}"
-          elif [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
-            tag="${GITHUB_REF_NAME}"
-          else
-            tag=edge
-          fi
+          tag="${{ steps.meta.outputs.tag }}"
           docker buildx imagetools create -t "${IMAGE}:${tag}" \
             "${IMAGE}:${tag}-amd64" "${IMAGE}:${tag}-arm64" "${IMAGE}:${tag}-riscv64"
           # latest 只指向正式 semver tag（vX.Y.Z）且必须与 VERSION 同源：
           # edge/rc/手输数字标签一律不更新，避免把开发面或预发布当稳定版。
-          if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "${tag#v}" = "$(cat VERSION)" ]; then
+          if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "${tag#v}" = "${{ steps.meta.outputs.version }}" ]; then
             docker buildx imagetools create -t "${IMAGE}:latest" \
               "${IMAGE}:${tag}-amd64" "${IMAGE}:${tag}-arm64" "${IMAGE}:${tag}-riscv64"
           fi

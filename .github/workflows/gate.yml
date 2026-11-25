@@ -267,6 +267,9 @@ jobs:
       # SKIP 纪律单点：本地缺工具链退 0，CI 内缺工具链退 1（覆盖缺口不得冒充绿）。
       - name: SKIP 纪律自检（本地 SKIP / CI 即红）
         run: bash tools/ci/skip.sh --self-test
+      # 版本纪律的执法件：tag 与 VERSION 同源 + 指向 release 提交，六例正负对照。
+      - name: 发布点执法自检（同源/不同源/rc/手输/分支/非 release 提交六例）
+        run: bash tools/ci/release-tag.sh --self-test
       # 步骤清单是 check.sh 的显式契约：删/改/换序一个 step、或一号两门，都会被这条抓住。
       - name: 门禁步骤清单自检（一致/删除/新增/改名/换序/门号重复/子号放行/打空八例）
         run: python3 tools/ci/gate_steps_audit.py --self-test

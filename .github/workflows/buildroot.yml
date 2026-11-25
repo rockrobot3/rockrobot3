@@ -434,10 +434,13 @@ jobs:
           KEY_HEX: ${{ secrets.RR3_OTA_SIGNING_KEY }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
-          ver="${tag#v}"
-          if ! printf '%s' "$ver" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error title=ota-version::标签 $tag 不是 v<major.minor.patch>"
+          # 正式制品只认 vX.Y.Z：release-tag.sh 已核"tag 与 VERSION 同源且指向 release 提交"，
+          # 这里的形状门再把 rc 预发布挡在签名发布之外。
+          meta="$(bash tools/ci/release-tag.sh "${GITHUB_EVENT_NAME}" "${GITHUB_REF}" "${GITHUB_REF_NAME}" "${{ inputs.tag }}")"
+          tag="$(printf '%s\n' "$meta" | sed -n 's/^tag=//p')"
+          ver="$(printf '%s\n' "$meta" | sed -n 's/^version=//p')"
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error title=ota-version::标签 ${tag} 不是 v<major.minor.patch>"
             exit 1
           fi
           if [ -z "${KEY_HEX:-}" ]; then

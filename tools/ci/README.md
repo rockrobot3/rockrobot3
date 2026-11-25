@@ -47,6 +47,10 @@
 理由：这些工程被 `check.sh` ④/⑥ 显式排除，专用门是唯一编译执法位；门一 SKIP，
 它们就变成"零覆盖但流水线绿"。
 
+**发布点执法（`release-tag.sh`，gate `scripts` job 自检）**：publish / buildroot 的发布腿
+经它取 `tag=` / `version=`——tag 必须与仓根 `VERSION` 同源且指向 `release(vX.Y.Z)` 提交，
+否则非 0 退出。版本纪律全文见 [conventions §7](../../docs/process/conventions.md)。
+
 **门禁步骤清单（`gate_steps_audit.py`，gate `scripts` job）**：把 `check.sh` 的
 `step`/`printf` 出口解析成有序清单，与 `gate_steps.txt` 逐字比对——删除、新增、
 改名、换序任一发生即红；并断言门号唯一（同一 token 两次即双义红，子号 `①b`/`⑨-a`

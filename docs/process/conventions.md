@@ -2937,3 +2937,18 @@ D11 的 `armed=true` 界面门要求"必须引用一条真板对拍证据的编�
 - **生成副本单向**：真值点（`contracts/`、`hardware/*/axis/`）→ 生成物
   （`topics_gen.rs` / `axis_gen.rs` / `envelope_gen.py`）只经 `rr3-codegen` 导出；
   消费者不手抄常量，重跑 `--check` diff 为空由门 ⑨-d 执法（三份同一判据）。
+
+**版本纪律（2026-11-25 批 46 裁定，[decisions §2 版本号回归](decisions.md)）**：
+
+- **唯一真源**：仓根 `VERSION`，现值 `0.0.8`。计划册、回执、流水线一律以它为准，
+  不得以 tag 反推进度。
+- **只能在 release 提交内变更**：改 `VERSION` 的提交标题必须是 `release(vX.Y.Z)`
+  且与文件新值一致；其它任何提交不得动它。
+- **tag 与 VERSION 同名**：tag 只能打在 release 提交上，名为 `v<VERSION>`
+  （预发布再加 `-rc<N>`，只出镜像不更新 latest、不进签名发布）。
+- **仓库角色**：atomgit 是主仓，github 是镜像仓——只借它的流水线，gitcode 是第三远端。
+  tag 先落 atomgit，再镜像到 github 触发发布。
+- **执法点**：[`release-tag.sh`](../../tools/ci/release-tag.sh)（publish 三处与 buildroot
+  发布腿调用；自检挂在 gate `scripts` job）。不同源或非 release 提交即红，不出制品。
+- **旧号处置**：v0.0.9–v0.0.23（含 rc）属违规抬高，已改名归入 `archive/v0.0.x/`，
+  原名作废不再引用；下次正式发布从 `v0.0.9` 起。

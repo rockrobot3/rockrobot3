@@ -49,6 +49,18 @@ check-runs/{id}/annotations`，无需 token；取数收成单点
 | `publish.yml`（4） | build ×2 / build-riscv64 / merge / firmware | 发布面：原生架构双腿构建 + riscv64 交叉腿（QEMU）→ merge 去重（三架构）→ firmware 双芯片（release asset + ghcr OCI） |
 | `buildroot.yml`（3） | dtb-backport / image / release | Buildroot 装配轨：交叉工具链与装配冒烟、出厂镜像轨 |
 
+## 版本纪律与发布点执法（2026-11-25）
+
+版本唯一真源是仓根 `VERSION`（现 `0.0.8`），它只能在标题为 `release(vX.Y.Z)` 的提交内变更；
+tag 与它同名并打在该提交上。atomgit 是主仓，github 是镜像仓（只借流水线），
+tag 先推 atomgit 再镜像 github。口径全文见 [conventions §7 版本纪律](conventions.md)。
+
+执法点只有一处：`tools/ci/release-tag.sh`——publish 的 build / build-riscv64 / merge
+三步与 buildroot 的 release 腿都先调它取 `tag=` / `version=`；tag 与 `VERSION`
+不同源、或 tag 未指向 release 提交即非 0 退出，不出制品。`workflow_dispatch`
+与分支推送两条路径不做版本判定（它们不发 Release，行为不变）。自检
+`release-tag.sh --self-test` 挂在 gate `scripts` job。
+
 ## 工具链
 
 各工作流一律显式钉版 `toolchain: "1.100.0"`（`dtolnay/rust-toolchain` 的
