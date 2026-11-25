@@ -1,52 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
-//! rr3-audio-rec —— 批D③ 音频上行收流端（宿主；0.0.5 增补轮五 全案 §4 批D 判据①）。
+//! rr3-audio-rec —— 音频上行收流端（宿主）：板面双麦 PCM → UART → wav。
 //!
-//! 链路：板面 INMP441 双麦（mic.rs 分片组帧，`rr3-sense/audio/pcm` Event @
-//! trace_id=0 / src=2 / dst=1）→ UART2 1.5M（板固件 `board::UART2_BAUD_HZ` 同档；
-//! 2026-10-30 自 921600 提档定档，音频 85KB/s 占线从 ~95% 降到 ~46%）→
-//! 本件收流：`AUDIO ON` 行命令起流 → dst=1 门 → Event payload → topic 门 →
-//! b64 解码 → 累积 PCM → `AUDIO OFF` → 按**实测采样率**写 wav（双通道 s16le）。
+//! 链路：板 `mic` 分片组帧（`rr3-sense/audio/pcm` Event，dst=1）→ UART2 1.5M →
+//! 本件 `AUDIO ON` 起流、dst/topic 双门、b64 解码、累积 PCM、`AUDIO OFF` 后按实测
+//! 采样率写双通道 s16le wav。帧语义、串口、b64 全走 rr-ipc 单点，零第二份帧层。
 //!
-//! 纪律：
-//! - 帧语义/串口/b64 全部 rr-ipc 单点（`Rr3UartConn` + blanket impl
-//!   `Rr3TransportConn` + `rr3_base64_decode`），零第二份帧层；
-//! - 载荷形状事实源 modules/rr3-sense composite::`rr3_pcm_event_body`（seq/format/
-//!   rate/channels/ms/pcm_b64），topic 键并入体（rr-bus `rr3_publish` 同形——板无
-//!   rr-bus 客户端，按 `body["topic"]` 形状自行并入）；
-//! - 开口 settle 纪律（批C 实锤）：open 后停 1.2s 让开口翻转的板复位走完，再
-//!   `rr3_flush_input` 净化残留；握手先发**防御 AUDIO OFF**（上一会话看门狗/
-//!   异常退出的板面残流会抢在 OK 应答前进线，d4 重跑实锤），停流冲净才 AUDIO ON。
-//! - seq 连续性记账（wrapping u32）：断档即板侧背压丢片（`INFO` 的 `drop` 互为
-//!   对账）；大步进（≥ 0x8000_0000）= 板侧重启记 `restarts`，不按 wrapping 补
-//!   天文 gap。收流端只对账不补救（fail-honest：wav 是真实收到的流）。
-//! - 三级防护（0.0.5 批D④ d4 600s 实锤；机制与策略分离；判据② 收流线程化——
-//!   A/B 决定性实验定案：病灶是分相读节奏（128B 头→plen 载荷两段间让出），
-//!   85KB/s 连续流下间歇 RX 溢出丢字节；python read(65536) 同款大块裸读 600s
-//!   满速零污染。读线程只做大块裸读推裸字节通道，解码线程纯内存拆帧
-//!   （[`FrameAssembler`]，头校验全数 rr-ipc [`Rr3Header::from_bytes`] 单点，
-//!   零第二份帧语义））：
-//!   ① 读超时——机制面 rr-ipc `rr3_read_timeout`（poll 等就绪，`Ok(0)`=此刻无
-//!   数据非 EOF），读线程裸读/应答读全走超时档；阻塞读缺省语义保持为 rr-ipc
-//!   其余用户（桥/哨兵）不动。
-//!   ② 失步重同步——帧头 magic 线上字节 = "1ERA"（全 b64 字母表字符），失步后
-//!   在载荷里撞上即"合法幻影帧头"+ 天文 payload_len。坏帧起点弃 4B magic 续扫
-//!   （字节已在缓冲，弃扫零新 I/O——滑移不放大为风暴的关键）；连续
-//!   [`ERR_STREAK_RESYNC`] 次拆帧失败记一次重同步账（日志对账用）。
-//!   ③ 断流重连——读线程见过数据后连续 [`RESYNC_ZERO_BAIL`] 次零读（1.6s
-//!   静默）= 线上断流，就地重开口 settle + AUDIO ON 续收（seq 重走/续走都如实
-//!   记账：板复位 `restarts`，续走空洞入 `gaps`）；握手 [`HANDSHAKE_TRIES`] 次
-//!   重试、每轮重开 fd（宿主侧 USB RX 冻结数分钟内自愈、板面四轮洗冤，重开 fd
-//!   是宿主侧唯一捅法，骑行期看门狗解武装）。
-//!   落盘走写线程（解码循环零磁盘 I/O，/dev/null 实验定案：逐片同步写刷是冻结
-//!   放大器）；看门狗（武装后 [`STALL`] 无新分片字节 → 补 wav 恢复头 exit(3)）
-//!   是最外层兜底；只管武装后的收流期，重连骑行期解武装不误触发。
+//! 三级防护（机制与策略分离；判据是 600s 真流实测）：
+//! ① 读超时：`rr3_read_timeout`（poll 就绪，`Ok(0)` = 此刻无数据非 EOF）；
+//! ② 失步重同步：magic 撞进载荷会产生"合法幻影帧头"，坏帧弃 4B magic 就地续扫
+//!    （零新 I/O），连续 [`ERR_STREAK_RESYNC`] 次失败记一次重同步账；
+//! ③ 断流重连：读线程见过数据后连续 [`RESYNC_ZERO_BAIL`] 次零读 = 断流，重开口
+//!    settle 后 `AUDIO ON` 续收；握手 [`HANDSHAKE_TRIES`] 次、每轮重开 fd。
+//!
+//! 线程分工：读线程只做大块裸读，解码线程纯内存拆帧（[`FrameAssembler`]），落盘走
+//! 写线程——解码循环零磁盘 I/O（逐片同步刷是冻结放大器）。看门狗（[`STALL`] 无新
+//! 分片即补 wav 恢复头并 exit 3）是最外层兜底，重连骑行期解武装。
+//!
+//! 开口纪律：open 后停 1.2s 等板复位走完，`rr3_flush_input` 净化残留；握手先发
+//! 防御 `AUDIO OFF`（上一会话残流会抢在 OK 前），停流冲净才 `AUDIO ON`。
+//!
+//! seq 记账（wrapping u32）：断档即背压丢片（与 `INFO` 的 `drop` 对账）；大步进
+//! （≥ 0x8000_0000）= 板重启记 `restarts`。只对账不补救：wav 是真实收到的流。
 //!
 //! 用法：`rr3-audio-rec <device> [--out <path>] [--secs <n>] [--baud <n>] [--doa]`
-//! 缺省 out=`rr3-audio-<unix秒>.wav`、secs=30、baud=1500000（板面 2026-10-30 定档
-//! 实测档，与固件 `board::UART2_BAUD_HZ` 同值；
-//! 波特率仍过 rr-ipc 档位表白名单，不预设动物园）。
-//! 退出码：0=收兵；1=开口/握手/0 分片/磁盘写失败；2=参数错；3=看门狗停滞恢复；
-//! 4=重连失败/收流线程亡（1/3/4 都先补恢复头保住已落盘数据再退）。
+//! 缺省 out=`rr3-audio-<unix秒>.wav`、secs=30、baud=1500000（与固件同值，仍过
+//! rr-ipc 波特率白名单）。退出码：0 收兵 / 1 开口握手或磁盘失败 / 2 参数错 /
+//! 3 看门狗停滞恢复 / 4 重连失败或收流线程亡（1/3/4 先补恢复头保住已落盘数据）。
 
 mod args;
 mod decode;

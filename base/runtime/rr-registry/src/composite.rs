@@ -1,45 +1,33 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 组合件装配清单（`modules/<名>/composite.toml`，三层 manifest 的 Composite 层，
-//! 0.0.5 批C② 原子重铺落位）的形状契约——组合件申报面定形（增补轮六 N-11：
-//! §8 门 j 的前件之一，§5 N-11 行）。
+//! 组合件装配清单（`modules/<名>/composite.toml`，三层 manifest 的 Composite 层）
+//! 形状契约：组合件申报什么件、暴露哪些注入面。
 //!
-//! **schema 位裁定（版本域）**：组合件清单顶层 `schema_version` 归
-//! [`RR3_COMPOSITE_SCHEMA_VERSION`]（= 1）管辖；件级 `atoms/<名>/assemble.toml`
-//! 归 [`crate::assemble::RR3_ASSEMBLE_SCHEMA_VERSION`]（= 2）管辖。两者同名
-//! 不同域：`schema_version` 指向的不是"一个全局版本"，而是各自文件形状各自的
-//! 版本，**不互认、不迁移、不互相 bump**（施工图全局约束："裸写 schema 2→3 会
-//! 指错常量"的同一条纪律）。
+//! schema 位：组合件顶层 `schema_version` 归 [`RR3_COMPOSITE_SCHEMA_VERSION`]（=1）；
+//! 件级 `assemble.toml` 归 [`crate::assemble::RR3_ASSEMBLE_SCHEMA_VERSION`]（=2）。
+//! 两者同名不同域——各自文件形状各自的版本，**不互认、不迁移、不互相 bump**。
 //!
-//! **本轮增三键属只增不 bump**：`[assemble]` 增 `handles` / `ops` /
-//! `no_injection`（N-11）。理由：本文件此前无代码读它（六份 composite.toml
-//! 零消费者，schema_version = 1 是"无校验器时代"的落位形状），本轮校验器与
-//! 数据同批落盘、六份文件同批迁移，不存在旧数据带病运行的兼容窗口——首次
-//! 定形不是破坏性变更；将来对已激活形状做语义变更才升版本走契约级评审。
-//!
-//! 定形内容（与件级 [`crate::assemble`] **同形同规则**，条目级解析直接共用其
-//! helper——一份判据一份真值，不许组合件另说一套）：
+//! 形状（与件级 [`crate::assemble`] **同形同规则**，条目解析直接共用其 helper，
+//! 不许组合件另说一套）：
 //!
 //! ```toml
 //! schema_version = 1
-//!
 //! [composite]
 //! name = "rr3-act"
 //! unit = "process"
-//!
 //! [assemble]
 //! atoms = ["servo", "led", "relay"]
-//! handles = []        # 组合件级句柄申报（结构同件级 { trait, desc_key }）
-//! ops = []            # 组合件级参数槽申报（结构同件级 { slot, src_key }）
-//! no_injection = true # L-5：两数组均空必须明写
+//! handles = []
+//! ops = []
+//! no_injection = true
 //! ```
 //!
-//! - `atoms`：⊗ 链（装配了哪些原子件），非空、每条非空串、不重复——空组合件
-//!   无意义，重复申报无意义。
-//! - `handles` / `ops` / `no_injection`：L-5 空面规则**整条适用**（0.0.5 批M
-//!   MC-10 同一条规则），组合件也必须把"漏填"与"本组合件确无注入面"分开。
+//! - `atoms`：⊗ 链，非空、每条非空串、不重复（空组合件无意义，重复申报无意义）。
+//! - `handles` / `ops` / `no_injection`：L-5 空面规则整条适用——两数组均空必须明写
+//!   `no_injection = true`，把"漏填"与"确无注入面"分开。
 //!
-//! fail-closed：任何键缺、任何取值出域逐条点名回 `Err`（与件级
-//! [`crate::assemble::rr3_assemble_parse`] 同一口径）。
+//! fail-closed：键缺或取值出域逐条点名回 `Err`，与件级解析同一口径。
+//! 增键不 bump 的前提是"该形状尚无可运行的消费者"；对已激活形状做语义变更须升版本
+//! 并走契约级评审。
 
 use crate::assemble::{
     rr3_handles_key, rr3_no_injection_err, rr3_ops_key, Rr3AssembleHandle, Rr3AssembleOp,

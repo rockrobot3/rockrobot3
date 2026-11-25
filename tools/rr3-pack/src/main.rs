@@ -1,47 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
-//! rr3-pack —— 发行版快路 deb 打包器（0.0.2 T5 / ADR-0013 裁定 5）。
+//! rr3-pack —— 发行版快路 deb 打包器（ADR-0013 裁定 5）：两份真值 → 一个 deb。
 //!
-//! 输入两份真值，装配各自薄装（保底轨 post-build.sh 读同一注入格式，两轨不互抄装配）：
-//! - `--payload` 注入产物（两轨同源约定，与 buildroot post-build.sh 同一口径）：
-//!   `rrd`、`rr3-ctl`、`rr3-ota-ctl`；rust 模块 `rr3-modules/<name>/{bin,manifest.toml}`；
-//!   python 模块 `rr3-modules/<name>/{pkg/,manifest.toml}`（`pkg/` = 包树，
-//!   如 `rr3_brain/`；entry 装机产物是打包器生成的 shim，见下）；
-//! - `--repo` 仓根：`profiles/<name>.toml`（`--profile` 选机型，缺省 distro——H4/C2 批K
-//!   参数化，出包链不再只认一份装配单）、`contracts/{topics,slots,roles,devices}.toml`、
-//!   `contracts/platform/<chip>.toml`（按装配单 `[platform].chip` 选册，批N1 基-22）、
-//!   `hardware/<name>/wiring.toml`、`hardware/<name>/axis/`（轴档案目录，在则整目录
-//!   随装）、`modules/<name>/config.toml`（config 是源真值，不是构建产物，不进注入
-//!   格式）。前六册 + 轴档案是 rrd 装载门的 boot 真值集，成员清单的真值只有 rrd
-//!   `rr3_truth_set` 一份（增补轮六 基-25／实-12：装载面定义清单，打包面照单
-//!   收口、不自带第二份——deb 缺任一必需册 rrd 即拒 boot，打包面缺任一册拒出包；
-//!   打包先按装载同判据预验装配单，坏单不得出包）。
+//! 输入：`--payload` 注入产物（rrd / rr3-ctl / rr3-ota-ctl / 模块 bin 或包树 +
+//! manifest）；`--repo` 仓根（装配单、contracts 六册、`hardware/<机型>/` 与轴档案、
+//! 模块 config）。前六册 + 轴档案是 rrd 装载门的 boot 真值集，成员清单真值只有
+//! rrd `rr3_truth_set` 一份——打包面照单收口，不收第二份；打包前按装载同判据预验，
+//! 坏单不出包。
 //!
-//! staging 装配是纯 Rust（macOS 可跑可单测），deb 布局：
-//! `/usr/bin/{rrd,rr3-ctl,rr3-ota-ctl}` + `/usr/lib/rockrobot3/{profiles,contracts,modules,hardware}` +
-//! `/usr/lib/systemd/system/rrd.service` + `DEBIAN/{control,postinst}`。
+//! 布局：`/usr/bin/{rrd,rr3-ctl,rr3-ota-ctl}` + `/usr/lib/rockrobot3/{profiles,
+//! contracts,modules,hardware}` + `rrd.service` + `DEBIAN/{control,postinst}`；
+//! staging 是纯 Rust（macOS 可跑可单测）。
 //!
-//! **内容改写只有两处**（除此外字节零差异）：①entry 装机改写（modules/README.md：
-//! "entry 在仓相对、装机绝对"）：manifest 只把 entry 的值换成装机绝对路径，其余字节
-//! 原样。为什么必须改：线上注册门禁（rrd conn.rs）要求 manifest.entry 绝对路径——模块
-//! 开机读的就是装机里这份 manifest 原文上报，相对值必被 `AIRY_EINVAL` 拒；装配单磁盘
-//! 装载那侧绝对/相对皆可，改写成绝对两头都过。错行不改、少行不改：除 entry 引号内
-//! 一个值外零差异。
+//! 内容改写只有两处（其余字节零差异）：
+//! ① entry 装机改写——manifest.entry 换成装机绝对路径（线上注册门禁要求绝对路径，
+//!    相对值必被拒），只改引号内一个值，错行少行不动；
+//! ② `rrd.service` 的 `--profile` 装机位随 `--profile` 同步改写（模板锚定 distro，
+//!    非 distro 机型照抄会找不到装配单）；锚点缺席即 fail-closed。
 //!
-//! ②rrd.service 的 --profile 装机位改写（0.0.5 批K 深挖收口）：单元模板 ExecStart
-//! 锚定缺省机型 distro.toml 的装机位，而非 distro 机型出包若照抄，systemd 拉起的 rrd
-//! 找不到装配单必败——装机位 profiles/<name>.toml 只装 --profile 指的那一份，故
-//! ExecStart 的 profile 路径随 --profile 同步改写。缺省 distro 恒等改写字节零差异；
-//! 模板锚点缺席即报错（fail-closed），不静默照抄。
-//!
-//! **python 模块的 entry 装机**（`lang = "python"`，批F1）：产物不是 ELF 而是 shim 脚本，
-//! 且 shim 里的 `PYTHONPATH`/`RR3_BRAIN_CONFIG` 必须是**装机绝对路径**（只有打包器知道
-//! `RR3_INSTALL_ROOT`），故 shim 由打包器生成而非注入（`bin` 那个位置对 python 模块换成
-//! `pkg/` 包树）。机制按 manifest.lang 数据位分派（批N32 件四起仓内六模块全 Rust，
-//! python 路径是机制保留位，仓内暂无消费模块）：
-//! `#!/bin/sh\nRR3_BRAIN_CONFIG=<装机 config> PYTHONPATH=<装机包树> exec python3 -m <包名>\n`
-//! （包名 = 目录名连字符转下划线；config env 走 brain `rr3_config_load` 的文档化优先口，
-//! python 模块 config 契约当前即 brain 契约）。
-//! 运行期语言不分支（rrd 只看 entry 可执行），`lang` 只在本打包器与演练侧做产物路径推导。
+//! python 模块（`lang = "python"`）产物是 shim 脚本而非 ELF：`PYTHONPATH` 与
+//! `config` 必须是装机绝对路径，故 shim 由本器生成；仓内六模块当前全 Rust，
+//! 该路径是机制保留位。运行期语言不分支（rrd 只看 entry 可执行）。
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};

@@ -1,46 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 物理绑定描述符（ADR-0018 裁定 4、批D④ 收口）：**这块板/平台是什么的唯一数据
-//! 事实源**。引脚/控制器编号/总线/设备名收进声明式描述符（`profiles/<机型>.toml`
-//! 的 `[hardware]` 段），由 rrd 装配链序列化注入 `RR3_HAL_BINDINGS`；`RR3_HAL_*`
-//! 环境变量降为**应急覆盖**（现场救场用，同键 env 赢）；代码缺省一律 **fail-closed**
-//! ——描述符与应急 env 都没给的键，对应能力面落占位后端显式回错，不回落任何一块
-//! 具体板的引脚（"板 = 数据"从此句成立，architecture §12.3）。
+//! 物理绑定描述符（ADR-0018 裁定 4）：**这块板是什么的唯一数据事实源**。
 //!
-//! 分层与真值：`profiles/<机>.toml` 是人写的数据事实源（rrd 解析并点名形状错误）；
-//! 本模块是运行期消费端——解析注入文本、合成生效绑定，键位语义与取值域在这里裁。
-//! 键集与白名单闭合（R11）：`led`/`relay` 两角色，扩 role 走契约级评审，届时同步
-//! 本处、`rr3_env_override_map` 与 profiles 键位。
-//! 键集冻结裁定（0.0.5 方案 §13.1 C4，评审已批J 在册）：[hardware] **不扩键**，
-//! 九键维持现状——后续扩键/扩 role 同走契约级评审，届时本处与
-//! rr-registry `RR3_ASSEMBLE_DESC_KEYS` 在册表**两处同批**（副本滞后 = fail-closed
-//! 拒绝，见 rr-registry assemble 模块契约测试）。
-//! 十键批（0.0.6 链④真件档）：MAX7219 显示面随真件落地按裁定流程扩 `spi_device`
-//! 键（spidev 设备路径），rr-registry 在册表与 face 原子 assemble.toml 句柄同批。
-//! 板侧配置三键批（批N4 件七(b) 基-24 桥上配置腿）：`i2c_sda`/`i2c_scl`/
-//! `adc_rail_pin` 进场——板侧裸寄存器自愈路径（I2C unstick）与打印面的引脚真值，
-//! rtos 档 `[hardware]` 原样直给、经桥 `rr3.set_bindings` 注入板侧（载荷键域/取值域
-//! 真值单点 = rr-ipc bindings 模块，本表解析共用其 `rr3_gpio_num_parse`）。
-//! 三键不在 [pins] 派生键集（无 role 对应——自愈路径没有能力面角色，rrd 门 n 不收）；
-//! 扩键裁定与批N3 件六 `spi_device` 同款：契约级评审、rr-registry 在册表两处同批、
-//! contract.rs 机判钉死。三键不设 `RR3_HAL_*` 应急 env 覆盖位（板侧配置随描述符
-//! 走单一路径，不设第二注入面——现场救场改装配单数据 + 重启）。
-//! 板侧主驱动七键批（批N9 件五，MC-7 缺③ [hardware] 进位补齐）：`uart2_tx`/
-//! `uart2_rx`/`ledc_pan`/`ledc_tilt`/`i2s_bclk`/`i2s_sd`/`i2s_ws` 进场——消费语义 =
-//! 板侧主驱动**装配对账锚**（esp-idf-hal 需具名引脚类型，驱动仍具名装配，注入值作
-//! 对账真值，不齐板侧 ERROR 点名＋计数；批N4 件七(c) 消费面纪律同款）。同上款：
-//! 不在 [pins] 派生键集、不设应急 env 覆盖位、rr-ipc/rr-registry/contract.rs
-//! 三处同批。`ledc_pan`/`ledc_tilt` 与 esp32-mini [[pin]] physical 同源同值
-//! （rtos 档 [pins] 派生为在册余量归 0.0.7 批G/D1——派生落位后本两键退役）。
-//! 凭据存储源键批（批N17 件二，N-10 ② 键半边契约级扩批）：`cred_store` 进场——
-//! **非 GPIO** 存储源标记 `nvs:<namespace>`（全案 §3.6 凭据行），取值域裁决
-//! `rr3_cred_store_parse` 真值单点在 rr-ipc（键集/取值域纪律不变）；消费语义 =
-//! 板侧读数面可见（GET /api/board/bindings 随键），boot 读链不消费＝批N14 架构
-//! 事实（注入晚于 WiFi 起栈）、无装配对账语义（非引脚不进对账锚）。同上款：不在
-//! [pins] 派生键集、不设应急 env 覆盖位、rr-ipc/rr-registry/contract.rs 三处同批。
-//! OLED 键批（W5-3，Pi 显示面换装）：`oled_addr` 进场——SSD1306 的 7-bit 从地址，
-//! 与既有 `i2c_bus` 两键齐备即显示面走 OLED 档；本键走 [pins] 派生轨
-//! （`ui.face.i2c` 的 addr → oled_addr），取值域与 `ina219_addr` 同一裁决函数
-//! （`rr3_i2c_addr_parse`，两器件共用 7-bit 地址域，不写第二套解析）。
+//! 引脚 / 控制器编号 / 总线 / 设备名收在装配单 `[hardware]` 段，由 rrd 装配链序列化
+//! 注入 `RR3_HAL_BINDINGS`；`RR3_HAL_*` 环境变量只是现场救场的**应急覆盖**（同键 env
+//! 赢）。两者都没有的键一律 **fail-closed**：对应能力面落占位后端显式回错，不回落
+//! 任何具体板的引脚——"板 = 数据"由此成立（architecture §12.3）。
+//!
+//! 分层：`profiles/<机型>.toml` 是人写数据源（rrd 解析并点名形状错误）；本模块是运行期
+//! 消费端——解析注入文本、合成生效绑定，键位语义与取值域在这里裁。
+//!
+//! 键集纪律（C4 裁定）：`[hardware]` **不扩键**，扩键/扩 role 走契约级评审，且必须
+//! 本文件、`rr3_env_override_map`、rr-registry `RR3_ASSEMBLE_DESC_KEYS` 与
+//! `tests/contract.rs` **四处同批**——副本滞后时方向是拒绝（fail-closed），不会带病放行。
+//!
+//! 键分两轨：**引脚派生键**（`ui.face.i2c` 的 addr → `oled_addr` 等）由装配单 `[pins]`
+//! 派生，rrd 门 n 收；**板侧直给键**（`i2c_sda`/`i2c_scl`/`adc_rail_pin`/`uart2_*`/
+//! `ledc_*`/`i2s_*`/`cred_store`）无能力面角色、不进派生集，也**不设** `RR3_HAL_*`
+//! 应急覆盖位——现场只改装配单 + 重启，不设第二注入面。`cred_store` 是**非 GPIO**
+//! 存储标记（`nvs:<namespace>`），取值域裁决单点在 rr-ipc。
+//!
+//! `ledc_pan`/`ledc_tilt` 与 esp32-mini 的 `[[pin]] physical` 同源同值，[pins] 派生
+//! 落位后这两个直给键退役（本文件与在册表同批删）。
 
 use std::collections::BTreeMap;
 
