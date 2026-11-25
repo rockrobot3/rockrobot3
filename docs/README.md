@@ -118,6 +118,8 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | [`../modules/rr3-power/README.md`](../modules/rr3-power/README.md) | 电源：电池、充电、低压关断兜底 |
 | [`../modules/rr3-connect/README.md`](../modules/rr3-connect/README.md) | 连接：WiFi 链路、云端会话、蓝牙配网 |
 | [`../modules/rr3-brain/README.md`](../modules/rr3-brain/README.md) | 认知（Rust）：ASR/LLM/TTS 编排与对话策略 |
+| [`../profiles/README.md`](../profiles/README.md) | 装配单名册与规则：哪台机器启用哪些能力格（纯数据，装载期 fail-closed） |
+| [`../hardware/README.md`](../hardware/README.md) | 接线真值名册与规则：电源与信号线怎么接、舵机行程单点 |
 | [`../tools/README.md`](../tools/README.md) | 主机侧工具名册：目录 × bin × 用途 |
 | [`../tools/ci/README.md`](../tools/ci/README.md) | `check.sh` 每步跑什么、为什么这么跑 |
 | [`../tools/deploy/README.md`](../tools/deploy/README.md) | 板侧固件烧录：发布制品资产清单、校验后烧录（`flash-artifact.sh`）与裸 espflash 用法 |
