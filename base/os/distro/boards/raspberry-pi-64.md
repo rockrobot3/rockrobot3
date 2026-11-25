@@ -7,7 +7,7 @@
   Layer 0 无感正是验证目标）
 - **OS**：Raspberry Pi OS Bookworm 64-bit（Debian 12 系，与 CI distro-smoke 的
   `rust:bookworm` 同系 glibc；systemd 在位；自带 dpkg-deb）
-- **关联**：[0.0.6 方案](../../../../docs/process/dev/0.0.6版本洛克三号树莓派验证方案.md)（§5.2 验收判据 / §5.3 已知边界）·
+- **关联**：[0.0.6 方案](../../../../docs/process/dev/0.0.6/0.0.6版本洛克三号树莓派验证方案.md)（§5.2 验收判据 / §5.3 已知边界）·
   [ADR-0013](../../../../docs/process/adr/ADR-0013-OS双轨-发行版快路与Buildroot保底.md)（快路轨：发行版现成镜像 + payload 层安装）·
   [distro README](../README.md)（boards/ 一板一文件纪律）
 

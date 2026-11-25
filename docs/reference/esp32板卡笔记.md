@@ -3,7 +3,7 @@
 - **定位**：ESP32 板卡实操笔记（硬件/接线/串口/证据台账）。0.0.7 批A"随批D1
   新建 ESP32 笔记"欠账的载体落地（status.md 2026-10-11 结项注记）。
 - **权威落点声明**（只引不抄）：串口排障四实锤唯一落点 =
-  [0.0.7 方案 §9.4 ⑥](../process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md)；
+  [0.0.7 方案 §9.4 ⑥](../process/dev/0.0.7/0.0.7版本洛克三号ESP32系统级验证方案.md)；
   esp-idf 版本组合唯一落点 = 0.0.7 方案批W1 登记；板上 runbook 唯一落点 =
   0.0.7 方案 §9 / [tools/espidf-sentinel/README.md](../../tools/espidf-sentinel/README.md)。
   本笔记只做实操聚合与证据台账。
@@ -76,7 +76,7 @@ E6 本机彩排 PASS=18 + E7 真板 e2e PASS=16 FAIL=0（断链自愈真拔实�
 
 ### 3.4 批N20 产线真板实录（2026-10-23，敞口 13 结项批）
 
-权威落点＝[批N20 计划册 §2](../process/dev/0.0.5增补轮六——批N20开发计划与产线真板实录.md)
+权威落点＝[批N20 计划册 §2](../process/dev/0.0.5/增补轮六/0.0.5增补轮六——批N20开发计划与产线真板实录.md)
 逐件证据行原文，本节只记板上机器事实摘要：
 
 - **首烧（merged 直烧）**：`espflash write-bin 0` 直烧 image-esp32.sh --release
@@ -90,5 +90,5 @@ E6 本机彩排 PASS=18 + E7 真板 e2e PASS=16 FAIL=0（断链自愈真拔实�
 - **写口断链**：POST /api/board/wifi 应答 1.99s recv failure＝批N16 裁定物理
   事实（STA 重配置杀 socket）；6s 后 GET state 200 旁证。
 - **机器事实订正**：release app image 实测 1,086,848 B（批N18 记录 444,576 B
-  系测量错误，批N20 件一定案）；分区表双表事实见 partition-layout.md 批N18 段
+  系测量错误，批N20 件一定案）；分区表双表事实见 分区布局与OTA槽位.md 批N18 段
   批N20 订正（IDF 表 0x100000 vs espflash 模板表 0x3F0000）。

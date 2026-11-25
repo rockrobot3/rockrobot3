@@ -1,7 +1,7 @@
 # RockRobot3 装配单：pi4b-host-esp32-classic 机型（W2/T1：Pi 4B 当宿主 × ESP32 classic 板）
 # 纯数据、零逻辑，门禁与 profiles/default.toml 完全同一套（ADR-0012 裁定 5② 查册门；
 # 机型集 pin 在 rr-registry contract.rs，新增/删除本文件须同批改那条 pin）。
-# 形态语义（docs/process/dev/通用底座三平台验证计划.md §7）：Pi 跑完整 Linux 底座 +
+# 形态语义（docs/process/dev/0.0.8/0.0.8版本通用底座三平台验证计划.md §7）：Pi 跑完整 Linux 底座 +
 # 五模块，ESP32 classic 板只做末梢（I2S 双麦 / LEDC 双轴 / I2C OLED / UART2 桥链）。
 # 与 esp32-mini/distro 的关键差别：
 #   1. 外设物理真值分两处：**板侧**十一键在 [hardware]（与 profiles/esp32-mini.toml 逐值

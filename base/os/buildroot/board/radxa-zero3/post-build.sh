@@ -22,7 +22,7 @@
 # modules-root（profile.rs），S99rrd 传 --profile /usr/lib/rockrobot3/profiles/distro.toml
 # 后 manifests 必然落 /usr/lib/rockrobot3/modules/<名>/module.toml，模块装机位不同根
 # 即 spawn 必败。数据面 /var/lib/rr3/staging 不随根动（rr_staging 分区挂载点，
-# partition-layout.md 钉死，属分区布局不属安装位）。
+# 分区布局与OTA槽位.md 钉死，属分区布局不属安装位）。
 
 set -eu
 TARGET="${TARGET_DIR:?post-build.sh 需要 TARGET_DIR（Buildroot 提供）}"
@@ -86,7 +86,7 @@ tmpfs                   /dev/shm        tmpfs   mode=0777               0      0
 tmpfs                   /tmp            tmpfs   mode=1777               0      0
 tmpfs                   /var/run        tmpfs   mode=0755               0      0
 tmpfs                   /var/log        tmpfs   mode=0755               0      0
-# 用户数据：升级不动（base/ota/partition-layout.md 分区表）
+# 用户数据：升级不动（docs/design/分区布局与OTA槽位.md 分区表）
 LABEL=rr_data           /data           ext4    defaults                0      1
 # 模块级更新暂存区（ADR-0007 决策二），rrd 拉包 → 校验 → 落位
 LABEL=rr_staging        /var/lib/rr3/staging ext4 defaults              0      2

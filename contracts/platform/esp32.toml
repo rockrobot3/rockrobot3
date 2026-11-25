@@ -64,7 +64,7 @@ channels = 0
 # 故音频面的事实真值点维持在 pins_classic.rs + 词形段之外的具名构造面，
 # 本表如实不抄第二份；待 I2S 成为可分配角色（如多路音频/编解码器选型）
 # 时，按契约级流程扩 kind 词域 + 落 [[controller]] 与 [[conflict]] 再进本表。
-# 审计存照：docs/process/dev/0.0.8静态生产审计-第七轮-平台表I2S裁定-2026-11-12.md。
+# 审计存照：docs/process/dev/0.0.8/静态生产审计/0.0.8版本静态生产审计-第七轮-P1落地.md 件一。
 
 [capabilities]
 # ADC1 六个出脚（同 [[controller]] adc1 的通道集——两处是"脚集/控制器"两个视图，

@@ -72,7 +72,7 @@ why = "UART2 TX/RX 用 GPIO41/42（pins_s3.rs，2026-10-29 真板订正自 17/18
 # 契约级评审），且 I2S 三信号脚由 board 具名装配直给、不进 profiles `[[pin]]`
 # 角色域，无 (controller, channel) 上界与 ④ 互斥判据需求。事实真值点维持
 # pins_s3.rs 单点；待音频面成为可分配角色时按契约级流程扩词域再进表。
-# 审计存照：docs/process/dev/0.0.8静态生产审计-第七轮-平台表I2S裁定-2026-11-12.md。
+# 审计存照：docs/process/dev/0.0.8/静态生产审计/0.0.8版本静态生产审计-第七轮-P1落地.md 件一。
 
 [construction]
 # 具名构造表（esp-idf-hal 具名类型，不可生成）。S3 现役构造两处：

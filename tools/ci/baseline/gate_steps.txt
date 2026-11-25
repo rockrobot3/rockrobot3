@@ -10,7 +10,7 @@
 ③ 主题前缀归属
 ④ 独立 Rust 工程编译（modules/ + tools/ + base/ota）
 ④b 独立工程 clippy -D warnings（CI lint 同源；esp 条件工程归专用门）
-⑤ 文档门（已跟踪 md 不得为空、相对链接不得断、README 不得漏进导航）
+⑤ 文档门（md 非空 / 相对链接不断 / README 入导航 / docs/ 外不散落）
 ⑥ 格格双达标·独立工程测试接线（每件 tests 真跑 ≥1，§13）
 ⑥b 部署面配置漂移门·工具自检（verify-board-config --self-test）
 ⑦ §13 静态断言（零策略载荷/F⊗F/五件套/入口体量）

@@ -25,7 +25,7 @@
 # nvs@0x9000/0x6000（批N14/15 凭据源）+ phy_init@0xf000/0x1000 +
 # factory@0x10000/0x100000 —— factory 单槽、无 ota_0/ota_1/otadata，是批N18
 # 件二/件三（升级=重烧即升级、不可回滚终态裁定）的物理前提；语义明文落
-# base/ota/partition-layout.md 批N18 段。
+# docs/design/分区布局与OTA槽位.md 批N18 段。
 set -euo pipefail
 
 cd "$(dirname "$0")/../.." # 仓根

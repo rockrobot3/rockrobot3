@@ -243,7 +243,7 @@ pub enum Rr3SampleQuality {
     Stale,
 }
 
-/// 一次环境量采样（定长形状，`no_std` 可达——[全案 §3.5](../../docs/process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md)：
+/// 一次环境量采样（定长形状，`no_std` 可达——[全案 §3.5](../../docs/process/dev/0.0.5/增补轮六/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md)：
 /// `Rr3Sample{kind,value,unit,quality}`。`value` 定长 `[f32; 3]`：`Scalar` 只用
 /// [0]，`Vec3` 全长有效——不引入 Vec，与 [`Rr3FaceFrame`] 同一"契约层不拥有堆"线）
 #[derive(Debug, Clone, Copy, PartialEq)]

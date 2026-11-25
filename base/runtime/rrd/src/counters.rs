@@ -31,7 +31,7 @@
 //! - env `RR3_DATA_DIR` 有值 → `$RR3_DATA_DIR/counters.json`（sim 侧注入口，
 //!   装配单 / CI 显式给定）；
 //! - env 无值 + cfg(linux) → 缺省 `/data/rr3/counters.json`（rr_data 分区挂载点，
-//!   partition-layout.md 在册）；
+//!   分区布局与OTA槽位.md 在册）；
 //! - 其余（env 无值 + 非 linux）→ `None`：不持久化，启动日志一行点名，不报错。
 
 use std::collections::BTreeMap;

@@ -2,7 +2,7 @@
 # 纯数据、零逻辑，门禁与 profiles/default.toml 完全同一套（ADR-0012 裁定 5② 查册门；
 # 机型集 pin 在 rr-registry contract.rs，新增/删除本文件须同批改那条 pin）。
 #
-# 形态语义（docs/process/dev/通用底座三平台验证计划.md §9 / 批N43 §3）：
+# 形态语义（docs/process/dev/0.0.8/0.0.8版本通用底座三平台验证计划.md §9 / 批N43 §3）：
 # Pi 4B 自己跑完整 Linux 底座，**不依赖任何外部板**。与
 # pi4b-host-esp32-classic / -s3 的差别是“末梢在哪”：
 #   - 本档没有外部板，故没有板侧十一键与 rr3.set_bindings 注入面；

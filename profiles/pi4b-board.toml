@@ -2,7 +2,7 @@
 # 纯数据、零逻辑，门禁与 profiles/default.toml 完全同一套（ADR-0012 裁定 5② 查册门；
 # 机型集 pin 在 rr-registry contract.rs，新增/删除本文件须同批改那条 pin）。
 #
-# 形态语义（docs/process/dev/通用底座三平台验证计划.md §9 / §10）：Mac 跑宿主栈，
+# 形态语义（docs/process/dev/0.0.8/0.0.8版本通用底座三平台验证计划.md §9 / §10）：Mac 跑宿主栈，
 # Pi 4B 只做**末梢板**——五端口（UART/I2C/PWM/ADC/Clock）由 tools/pi-periph-base
 # 直连 Linux 设备；本档登记板侧的物理绑定真值（双轴舵机成对 + 板侧总线引脚），
 # 不登记宿主本地外设。W4 只把 Pi 当板，不混用 pi4b-host-* 组合档。

@@ -10,7 +10,7 @@
   只写设计语义，一切"做到哪"的句子移出本档）
 - **日期**：2026-10-01
 - **修订记录**：v0.18（2026-10-21 同日第十一轮）**不新测架构，只把第十轮（§24）与新基线 `14e7dcc` 对表**——承
-  [增补轮六全案](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §25（89 个提交之后重测，`裁-1…裁-14` 全判 ＋ 新发现 `裁-15…裁-23`）。
+  [增补轮六全案](../process/dev/0.0.5/增补轮六/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §25（89 个提交之后重测，`裁-1…裁-14` 全判 ＋ 新发现 `裁-15…裁-23`）。
   本档三处改动：① **§12.8 接缝一的"消费者"那一维已闭**——`⑨-w 依赖面禁令` 已进 `check.sh:649`（逐单元必依 `rr-hal-api`／`use` 面白名单四类冻结／板侧禁实现 crate），
   单元侧 `use rr_hal_api` 由 0 行变为 **17 行 / 11 文件** ⇒ 上轮那条"能力面已抽象、依赖面未解耦"的**修法已落地**，接缝一现在要判的是**禁令不被绕过**而不是"补消费者"；
   ② **§13／§14 的分母重取**：`check.sh` step **11 → 18**、专属执法位 **1 → 8 把**（`⑨-a/c/d/e/n/r/w` ＋ `⑩` 门 d）、**待建门 23 → 18 把**
@@ -23,7 +23,7 @@
   本轮实测证据是"位号锚点集合差"整张换血（31/16/15/5 → 31/23/8/10）、爬路四枚旧锚点全部作废、`--manifest` 调试轨仍在（`daemon.rs:293-299`，裁-21）。
   本轮**零 `.rs`、零 `contracts/*.toml` 改动**。
 - **修订记录（续）**：v0.17（2026-10-17 同日第十轮）**把"待裁"本身当对象，并第一次量依赖面**——承
-  [增补轮六全案](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §24（决策闭合与依赖面极小性，
+  [增补轮六全案](../process/dev/0.0.5/增补轮六/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §24（决策闭合与依赖面极小性，
   代码基线 `ced8946`，发现号 `裁-1…裁-14`）。本档四处改动：① **§12.8 接缝一处补"消费者"这一维**——`base/runtime/rr-hal-api` **已存在**
   （373 行、7 个 `pub trait`、`no_std`，`rr-registry/src/assemble.rs:43` 的注释自认它是真值源），可 **5/5 单元的 `Cargo.toml` 依赖写的是实现 crate `rr-hal`**、
   `modules/**` 内 `use rr_hal_api` **零行**，全靠 `rr-hal/src/lib.rs:19` 的 re-export 才编译得过 ⇒ **"能力面已抽象"不等于"依赖面已解耦"**，
@@ -33,7 +33,7 @@
   并把"**路径无关**"这句改为"**契约根由构建期注入后才路径无关**"——机制核今天编译期内嵌仓布局（`rr-ipc/src/protocol/header.rs:289`、`rr-core/src/lib.rs:3`、`rr-mech/src/lib.rs:3`）。
   本轮**零 `.rs`、零 `contracts/*.toml` 改动**；取证＝三路只读代理＋本人逐条复跑，**复跑推翻两条旧断言**（裁-5 的"文档对 批N6/N7 零命中"、裁-11 的"44 处爬路"），照实写进 §24.1。
 - **修订记录（续）**：v0.16（2026-10-17 同日第九轮）**拿"这个切分是最小的吗"量回架构本身**——承
-  [增补轮六全案](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §23（模块化尺子：内聚 / 耦合 / 极小性，
+  [增补轮六全案](../process/dev/0.0.5/增补轮六/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §23（模块化尺子：内聚 / 耦合 / 极小性，
   代码基线 `80af1a9`，发现号新序列 `块-1…块-22`）。本档四处改动：① **§12.1/§12.2 的分档判据改两轴**——原写
   "切线判据＝七位供给齐不齐"（`:1161`）与"三档差别＝这四件的齐备度"（`:1187`），两句互相矛盾、且与本节三档表不符
   （表里 host 与 rtos **都是"七位齐"**，真分它们的是有无进程监督与富文件系统）；同句还把供给数写成"四类"（表是七行），已订正。
@@ -49,7 +49,7 @@
   三处把它当校验位引用，而 §5 行 ⑧ 只列 ⑧-a/⑧-b ⇒ **被引用的位号集不等于宣布的位号集**；补位即改分母（31→32），
   **本轮不自改**，双向清点归 **基-28**。这条订正是 块-1"各自分类各自数"在第九轮写回里的自我复发，按 实-16 由抄侧复跑抓出。
   v0.15（2026-10-15 同日第八轮）**拿"设计说 X、实装是 Y"量回已落盘的代码**——承
-  [增补轮六全案](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §22（实装对账审查：
+  [增补轮六全案](../process/dev/0.0.5/增补轮六/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §22（实装对账审查：
   十二条发现 `实-1…实-12`，代码基线 `b11dd2f`，实测三册提交 **零文档回写**）。本档五处改动：
   ① **装载期判定位分母 24 → 31**（§12.3 / §12.6 / §13 / §14 同批）：+4 是**追认代码已实装而设计未登记的四条**
   （`rrd/src/profile.rs:989` `direction` 与角色一致 / `:998` `role.slot ∈ slots` / `:1017` 多实例共键须同值 /
@@ -84,7 +84,7 @@
   `RR3_PIN_DERIVED_KEYS: [&str; 7]`，全案 §22 实-9）都是当时的口径，只加本指针不改写——**引用一律以 §14 速查为准**。
   本轮**零 `.rs`、零契约文件改动**。
   v0.14（2026-10-15 同日第七轮）**拿"这条设计有没有终点"量回前六轮立起来的一切**——承
-  [增补轮六全案](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §21（闭合性审查：十一条断头 T-1…T-11）。
+  [增补轮六全案](../process/dev/0.0.5/增补轮六/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §21（闭合性审查：十一条断头 T-1…T-11）。
   本档三处改动：① **§12.8 接缝四由"定形四件"扩为五件**，新立 `contracts/platform/<平台>.toml`——
   装载校验 ④-b/⑤-a/⑤-b/⑧-a/⑧-b **五个判定位一直在读这张表，而它从头到尾没有住处**（索引 §11 新立 **L-28 判据前件未立**：
   判据写得再严，判的东西不存在，建成即全红而施工者无处改绿，这与"恒真判据"是同一枚硬币的两面）；
@@ -96,7 +96,7 @@
   撞名（索引 §11 新立 **L-30 标识符序列没有唯一登记处**：撞名只在引用侧发现，而那时已经写进去了）。
   本轮**零 `.rs`、零契约文件改动**；施工编排与字段级设计仍不在本档（归全案 §4/§9）。
   v0.13（2026-10-15）**拿"什么观测能推翻它"逐条量回设计本身**——承
-  [增补轮六全案](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §18（证伪审查轮：32 条命中，
+  [增补轮六全案](../process/dev/0.0.5/增补轮六/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §18（证伪审查轮：32 条命中，
   其中 **14 条打在本系列文档自己写的裁定与编排上**；7 处撤回单列 §18.8，审过成立 10 条单列 §18.7）。七处改动：
   ① §12.3/§4.3 `[hardware]` 与 `[pins]` 的**关系定形**：六个物理绑定键
   （`pwm_chip`/`pwm_channel`/`gpio_chip`/`gpio_led_line`/`gpio_relay_line`/`i2c_bus`+`ina219_addr`）
@@ -158,7 +158,7 @@
   ⑥ §13 新增六门（四表一致 / 资源装载 / 生成物一致 / 行程单真值点 / 面板覆盖率 / 板 crate 进门），
   **全部标"待建"**——把待建门写成现有强度正是索引 §11 L-6 那类病。
   施工编排与字段级设计不在本档（归
-  [0.0.5 增补轮六全案](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md)）。
+  [0.0.5 增补轮六全案](../process/dev/0.0.5/增补轮六/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md)）。
   v0.10（2026-10-12）**版本边界重划的架构侧对齐**——承
   [ADR-0020](../process/adr/ADR-0020-版本边界-开发收口与实机验证与验证后整理.md)：版本按**交付物类型**分窗
   （0.0.5 产码 / 0.0.6 与 0.0.7 产证据 / 0.0.8 产结构）。本节新增的不是新模型，而是把 §12.6 那条
@@ -405,7 +405,8 @@ rock3/
 │   │   │                             patches/（内核/U-Boot 回移补丁，核对清单见其 README）
 │   │   └── distro/                ← 快路轨：payload 打包（.deb/OCI）· systemd units ·
 │   │                                 boards/（发行版实板笔记）
-│   ├── ota/                       ← README.md + partition-layout.md（A/B/factory 布局文档）
+│   ├── ota/                       ← README.md（槽位 CLI）；A/B/factory 布局文档已归
+│   │                                  docs/design/分区布局与OTA槽位.md（2026-11-25 批46）
 │   │   └── rr3-ota-ctl/           ← 独立 workspace，bin 名 `rr3-ota-ctl`（升级入口 CLI）
 │   ├── runtime/                   ← Rust workspace：members = rr-ipc rr-mech rr-core rr-registry rr-bus rr-hal rr-hal-api rr-ota rrd
 │   │   │                             （Cargo.lock 在 workspace 根，每 crate 各有一份 README.md）
@@ -470,7 +471,10 @@ rock3/
 │                                     cloud,config_store}.rs + config.toml
 │
 ├── tools/                         ← 三个独立 workspace + 门禁脚本（各自 Cargo.lock）
-│   ├── ci/check.sh                ← 规约检查唯一入口；步序与条数只登记在 conventions.md §2
+│   ├── ci/                        ← 规约门（2026-11-25 分层）：根只留 check.sh（唯一入口，
+│   │                                  步序与条数只登记在 conventions.md §2）与 ci-status.sh；
+│   │                                  steps/ 步骤体 · lib/ 公共件 · audit/ 静态审计 ·
+│   │                                  baseline/ 棘轮基线 · platform/ 工作流直调腿
 │   ├── mkmodule/                  ← bin: rr3-mkmod，生成合规模块骨架并自检（tests/gen.rs 回灌契约）
 │   ├── rrctl/                     ← bin: rr3-ctl，status / health / logs / ota 四个子命令
 │   └── sim/                       ← bin: rr3-sim，虚拟设备与 PCM 形状，主机联调
@@ -479,7 +483,10 @@ rock3/
     ├── README.md                  ← 索引：哪类事实只有一个权威落点
     ├── architecture/architecture.md ← 本档（唯一架构图）
     ├── status.md                  ← 唯一实况快照
-    └── process/                   ← conventions.md、naming.md、adr/（ADR-0001~0018）、dev/
+    ├── design/                    ← 模块级细化设计集（architecture 的下一层；含
+    │                                  分区布局与OTA槽位.md，2026-11-25 自 base/ota 归位）
+    └── process/                   ← conventions.md、naming.md、adr/（ADR-0001 起）、
+                                     dev/（2026-11-25 起按版本目录组织，卷首索引 dev/README.md）
 ```
 
 本树只画**已存在的结构**：`base/`、`modules/`、`tools/` 与每个 crate、每个模块目录还各有一份
@@ -770,7 +777,7 @@ v0.8 的"六段"漏了既有的 `[os]`——`rrd/src/profile.rs` 与查册门测
 | `[bindings]` | 格位 → 件（哪个原子件填哪个格） | 换实现件 |
 | `[enabled_slots]` | 模块 → 本形态启用的格位集合 | 裁剪形态 |
 | `[hardware]` | **底板走线**：控制器编号 / 总线 / 设备名 / 速率等物理绑定。键集**不再是九键闭集**——由 `contracts/roles.toml` 的角色词表导出，未知键仍拒（C4"不扩键"随 ADR-0021 裁定 4 作废）。**条件必填**（v0.12，承 [ADR-0022](../process/adr/ADR-0022-代码事实复盘-机制核纯净度与申报面逃逸与安全语义身体.md) 裁定 3；其取值判据经 v0.13 订正为"在册角色 `kind ∈ {signal, power}`"，原写 `kind != logic` 时 `logic` 尚未进取值域）：`[slots].present ∩ enabled_slots` 中任一格需要物理绑定 ⇒ 该段与对应键必填，缺则拒 boot 并点名缺哪个键。**"可选"是为纯 sim 形态设计的，不能被外设最多的形态拿来当缺省**（现例：`profiles/esp32-mini.toml` 整段缺席，而该固件实驱动 SSD1306 + 双轴 + 双麦）。**v0.13 键归属改判**：**七个**物理绑定键（`pwm_chip`/`pwm_channel`/`gpio_chip`/`gpio_led_line`/`gpio_relay_line`/`i2c_bus`+`ina219_addr`；**v0.15 订正计数**：原写"六个"而同一句枚举了七键，裁定源 `rrd/src/profile.rs` 的 `RR3_PIN_DERIVED_KEYS: [&str; 7]` 与其"以枚举为准"注，全案 §22 实-9）**下移为 `[pins]` 的派生视图**，本段只留**三个非引脚键** `alsa_device`/`link_ifname`/**`spi_device`**（**v0.15 订正**：原写两键，而 `contracts/roles.toml:23` 与 `rrd/src/profile.rs:1192-1193` 实装都是三键，全案 §22 实-9）——不这么做，`件 handles[].desc_key → [hardware]` 这条现役注入路径与新增 `[pins]` 就是**同一句柄两份取值**（拟 ⑨-n 注入路径唯一门执法，承全案 §18 F-1）。**`spi_device` 的收口终点**：门 n 的扫面 `RR3_PIN_DERIVED_KEYS` 只有 **7** 个派生键，而 `RR3_ASSEMBLE_DESC_KEYS` 是 **10** 名 ⇒ `spi_device` 今天**合法地**留在本段直给，SPI 器件（MAX7219 点阵）仍走 schema 2 旧路、L-23 对 SPI **未闭**；批N3 随显示面角色（**取决于施工图 §6 第二问：`ui.face` 是否拆 oled/matrix**）把它提升为派生键，扫面 7→8；不拆则它**永久**留本段直给、门 n 对 SPI 永远不闭（挂敞口账）。**2026-10-19 对表：批N3 件六已收口**——`ui.face` 拆格裁定 2 落地为 **SPI 词形规则**（`spi_device` = controller `spidev<N>` ＋ `channel` 的派生对，非拆 slot），角色 `ui.face.spi` 进 `contracts/roles.toml`（过 slots 两段式 ＋ roles 前缀两条例），`RR3_PIN_DERIVED_KEYS` 7→8，profiles 两份 `[[pin]]` 迁移完毕、本段只留两非引脚键，装载红例三条随步 ①b 进 CI；**角色名不在本档预定**——造名须过 slots 两段式 + roles 前缀＝格名动作侧两条例（全案 §4.2 已就地收回原稿造的一个名，属 F-5 病形） | 换底板 |
-| `[pins]` | **角色 → 槽位绑定**（v0.11 新立）：`role / instance / controller / channel / physical[] / direction / rail / mux_group[] / failsafe`；装载期十项资源校验在此判（§12.8 接缝四、[增补轮六全案](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §5）。**2026-10-19 对表：批N3 件八加第十键 `device`**——I2C pin 的器件型号身份键（词表 `RR3_PIN_KEYS` 10→11），共址判据 ③-c 的身份面：同 (bus,addr) 共址须同 `device` 非空且型号在册，P-5 共读源由此合法 | 换走线 / 换外设 |
+| `[pins]` | **角色 → 槽位绑定**（v0.11 新立）：`role / instance / controller / channel / physical[] / direction / rail / mux_group[] / failsafe`；装载期十项资源校验在此判（§12.8 接缝四、[增补轮六全案](../process/dev/0.0.5/增补轮六/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §5）。**2026-10-19 对表：批N3 件八加第十键 `device`**——I2C pin 的器件型号身份键（词表 `RR3_PIN_KEYS` 10→11），共址判据 ③-c 的身份面：同 (bus,addr) 共址须同 `device` 非空且型号在册，P-5 共读源由此合法 | 换走线 / 换外设 |
 
 `[platform]` 与 `[hardware]` 必须分开：一颗芯片可以配若干底板，把两者混在一段里，换底板就要改平台档、
 换平台就要重写引脚——"板 = 数据"的分工就散了。**注**：`enabled_slots` 原名 `[faces]`，为避免与
@@ -780,7 +787,7 @@ v0.8 的"六段"漏了既有的 `[os]`——`rrd/src/profile.rs` 与查册门测
 `[bindings]` / `[enabled_slots]` / `[hardware]` 四段**，`[platform]` `[supplies]` `[slots].present`
 三段随 §12.8 注入接缝一起在第 III 轮批J 落（进度见 status.md）；`[pins]` 是 v0.11 新立的第八段，
 本节只写它的语义，其 schema、校验与 profiles 实例归
-[增补轮六全案](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) 批N1。
+[增补轮六全案](../process/dev/0.0.5/增补轮六/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) 批N1。
 
 **机型集是钉死的（v0.9 写实，防漂移）**：查册门测试 `rr-registry/tests/contract.rs` 断言
 `profiles/` 目录的 `.toml` 集合逐名在册（"profiles/ 机型集合漂移"即红；当前 8 份 =
@@ -1291,7 +1298,7 @@ SY8801 ~2A 堵转裕量），软件契约没有对象**（`rr-hal-api` 的 `Rr3P
 **运行期**按档降载（`Mild` 串行 + 降亮、`Severe` 拒动）。今天板侧的 `AXIS_SETTLE_MS` 串行整定与
 `OLED_CONTRAST_LEVELS` 逐级降亮，就是这三层的**未经建模版本**——它们是行为，不是数据结构，所以换板学不到。
 职责分界要写清：第七位**不进**下面那个"四个 port 形状"的代码块（声明归描述符，**读它**归能力面新 trait
-`Rr3Rail`，随 [增补轮六全案](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) 批N2 立）；
+`Rr3Rail`，随 [增补轮六全案](../process/dev/0.0.5/增补轮六/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) 批N2 立）；
 阈值的**取值**仍受"无真板对拍前 `armed=false`、不接闸、不 claim"的既有纪律约束（`RAIL_GATE_ARMED` 那条）。
 
 **四类供给的可实现接口（v0.9 补——此前只有自然语言清单，移植者无从下手）**：一个 port 交付的是
@@ -1352,8 +1359,8 @@ pub trait Rr3ByteStream {                     // 4. 传输实现（§12.8 接缝
   或动码，而不是改装配单。**"板 = 数据"的成立范围到"底板走线 + 供给声明"这一层为止，平台档那一层未闭**
   （v0.7 那句"换板只改数据"写得过满，v0.8 收到实况，v0.11 再按实现订正一次）。
   另：`[supplies]` 今天在册的是六位（看门狗三 + 时序三），**第七位能源域 `[[supplies.domain]]` 尚无
-  schema 与消费者**，随 [增补轮六全案](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) 批N2 落。
-- **未收口（v0.11 新立，[增补轮六全案](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) 批N1/批N2）：角色绑定面与能源域**。
+  schema 与消费者**，随 [增补轮六全案](../process/dev/0.0.5/增补轮六/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) 批N2 落。
+- **未收口（v0.11 新立，[增补轮六全案](../process/dev/0.0.5/增补轮六/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) 批N1/批N2）：角色绑定面与能源域**。
   `[pins]` 与 `[[supplies.domain]]` 是本轮新立的语义，今天**无 schema、无消费者**；它们要解决的问题是
   具体且昂贵的：同类引脚冲突跨平台出现过**两次**——ESP32 的 GPIO16/17↔I2C0 实际撞上并被迫改线
   （迁到 18/19，而 19 又与点阵 VSPI 预留同脚），Pi 路线的 I2S↔硬件 PWM 在 GPIO18/19 的互斥
@@ -1437,7 +1444,7 @@ provides / subscribes / exposes、能力格绑定、§6 的消息语义）**不�
 
 **承载体（v0.9 写实，原先无主语）**：矩阵假定"能真正执行的跨架构流水线"承载它，但远端 atomgit 的
 Actions 从不运行（敞口见 status.md）。故规定：矩阵的**默认承载体是一组钉死版本的标准化环境，不是某台机器**（v0.9 同日四轮改判，D4 裁定，定形表见
-[0.0.5 方案 §13.2](../process/dev/0.0.5版本洛克三号对齐与裁定方案.md)）：E1 host-x86_64（`rust:*-bookworm`
+[0.0.5 方案 §13.2](../process/dev/0.0.5/0.0.5版本洛克三号对齐与裁定方案.md)）：E1 host-x86_64（`rust:*-bookworm`
 + musl/arm64 target + qemu-user + docker）、E2 xtensa-none-elf（esp-rs fork v1.90.0.0 镜像，
 `build-std=core,alloc`）、E3 espidf-std（`espressif/idf` + esp-clang）三个容器出 ①②③④⑤⑥ 六列，
 本地 WSL2 与 GitHub-hosted runner 只是同一环境的两种载体；入口仍是 `tools/ci/platform/matrix.sh`（随批K 建），
@@ -1500,7 +1507,7 @@ RK3566 与 ESP32 之间**不存在协处理器关系**（"外设挂 ESP32 协处
 "无载体 + 触发条件"两本账之一）。理由很直白：本仓的诚实标注散在十几处注记里都很到位，
 但**没有任何一处回答"新人今天能把这台机器做到哪一步"**——生产面的真实缺口不是缺注释，是缺这张表。
 它由结构化开放项数据生成（不许手写，手写的表必然漂），施工与判据见
-[增补轮六全案](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §17（批N5）。
+[增补轮六全案](../process/dev/0.0.5/增补轮六/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §17（批N5）。
 
 **证据对象必须写在行名上（v0.10 补，承 [ADR-0020](../process/adr/ADR-0020-版本边界-开发收口与实机验证与验证后整理.md)）**：
 矩阵的轻承载档行今天七格齐（0.0.7 批G），但它的**证据对象是诊断哨兵**——一个只用两脚做 UART、
@@ -1576,7 +1583,7 @@ pub trait Rr3ByteStream {
 
 **接缝四 资源与语义缝（平台 ↔ 物理资源；真值点 ↔ 板侧副本）** · v0.11 新立（
 [ADR-0021](../process/adr/ADR-0021-三独立形态与资源供给面-能力原子化补课.md) 裁定 3/7/8），实施归
-[增补轮六全案](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) 批N1
+[增补轮六全案](../process/dev/0.0.5/增补轮六/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) 批N1
 **前三条缝把"能不能跑起来"接通了，没有一条管"接了什么物理东西、给它多少电"**——本周的硬件损失
 （舵机堵转发烫、轨压拉塌致 BOD 复位、外设点不亮、引脚互斥跨平台两次复发）全部发生在缝四的位置。定形五件：
 
@@ -1596,7 +1603,7 @@ pub trait Rr3ByteStream {
    三条边界同批定死：表或段**缺失即红**（不是跳过）；`[[conflict]]` 空数组须显式写并带评审注记；
    **栈/堆预算不住这里**（住 `[supplies].budget`）、**器件型号能力不住这里**（住 `contracts/devices.toml`）——
    "芯片有什么 / 这块板供多少 / 这颗器件叫什么"是三问三个主人，**不许并表**。
-   细则唯一落点 = [增补轮六全案 §4.6](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md)，施工 = 批N1 **基-22**。
+   细则唯一落点 = [增补轮六全案 §4.6](../process/dev/0.0.5/增补轮六/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md)，施工 = 批N1 **基-22**。
 
 **一处必须写明的结构性不对称**：`esp-idf-hal` 的 `LedcDriver::new`/`UartDriver::new` 需要**具名引脚类型**，
 无法由 `i32` 常量构造（板侧 `board.rs` 的引脚真值段自述此事）。所以引脚编号在全仓**不可能只出现一次**：
@@ -1649,7 +1656,7 @@ pub trait Rr3ByteStream {
 **本表只写"判据"，不写"谁来建"**——v0.13 及以前这两件事混在拟步号里，结果是**二十把待建门没有一把有自己的工单**
 （L-29）。自 v0.14 起，每把待建门另有一张**基座轨工单 `基-1…基-25`**（v0.15 由 22 扩到 25：+基-23 出厂轨装载面齐装、+基-24 桥上配置腿、+基-25 装载消费真值集清单三处判等，三件均**不占拟步号**；与拟步号一一对应的是基-1…基-20；
 批次、前置、"建成即红 → 转绿批或敞口行"三列的表在
-[增补轮六全案 §21.4](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md)，
+[增补轮六全案 §21.4](../process/dev/0.0.5/增补轮六/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md)，
 命名空间登记在 [conventions §6](../process/conventions.md)）。**引用一把门要写三个号里的那一个**：
 设计编号（门 h）、拟步号（⑨-f）、工单号（基-6）——三者各自成立，裸写"第 8 把门"不合规。
 
@@ -1674,8 +1681,8 @@ pub trait Rr3ByteStream {
 | 契约冻结 | 128B 头/payload 枚举对 `envelope.schema.json` + golden 逐字节；主题/格只增不改 | `envelope_meta` + 形状 pin（§6、§4.3） | **fail-closed** |
 | 层界单向 | 依赖只从上层指向下层，无反向、无模块 crate 互依赖 | 链接图断言（承 §2 原则、ADR-0002） | **fail-closed** |
 | 准入三问留痕 | 新建/收编原子件的三问结论登记录（评审项，非静态门）；第①问的可答法见 §4.0.3 | 评审 | 记录留痕 |
-| **六表一致**（v0.11 拟"四表"，**v0.13 改判为六表**） | 实际参与判等的是**六张**而非四张：`contracts/roles.toml`、`contracts/slots.toml`、`RR3_ASSEMBLE_HANDLE_TRAITS`（v0.15 实测 **7** 名：`Rr3GpioOut`/`Rr3PwmServo`/`Rr3AudioSource`/`Rr3AudioSink`/`Rr3Power`/`Rr3Link`/`Rr3Display`，`assemble.rs:44-52`；本全案要立 7 个**句柄面** trait ⇒ 扩至 14 名）、`RR3_ASSEMBLE_DESC_KEYS`（v0.15 实测 **10** 名，含 `spi_device`，`assemble.rs:56-67`；**此前文档写 9 键，本轮读码确定为 10**）× 件 `handles[].desc_key`、`[pins]` 字段词表、平台 `role→具名构造` 表（键为三元 `(controller, role, instance)`）；其中两张今天已在 CI 有执法。**v0.13 同时补 `roles.toml` 两个必填键**：`iface`（值域 = 扩面后的 trait 表）与 `requires`（值域 = 下移后的键词表）——首版没有它们，所以"∃trait(role) / ∃key(role)"这两条判据**无判据对象**，门建成即全红且**无从改绿**。`kind` 取值域一并封闭为 `signal｜power｜logic`（ADR-0022 裁定 3.1 的条件必填引用过不存在的 `logic`） | 静态断言（拟 `check.sh` ⑨-a——**2026-10-18 对表：已建·报告模式**（批N2 件六）：报告三段 A 未覆盖 normal 格／B roles 四外键悬空（应恒 0、硬红不进基线）／C TRAITS·PIN_KEYS 差集，红账对低水位基线 `tools/ci/baseline/gate-a-baseline.txt`（count 不增机器判据，键集自代码常量导出）；**转红随基-39 全刀落完**——switch/charger 归批N3，logic 内建格覆盖口径归转红收口件另裁）**2026-10-19 对表：批N3 件八已收口**——`RR3_ASSEMBLE_HANDLE_TRAITS` 7→9（+`Rr3Sensor`/`Rr3DigitalIn` 契约面先行，无实现件），`power.charger.meter`/`sensor.env.meter`/`sensor.imu.meter` 三计量角色进 `roles.toml`（`device` pin 键同批进场，`RR3_PIN_KEYS` 10→11），A 14→13（power.charger 格获覆盖；sensor.env/imu 格仍 placeholder 不在分母）、C 7→8（trait 差集 +`Rr3DigitalIn`），红账 21 = 基线 21 持平。**2026-11-12 对表（P1 审计件四，转执法收口）**：红账 **21→0**、基线归零、本门由报告模式**转执法**（任何新红即 FAIL）——两件事同批落：① 真覆盖——`net.wifi.link`/`audio.capture.mic`/`audio.playback.spk`/`audio.vad.gate` 四格能力面角色进 `roles.toml`（`kind = logic`：按头注定义无 `[pins]` 物理绑定，`requires`/`derives` 双显式空；iface 取 `Rr3Link`/`Rr3AudioSource`/`Rr3AudioSink` 真实承载面），`rr3_role_gaps` 同批把 logic 角色移出"缺角色"点名面（否则能力面角色化反把 boot 判降）；② 口径裁定——A 段分母收为 `layer = body` 的 normal 格（base 内建四族与 cognition 软件四格无 `[pins]` 角色域，计入即永久红），C 段豁免 `Rr3DigitalIn`（S-10 数字输入面未立项、零格位消费者）与 `role`/`instance`/`direction`/`mux_group` 四枚永不进 `requires` 的键（自指/条件键/独立判据/互斥组归平台 conflicts），逐条理由写在 `check.sh` ⑨-a 段内。审计存照 `docs/process/dev/0.0.8静态生产审计-第七轮-P1落地-2026-11-12.md` | fail-closed（B 段悬空即红、红账回涨即红；A/C 已知红按基线放行、按批转绿；**"表数错了"本身就是要判红的的第一件事**） |
-| **资源与接线装载门**（v0.11 拟，**v0.13 判据重写**） | §12.8 接缝四的装载期校验逐条判，**口径是"十条 / 31 个判定位"**（v0.15；v0.11 写"十项"掩盖了每条实际含 2–4 个判定位，v0.13 细化为 24）。v0.13 补的四处：③ **不双占判三个资源空间**（脚 `physical` / `(controller, channel)` / `(bus, addr)`——板侧 LEDC 是"脚 + 通道"两维，只判脚则双轴同通道仍绿）；④ 互斥组改**双向**（每平台一份 `conflicts` 集，命中同一冲突子集而未声明同组 ⇒ **漏声明即红**；自愿填的 `mux_group` 就是注释搬了家，坑 1 那种"不同脚但同外设矩阵"的冲突它一条也抓不到）；⑤ 拆方向与 **ADC 能力**两半（模拟测点落无 ADC 的脚读回 0 mV ⇒ 档位恒真或恒假）；⑦ 额定电流按 `wire.feeds` 闭包**加总**（逐条判单角色则 1A 主供线载 2.2A 峰值全绿——那正是本周 BOD 的实物形状）；⑧ 对账键定为**三元** `(controller, role, instance)`；⑨ "并发窗口"改为**缺省全部同时**（无数据源的限定词使判据恒可满足）；⑩ 拆栈与堆两条。**v0.15 补的五处**（承全案 §22）：**①-c…①-f** 追认四条代码已实装而设计未登记的判据（`direction` 与角色一致 / `role.slot ∈ slots` / 多实例共键须同值 / controller 词形漂移，`profile.rs:989/:998/:1017/:1027-1040`）；**②-a0** 元判据"每个 `status = normal` 的格至少有一个在册角色"（`roles.toml` 今天只有 4 角色覆盖 4 格，而 normal 格是 18 ⇒ ②-a 的空集包含对其余 **14 格恒真**、永远绿而从未判过，实-7；建即红 14 条如实登记，禁缩分母）；**⑥-c 拆 c1/c2**（装载期 `armed ⇒ sense≠none ∧ max_age_ms>0` 已实判 / 运行期 `age_ms > max_age_ms ⇒ tier = Unknown` 前件是 `Rr3RailState.age_ms`，归 P-15，**一位不得骑两层**否则"⑥-c 已过"不可核，实-11）；**⑦-c 拆 c1/c2**（器件侧额定加总的三个判据对象 `wiring.rated_a`/`feeds` 闭包/`devices.toml peak_ma` **今天全部落盘、零前置**，原挂"等件 demands、批N2"是把 ⑦-c 与 ⑨ 的对象混为一谈，实-4）；**③④ 五位的批次归属**（此前在 §9 五个批次判据列**零归属**，本门是它们唯一的归属处，实-2）。**每条两列必填**：**缺失语义**（留空即红；合法不适用要显式写 `none`/`false`，范式抄仓内既有的 `assemble.rs::no_injection`）与**后果三态**（拒 boot / 降级+点名 / 仅点名——安全相关 ⑤⑥⑦⑨ 一律拒 boot；解开"② 说降级、门 b 说拒 boot"的矛盾）。且**每条带一条反例用例 + 一条留空用例**（把 pan 绑到输入专用脚必须让 boot 变红；把 `rail`/`rated_a` 删掉也必须变红） | 描述符装载门（拟 ⑨-b/⑨-c，**部分建成——三层里缺第三层**：v0.15 实测 **14 / 31** 位已实判；门 n 两条稳态判据已落 `profile.rs:1042-1056`（`b11dd2f` 时点；现行位 :1089-1100，基-37）；反例用例**已有并进 CI**——`profile.rs:1271-1272` 的 `#[cfg(test)] mod tests` 有 **42** 个 `#[test]`、10 处以"反例"注释逐条点名 ①-b/⑥-a…⑥-d/⑦ 与门 n，经 `check.sh:79-80` 步 ①b `cargo test --workspace` 跑；真缺两件 = 反例**未按判定位编号组织**（"31 位每位至少一条反例"今天不可机判）+ **无 ⑨-b/⑨-n 专属执法步**（⑨/⑩/⑪ 在脚本中零命中）。三层分档见全案 §22 实-14；并入 §12.6 矩阵 ④ 列判据）。**入口条件（v0.15，L-31）**：全部 31 位的入口是"装配单在场"，`daemon.rs:248-253` 的 `None` 臂使不传 `--profile` 即合法跳过整张表 ⇒ `--profile` 升必选 + 出厂轨齐装（**基-23**）。**v0.16 施工顺序约束（块-15）：基-25 必须先于基-23**——n1-7 已把 `contracts/platform/<chip>.toml` 变成装载必需件（`profile.rs:894-901` 读不到即**拒 boot**），而 `rr3-pack/src/main.rs:324-327` 仍只打四册、`distro-smoke.sh:91-100` 六条 `must_file` 不含平台册、buildroot `post-build.sh` 一册都不装（`grep -c contracts` = 0）⇒ **先收旁路会把出厂机与装机轨锁死在 boot 前**；今天 sim 轨传整个 `--contracts <仓根>/contracts` 把这个洞完全遮住（CI 因此全绿）。**2026-10-20 对表（批N5 件三）：本约束 host 半边已兑现**——`rr3-pack` 按 `rrd::profile::rr3_runtime_truth_set` 唯一清单照单扩包（＋平台册＋轴档案目录）、`distro-smoke` 补平台册装机断言、buildroot `post-build.sh` 三目录整目录随装（`280da7b`/`497e1a6`；OTA 消费方判据冻结在 `base/ota/partition-layout.md` 批N5 占位随 M6，espflash 烧录半边等真板）；历史缺口表述为 v0.16 时点取证，按纪律保留／**2026-10-20 对表（批N5 件四，基-23 收官）**：入口条件旁路修法半边已落——`--profile` 升必选（cli parse 双缺即拒，`8b1390c`）＋出厂轨 `S99rrd` 改传 `--socket`/`--contracts`/`--profile` 三参数（与 `rrd.service` ExecStart 逐字同源）＋安装根迁 `/usr/lib/rockrobot3`（`ff2f318`，镜像级断言随装配冒烟 22 项）——"None 臂跳过整张表"自此非 0 退出不可达，31 位入口条件由"装配单在场"升为"装配单必在场"；真跑证据（出厂机启动日志＋坏接线档拒起对照）仍归敞口 20 真板批 | fail-closed——**缺省语义不写清的判据等于没有判据；入口条件能被省略参数绕开的门等于没有门** |
+| **六表一致**（v0.11 拟"四表"，**v0.13 改判为六表**） | 实际参与判等的是**六张**而非四张：`contracts/roles.toml`、`contracts/slots.toml`、`RR3_ASSEMBLE_HANDLE_TRAITS`（v0.15 实测 **7** 名：`Rr3GpioOut`/`Rr3PwmServo`/`Rr3AudioSource`/`Rr3AudioSink`/`Rr3Power`/`Rr3Link`/`Rr3Display`，`assemble.rs:44-52`；本全案要立 7 个**句柄面** trait ⇒ 扩至 14 名）、`RR3_ASSEMBLE_DESC_KEYS`（v0.15 实测 **10** 名，含 `spi_device`，`assemble.rs:56-67`；**此前文档写 9 键，本轮读码确定为 10**）× 件 `handles[].desc_key`、`[pins]` 字段词表、平台 `role→具名构造` 表（键为三元 `(controller, role, instance)`）；其中两张今天已在 CI 有执法。**v0.13 同时补 `roles.toml` 两个必填键**：`iface`（值域 = 扩面后的 trait 表）与 `requires`（值域 = 下移后的键词表）——首版没有它们，所以"∃trait(role) / ∃key(role)"这两条判据**无判据对象**，门建成即全红且**无从改绿**。`kind` 取值域一并封闭为 `signal｜power｜logic`（ADR-0022 裁定 3.1 的条件必填引用过不存在的 `logic`） | 静态断言（拟 `check.sh` ⑨-a——**2026-10-18 对表：已建·报告模式**（批N2 件六）：报告三段 A 未覆盖 normal 格／B roles 四外键悬空（应恒 0、硬红不进基线）／C TRAITS·PIN_KEYS 差集，红账对低水位基线 `tools/ci/baseline/gate-a-baseline.txt`（count 不增机器判据，键集自代码常量导出）；**转红随基-39 全刀落完**——switch/charger 归批N3，logic 内建格覆盖口径归转红收口件另裁）**2026-10-19 对表：批N3 件八已收口**——`RR3_ASSEMBLE_HANDLE_TRAITS` 7→9（+`Rr3Sensor`/`Rr3DigitalIn` 契约面先行，无实现件），`power.charger.meter`/`sensor.env.meter`/`sensor.imu.meter` 三计量角色进 `roles.toml`（`device` pin 键同批进场，`RR3_PIN_KEYS` 10→11），A 14→13（power.charger 格获覆盖；sensor.env/imu 格仍 placeholder 不在分母）、C 7→8（trait 差集 +`Rr3DigitalIn`），红账 21 = 基线 21 持平。**2026-11-12 对表（P1 审计件四，转执法收口）**：红账 **21→0**、基线归零、本门由报告模式**转执法**（任何新红即 FAIL）——两件事同批落：① 真覆盖——`net.wifi.link`/`audio.capture.mic`/`audio.playback.spk`/`audio.vad.gate` 四格能力面角色进 `roles.toml`（`kind = logic`：按头注定义无 `[pins]` 物理绑定，`requires`/`derives` 双显式空；iface 取 `Rr3Link`/`Rr3AudioSource`/`Rr3AudioSink` 真实承载面），`rr3_role_gaps` 同批把 logic 角色移出"缺角色"点名面（否则能力面角色化反把 boot 判降）；② 口径裁定——A 段分母收为 `layer = body` 的 normal 格（base 内建四族与 cognition 软件四格无 `[pins]` 角色域，计入即永久红），C 段豁免 `Rr3DigitalIn`（S-10 数字输入面未立项、零格位消费者）与 `role`/`instance`/`direction`/`mux_group` 四枚永不进 `requires` 的键（自指/条件键/独立判据/互斥组归平台 conflicts），逐条理由写在 `check.sh` ⑨-a 段内。审计存照 `docs/process/dev/0.0.8/静态生产审计/0.0.8版本静态生产审计-第七轮-P1落地.md` | fail-closed（B 段悬空即红、红账回涨即红；A/C 已知红按基线放行、按批转绿；**"表数错了"本身就是要判红的的第一件事**） |
+| **资源与接线装载门**（v0.11 拟，**v0.13 判据重写**） | §12.8 接缝四的装载期校验逐条判，**口径是"十条 / 31 个判定位"**（v0.15；v0.11 写"十项"掩盖了每条实际含 2–4 个判定位，v0.13 细化为 24）。v0.13 补的四处：③ **不双占判三个资源空间**（脚 `physical` / `(controller, channel)` / `(bus, addr)`——板侧 LEDC 是"脚 + 通道"两维，只判脚则双轴同通道仍绿）；④ 互斥组改**双向**（每平台一份 `conflicts` 集，命中同一冲突子集而未声明同组 ⇒ **漏声明即红**；自愿填的 `mux_group` 就是注释搬了家，坑 1 那种"不同脚但同外设矩阵"的冲突它一条也抓不到）；⑤ 拆方向与 **ADC 能力**两半（模拟测点落无 ADC 的脚读回 0 mV ⇒ 档位恒真或恒假）；⑦ 额定电流按 `wire.feeds` 闭包**加总**（逐条判单角色则 1A 主供线载 2.2A 峰值全绿——那正是本周 BOD 的实物形状）；⑧ 对账键定为**三元** `(controller, role, instance)`；⑨ "并发窗口"改为**缺省全部同时**（无数据源的限定词使判据恒可满足）；⑩ 拆栈与堆两条。**v0.15 补的五处**（承全案 §22）：**①-c…①-f** 追认四条代码已实装而设计未登记的判据（`direction` 与角色一致 / `role.slot ∈ slots` / 多实例共键须同值 / controller 词形漂移，`profile.rs:989/:998/:1017/:1027-1040`）；**②-a0** 元判据"每个 `status = normal` 的格至少有一个在册角色"（`roles.toml` 今天只有 4 角色覆盖 4 格，而 normal 格是 18 ⇒ ②-a 的空集包含对其余 **14 格恒真**、永远绿而从未判过，实-7；建即红 14 条如实登记，禁缩分母）；**⑥-c 拆 c1/c2**（装载期 `armed ⇒ sense≠none ∧ max_age_ms>0` 已实判 / 运行期 `age_ms > max_age_ms ⇒ tier = Unknown` 前件是 `Rr3RailState.age_ms`，归 P-15，**一位不得骑两层**否则"⑥-c 已过"不可核，实-11）；**⑦-c 拆 c1/c2**（器件侧额定加总的三个判据对象 `wiring.rated_a`/`feeds` 闭包/`devices.toml peak_ma` **今天全部落盘、零前置**，原挂"等件 demands、批N2"是把 ⑦-c 与 ⑨ 的对象混为一谈，实-4）；**③④ 五位的批次归属**（此前在 §9 五个批次判据列**零归属**，本门是它们唯一的归属处，实-2）。**每条两列必填**：**缺失语义**（留空即红；合法不适用要显式写 `none`/`false`，范式抄仓内既有的 `assemble.rs::no_injection`）与**后果三态**（拒 boot / 降级+点名 / 仅点名——安全相关 ⑤⑥⑦⑨ 一律拒 boot；解开"② 说降级、门 b 说拒 boot"的矛盾）。且**每条带一条反例用例 + 一条留空用例**（把 pan 绑到输入专用脚必须让 boot 变红；把 `rail`/`rated_a` 删掉也必须变红） | 描述符装载门（拟 ⑨-b/⑨-c，**部分建成——三层里缺第三层**：v0.15 实测 **14 / 31** 位已实判；门 n 两条稳态判据已落 `profile.rs:1042-1056`（`b11dd2f` 时点；现行位 :1089-1100，基-37）；反例用例**已有并进 CI**——`profile.rs:1271-1272` 的 `#[cfg(test)] mod tests` 有 **42** 个 `#[test]`、10 处以"反例"注释逐条点名 ①-b/⑥-a…⑥-d/⑦ 与门 n，经 `check.sh:79-80` 步 ①b `cargo test --workspace` 跑；真缺两件 = 反例**未按判定位编号组织**（"31 位每位至少一条反例"今天不可机判）+ **无 ⑨-b/⑨-n 专属执法步**（⑨/⑩/⑪ 在脚本中零命中）。三层分档见全案 §22 实-14；并入 §12.6 矩阵 ④ 列判据）。**入口条件（v0.15，L-31）**：全部 31 位的入口是"装配单在场"，`daemon.rs:248-253` 的 `None` 臂使不传 `--profile` 即合法跳过整张表 ⇒ `--profile` 升必选 + 出厂轨齐装（**基-23**）。**v0.16 施工顺序约束（块-15）：基-25 必须先于基-23**——n1-7 已把 `contracts/platform/<chip>.toml` 变成装载必需件（`profile.rs:894-901` 读不到即**拒 boot**），而 `rr3-pack/src/main.rs:324-327` 仍只打四册、`distro-smoke.sh:91-100` 六条 `must_file` 不含平台册、buildroot `post-build.sh` 一册都不装（`grep -c contracts` = 0）⇒ **先收旁路会把出厂机与装机轨锁死在 boot 前**；今天 sim 轨传整个 `--contracts <仓根>/contracts` 把这个洞完全遮住（CI 因此全绿）。**2026-10-20 对表（批N5 件三）：本约束 host 半边已兑现**——`rr3-pack` 按 `rrd::profile::rr3_runtime_truth_set` 唯一清单照单扩包（＋平台册＋轴档案目录）、`distro-smoke` 补平台册装机断言、buildroot `post-build.sh` 三目录整目录随装（`280da7b`/`497e1a6`；OTA 消费方判据冻结在 `docs/design/分区布局与OTA槽位.md` 批N5 占位随 M6，espflash 烧录半边等真板）；历史缺口表述为 v0.16 时点取证，按纪律保留／**2026-10-20 对表（批N5 件四，基-23 收官）**：入口条件旁路修法半边已落——`--profile` 升必选（cli parse 双缺即拒，`8b1390c`）＋出厂轨 `S99rrd` 改传 `--socket`/`--contracts`/`--profile` 三参数（与 `rrd.service` ExecStart 逐字同源）＋安装根迁 `/usr/lib/rockrobot3`（`ff2f318`，镜像级断言随装配冒烟 22 项）——"None 臂跳过整张表"自此非 0 退出不可达，31 位入口条件由"装配单在场"升为"装配单必在场"；真跑证据（出厂机启动日志＋坏接线档拒起对照）仍归敞口 20 真板批 | fail-closed——**缺省语义不写清的判据等于没有判据；入口条件能被省略参数绕开的门等于没有门** |
 | **生成物一致性**（v0.11 拟） | 重跑生成器（主题串 / payload 形状 / task 位形 / 表情白名单 → 板侧副本）后 `git diff --quiet`；不等即红并点名漂移行 | 静态断言（**2026-10-16 对表：已建**（n1-8 `bbc853d` 起 `step "⑨-d 生成物一致性…"`＝`rr3-codegen --check` 重跑 diff 为空）） | fail-closed |
 | **行程单真值点**（v0.11 拟，**v0.13 判据补强**） | 机械行程字面量在全仓的**读者数 = 1**（今天三处：servo schema 的线格式域、`rr3-act/config.toml` 的 `angle_limit_deg`、板侧 `Axis::range()` 派生集，且前两处的注释错声称板侧与它们一致）；收敛到执行件档案后由本门守。**v0.13 的关键补强：读者集合必须包含"数据→数据"的引用**——实读 `modules/rr3-act/atoms/servo/assemble.toml:16-17`，两个 `ops[].src_key` 同引 `rr3-act.servo.angle_limit_deg`，纯标识符 grep 看不见这条；不补则档案落地后 config 那份仍被 ops 引 ⇒ **两处真值、门照样绿**。判据改写为"该键在**档案之外**的读者数为 0"，读者集合 = 码内标识符 ∪ `ops[].src_key` ∪ `[pins]`/`domains` 引用位 ∪ 生成器输入 | 静态断言（**2026-10-19 对表：已建**（批N3 件五④，`af61210` 起 `step "⑨-e 行程真值单点…"`——旧行程键名＋板侧三旧手写行程常量名全仓零命中 fail-closed，注释/断言提及字面量名同红；三处互斥已收敛为档案一处（件五②③，`bfe3505`/`ee18519`）；读者集合定义随 act **A-17**① 已定形进门注释与 schema 描述） | fail-closed |
 | **注入路径唯一**（**v0.13 新立**，承全案 §18 F-1 / 索引 L-23） | 同一 `handle(trait, key)` 的取值**只能有一条来源路径**：`[pins]` 派生，或 `[hardware]` 直给，二者并存即拒 boot 并点名两份取值。稳态判据 = **七个**物理键在 `[hardware]` 中**出现即红**（v0.15 订正计数，原写"六个"而枚举七键，裁定源 `RR3_PIN_DERIVED_KEYS: [&str; 7]`（`rrd/src/profile.rs`，取证时点 `e9a764f` :92），全案 §22 实-9；**v0.15 实测：两条稳态判据已落（`profile.rs` 门 n 段，取证时点 `e9a764f` :1089-1100；v0.15 时点记 `:1042-1056`），是当时 20 把待建门里唯一有装载期实体的；反例用例也已有并进 CI（`gate_n_hardware_physical_key_is_fatal` `profile.rs:2347`、`gate_n_coexistence_names_both_values` `:2360`，经步 ①b `cargo test --workspace`），但 `check.sh` 无点名它的 ⑨-n 步 ⇒ 有实现、有反例、**无专属执法步**（实-14）**；扫面不含 `spi_device`，SPI 器件仍走 schema 2 旧路，收口批 N3；**2026-10-19 对表：批N3 件六已收口**——`spi_device` 进派生键集（扫面 7→8 键）、profiles 两份 `[[pin]]` 迁移完毕、装载红例三条进 CI，⑨-n 静态面键集自代码常量导出自动跟随）；迁移期判据 = 两处都有值即红。**这条不是洁癖**：现役路径 `件 handles[].desc_key → [hardware] → descriptor → backend` 一直在生效，`[pins]` 若只是"旁挂第八段"，则装载期说的是 A 份、运行时用的是 B 份，而门只判 A 份 | 装载期**已落**（`profile.rs:1042-1056`）+ 静态拟 ⑨-n **专属步待建**（反例已经步 ①b 进 CI，缺的是点名它的那一步，实-14），随批N1；power **P-13** | fail-closed——**一事实一真值点在这条路上最容易破，因为破它的是"新加的那一层"而不是"抄错的那一次"** |

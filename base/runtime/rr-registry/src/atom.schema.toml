@@ -1,5 +1,5 @@
 # 原子件 manifest（atoms/<名>/atom.toml）的字段契约（0.0.5 批B①，ADR-0019）
-# 逐行来源：docs/process/dev/0.0.5版本洛克三号对齐与裁定方案.md §8 批B 行、§9 设计要点
+# 逐行来源：docs/process/dev/0.0.5/0.0.5版本洛克三号对齐与裁定方案.md §8 批B 行、§9 设计要点
 # 消费方：base/runtime/rr-registry/src/atom.rs（校验实现）、tools/mkmodule（原子五件套生成自检）
 # 演进：只增不改；破坏性变更须升 schema_version 并同步 rr-registry 测试
 # 引用：ADR-0019 裁定 1（Atom=填一个格、不可再分、只含机制、板无关）、

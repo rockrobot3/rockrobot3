@@ -42,7 +42,7 @@ pub struct Rr3AxisWriteArgs {
     pub candidate: PathBuf,
 }
 
-const USAGE: &str = "用法: axis_write --profile <装配单.toml> --candidate <候选档案.toml>\n说明: 执行件档案写入面（批N3 件四）——候选档案过装载全判据（十四键全键必填、类型域界、词表在册、行程自洽、pin 外键 ∈ 装配单 [[pins]]）后，原子落盘到 hardware/<形态>/axis/<instance>.toml（tmp→fsync→rename 唯一写路径）。坏目标不覆盖；同 pin 异名副本拒写（boot 链恰一份合法才投影）。产线标定流程见 docs/process/dev/真件装配与标定手册.md 件2b。";
+const USAGE: &str = "用法: axis_write --profile <装配单.toml> --candidate <候选档案.toml>\n说明: 执行件档案写入面（批N3 件四）——候选档案过装载全判据（十四键全键必填、类型域界、词表在册、行程自洽、pin 外键 ∈ 装配单 [[pins]]）后，原子落盘到 hardware/<形态>/axis/<instance>.toml（tmp→fsync→rename 唯一写路径）。坏目标不覆盖；同 pin 异名副本拒写（boot 链恰一份合法才投影）。产线标定流程见 docs/process/dev/0.0.8/0.0.8版本真件装配与标定手册.md 件2b。";
 
 /// 路径型开关取值：缺参数与疑似开关的值都拒（与 rrd cli 的
 /// `need_path_value` 同一条口径——fail-open 的形状两处都不许有）。

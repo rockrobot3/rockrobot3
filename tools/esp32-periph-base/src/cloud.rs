@@ -2,7 +2,7 @@
 //! 板侧云 TTS/对话 worker（W4-2b 起，W7-b2 改流式）：有界作业队列 → NVS 配置 →
 //! 4 KB 流式收 PCM → 16 KB 播放环；ASR/LLM 仍走整段小 JSON。
 //!
-//! 契约（docs/process/dev/单板全链云API契约-2026-11-19.md）：
+//! 契约（docs/process/dev/0.0.8/单板全链/0.0.8版本单板全链云API契约.md）：
 //! - 只请求 `response_format=pcm`、16 kHz；不做 MP3/AAC 解码；
 //! - 单次 8 s 超时、最多 2 次尝试、500 ms 间隔；429/5xx/传输失败可重试；
 //!   流式 TTS 一旦开始播不再重试（重放音频比失败更糟）；

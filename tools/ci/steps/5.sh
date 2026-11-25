@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# ⑤ 文档门步骤体（空文档 / 相对断链 / 导航漏链；列表打空即门禁失效）。
+# ⑤ 文档门步骤体（空文档 / 相对断链 / 导航漏链 / docs/ 外散落 md；列表打空即门禁失效）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 fail via run。
 
 check_docs() {
@@ -37,6 +37,18 @@ check_docs() {
                     || printf '导航漏链  %s\n' "$f" >> "$bad" ;;
     esac
   done < "$list"
+  # 第四判据（2026-11-25 批46 裁定）：docs/ 之外每目录至多一份 md 且必须是 README.md，
+  # 专题文档一律归 docs/design 或 docs/reference。豁免两类：base/os/（Buildroot 外部树
+  # 与板卡笔记随外树布局走）；仓根 README_zh.md（开源双语说明）。
+  while IFS= read -r f; do
+    case "$f" in docs/*|base/os/*) continue ;; esac
+    case "$(basename "$f")" in
+      README.md) ;;
+      README_zh.md) [ "$(dirname "$f")" = "." ] \
+                      || printf '散落文档  %s\n' "$f" >> "$bad" ;;
+      *) printf '散落文档  %s\n' "$f" >> "$bad" ;;
+    esac
+  done < "$list"
   if [ -s "$bad" ]; then cat "$bad"; rm -f "$list" "$bad" "$nav"; return 1; fi
   rm -f "$list" "$bad" "$nav"
 }
@@ -45,7 +57,8 @@ rr3_step_5() {
   run check_docs
 }
 
-# 自检（2026-11-24）：夹具仓四例——好档通过 / 空文档红 / 断链红 / 导航漏链红。
+# 自检（2026-11-24，2026-11-25 批46 补第四判据三例）：夹具仓七例——好档通过 / 空文档红 /
+# 断链红 / 导航漏链红 / docs/ 外散落 md 红 / base/os 豁免通过 / 仓根 README_zh 豁免通过。
 # 文档门的判据（列表打空、链接归一、README 覆盖）腐化时先在这里红，而不是在
 # 真仓上静默放行。调用方见 tools/ci/platform/docs_gate_selftest.sh。
 check_docs_selftest() {
@@ -84,6 +97,14 @@ check_docs_selftest() {
     && ( cd "$td/broken" && git add -A ) && expect "$td/broken" 1 "断链" "断链即红" || ok=0
   mk_case nav >/dev/null && printf '# Sub\n' > "$td/nav/docs/sub/README.md" \
     && ( cd "$td/nav" && git add -A ) && expect "$td/nav" 1 "导航漏链" "导航漏链即红" || ok=0
+  mk_case scatter >/dev/null && mkdir -p "$td/scatter/tools" \
+    && printf '# 笔记\n' > "$td/scatter/tools/notes.md" \
+    && ( cd "$td/scatter" && git add -A ) && expect "$td/scatter" 1 "散落文档" "docs/ 外散落 md 即红" || ok=0
+  mk_case exempt >/dev/null && mkdir -p "$td/exempt/base/os/boards" \
+    && printf '# 板卡\n' > "$td/exempt/base/os/boards/pi.md" \
+    && ( cd "$td/exempt" && git add -A ) && expect "$td/exempt" 0 "" "base/os 豁免通过" || ok=0
+  mk_case zh >/dev/null && printf '# zh\n' > "$td/zh/README_zh.md" \
+    && ( cd "$td/zh" && git add -A ) && expect "$td/zh" 0 "" "仓根 README_zh 豁免通过" || ok=0
 
   rm -rf "$td"
   [ "$ok" -eq 1 ]

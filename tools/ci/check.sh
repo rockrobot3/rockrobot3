@@ -201,7 +201,9 @@ rr3_step_4b
 #    `git ls-files` 显式关掉 core.quotepath：默认 true 时非 ASCII 文件名（如
 #    docs/process/dev/0.0.1版本…）会被转义成八进制串，`-s`/`-e` 检的是那个不存在的名字，
 #    门禁会在别人机器上凭空报一条假红。
-step "⑤ 文档门（已跟踪 md 不得为空、相对链接不得断、README 不得漏进导航）"
+#    第四判据（2026-11-25 批46 裁定）：docs/ 之外每目录至多一份 md 且必须是 README.md
+#    （base/os/ 外树与仓根 README_zh.md 豁免）——散落专题文档归 docs/design 或 docs/reference。
+step "⑤ 文档门（md 非空 / 相对链接不断 / README 入导航 / docs/ 外不散落）"
 rr3_step_5
 
 # ⑥ 格格双达标·接线 CI（architecture §13，0.0.5 批E；收口批 E' 扩全量）："双达标"

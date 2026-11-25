@@ -9,7 +9,7 @@
   同理。
 - **关联**：[ADR-0013](../../../../docs/process/adr/ADR-0013-OS双轨-发行版快路与Buildroot保底.md) ·
   [ADR-0015](../../../../docs/process/adr/ADR-0015-板卡策略-rk3566核心板过桥与量产自定制.md) ·
-  [partition-layout.md](../../../ota/partition-layout.md) ·
+  [分区布局与OTA槽位.md](../../../../docs/design/分区布局与OTA槽位.md) ·
   [buildroot flash-maskrom](../../buildroot/board/radxa-zero3/flash-maskrom.md)
 
 ## 0. 到货前静态点验
@@ -41,7 +41,7 @@ cat /proc/cmdline | tr ' ' '\n' | grep '^root='
 ```
 
 `root=` 必须是 `LABEL=rr_a` 或 `LABEL=rr_b`；裸设备形态按
-[partition-layout.md](../../../ota/partition-layout.md) 的板上核对项处理，不静默放过。
+[分区布局与OTA槽位.md](../../../../docs/design/分区布局与OTA槽位.md) 的板上核对项处理，不静默放过。
 
 ### B. 发行版快路（已有 mainline aarch64 系统）
 

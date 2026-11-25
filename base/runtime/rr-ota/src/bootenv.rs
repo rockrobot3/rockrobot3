@@ -12,14 +12,14 @@
 //! 2. [`Rr3EnvDev`]：解析 `/etc/fw_env.config`（`device offset env_size
 //!    [sector_size num_sectors]`，数支持 `0x` 十六进制；`#` 行注释）；
 //! 3. 回滚链状态迁移：`rr3_rollback_arm` / `rr3_rollback_ok` 落实
-//!    `base/ota/partition-layout.md` 标准序第 4/6 步（bootcount/bootlimit/
+//!    `docs/design/分区布局与OTA槽位.md` 标准序第 4/6 步（bootcount/bootlimit/
 //!    altbootcmd/upgrade_available 四变量）。
 //!
 //! 区读写走 `std::fs`（定位 + 读写，无 ioctl），只在 `cfg(unix)` 下编译：板上
 //! Linux 与主机 macOS 测试面是同一份代码（测试用普通临时文件顶替块设备，
 //! 不碰真实设备）；Windows 无部署面、不编。
 //!
-//! **明确不做**（板上核对项，见 `base/ota/partition-layout.md`）：冗余双份 env 的
+//! **明确不做**（板上核对项，见 `docs/design/分区布局与OTA槽位.md`）：冗余双份 env 的
 //! 同步写、坏块/写保护探测、fw_env.config 与实际 U-Boot 布局的核对、
 //! `CONFIG_BOOTCOUNT_LIMIT` 计数载体的 defconfig 确认。altbootcmd 的具体命令文本
 //! 由调用方给（distro boot 的备援命令随板/构建而变，契约不预造）。

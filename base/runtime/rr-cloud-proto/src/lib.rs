@@ -5,7 +5,7 @@
 //! 传输层（`ureq` / `esp_http_client`）只做收发。零 IO、零环境读取、零平台依赖；
 //! 只依赖 `serde_json`（alloc 档）与 `rr-audio-mech` 的 WAV 头。
 //!
-//! 口径来源：[单板全链云 API 契约](../../../../docs/process/dev/单板全链云API契约-2026-11-19.md)。
+//! 口径来源：[单板全链云 API 契约](../../../../docs/process/dev/0.0.8/单板全链/0.0.8版本单板全链云API契约.md)。
 
 #![no_std]
 

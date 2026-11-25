@@ -210,7 +210,7 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   espidf-sentinel 是 crate 名非总线身份，不变）。同批更新 rr-registry 形状 pin（29 条三元组、
   owner 8、kind 12-10-3-4）。topics.toml 只增不改维持。
 - **2026-10-12 · 0.0.5 第 IV 轮 MCP-0 契约级评审（MC-0 合并件：MCP-1 + MCP-2 作废登记 + MCP-3，承
-  [0.0.5 方案 §19 MC-0 / §18.4 防重规则①](../docs/process/dev/0.0.5版本洛克三号对齐与裁定方案.md)）**：
+  [0.0.5 方案 §19 MC-0 / §18.4 防重规则①](../docs/process/dev/0.0.5/0.0.5版本洛克三号对齐与裁定方案.md)）**：
   ① **MCP-1**：`topics.toml` 29→**30** 条（append `rr3-brain/audio/tts_pcm` stream L2——brain 侧
   TTS PCM 下行流，F-4 真人声通路的契约半边；载荷体**逐字段复用** `rr3-sense/audio/pcm` 已定形状
   `{seq, format, rate, channels, ms, pcm_b64}`（`rr3-sense` composite.rs `rr3_pcm_event_body`

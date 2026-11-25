@@ -4,14 +4,14 @@
 //! 本版本范围 = **判定与文件改写逻辑**，临时文件夹具主机可测、字节级断言：
 //! `switch` 改写 `append root=LABEL=rr_X` 行做 rr_a/rr_b 持久切换；`factory`
 //! 把该行切到 `rr_factory` 做一次性引导（出厂恢复环境自带回切职责，
-//! rr_factory 分区本体永不写入——partition-layout.md 只读约束不破）。
+//! rr_factory 分区本体永不写入——分区布局与OTA槽位.md 只读约束不破）。
 //! 一切落盘走"读 → 改写 → 同目录临时文件 → rename"（rename 同文件系统原子，
-//! 断电只得到旧文本或新文本——partition-layout.md 断电安全约束的文件系统面）。
+//! 断电只得到旧文本或新文本——分区布局与OTA槽位.md 断电安全约束的文件系统面）。
 //!
 //! 本版本**明确不做**（不 claim 板上语义）：U-Boot 环境变量写侧
 //!（`fw_setenv` bootcount/bootlimit/altbootcmd/upgrade_available——回滚链的
 //! 一次性兜底）与块设备/挂载探测。这些是板上件，随板上批次过 cfg(linux) 门
-//! 实装；标准语义与板上核对项清单登记在 `base/ota/partition-layout.md` 增补段。
+//! 实装；标准语义与板上核对项清单登记在 `docs/design/分区布局与OTA槽位.md` 增补段。
 
 use std::path::Path;
 
@@ -142,9 +142,9 @@ fn rr3_switch_chk(target: Rr3Slot) -> Result<(), String> {
 }
 
 /// 一次性出厂引导：把根定位切到 rr_factory。**只改引导配置**，rr_factory
-/// 分区本体任何代码路径不得写入（partition-layout.md 只读约束）。
+/// 分区本体任何代码路径不得写入（分区布局与OTA槽位.md 只读约束）。
 /// "一次性"的兜底链（恢复流程回切 / U-Boot bootcount-altbootcmd）见
-/// partition-layout.md 增补段——属板上核对项，本版本不 claim。
+/// 分区布局与OTA槽位.md 增补段——属板上核对项，本版本不 claim。
 pub fn rr3_bootconf_factory(text: &str) -> Result<String, String> {
     let (out, current) = rr3_bootconf_rewrite(text, Rr3Slot::Factory)?;
     if current == Rr3Slot::Factory {
@@ -173,7 +173,7 @@ fn rr3_bootconf_tmp(path: &Path) -> std::path::PathBuf {
 /// 原子落盘（委托 [`rr_ipc::persist::rr3_store_perm`] 单点：tmp 独占建 → 写全量 →
 /// 文件 fsync → rename → 父目录 fsync）。引导配置与其它落盘面同一原子序，不再
 /// 自持一份"读改写"实现。注：vfat（boot 分区）rename 原子性弱于 unix 文件系统的
-/// 残余风险仍列 partition-layout.md 板上核对项。
+/// 残余风险仍列 分区布局与OTA槽位.md 板上核对项。
 pub fn rr3_bootconf_store(path: &Path, text: &str) -> Result<(), String> {
     rr_ipc::persist::rr3_store_perm(path, &rr3_bootconf_tmp(path), text.as_bytes(), 0o644)
 }

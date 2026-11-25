@@ -6,7 +6,7 @@
   [ADR-0020](ADR-0020-版本边界-开发收口与实机验证与验证后整理.md)（版本边界）·
   [ADR-0013](ADR-0013-OS双轨-发行版快路与Buildroot保底.md)（Buildroot 出厂轨）·
   [genimage.cfg](../../../base/os/buildroot/board/radxa-zero3/genimage.cfg)（产物集合）·
-  [partition-layout.md](../../../base/ota/partition-layout.md)（槽位与写入边界）
+  [分区布局与OTA槽位.md](../../design/分区布局与OTA槽位.md)（槽位与写入边界）
 
 ## 背景
 
@@ -154,5 +154,5 @@ ADR-0026 已把"制品可签、可验、可拒"做成主机面单点（`rr-ota::
 3. `permissions`：`contents: read` + `packages: write`；不申请多余权限。
 4. 首次实跑前置：仓库 Secret `RR3_OTA_SIGNING_KEY` 就位；密钥由离线 CSPRNG
    生成（ADR-0026 裁定 5），生成记录登记在 `docs/evidence/`。
-5. 文档对表：M6 里程碑行与 `partition-layout.md` 的签名段在本 job 取得绿回执后
+5. 文档对表：M6 里程碑行与 `分区布局与OTA槽位.md` 的签名段在本 job 取得绿回执后
    追加实况注记；本 ADR 状态随之改为"已实装"。

@@ -96,7 +96,7 @@ fn rr3_conf_store(path: &Path, out: &str) -> Result<(), (String, ExitCode)> {
     })
 }
 
-/// rollback：arm 上膛 / ok 解除（`base/ota/partition-layout.md` 标准序第 4/6 步）。
+/// rollback：arm 上膛 / ok 解除（`docs/design/分区布局与OTA槽位.md` 标准序第 4/6 步）。
 pub(crate) fn rr3_cmd_rollback(args: &[String]) -> Result<String, (String, ExitCode)> {
     match args.first().map(String::as_str) {
         Some("arm") => rr3_cmd_rb_arm(&args[1..]),

@@ -361,7 +361,7 @@ jobs:
           cp "$boot_classic" rr3-bootloader-esp32-dev.bin
           cp "$boot_s3" rr3-bootloader-esp32s3-dev.bin
           cp tools/esp32-periph-base/partitions.csv rr3-partitions.csv
-          cp tools/deploy/flash-firmware.md FLASHING.md
+          cp tools/deploy/README.md FLASHING.md
           test -s FLASHING.md
           grep -Eq '^[[:space:]]*spool' rr3-partitions.csv || {
             echo "::error title=fw-partitions::rr3-partitions.csv 缺 spool 条目"; exit 1; }
