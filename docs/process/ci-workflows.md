@@ -35,7 +35,7 @@ CI 单一事实源在 GitHub Actions（R30 裁定：atomgit 无流水线功能�
 | 工作流 | 作业 | 职责 |
 |---|---|---|
 | `gate.yml`（6） | conventions / release / supply / alsa / ota-bundle / scripts | 门禁主线（与本地 `tools/ci/check.sh` 同一入口）：规约全步（含 rustfmt/clippy、质量度量与仓面卫生）、release 档溢出检查测试、supply 供应链审计（cargo-deny --strict，周程定时复核公告）、ALSA 真后端编译门、OTA bundle 装配门、脚本卫生与基线棘轮审计、SKIP 纪律自检、门禁步骤清单审计。风格/lint 不单列 job：判据体只在 check.sh ①c/①d/④b，避免第二份 find/clippy 形状 |
-| `platforms.yml`（8） | cross-artifacts ×3 / riscv-image / esp32-gates ×2 / autonomy-face / ipct003 / host-windows / host-macos | 跨平台与跨架构面：交叉编译矩阵、RISC-V 运行镜像构建门（交叉产物 → stage → QEMU 两段冒烟，不推送）、ESP32 专用门（含 autonomy/tts 双档构建腿）、自治健康面真跑（30 s 模拟 + 复位闸门）、ipct003 跨架构对拍（--strict）、宿主等价面（Windows＋macOS；macOS 单腿含 workspace 与独立工程串行） |
+| `platforms.yml`（8） | cross-artifacts ×3 / riscv-image / esp32-gates ×2 / autonomy-face / ipct003 / host-windows / host-macos | 跨平台与跨架构面：交叉编译矩阵、RISC-V 运行镜像构建门（交叉产物 → stage → QEMU 两段冒烟，不推送）、ESP32 专用门（含 autonomy/tts 双档构建腿 + 双芯片整片烧录镜像装配）、自治健康面真跑（30 s 模拟 + 复位闸门）、ipct003 跨架构对拍（--strict）、宿主等价面（Windows＋macOS；macOS 单腿含 workspace 与独立工程串行） |
 | `integration.yml`（7） | distro-smoke / ota-sign / rk3566-onboard / buildroot-assembly / sim-assemble / sim-chain / matrix | 集成面：deb 装机冒烟、OTA 签名链、板面装配断言、装配与全链闭环演练（含 60s 稳态与阻塞面判据）、点验矩阵出数 |
 | `coverage.yml`（2） | workspace / independent ×9 | 覆盖率观测面：周程/手动跑 `cargo llvm-cov`，workspace 与独立工程（六模块 + rrctl / ota-ctl / pack）分开出 summary，artifact 留存；非阻断，先积累趋势再决定 ratchet |
 
@@ -113,7 +113,7 @@ S3 门的 ⑨ release 与 `firmware` job 逐字同参（`esp32s3,autonomy,tts`�
 同批构建 classic `safe`（默认档）与 ESP32-S3 `full`（`esp32s3,autonomy,tts`）
 release ELF，并从同一 IDF 5.2.2 构建树取两份 `bootloader.bin`——**ELF 不内嵌
 bootloader/分区表**，espflash 未显式给 `--bootloader` 时用它自带的镜像（版本
-与 app 不保证一致）。资产集 = 双 ELF + 双 bootloader + `rr3-partitions.csv` +
+与 app 不保证一致）。资产集 = 双 ELF + 双整片镜像 + 双 bootloader + `rr3-partitions.csv` +
 `FLASHING.md` + sha256 清单；release asset 无凭据可下载，同时以 oras 推
 `ghcr.io/<owner>/rockrobot3-firmware:<tag>`（不可变标签），五类芯片的正式发布
 制品从此全部落在 ghcr。**资产集缺一即红**（`workflows_audit` 的 firmware 断言
@@ -121,6 +121,13 @@ bootloader/分区表**，espflash 未显式给 `--bootloader` 时用它自带的
 `buildroot.yml` 的 `release` 腿必须 tag 门（`refs/tags/v`）、登录 ghcr、带
 `packages: write`，并以 oras 推 `rockrobot3-ota` 与 `rockrobot3-buildroot`；
 正式制品只发 release asset 不进 ghcr 即红。
+**整片烧录镜像（2026-11-26 补）**：classic safe 与 S3 full 各出单文件整片镜像
+（4 MB / 16 MB，bootloader + 分区表 + app，`write_flash 0x0` 直烧），由
+`tools/deploy/image-esp32.sh` 装配并自检三点 magic 与整片尺寸；espflash 固定
+4.6.0 官方预编译件 + sha256（`cargo install` 慢且版本漂移不可见）。同一脚本在
+`platforms` 双芯片腿逐推执行（制品 `esp32-classic-merged-image` /
+`esp32s3-merged-image`），发布面只多"进资产集 + oras"两步——装配参数漂移在
+推送时就红，不等 tag 才发现。
 **缓存键治理（2026-11-22 v0.0.16 实锤）**：`actions/cache` 的 key **禁止逗号**；
 esp-toolchain 的 `targets` 允许逗号（espup 语法），归一必须在 action 内做
 （逗号→短横），不得让调用方各自清洗。组合档键为
