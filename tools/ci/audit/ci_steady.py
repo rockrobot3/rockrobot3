@@ -8,7 +8,7 @@
 #
 # 用法:
 #   python3 tools/ci/audit/ci_steady.py                 # 本地 HEAD
-#   python3 tools/ci/audit/ci_steady.py --head 2a03b7b
+#   python3 tools/ci/audit/ci_steady.py --head 835ab2f
 #   python3 tools/ci/audit/ci_steady.py --repo owner/name
 #   python3 tools/ci/audit/ci_steady.py --head <sha> --assert   # 叠加实时性判据
 #

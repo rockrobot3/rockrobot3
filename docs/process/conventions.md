@@ -2684,7 +2684,7 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/bas
 | `esp32-gates`（矩阵两腿） | xtensa/espidf 五门按芯片分腿：ESP32 腿 5 门（外设底座 / UART echo / espidf std / 哨兵 / act·sense classic 面）、ESP32-S3 腿 2 门（S3 外设底座 / act·sense S3 面）；每腿独立装本芯片工具链 | push / PR / 手动 / 周程 |
 | `publish`（`publish.yml`） | 运行镜像发布到 `ghcr.io/rockrobot3/rockrobot3`：amd64/arm64 原生构建 + riscv64 交叉（QEMU）→ 单架构镜像 → 三架构清单合并；tag 时 `firmware` job 另把 classic/S3 ELF 推 `rockrobot3-firmware`；镜像根 = rr3-pack stage 树 | 打 `v*` 标签 / main（edge）/ 手动 |
 
-**首发布回执（2026-11-15）**：`v0.0.9` 标签（锚提交 `e445f14`，dev/hubs-01）触发
+**首发布回执（2026-11-15）**：`v0.0.9` 标签（锚提交 `372817a`，dev/hubs-01）触发
 publish 首跑即全绿——amd64（`ubuntu-latest`）与 arm64（`ubuntu-24.04-arm`）两条原生腿
 各自构建 + 推单架构镜像，merge 腿合并多架构清单并同步 `latest`；制品标签
 `0.0.9` / `0.0.9-amd64` / `0.0.9-arm64`，都落在 `ghcr.io/rockrobot3/rockrobot3`。
@@ -2700,7 +2700,7 @@ docker run --rm -p 8080:8080 -p 18080:18080 \
 包可见性默认私有：匿名拉取前须在 GitHub Packages 把该包改为 Public（一次性设置，
 不属流水线可自动化面）；`0.0.14` 为多架构清单，`*-amd64` / `*-arm64` 是单架构腿。
 
-**第二发布回执（2026-11-15，冒烟步首考）**：`v0.0.11`（锚提交 `0333473`）两腿冒烟全绿
+**第二发布回执（2026-11-15，冒烟步首考）**：`v0.0.11`（锚提交 `d758532`）两腿冒烟全绿
 ——推完即验"镜像能跑"三件（`/usr/bin/rrd`、`contracts/topics.toml`、
 `profiles/distro.toml`）＋镜像内 `rrd` 真执行打用法。这一步首考就抓到 **`v0.0.10` 的
 "半绿"**：amd64 腿绿、arm64 腿镜像内 rrd 起不来（构建腿 `ubuntu-24.04-arm` 的 glibc
@@ -2709,7 +2709,7 @@ docker run --rm -p 8080:8080 -p 18080:18080 \
 必须自带现场（rc + 输出前三行），首版只说"不可运行"，白跑一轮才定位。
 `0.0.10` 单架构腿仍留在 registry（arm64 腿不可用），消费面请用 `0.0.11` 及以后。
 
-**第三发布回执（2026-11-15，运行冒烟首考）**：`v0.0.14`（锚提交 `c8b5a15`）发布链三判据
+**第三发布回执（2026-11-15，运行冒烟首考）**：`v0.0.14`（锚提交 `ff05feb`）发布链三判据
 全绿——①文件冒烟（装机树三件 + `rrd --help`）；②**运行冒烟**（镜像内按装机面真起 rrd，
 sim 探测档 + mock 云，六模块全 spawn、零拒绝；判据与 `distro-smoke` ⑧ 同源）；
 ③merge 腿多架构清单判等 + `latest` 同步。两步假红都记录在案，作为"冒烟本身也要被审"的

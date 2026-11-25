@@ -138,8 +138,8 @@ step "①b workspace 全量测试（含未被点名的守护用例）"
 run_tests sh -c 'cd base/runtime && cargo test --locked --workspace'
 
 # ①c/①d 与 CI lint job 同源（.github/workflows/ci.yml lint）。此前本地门禁缺
-# fmt/clippy 两步，手工折行与 clippy 告警一路入库（9390d28 收 ⑱ 文件漂移、
-# 9227249 收 too_many_arguments 即实证）——"CI 绿本地红"的两套逻辑由此补齐。
+# fmt/clippy 两步，手工折行与 clippy 告警一路入库（e1a93eb 收 ⑱ 文件漂移、
+# eae280e 收 too_many_arguments 即实证）——"CI 绿本地红"的两套逻辑由此补齐。
 # fmt 不编译，对 esp 条件工程照跑（CI lint 同口径）；clippy 宿主 stable 对
 # esp 专用工程必红，独立工程侧归 ④b 排除、由各自专用门执法（口径同 ④）。
 step "①c 代码风格门 rustfmt --check（base/runtime + 全部独立工程，CI lint 同源）"

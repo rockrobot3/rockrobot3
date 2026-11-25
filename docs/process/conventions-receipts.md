@@ -64,14 +64,14 @@ python3 缺位按 SKIP 纪律明说）。四条判据：**重复率硬门槛 3%*
 
 **2026-11-10 lint 并门步（①c/①d/④b，已建成）**：CI 的 lint job（rustfmt
 --check + clippy -D warnings，仓内全工程）此前不在本地门禁里，手工折行与
-clippy 告警一路入库（实证：`9390d28` 收 ⑱ 文件漂移、`9227249` 收
+clippy 告警一路入库（实证：`e1a93eb` 收 ⑱ 文件漂移、`eae280e` 收
 too_many_arguments）。本批把 CI lint 两段拆为 ①c（fmt：workspace + 全部独立
 工程，esp 条件工程不编译照跑）、①d（clippy：workspace）、④b（clippy：独立
 工程，排除口径同 ④）三步并入 `check.sh`，本地与 CI 从此同一强度。
 
-**2026-11-10 status.md 实况锚点重锚（`8985677`→`e117d17`）**：旧锚哈希不在对象库
+**2026-11-10 status.md 实况锚点重锚（`8985677`→`e22f20a`）**：旧锚哈希不在对象库
 （批N33 件一 amend 后无引用可循；同批失效的还有 `9c07b3e`/`dc3a1d6` 等改写前
-命名空间哈希，现行哈希自批N30件三 `8ef49da` 起在册）。主锚点、里程碑表头、
+命名空间哈希，现行哈希自批N30件三 `e133217` 起在册）。主锚点、里程碑表头、
 在制品段三处重锚，死哈希以历史注记统一登记（不改写历史清单原文）；
 e2e 并发确定性同批结案——真 flaky 是 uart flock spawn 瞬态（批N21 件一已
 根因拆修），撞 tag 假设被枚举证伪（各测试文件内 tag 互异、跨文件靠 pid 隔离）。
@@ -99,7 +99,7 @@ pi-periph-base `line_round`（24→16，OLED/FACE/SERVO 三臂抽 `oled_text`/`f
 行为等价逐分支核对）。基线 `cc_max_fn` 26→21（真降，红账只降不升兑现）。
 
 **2026-11-10 远端 CI 三红根因收口（P0-3 连带，夹具/CI 层零生产码改动）**：
-远端回执考古红至至少 12 run 连败、早于本会话——P0-3（e392d70）消除"漏 env 静默
+远端回执考古红至至少 12 run 连败、早于本会话——P0-3（6954b5d）消除"漏 env 静默
 落 sim"后，部署真值 hal_backend=linux 直透无硬件环境，三个演练载体全部翻红：
 ① sim-assemble——rr3-sim 只给 rrd 设了 sim env，supervisor 按装配单注入覆盖之；
 修 = 沙箱装配单副本 sim 变换（`rr3_asm_sim_text`：hal_backend→sim +
@@ -115,9 +115,9 @@ sim-assemble 六模块 running + denied_publish=0、sim 27 单测绿、matrix FA
 载体（演练夹具/容器冒烟/CI 矩阵），否则门禁绿、真装配红**。
 
 **2026-11-10 第六轮跨平台静态审计（四平台三方对账，[审计文档](dev/0.0.8/静态生产审计/0.0.8版本静态生产审计-第六轮-跨平台.md)）**：
-真值漂移一处——esp32s3 平台表 UART2 conflict 集仍钉 17/18，真板订正（85bbcaa 迁
-41/42）只同步了 profile 键值漏了契约表，已随真值修（4501b8c）；mkmodule fmt 漂移
-系 e117d17 遗留、新并入 fmt 门首跑实爆（350574e）。核过无损六条：Pi 绑定三方一致、
+真值漂移一处——esp32s3 平台表 UART2 conflict 集仍钉 17/18，真板订正（6c0169e 迁
+41/42）只同步了 profile 键值漏了契约表，已随真值修（ed82016）；mkmodule fmt 漂移
+系 e22f20a 遗留、新并入 fmt 门首跑实爆（3be6ad5）。核过无损六条：Pi 绑定三方一致、
 linux_pwm/gpio 无平台名分支（chip/channel 全走绑定）、nmcli 假设显式、esp32audio↔
 mic.rs 四道门同形（线上恒 s16le，32bit 截定在板侧）、rk3566 演练消费面闭环。
 遗留观察（**2026-11-12 P1 件一已裁**）：I2S 未进 esp32/esp32s3 平台表——
@@ -558,9 +558,9 @@ CI"往返，本地无法复跑。SKIP 纪律：仅 `RR3_SMOKE_ALLOW_SKIP=1` 时�
 退 0（本机开发），CI 不设该变量——缺 docker 即红，不以 SKIP 充绿。两段各自独立退出，
 容器起不来 / 装机树缺件 / 二进制不可执行 / 六模块未起齐 / 拒绝 boot 归因不混。
 
-**2026-11-16 平台矩阵重构回执**（commit `138d419`，run 43803306704 三 workflow 全绿）：
+**2026-11-16 平台矩阵重构回执**（commit `6438c2c`，run 43803306704 三 workflow 全绿）：
 
-**2026-11-16 追加：Windows（登记平台 L1）腿建成**（commit `82ce8fa`）：`host-windows`
+**2026-11-16 追加：Windows（登记平台 L1）腿建成**（commit `444ea21`）：`host-windows`
 在 `windows-latest` 上跑 workspace 编译面 + `cargo test --no-fail-fast`，敞口 #5 的
 Windows 半边结项。首跑 4 处红全部是**跨平台假设**而非产品缺陷：3 处 CRLF（checkout 的
 `autocrlf` 把文本转成 CRLF，而装载面/测试用 `include_str!` + `"\n"` 的 replace/断言 →
@@ -588,7 +588,7 @@ cargo-deny 的公共选项只认子命令之前（`cli/common.html`），22 个�
 18:30 = 北京周一 02:30，与 platforms 的 18:00 错开）——RustSec 库随时间漂移，没有推送
 也必须复核；job 表的触发列同批订正为实际形态（integration 无周程，platforms 有）。
 
-**2026-11-16 ESP 门按芯片拆腿（commit `6dda413`，run 43833170142 三工作流全绿）**：
+**2026-11-16 ESP 门按芯片拆腿（commit `21797ee`，run 43833170142 三工作流全绿）**：
 `esp32-gates` 由"六门串行单腿"改为 `esp32` / `esp32s3` 矩阵两腿，六门判据与覆盖面
 零缩水（classic 腿 5 门、S3 腿 2 门，见上文 job 表与芯片平台表）。**实测回执**：
 classic 腿 17.6 分钟（08:40:41→08:58:18，5 门全 PASS）、S3 腿 12.1 分钟
@@ -664,7 +664,7 @@ keypub/manifest/sign/verify 端到端、错私钥 key_id、0600 权限、超大�
 `bootconf_cmd` 192 / `main` 518 / `sign_cmd` 305（均 <600）。依赖：
 `ed25519-dalek 2.2` + `sha2 0.10`（纯 Rust，锁文件同批；供应链门由 CI
 `supply-audit --strict` 执法）。首跑红一处：`rr3_manifest_parse` CC 27
-（提交 8484629），已按"字节形制 / 字段值域 / 数值摘要"三段拆分修复（a6254a7）；
+（提交 b75a031），已按"字节形制 / 字段值域 / 数值摘要"三段拆分修复（b5056d8）；
 远端最新 run 回执以 CI 结论为准。
 
 **2026-11-17 A1b/A1c（OTA CLI 进发布面 + 签名演练）**：`rr3-ota-ctl` 进
@@ -826,12 +826,12 @@ artifact/镜像名解析/六分区断言与产物上传已就位、**全量绿�
 tag/main 的 publish**，本机不冒充。
 
 **2026-11-17 status 口径补充（锚点与逐行增量）**：事实——表头"当前 HEAD =
-`e117d17`"与后来按行补的 A1/A2/alsa 等行并存，读者可能把"某行补过"误读成
+`e22f20a`"与后来按行补的 A1/A2/alsa 等行并存，读者可能把"某行补过"误读成
 "整表已按最新 HEAD 实测"。处置——表头加口径段：锚点之后按行增量维护、**未注记
 的行**仍只指锚点、全表重读只在收口做。验证——`check.sh` ⑤ 文档门通过。
 
 **2026-11-17 CI 漂红审计（e2e_profile 回填用例偶发红）**：事实——
-platforms/host-macos 在 `d5acab7` 红一次（`rrd_reboot_recovers_previous_run_lines_from_disk`），
+platforms/host-macos 在 `f974e4d` 红一次（`rrd_reboot_recovers_previous_run_lines_from_disk`），
 本地重复 5/5 通过，且本次改动不涉 rrd。可疑点是环容量 64 与慢 runner 的挤占
 竞态（用例靠"回填行仍在环里"取证），加上 10s/20s 固定等待。处置——环容量
 64→**256**（断言一条不改）、两处等待 20/10s→**30s**；这是去竞态，不是放宽判据。
@@ -846,8 +846,8 @@ platforms/host-macos 在 `d5acab7` 红一次（`rrd_reboot_recovers_previous_run
 `check.sh` 全绿（度量按当日基线）；板上真实抖动值随证据批，不在本机造数。
 
 **2026-11-17 buildroot 全量镜像：源修正 + 产物化 + 分区断言**：事实——①image
-job 从未成功：`8d61b4d` 在全量 make 的 uboot 阶段因 ftp.denx.de 443 超时失败，
-而 `068fd97` 的 image job 是 **skipped**（此前"全量构建已成功"是误读）；②断言
+job 从未成功：`8ae6fd1` 在全量 make 的 uboot 阶段因 ftp.denx.de 443 超时失败，
+而 `cac2d8b` 的 image job 是 **skipped**（此前"全量构建已成功"是误读）；②断言
 步硬写 `sdcard.img`，genimage 实际产出 `rock3-zero3.img`，即使 make 成功也会
 假红；③产物不上传，OTA 签名链没有真实载体。处置——defconfig 的 U-Boot 源改
 **custom git**（GitHub tag `v2024.10`，去掉 denx tarball 依赖），删 CI 的预塞
@@ -855,7 +855,7 @@ tarball 步；CI 从 `genimage.cfg` 解析镜像名（不写第二份字面量�
 断言（`boot/rr_a/rr_b/rr_factory/rr_staging/data`）、生成 sha256 清单并上传
 artifact（14 天）。验证——YAML/脚本语法门通过、镜像名解析实测
 `rock3-zero3.img`；**全量构建回执由本次 `[buildroot-full]` 提交触发**（小时级，
-结论以 buildroot workflow 为准）。**同日第二次全量（`6fdffee`）仍红**：custom git
+结论以 buildroot workflow 为准）。**同日第二次全量（`0878f07`）仍红**：custom git
 已生效（阶段名 `uboot v2024.10`），失败为 `No rule to make target 'u-boot.itb'`
 ＋ `scripts_dtc Error 1`；旧注解被 `pyerrors.h` 这类含 error 的路径污染，根因
 读不出来。追加处置——defconfig 与全量 make 拆步，新增 `make uboot` 预构建拍
@@ -972,7 +972,7 @@ ext 生成默认走 `genext2fs`，而 Buildroot 的 host-genimage 不带它；`m
 文件系统生成器）。验证——下一拍全量构建。
 
 **2026-11-17 Buildroot 全量镜像绿回执（第 10 拍）**：证据——run `44018120685`
-（HEAD `2c733fd`）的 image job **全步骤 success**：释放磁盘、宿主依赖、取 Buildroot
+（HEAD `66bbec1`）的 image job **全步骤 success**：释放磁盘、宿主依赖、取 Buildroot
 2024.02.11、DL 缓存、交叉产物注入、BINARIES_DIR 注入、defconfig、U-Boot 预构建、
 全量 make、镜像名解析（`rock3-zero3.img`）、六分区断言
 （`boot/rr_a/rr_b/rr_factory/rr_staging/data`）、摘要清单、artifact 上传
@@ -1002,7 +1002,7 @@ sysfs/devtmpfs/rr_data/rr_staging、`fdtdump` 断言 `atf-bl31`、idbloader 体�
 验证——下一拍内容断言全绿。
 
 **2026-11-17 Buildroot 内容回执（第 12 拍）**：证据——run `44035094772`
-（HEAD `4c7ff39`）的 image job 全步骤 success；内容断言全过：五个 ext4 `e2fsck`、
+（HEAD `621c26f`）的 image job 全步骤 success；内容断言全过：五个 ext4 `e2fsck`、
 `dumpe2fs` 标签逐槽（`data`→`rr_data`）、`/usr/bin/rrd` 与 `/etc/init.d/S99rrd`
 在册、`/etc/fstab` 四键（sysfs/devtmpfs/`LABEL=rr_data`/`LABEL=rr_staging`）、
 `u-boot.itb` 含 `atf-bl31`、idbloader 体量下限；artifact `rock3-zero3-image`
@@ -1037,8 +1037,8 @@ rr3-obs，模块注册耗时全列可见），CI sim-chain job 每拍打印同�
 （信号提取 → 噪音过滤 → 单行注解 → 末段回显，`--head` 用于"命令级错误在前"的日志），
 13 处调用收敛；`--self-test` 正例 + 四负例进 gate `scripts` job；
 checkout/upload/download 升 v7/v7/v8，setup-qemu 升 v4（只换 Node 24 运行时，
-输入面未变；login/buildx 留发布面正回执后升）。验证——`582b4c7` / `316920e` /
-`424c754` / `6ea24c3` 的 gate/integration/platforms 回执。
+输入面未变；login/buildx 留发布面正回执后升）。验证——`9e1022f` / `b6dac2b` /
+`1d9510d` / `096a4b6` 的 gate/integration/platforms 回执。
 
 **2026-11-17 unsafe/FFI 注释审计门（续轮四）**：事实——生产面 122 处 `unsafe`
 关键字中 78 处没有 SAFETY 前言，集中在 esp32 板侧、macaudio 开发面与少数 Linux
@@ -1083,12 +1083,12 @@ gate `scripts` job 先 `--self-test`（好例 + 缺并发/缺超时/版本漂移
 改为**只认以换行收尾的完整行**（`rr3_log_find`），半行不再提前返回。本机回执：60s /
 117 拍，峰值 201–206ms（看门狗 1000ms）；`tools/sim` 35 测试全绿。
 
-**2026-11-17 rr3-ctl 健康表 BOOT_MS（续轮七）**：事实——`ctl.health` RPC 自 `cb87d3a`
+**2026-11-17 rr3-ctl 健康表 BOOT_MS（续轮七）**：事实——`ctl.health` RPC 自 `38089c1`
 起回 `boot_ms`，但 CLI 健康表只有六列，冷启动列在实际运维面不可见（RPC 有、CLI 无）。
 处置——表头加 `BOOT_MS` 第七列，JSON null（基准未定格）渲染 `?`（沿用"缺失字段不得
 显示 null"口径）；单测钉数值/表头/null 三态。
 
-**2026-11-17 日志落盘序（macOS 腿红根因）**：事实——`0db37f8` platforms 的 host-macos
+**2026-11-17 日志落盘序（macOS 腿红根因）**：事实——`3e00a37` platforms 的 host-macos
 红在 `rrd_reboot_recovers_previous_run_lines_from_disk`；`rr3_log` 先写 stdout 再落盘，
 用例等 stdout 的收尸行后立刻 SIGTERM，而关停 flush 线程落盘后直接 `process::exit(0)`
 不等其他线程 ⇒ 文件里可能缺这行，第二世回填判据偶发失败（时间窗窄，本机 15 次未复现，
@@ -1239,5 +1239,5 @@ panic 会带走整条 `rrd-ctr-store`：在飞位留在 gate 上，reader 侧此
 不迁）。判据——迁出前后非空行多重集守恒（脚本核对）、§2 零残留日期段、
 `check.sh` 全量门禁通过；`conventions.md` 4134→2921 行。
 同批红收口：⑬ 仓面卫生门原先只豁免 `conventions.md`，回执里"仓面卫生步"这条规则
-原文引用被禁模式（`trae_projects` 等）即触发；排除面同步到本存档（`c4bb69b`），
+原文引用被禁模式（`trae_projects` 等）即触发；排除面同步到本存档（`5391bf0`），
 本地复现与修复后均全绿。

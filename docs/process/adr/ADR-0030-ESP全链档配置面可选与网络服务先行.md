@@ -14,7 +14,7 @@ classic W7 真板实测（2026-11-21）暴露两个不同性质的问题：
 1. **网络服务与 HTTP 配置面耦合**：`net` 心跳原先绑在 `httpd` 起栈成功之后；
    classic 上 httpd 以 `0xB008`（`ESP_ERR_HTTPD_ALLOC_MEM`，实际栈
    `HTTPD_STACK_SIZE=16,384B`）分配失败，net 永不心跳，监督壳判死并整机复位。
-   源码 `60381a0e` 已把 net 心跳前移到 httpd 之前，复位环消失。
+   源码 `88016cd8` 已把 net 心跳前移到 httpd 之前，复位环消失。
 2. **全链档仍常驻配置面**：即使复位修好，httpd 仍是全链档的常驻面；classic
    播放面后 `free=34,336B`、`int_free=61,160B`，没有空间再承担 16KB httpd 栈与
    会话分配。全链档不需要 HTTP 配网面，配置面应可关闭。
@@ -81,7 +81,7 @@ classic W7 真板实测（2026-11-21）暴露两个不同性质的问题：
 
 ## 施工回执（2026-11-21）
 
-- 代码 `3a43c6cb`；CI gate / integration / platforms 全绿；产物
+- 代码 `d90e6680`；CI gate / integration / platforms 全绿；产物
   `esp32-classic-nohttp-firmware`（7,367,414 B）。
 - 真板 60s：单次 boot、0 次 `rst:0xc`；日志命中
   `全链档 no-http：WiFi 已起…HTTP 配置面关闭（ADR-0030）`。

@@ -85,22 +85,22 @@ TTS 回包与日志落存储**，不把整段数据常驻 RAM。本 ADR 只裁�
   判无有效记录。host 单测覆盖越界、IO 失败、写回不一致、掉电与 CRC 损坏；CI
   双芯片构建并核验 `partition-table.bin` 含 spool 条目。**尚未接 VAD/dialog**，
   真板容量/擦除时延与写寿命在 W7-b4 记账。
-- **W7-b1a CI 回执（2026-11-21，`17ac68f1`）**：gate（含 host 三平台单测）与
+- **W7-b1a CI 回执（2026-11-21，`7e9c9a73`）**：gate（含 host 三平台单测）与
   platforms 的 classic/S3 两条 esp32-gates 全绿；两芯片构建产物均核出 spool
   分区，Actions 固件制品（solo / no-http）在册。真板 `[spool]` boot 行随下一次
   烧录会话取证（写入路径尚未接线，本身不产生磨损）。
-- **W7-b2（2026-11-21 落树，`12676402`）**：TTS 回包 4KB 边收边播——头窗识别
+- **W7-b2（2026-11-21 落树，`bdf8cd40`）**：TTS 回包 4KB 边收边播——头窗识别
   WAV/裸 PCM → `Rr3PcmStream` 全局淡入淡出 → 16KB 播放环；首块前按契约重试、
   开播后不重放；Content-Length 与 WAV 声明长度双向对账，不完整回包显式中止。
   播放队列由“2 条全量 PCM”降为 16KB 环，512KB 回包 Vec 不再存在。CI 双芯片绿；
   真板听感、时长误差与 30min 内存列在 W7-b4 取。
 - **W7-b3**：无 PSRAM VAD 小窗 + spool 写入；半双工与丢段计数。
-- **W7-b3a（2026-11-21 落树，`657f1af8`）**：ASR multipart 改 4KB 分块上行——
+- **W7-b3a（2026-11-21 落树，`df875752`）**：ASR multipart 改 4KB 分块上行——
   `rr-cloud-proto` 出 `Rr3AsrPlan`（head/wav/tail/content_len，与整段组包逐字节
   对拍），`cloud/http` 按头/WAV/样本/尾顺序写 `esp_http_client_write`；删除
   256KB s16le 与 256KB 整段 multipart 两份临时体。重试仍 2 次/500ms。语音段
   缓冲（VAD 段）尚未落 spool，无 PSRAM 写入路径仍归 W7-b3b。
-- **W7-b3b（2026-11-21 落树，`67472d7b`）**：无 PSRAM 的 spool 写入路径全链接通。
+- **W7-b3b（2026-11-21 落树，`c0747baf`）**：无 PSRAM 的 spool 写入路径全链接通。
   - **写线程**：`spool` 分区后端独占一条 `spool-w` 线程，擦/写/读全在其内串行；
     音频线程只做非阻塞投递（`SyncSender` 容量 16 块 = 320ms）。块内联
     `[i16; 320]`（20ms mono），零堆分配；队列满即弃段并计数，绝不阻塞 I2S。
@@ -114,16 +114,16 @@ TTS 回包与日志落存储**，不把整段数据常驻 RAM。本 ADR 只裁�
     声道（能量高者）后段内不跳变，逐块落盘；单段 8s 上限；`oled_hold` 只判向
     不落段。S3（有 PSRAM）保持内存路径，不起 spool 写线程、不占 6KB 栈。
   - **启动清扫**：上电只读记录头，残留段点名后清理（语音跨重启已过期，不补传）。
-  - **CI 回执（2026-11-21，`67472d7b`）**：gate `44901448372`、integration
+  - **CI 回执（2026-11-21，`c0747baf`）**：gate `44901448372`、integration
     `44901448361`、platforms `44901448369` 全绿；classic 与 S3 两条 esp32-gates
     均过（clippy `-D warnings` / 五档构建 / 测试码编译 / 分区核验），
     `esp32-classic-solo-firmware` 等固件制品在册。中途红因已按根因修复：
-    `doa.rs` 触 500 行门 → 下混拆 `chan.rs`（`144bdd1f`）；预滚窗借用冲突
-    E0502 → `mem::take` 迭代（`6615961d`）；ASR 参数数与 spool 枚举体积 →
-    计划反推字节数 + 内联块显式预算（`67472d7b`）。
+    `doa.rs` 触 500 行门 → 下混拆 `chan.rs`（`b7b854f0`）；预滚窗借用冲突
+    E0502 → `mem::take` 迭代（`ee173961`）；ASR 参数数与 spool 枚举体积 →
+    计划反推字节数 + 内联块显式预算（`c0747baf`）。
   - **未过 Go 门**：真板 spool 擦写时延、I2S DMA 是否被 flash 擦除的 cache 停顿
     拖出欠载、30min 内存曲线均未测，归 W7-b4；classic 全链仍 No-Go。
-- **W7-b4（2026-11-22，classic 4MB 无 PSRAM，CI 制品 `d5963ce3`）**：30 min soak
+- **W7-b4（2026-11-22，classic 4MB 无 PSRAM，CI 制品 `2a555bd6`）**：30 min soak
   完成——1 次上电复位、0 Guru/panic/心跳超时/OOM；`status free` 61 样本
   36,288–36,448 B（7.0% SRAM），`min_free=1,884 B`；MIC 采样率 15,947–16,130 Hz；
   播放面/WiFi/net 在线，HTTP 配置面按最大连续堆降级关闭，本地 VAD/spool 按
