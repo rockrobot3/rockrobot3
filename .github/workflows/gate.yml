@@ -264,6 +264,10 @@ jobs:
         run: python3 tools/ci/audit/baselines_audit.py --self-test
       - name: 基线只降不升（对比 base ref）
         run: python3 tools/ci/audit/baselines_audit.py
+      # 提交面不在 git grep 的扫面内（追踪文件 vs 提交对象）：提交信息与身份
+      # 含本机标识只能由提交对象自身判定；豁免表只减不增，新增命中即红。
+      - name: 提交面卫生自检（干净/泄漏/豁免内/豁免失效/本机域五例）
+        run: python3 tools/ci/audit/commit_msg_audit.py --self-test
       # SKIP 纪律单点：本地缺工具链退 0，CI 内缺工具链退 1（覆盖缺口不得冒充绿）。
       - name: SKIP 纪律自检（本地 SKIP / CI 即红）
         run: bash tools/ci/lib/skip.sh --self-test

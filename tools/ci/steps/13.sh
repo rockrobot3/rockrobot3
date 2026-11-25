@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-# ⑬ 仓面卫生门（门 13 步骤体：追踪面本机路径 / 构建目录 / 未入册源码 /
-#    shell 展开截断；扫描器错误按 fail-closed 计红）。
+# ⑬ 仓面卫生门（追踪面本机路径 / 构建目录 / 未入册源码 / shell 展开截断 /
+#    提交信息与提交身份；扫描器错误按 fail-closed 计红）。
 # 由 check.sh 在启动段 source；函数读写入口的全局 fail 与 root。
-# 四个检查各成一个函数（单函数 <50 行），编排与 fail 汇总留在 rr3_step_13。
+# 五个检查各成一个函数（单函数 <50 行），编排与 fail 汇总留在 rr3_step_13。
 
 hyg_paths() {
   local self hy_path hy_rc
@@ -91,6 +91,26 @@ hyg_expansion() {
   fi
 }
 
+# 提交面卫生（2026-11-25 补盲区）：git grep 只扫追踪文件，提交对象与提交身份
+# 不在其面内。判据落在 commit_msg_audit.py（豁免表只减不增，新增命中即红）。
+hyg_commits() {
+  local hy_out hy_rc
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf 'SKIP  ⑬ python3 缺位——提交面卫生不执行（CI runner 自带 python3）\n'
+    return
+  fi
+  hy_out="$(python3 "$root/tools/ci/audit/commit_msg_audit.py" 2>&1)"
+  hy_rc=$?
+  case "$hy_rc" in
+    0) printf 'PASS  ⑬ %s\n' "$hy_out" ;;
+    3) printf 'SKIP  ⑬ 非 git 仓库——提交面卫生不执行\n' ;;
+    *)
+      printf 'FAIL  ⑬ 提交面卫生（提交信息/身份含本机标识或豁免失效）:\n%s\n' "$hy_out"
+      hyg_fail=1
+      ;;
+  esac
+}
+
 rr3_step_13() {
   hyg_fail=0
   if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -98,6 +118,7 @@ rr3_step_13() {
     hyg_build_dirs
     hyg_unregistered
     hyg_expansion
+    hyg_commits
   else
     printf 'SKIP  ⑬ 非 git 工作树——仓面卫生门不执行\n'
   fi
