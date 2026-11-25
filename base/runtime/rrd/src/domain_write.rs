@@ -1,37 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 装配侧策略量写口（批N22 件一，敞口 15 写面半边；判据源三处：conventions §6.1
-//! 三写口点名、ADR-0021 裁定 6"拒动类阈值写必须带二次确认与留痕"、B-15 ③"安全写
-//! 必须携带证据引用"）。
+//! 装配侧策略量写口：`armed` / `severe_mv` / `current_ceil_ma` 三个拒动类阈值的写编排。
 //!
-//! 职责边界（机制与策略分离）：**机制**全在别处单点——文本手术在
-//! [`crate::profile::rr3_domain_apply`] / [`crate::profile::rr3_key_line_apply`]，
-//! 原子落盘在 `rr_ipc::persist::rr3_atomic_store`（re-export 单点
-//! [`crate::counters::rr3_atomic_store`]），装载判据在 [`crate::profile::
-//! rr3_boot_inputs`]（与 boot 正门同一份裁决，写面不重复判业务合法性），
-//! 证据四道核在 `rr_ipc::evidence`（唯一实现，§6.1 纪律），轴档全判据＋落盘在
-//! [`crate::axis_write::rr3_axis_write_run`]（§7"落盘只许有一份实现"，第二条写
-//! 路径即红——本模块是它的第二个接线位，不是第二份实现）。**本模块只持写编排
-//! 策略**：谁能写（confirm 门＋key 白名单）、凭什么写（证据引用规则）、写到哪
-//! （路径自真值集记账推导，零新增全局）、怎么生效（落盘 → 装载链预核 → 原子写回
-//! → 契约记账重记；**运行态不动，下次 rrd boot 生效**）。
+//! 职责边界：**机制全在别处单点**——文本手术在 [`crate::profile::rr3_domain_apply`]
+//! 与 [`crate::profile::rr3_key_line_apply`]，原子落盘在
+//! `rr_ipc::persist::rr3_atomic_store`，装载判据在 [`crate::profile::rr3_boot_inputs`]
+//! （与 boot 正门同一份裁决，写面不重复判业务合法性），证据四道核在 `rr_ipc::evidence`，
+//! 轴档落盘在 [`crate::axis_write::rr3_axis_write_run`]（本模块是第二接线位，不是第二
+//! 份实现）。本模块只持**写编排策略**：谁能写（confirm 门 + key 白名单）、凭什么写
+//! （证据引用规则）、写到哪（路径自真值集记账推导）、怎么生效（落盘 → 装载链预核 →
+//! 原子写回 → 契约记账重记；**运行态不动，下次 boot 生效**）。
 //!
-//! 三写口与证据引用规则（conventions §6.1"哪些写必须带引用"归各写面）：
-//! - `armed`：置 true 必携证据引用且**联动入档**（装载期⑥-e 成对纪律——armed=true
-//!   必携形制合法引用、armed=false 显式写 `"none"` 不携过期引用，写面直接落出
-//!   成对形状）；置 false 不要求引用，档内 evidence 联动写 `"none"`。
-//! - `severe_mv` / `current_ceil_ma`：必携证据引用，**仅留痕不入档**（档内
-//!   evidence 键语义 = 武装证据，单主键；写动作的证据住 rrd 日志审计留痕）。
-//! - 三个键统一 confirm 门与留痕：ADR-0021 裁定 6 点名 severe_mv/armed 必须
-//!   二次确认；current_ceil_ma 同为拒动类阈值（写大 = 烧轴风险），同一端点的
-//!   三键差别化确认会让端点语义劈叉，取保守侧统一（fail-closed 方向不违判据源）。
+//! 三写口与证据规则：
+//! - `armed`：置 true 必携证据引用且**联动入档**（装载期⑥-e 成对纪律）；置 false
+//!   不要求引用，档内 evidence 写 `"none"`。
+//! - `severe_mv` / `current_ceil_ma`：必携证据引用，**仅留痕不入档**（档内 evidence
+//!   键语义 = 武装证据，单主键；写动作的证据住 rrd 日志审计）。
+//! - 三键统一 confirm 门：ADR-0021 裁定 6 点名 severe_mv/armed 须二次确认；
+//!   current_ceil_ma 同为拒动类（写大 = 烧轴风险），差别化确认会让端点语义劈叉，
+//!   取保守侧统一（fail-closed 方向不违判据源）。
 //!
-//! 生效语义与记账跟随：落盘后运行态（装配快照）维持 boot 时旧值——`effective:
-//! "boot"` 应答如实申报；契约记账快照在写口成功后重记（写口的 tmp 产物过装载链
-//! 全量预核 = 新验收事实，记账跟住最新验收事实——否则写口自造一笔常驻"sha 漂"
-//! 自检红，把真漂移淹没，见 contracts.rs Mutex 化注记）。
+//! 生效与记账：落盘后装配快照维持 boot 时旧值，应答如实 `effective: "boot"`；写口的
+//! tmp 产物过装载链全量预核后，契约记账快照重记（跟住最新验收事实——否则自造常驻
+//! "sha 漂"自检红，把真漂移淹没）。
 //!
-//! 快照未在册（`--manifest` 调试路径）如实回不可得：无记账即无路径依据，写口
-//! 拒（与 wiring/contracts 读口"如实报不可得"同一条诚实纪律）。
+//! 快照未在册（`--manifest` 调试路径）如实回不可得：无记账即无路径依据，写口拒
+//! （与 wiring/contracts 读口同一条诚实纪律）。
 
 use std::path::{Path, PathBuf};
 

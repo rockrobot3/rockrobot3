@@ -1,39 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 本地落盘原子序（全仓唯一实现，批N4 件四 I-20 下沉共享）。
+//! 本地落盘原子序（全仓唯一实现）：断电后目标文件要么旧全量、要么新全量。
 //!
 //! 写序：tmp 写全量 → `sync_all()` → 同目录 `rename` → 父目录 fsync（尽力而为）
-//! → rename 失败清 tmp——断电卡在写中间时目标文件要么是旧全量、要么是新全量，
-//! 不存在半截；目录 fsync 保证"新全量可见"在掉电后仍是事实（POSIX 崩溃一致
-//! 性：只 fsync 文件不 fsync 目录，rename 可能在掉电后回旧态）。
+//! → 失败清 tmp。目录 fsync 是必需项：只 fsync 文件不 fsync 目录，rename 可能在
+//! 掉电后回旧态（POSIX 崩溃一致性）。
 //!
-//! 为什么住在 rr-ipc：裁定（全案 §19.2 Y-2 / interact I-20，索引 L-26）——
-//! **轴档案、域阈值、`armed`、凭据的落盘一律复用同一份原子序，出现第二条写
-//! 路径即红**（L-23"新加一层没迁旧一层"在写路径上的形态）。原实现住
-//! `rrd/src/counters.rs`，但凭据面在 modules/rr3-interact（独立 workspace，
-//! 不依赖 daemon crate rrd，也不许依赖——层级倒挂）；rr-ipc 是双方既有的
-//! 最低公共依赖层（evidence 先例同径），故原样迁此，rrd 侧 re-export 保持
-//! 既有调用点（counters/axis）零改动。
+//! 为什么住 rr-ipc：轴档案、域阈值、`armed`、凭据的落盘**一律复用这一份**，出现
+//! 第二条写路径即红。原实现住 rrd，但凭据面在 rr3-interact（独立 workspace，不许
+//! 依赖 daemon crate）；rr-ipc 是双方最低公共依赖层，原样迁此后 rrd 侧 re-export，
+//! 既有调用点零改动。
 //!
-//! 权限语义：**tmp 建时即定权**（[`rr3_store_perm`]，unix `mode` 经
-//! `OpenOptions::mode` 落位）——旧序"`File::create` 0644 建 tmp、rename 后
-//! 再 chmod"在外部注入路径（父目录非 0700，如运维指定 `/data/rr3`）下留了
-//! 同机他用户读 tmp 的窗口，崩溃残留时更是长期可读；敏感面（模型凭据 0600）
-//! 由此不再依赖父目录护城河。非敏感面经 [`rr3_atomic_store`] 沿用 0644 档。
+//! 权限：**tmp 建时即定权**（[`rr3_store_perm`]，unix `mode` 经 `OpenOptions::mode`）
+//! ——"先 0644 建再 rename 后 chmod"在外部注入父目录（如 `/data/rr3`）下留了同机他
+//! 用户读 tmp 的窗口，崩溃残留更会长期可读。敏感面 0600 不依赖父目录护城河；非敏感
+//! 面经 [`rr3_atomic_store`] 沿用 0644。
 //!
-//! 独占建语义：tmp 一律先清残留再 `create_new` 建（[`rr3_stage_excl`]）——
-//! `create+truncate` 式开文件会跟着同机攻击者预置的符号链接写穿到链接目标
-//! （root 侧写口 = 任意文件截断器）；独占建把"清→建"之间的换链竞态变成建失败
-//! 而非写穿，崩溃残留也不再挡下一次写。
+//! 独占建：tmp 先清残留再 `create_new`（[`rr3_stage_excl`]）——`create+truncate`
+//! 会跟着同机攻击者预置的符号链接写穿（root 侧写口 = 任意文件截断器）；独占建把
+//! 换链竞态变成建失败，崩溃残留也不挡下一次写。
 //!
-//! 调用方清单（改动须同批过本注释）：
-//! - `rrd/src/counters.rs`：运维计数账（R26 合并写窗口尾 flush）
-//! - `rrd/src/axis.rs`：执行件标定档案（§4.4"不许出现第二条写路径"）
-//! - `modules/rr3-brain/src/config_store.rs`：模型行改写（只存 api_key_ref，无密钥）
-//! - `modules/rr3-interact/src/panel/secrets.rs`：模型凭据（建 tmp 即 0600）
-//! - `base/ota/rr3-ota-ctl`：manifest/签名/公钥的原子写（A1 起；install 的
-//!   staging 落位复用 [`rr3_sync_dir`] 做目录项落盘）
+//! 调用方（改动须同批过本注释）：rrd 计数账与轴档案、brain 模型行、interact 凭据
+//! （建 tmp 即 0600）、ota-ctl 的 manifest/签名/公钥写（staging 复用 [`rr3_sync_dir`]）。
 
-// no_std crate 的 std 显式恢复（evidence.rs 同径写法）：本模块是 std::fs 文件面，
+// no_std crate 的 std 显式恢复（与 evidence.rs 同径）：本模块是 std::fs 文件面，
 // 与 evidence 同门编译（linux/macos/windows；权限位在非 unix 忽略）。
 use std::format;
 use std::fs::File;

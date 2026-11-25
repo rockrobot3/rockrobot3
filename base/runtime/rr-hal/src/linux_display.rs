@@ -1,39 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
-//! linux（spidev UAPI）MAX7219 LED 点阵显示后端：真件档（0.0.6 批F5a③ R11③
-//! trait 立面，本档随链④真件到位实装）。
+//! Linux（spidev UAPI）MAX7219 LED 点阵显示后端：真件档。
 //!
-//! 编译门是单重的：`target_os = "linux"`——依赖 libc 仅取 `ioctl` 的 extern
-//! 声明（纯 Rust 壳，musl 静态链接零额外 C 库依赖，R13 友好），无 feature 门
-//! （与 [`crate::linux_gpio`] 同形）。主机 CI（macOS）不编译本文件；宿主侧
-//! 验证路径 = aarch64 musl 交叉 check（R13）+ 板上真件实测（SPI ioctl 面无
-//! 法假树模拟，确定性单测 = ioctl 号/包组装纯函数 + temp 树普通文件的错误
-//! 传播路径，不触真硬件）。
+//! 编译门单重：`target_os = "linux"`——只取 `ioctl` 的 extern 声明（纯 Rust 壳，
+//! musl 静态链接零额外 C 库依赖），无 feature 门（与 [`crate::linux_gpio`] 同形）。
+//! 宿主侧验证 = aarch64 musl 交叉 check + 板上真件实测；SPI ioctl 面无法假树模拟，
+//! 确定性单测只覆盖 ioctl 号/包组装纯函数与普通文件的错误传播。
 //!
-//! 接口面：spidev 用户态 API（`/dev/spidevB.C`，SPI 模式 0 / MSB first /
-//! 8 bit/字 / 1 MHz——飞线杜邦的保守速率）。CS 包络由内核 spidev 驱动管理：
-//! 一次 `write()` 内 CS 保持低、结束后拉高，恰是 MAX7219 的 16-bit 包锁存
-//! 语义（DIN 上升沿锁存到行寄存器），HAL 无需再摸 GPIO。
+//! 接口：spidev（`/dev/spidevB.C`，模式 0 / MSB first / 8 bit / 1 MHz——飞线保守
+//! 速率）。CS 包络由内核驱动管理：一次 `write()` 内 CS 保持低、结束拉高，恰是
+//! MAX7219 的 16-bit 包锁存语义，HAL 无需再摸 GPIO。
 //!
-//! 级联形状：参考机是双位模块（两片 MAX7219 级联，`RR3_MAX7219_CHIPS = 2`），
-//! 同帧双片同显——发送顺序 = 先发的 16-bit 包落在链尾那片，两片同值时顺序
-//! 无关紧要；单位模块换装时只改片数常量并如实重测，帧面契约（[`Rr3FaceFrame`]
-//! 8x8 行主序、bit7 最左、行寄存器直排，rr-hal-api 定案档）不动。
+//! 级联形状：参考机双位模块（两片级联，`RR3_MAX7219_CHIPS = 2`），同帧双片同显；
+//! 先发的包落在链尾那片，两片同值时顺序无关。换单位模块只改片数常量并如实重测，
+//! 帧面契约（[`Rr3FaceFrame`] 8x8 行主序、bit7 最左、行寄存器直排）不动。
 //!
-//! 开机 init 序列（datasheet 惯例：先关显示测试、配扫描/解码/亮度，最后进
-//! normal 工作态）：DISPLAYTEST=off → SCANLIMIT=7 → DECODE=off →
-//! INTENSITY → SHUTDOWN=normal。亮度缺省 [`RR3_MAX7219_INTENSITY_DEFAULT`]
-//! （0x03 = 3/31 占空比，近看不刺眼；现场可调走重装，不留 env 旋钮——旋钮
-//! 应急键是"物理绑定"口径，亮度是体验参数）。
+//! 开机 init：DISPLAYTEST=off → SCANLIMIT=7 → DECODE=off → INTENSITY → SHUTDOWN=normal；
+//! 亮度缺省 [`RR3_MAX7219_INTENSITY_DEFAULT`]（3/31），不留 env 旋钮（旋钮只给物理绑定）。
 //!
-//! **级联锁存纪律（真板实证）**：MAX7219 级联下一次 CS 包络里每片只锁存
-//! 移位流的最后 16 位——一次 write 多包会让更早的包全部被吞。因此 init
-//! 序列逐条 write、整帧逐行 write（每条/每行 = 一个独立 CS 包络），包形状
-//! 统一走 [`rr3_max7219_cmd`]（单包双片同值）。
+//! **级联锁存纪律（真板实证）**：一次 CS 包络里每片只锁存移位流的最后 16 位——一次
+//! write 多包会让更早的包全部被吞。故 init 逐条 write、整帧逐行 write，包形状统一走
+//! [`rr3_max7219_cmd`]（单包双片同值）。
 //!
-//! boot 语义：选择函数（[`crate::backend::rr3_hal_display`]）不触设备：构造
-//! 只存路径，打开 + ioctl 配置 + init 序列延迟到首次 trait 调用（ensure，与
-//! gpio/pwm/alsa 后端 open 延迟同形）。设备不在位/权限不足/非字符设备在此
-//! 显式报错，rr3-interact 开机探活按"能力缺失显式回错" exit(1)，不静默退化。
+//! boot 语义：构造只存路径，打开 + ioctl 配置 + init 延迟到首次 trait 调用（ensure），
+//! 与 gpio/pwm/alsa 后端同形；设备不在位/权限不足/非字符设备显式报错，上层按
+//! "能力缺失显式回错"处理，不静默退化。
 
 use std::path::PathBuf;
 use std::sync::Mutex;

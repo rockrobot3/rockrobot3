@@ -1,38 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
-//! linux（NetworkManager）链路读数后端：R18 扩围（0.0.6 方案 §5.4，判据 13）。
+//! Linux（NetworkManager）链路读数后端。编译门单重：`target_os = "linux"`。
 //!
-//! 编译门是单重的：`target_os = "linux"`。承载选 **nmcli 子进程轮询**而非
-//! D-Bus 直连——nmcli 是方案 runbook §5.5.2 件 4 的既定口径（配网/对拍全套
-//! 命令都落在它上），std::process::Command 零新依赖，不破"libc 声明壳纯
-//! Rust、musl 静态"纪律（D-Bus 需引 zbus 级大库且 async 耦合）；轮询节拍由
-//! 模块侧 connect 的 `link_report_period_ms` 控制，HAL 每次 `state()` 现读
-//! 现报，不持 fd 无 ensure（与 pwm/gpio/power 的设备 fd 面不同构——这里是
-//! 进程面不是设备面）。
+//! 承载选 **nmcli 子进程轮询**而非 D-Bus 直连：配网/对拍全套命令已在 nmcli 上，
+//! `std::process::Command` 零新依赖，不破"libc 声明壳纯 Rust、musl 静态"纪律
+//! （D-Bus 要 zbus 级大库且 async 耦合）。轮询节拍由模块侧 `link_report_period_ms`
+//! 控制；HAL 每次 `state()` 现读现报，不持 fd 无 ensure——这里是进程面不是设备面。
 //!
-//! 一轮读数两次调用（terse 模式 `-t`，冒号分隔、值内 `:`/`\` 转义）：
-//! 1. `nmcli -t -f GENERAL.STATE,GENERAL.CONNECTION,GENERAL.TYPE dev show
-//!    <ifname>` —— STATE 数值 100 即 up；CONNECTION 是活动连接 profile 名
-//!    （可改名，仅作 SSID 回落）；TYPE 区分 wifi / 有线（非 wifi 无 SSID/
-//!    RSSI 语义，如实 None）。
-//! 2. up 且 wifi 时：`nmcli -t -f IN-USE,SSID,SIGNAL dev wifi list ifname
-//!    <ifname> --rescan no` —— 取 `*` 行拿真实广播 SSID 与信号质量。SIGNAL
-//!    是 0–100 质量百分比不是 dBm，按经验线性 dBm ≈ q/2 − 100 折算（NM 不
-//!    出 dBm，折算是近似面，注释钉死）；`--rescan no` 只读缓存不触发扫描
-//!    （扫描是秒级阻塞，不许进周期拍）。缓存空/调用失败 → SSID 回落
-//!    CONNECTION、RSSI None，不编造。
+//! 一轮两次调用（terse `-t`，冒号分隔、值内 `:`/`\` 转义）：
+//! 1. `nmcli -t -f GENERAL.STATE,GENERAL.CONNECTION,GENERAL.TYPE dev show <if>`：
+//!    STATE=100 即 up；CONNECTION 是活动 profile 名（可改名，仅作 SSID 回落）；
+//!    TYPE 区分 wifi/有线（非 wifi 无 SSID/RSSI 语义，如实 None）。
+//! 2. up 且 wifi：`nmcli -t -f IN-USE,SSID,SIGNAL dev wifi list ifname <if> --rescan no`，
+//!    取 `*` 行。SIGNAL 是 0–100 质量不是 dBm，按 q/2−100 近似折算（注释钉死）；
+//!    `--rescan no` 只读缓存（扫描是秒级阻塞，不许进周期拍）；缓存空/失败 →
+//!    SSID 回落 CONNECTION、RSSI None，不编造。
 //!
-//! 分工口径与 sim 同一条（sim.rs 模块注释）：NM 承载配网与断链重连
-//! （autoconnect 是 NM 自身行为），模块侧只读翻转上报；HAL 只如实报数。
-//! 断链语义对齐 sim：`up=false` 时 ssid/rssi 强制 `None`——真设备断链后
-//! 拿不到这些读数，模块侧不许从"down 还带着 ssid"里发明语义。
+//! 分工与 sim 同一条：NM 承载配网与重连（autoconnect），模块侧只读翻转上报，HAL
+//! 只如实报数。`up=false` 时 ssid/rssi 强制 None——真设备断链后拿不到读数，不许从
+//! "down 还带着 ssid"发明语义。
 //!
-//! 子进程超时（0.0.5 批I N-2）：每次调用由模块 config 的 `timeout_ms` 管
-//! 住——spawn 后轮询 `try_wait`，到点 kill 并显式回错。此前 `.output()` 阻塞
-//! 等到底，最坏翻转延迟由 nmcli 自由决定（工单 N-2 的真问题：`dev show` 平时
-//! 毫秒级，但 NM 卡顿时可拖到秒级以上，且周期拍里没有别的超时兜底）。
-//! 批H5 审查补档：正常退出后的管道读也套同一档 timeout 做 deadline——kill
-//! 只收直子进程，幸存孙进程仍持写端时阻塞读会拖到孙退出，超时兜底被这条
-//! 旁路架空（`rr3_nm_read_capped`，M-γ 起在 nmcli_support 共享层）。
+//! 超时：每次调用受模块 `timeout_ms` 管住——spawn 后轮询 `try_wait`，到点 kill 并
+//! 显式回错。正常退出后的管道读也套同一 deadline：kill 只收直子进程，幸存孙进程
+//! 持写端时阻塞读会拖到孙退出（`rr3_nm_read_capped`，nmcli_support 共享层）。
 
 use std::path::PathBuf;
 use std::time::Duration;

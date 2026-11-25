@@ -1,38 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 运维计数聚合的持久化（0.0.4 批B，Q1/Q2 裁定；0.0.5 增补轮四 R26 改判落盘时机）。
+//! 运维计数聚合的持久化：聚合表**断电尽量不丢**的落点。
 //!
-//! 聚合表（`registry.rs` 的 `RrdRegistry` 计数字段）的**断电尽量不丢**落点。
-//! 裁定演进（诚实记录，不覆盖旧裁定原文）：
-//! - 0.0.4 批B Q2：write-through 逐次刷——每次聚合变化即整文件原子写（tmp → 写全量
-//!   → fsync → rename，与 OTA 同款断电安全序），否决周期刷（"断电丢尾部"）；
-//! - 0.0.5 增补轮四 R26（批W3）：真板 eMMC 上高频小写 = 磨损 + I/O 抖动实证敞口
-//!   （0.0.6 批F 系真板实测教训），改判**心跳合并写**——M 毫秒窗口至多一次 +
-//!   N 拍兜底 + SIGTERM/优雅关停强制 flush（`daemon.rs` 的 term 路径）。落盘仍走
-//!   同一条原子写序，数据面零改动，只改 flush 时机；代价 = 断电丢 ≤M 秒运维账
-//!   （计数是运维账不是账本事实，裁定接受该窗口）。
-//! - 0.0.8 续轮十三：R26 的**执行面**也搬出心跳 reader 线程。原实现里窗口到点
-//!   的心跳自己持全连接共享的 gate 锁做 tmp+fsync+rename——一次 eMMC/SD 抖动就把
-//!   其余模块的心跳处理（含 `rr3_reg_beat` 判活记账）排在磁盘后面，慢过看门狗即
-//!   误判死。现改为 reader 只投递"该落盘了"（`try_send` 非阻塞），快照与 fsync
-//!   全在 `rrd-ctr-store` 单线程；`Rr3CountersGate` 增 `in_flight` 防重复排程，
-//!   判活记账先于计数归并（心跳核心语义不被运维账推迟）。
-//! - 0.0.8 续轮二十一：执行面的**存亡**也可读——`ctl.status.ctr_store` 三态
-//!   （`off`/`on`/`dead`）。线程 panic 展开原本只有 panic hook 一行 stderr，
-//!   运维面看不到"计数账本已经不再落盘"；现由收场守卫在展开时置位，起不来
-//!   同样记 `dead`（启用过但执行面不在，不能读成"未启用"）。
+//! 落盘时机（裁定演进，结论）：不再 write-through 逐次刷——真板 eMMC 上高频小写 =
+//! 磨损 + I/O 抖动。改为**心跳合并写**：M 毫秒窗口至多一次 + N 拍兜底 + 优雅关停
+//! 强制 flush；写序仍是同一条原子写序（tmp → fsync → rename），数据面零改动。
+//! 代价 = 断电丢 ≤M 秒运维账（计数是运维账不是账本事实，裁定接受）。
 //!
-//! 旋钮（env，parse-or-default 口径同 rr-hal env 键——运维账旋钮不走 CLI fail-closed）：
-//! - `RR3_COUNTERS_FLUSH_MS`：合并写窗口毫秒数（缺省 10_000——1s 心跳拍下落盘
-//!   频次 60/min → ≤6/min，10× 削减）；
-//! - `RR3_COUNTERS_FLUSH_MAX`：拍数兜底（缺省 64——高频心跳下 M 窗口拦不住的
-//!   场景按拍数强制透一次）。
+//! 执行面（续轮十三）：窗口到点的落盘**不在心跳 reader 线程里做**——一次 SD 抖动会
+//! 把其余模块的心跳处理排在磁盘后面，慢过看门狗即误判死。reader 只 `try_send`
+//! 投递"该落盘了"（非阻塞），快照与 fsync 全在 `rrd-ctr-store` 单线程；
+//! `Rr3CountersGate` 的 `in_flight` 防重复排程，判活记账先于计数归并。
 //!
-//! 路径判定（[`rr3_path_with`]，纯函数便于测试）：
-//! - env `RR3_DATA_DIR` 有值 → `$RR3_DATA_DIR/counters.json`（sim 侧注入口，
-//!   装配单 / CI 显式给定）；
-//! - env 无值 + cfg(linux) → 缺省 `/data/rr3/counters.json`（rr_data 分区挂载点，
-//!   分区布局与OTA槽位.md 在册）；
-//! - 其余（env 无值 + 非 linux）→ `None`：不持久化，启动日志一行点名，不报错。
+//! 存亡可读（续轮二十一）：`ctl.status.ctr_store` 三态 `off`/`on`/`dead`——线程
+//! panic 或起不来都记 `dead`（启用过但执行面不在，不能读成"未启用"）。
+//!
+//! 旋钮（env，parse-or-default；运维账旋钮不走 CLI fail-closed）：
+//! `RR3_COUNTERS_FLUSH_MS` 合并窗口（缺省 10_000）、`RR3_COUNTERS_FLUSH_MAX`
+//! 拍数兜底（缺省 64）。
+//!
+//! 路径（[`rr3_path_with`] 纯函数）：`RR3_DATA_DIR` 有值 → `$RR3_DATA_DIR/counters.json`；
+//! linux 无 env → `/data/rr3/counters.json`（rr_data 分区挂载点）；其余 → `None`，
+//! 启动日志一行点名，不报错。
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
