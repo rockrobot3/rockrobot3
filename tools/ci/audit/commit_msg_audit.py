@@ -78,6 +78,13 @@ def _git_log() -> list[str]:
     return out.stdout.decode("utf-8", "replace").split("\x00")
 
 
+def _is_shallow() -> bool:
+    out = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"], capture_output=True, check=False
+    )
+    return out.stdout.decode().strip() == "true"
+
+
 def _repo_root() -> Path:
     out = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"], capture_output=True, check=False
@@ -118,6 +125,9 @@ def main(argv: list[str]) -> int:
         return _self_test()
     try:
         root = _repo_root()
+        if _is_shallow():
+            print("浅克隆无法校验提交面（actions/checkout 须 fetch-depth: 0）", file=sys.stderr)
+            return 2
         payload = _git_log()
     except SystemExit:
         raise

@@ -26,7 +26,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      # 全历史检出：⑬ 的提交面判据要扫全部提交（浅克隆只看到 1 条，
+      # 豁免表会整体判失效而误红）。其余作业保持缺省深度以省时间。
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       # 工具链显式钉版 1.100.0（编译器基线，不依赖 runner 镜像预装版本）；
       # components 显式声明，不依赖 runner 镜像预装的 clippy/rustfmt。
       - uses: dtolnay/rust-toolchain@stable
