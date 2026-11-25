@@ -18,6 +18,11 @@ on:
       - "base/os/buildroot/**"
       - ".github/workflows/buildroot.yml"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "手输标签（发布腿直接采用，如 0.0.8 或 edge）"
+        required: false
+        default: edge
 
 permissions:
   contents: read

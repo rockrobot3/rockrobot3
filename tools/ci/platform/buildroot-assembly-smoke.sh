@@ -11,7 +11,7 @@
 # 用 RR3_PACK_BIN 指入；本地可先 `cargo build --release --manifest-path
 # tools/rr3-pack/Cargo.toml`，缺省读 /tmp/rr3-build/release/rr3-pack。
 set -eu -o pipefail
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 POST_BUILD="$REPO_ROOT/base/os/buildroot/board/radxa-zero3/post-build.sh"
 PACK="${RR3_PACK_BIN:-/tmp/rr3-build/release/rr3-pack}"
 [ -x "$PACK" ] || {

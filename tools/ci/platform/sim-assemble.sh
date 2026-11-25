@@ -5,7 +5,7 @@
 # profiles/default.toml`：装配单驱动 rrd 装配链正门 boot 全部 face 模块，
 # 判据 = 六模块真进程全 running + `denied_publish = 0`（D9 验收）。
 set -eu -o pipefail
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$REPO_ROOT"
 
 echo "== 构建 rrd + rr3-ctl + rr3-sim =="

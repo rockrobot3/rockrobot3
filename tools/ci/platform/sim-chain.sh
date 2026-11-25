@@ -7,7 +7,7 @@
 # actions=1 / tts talk 挂起 / intent servo 落角）+ denied_publish = 0（§5.2
 # 判据 10 的 sim 档，R9 采购前档，不充当真件收口证据）。
 set -eu -o pipefail
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$REPO_ROOT"
 
 echo "== 构建 rrd + rr3-ctl + rr3-sim =="

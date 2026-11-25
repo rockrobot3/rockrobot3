@@ -13,7 +13,7 @@
 # 仅 CI 调用（需 docker）；本地想单跑装配逻辑用 rr3-pack --stage-only。
 set -euo pipefail
 
-cd "$(dirname "$0")/../.." # 仓根
+cd "$(dirname "$0")/../../.." # 仓根
 
 IMAGE="rust:bookworm"
 docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '

@@ -315,7 +315,7 @@ jobs:
         with:
           title: ${{ matrix.chip }}-periph-base
           prelude: ~/export-esp.sh
-          command: bash tools/ci/${{ matrix.chip }}-periph-base-check.sh
+          command: bash tools/ci/platform/${{ matrix.chip }}-periph-base-check.sh
       # 以下三门是 classic（ESP32）专属工程：xtensa-esp32-none-elf 固件 / espidf std /
       # 哨兵，S3 腿不适用（S3 的对应面由 periph-base 的 S3 档与 act-sense 的 S3 腿覆盖）。
       - uses: ./.github/actions/guarded-run
