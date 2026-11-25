@@ -1,66 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
-//! UART 传输（0.0.7 批C，ADR-0008 第三实现位；Q1 裁定：线上帧格式不变）。
+//! UART 传输（ADR-0008 第三实现位；线上帧格式不变）。
 //!
-//! 点对点字节流：宿主侧按 raw termios 打开串口设备（`/dev/ttyUSB*` /
-//! `/dev/tty.usbserial*`），帧语义由 blanket impl
-//! [`Rr3TransportConn`](crate::transport::Rr3TransportConn) 免费覆盖——批J G1 换底后
-//! 下底是窄缝 [`Rr3ByteStream`](crate::transport::bytestream::Rr3ByteStream)（本模块
-//! 的 Read+Write 实现经 std 单向 adapter 进缝），半帧/坏 magic/长度不符的拒收路径
-//! 与 uds 完全同源，不写第二份帧层。
+//! 点对点字节流：宿主侧按 raw termios 打开串口，帧语义由 blanket impl 免费覆盖
+//! （下底是 [`Rr3ByteStream`](crate::transport::bytestream::Rr3ByteStream)），半帧 /
+//! 坏 magic / 长度不符的拒收与 uds 同源。无"监听/accept"语义，故
+//! [`Rr3TransportEndpoint`] 与 listener 两 trait 不适用——硬套点对点等于撒谎。
+//! 板侧不用本实现（板侧直接实现两个 `usize` 方法，形状见 `transport/mod.rs` tests）。
 //!
-//! 板侧（0.0.7 层②）另写：宿主侧这个实现是"开 `/dev/ttyUSB` 的"不是板侧实现；
-//! 板侧接总线只需直接实现两个 `usize` 方法（形状用例见 `transport/mod.rs` tests）。
+//! 系统调用面：手写 `extern "C"` 壳（open/close/read/write/tcgetattr/tcsetattr/
+//! cfmakeraw/cfsetispeed/cfsetospeed/tcflush/ioctl/fcntl），不引 libc crate；
+//! termios 结构与常量按 Linux/macOS 分 `cfg`（定义面 `uart/sys.rs`），并用
+//! `const _` 断言结构尺寸，编译期先拦 ABI 漂移。
 //!
-//! 接缝纪律（0.0.7 方案 §5）：只落 conn 面，**不改 trait 签名、不新增关联类型**。
-//! UART 无"监听/accept"语义（点对点，无连接洪泛），[`Rr3TransportEndpoint`] 与
-//! [`Rr3TransportListener`](crate::transport::Rr3TransportListener) 两 trait 不适用
-//! ——uds 的 endpoint trait 面是"端点可洪泛"形状的产物，硬套点对点等于撒谎。
+//! 排他开口：按 (进程, 路径) 的 flock 登记账本——每路径首个 open 开长寿命 guard fd
+//! 并 `flock(LOCK_EX|LOCK_NB)`，同进程后续 open 只记账重入（桥 rx/tx 双开合法）；
+//! 跨进程第二 opener 当场拒绝（ResourceBusy 点名）。不用 TIOCEXCL：Linux 连自家
+//! 双开一起拦，macOS 的 TS_XCLUDE 对本模块 O_NOCTTY 开口无效。外部进程
+//! （espflash/monitor）不守 flock，须按 runbook 先清场。
 //!
-//! 系统调用面：手写 `extern "C"` 声明壳（open/close/read/write/tcgetattr/
-//! tcsetattr/cfmakeraw/cfsetispeed/cfsetospeed/tcflush/ioctl/fcntl），**不引 libc crate**——
-//! 同款仓内纪律，rr-ipc 依赖表保持为空。termios 结构与常量 Linux/macOS 分
-//! `cfg` 各钉一份（数值互不相同：Linux B115200 = `0o10002`，macOS 直接用字面
-//! 波特率；O_NOCTTY、VMIN/VTIME 下标、结构布局均异）——每一份都以各自平台
-//! 头文件为准，并用 `const _` 断言结构尺寸，编译期先拦 ABI 漂移（定义面在
-//! `uart/sys.rs`）。
+//! fd 一律 `O_CLOEXEC`：锁的释放点不得被子进程生命周期拖长。`Command::spawn`
+//! 复制 fd 表瞬间仍会短暂持锁（合法瞬态），守门用例以有界重试容忍，真泄漏重试恒败。
 //!
-//! 排他开口（0.0.7 批G，批E E7 排障实锤处置）：**按 (进程, 路径) 的 flock 登记
-//! 账本**。每路径在本进程内的首个 open 开一支长寿命 guard fd（O_NONBLOCK 防
-//! carrier 阻塞）并对它 `flock(LOCK_EX|LOCK_NB)`；同进程后续 open 只记账重入
-//! （桥 rx/tx 对同一节点双开是仓内合法形状，`open_uart_pair`）；账退到零关
-//! guard 放锁。跨进程的第二个 opener 在 guard 的 flock 上当场被拒（EWOULDBLOCK
-//! → ResourceBusy 点名）——E7 的雷（macOS 允许重复 open 同一 USB 串口节点，
-//! 残留旧桥/旧 harness 静默截走数据）正是跨进程形状，拦住即结案。
-//!
-//! 为什么不用 TIOCEXCL：Linux 内核对同节点**一切**后续 open 硬拦（不分进程），
-//! 会把桥自家 rx/tx 双开一起拦死；macOS（xnu）的 TS_XCLUDE 只拦"tty 已挂
-//! controlling session 且 opener 非其 leader"，本模块 O_NOCTTY 开口无 session，
-//! pty 探针实测（2026-10-11）TIOCEXCL 后二次 open 仍成功——两头都不成立，弃用。
-//! flock 是 advisory，但仓内全部串口消费者（桥/harness/运维脚本）都经
-//! [`Rr3UartConn::open`] 这一个咽喉，同一把锁即对全体自家人硬约束；外部进程
-//! （espflash/monitor）不守 flock，与旧状同，须按 runbook 先清场再操作。
-//! 精度注记：账本按**路径字符串**记账，同一节点的别名路径（symlink）不记账
-//! ——本仓所有消费方都用同一固定路径写法，别名逃逸留 runbook 纪律兜底。
-//!
-//! CLOEXEC 边界与 spawn 瞬态（0.0.5 增补轮六批N21 件一根因实录）：guard 与
-//! 通信 fd 一律 `O_CLOEXEC`——guard fd 是持锁面，exec 换体时必须随手撤走，
-//! 锁的释放点不得被不相干的子进程生命周期拖长（无 CLOEXEC 时子进程继承的
-//! fd 副本把锁扣到子进程退场，同账本重开撞假"跨进程占用"）。批N19 起的
-//! 测试 flaky 由此拆修定案：即便有 O_CLOEXEC，`Command::spawn` 复制父进程
-//! fd 表的瞬间，fork 副本仍持 guard fd 的 open file description 引用，把
-//! flock 锁扣到子进程 exec 完成（CLOEXEC 生效）才放——macOS posix_spawn
-//! 语义的固有毫秒级窗口，与"账退尽后立即重开"并发即撞 EAGAIN（lsof 在
-//! 诊断窗内抓不到锁主：exec 已完成、fd 已关）。这是合法瞬态不是账本泄漏，
-//! 守门用例以有界重试容忍（真泄漏锁是永久的，重试恒败照常 panic）；生产
-//! 同形状（桥进程 spawn 运维工具后并发重开同路径）同理重试即过。
-//!
-//! 波特率只收 [`rr3_uart_baud_speed`] 认识的档位（115200 默认 / 9600 降速 /
-//! 921600 高速 / 1.5M 与 2M 高速档）：9600 是 0.0.7 方案 P3 的合法降速处置；
-//! 921600 是 0.0.5 增补轮五批D② 按带宽账加的高速档（音频上行双通道
-//! 16kHz×16bit ≈ 512kbps，115200 载不动、921600 有效 ≈ 737kbps 可承载）；
-//! 1.5M/2M 是为"不动音频口径、只扩链路容量"加的高容量档（2026-10-30 链路
-//! 换树莓派 PL011 三线直连后重评、压实定档 1.5M，音频 85KB/s 占线降到 ~46%）。
-//! 缺省 115200 不变（Q1=(a) 裁定），高速档只显式选择——不预设更大的波特率动物园。
+//! 波特率只收 [`rr3_uart_baud_speed`] 认识的档位（115200 缺省 / 9600 降速 /
+//! 921600 / 1.5M / 2M）；高速档只显式选择，不预设更大的波特率动物园。
 
 use std::io::{Read, Write};
 use std::path::Path;

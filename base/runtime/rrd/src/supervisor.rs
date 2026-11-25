@@ -1,59 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
-//! spawn 与重启的唯一执行者（spec §5.3/§5.4）。一条线程、串行收尸与起进程。
+//! spawn 与重启的唯一执行者（spec §5.3/§5.4）：一条线程串行收尸与起进程。
 //!
-//! 为什么要有"所有权"这件事（`jobs` / `rr3_reg_own`）：没有 `SO_PEERCRED`（要 libc，破 K5），
-//! rrd 认不出哪条连接是自己起的进程，只能反向用"我自己起过谁"当依据 ——
-//! 所以本文件是"能起谁"的全集，而不是"该起谁"的裁判。**外来模块的计划一律跳过**，
-//! 理由与代价见 E-1 / E-2。
+//! 所有权（`jobs` / `rr3_reg_own`）：没有 `SO_PEERCRED`（要 libc，破 K5 依赖预算），
+//! rrd 认不出哪条连接是自己起的进程，只能以"我起过谁"为依据——本文件是"能起谁"
+//! 的全集，不是"该起谁"的裁判。
 //!
-//! 本文件的四条**已知边界**（任何"崩溃自愈已完成"的措辞都不许盖过它们）：
-//! ① **非本守护起的模块永不重启**（E-1/E-2 的代价）：它们照样被记账、照样出计划，
-//!    但执行时只打一行 `跳过重启 {name}：不是本守护起的进程`。M3 若要"rrd 接管别人起的进程"，
-//!    得回来补 identity 载体 + `SO_PEERCRED`（libc → 要先重裁 K5 依赖预算）。
-//! ② **`rr3_reg_own` 与注册之间只靠 name 相关**：boot 一个已被外部占用的名字 = 配置错误，
-//!    本轮按"子进程退出"处理（走 `rr3_reg_child_exit` 的 EarlyExit，吃预算、有上限），
-//!    不为其发明第二种语义。
-//! ③ **不持有 `SIGCHLD` 处理、不靠 `waitpid` 阻塞**：收尸靠 `try_wait` + 扫尸节拍（E-5 复用
-//!    `--watchdog-tick-ms`），故"进程已死"到"rrd 知道"之间有**至多一个 sweep 的延迟**（生产 200ms）。
-//! ④ **depends / degraded 不在本文件裁定**（原"两条不做"随 F2/ADR-0009 解除，但裁定权不在这）：
-//!    boot 启动序由 `rr3_plan_boot` 在 `daemon.rs` 仲裁后投递（环 / 不可满足都在
-//!    那里拒）；降级传播只在本文件收尸那一路"记账之后"被动触发——置位/解除的账本在
-//!    `registry.rs`（`rr3_reg_degrade` / `rr3_reg_undegrade`），本文件不判
-//!    "谁该降级"，只把收尸事实交出去。降级不出重启计划、不吃预算（裁定 4）。
+//! 四条已知边界（任何"崩溃自愈已完成"的措辞都不许盖过）：
+//! ① 非本守护起的模块永不重启：照常记账、照常出计划，执行时只打
+//!    `跳过重启 {name}：不是本守护起的进程`。要接管外来进程须先补 identity 载体。
+//! ② `rr3_reg_own` 与注册只靠 name 相关：boot 到已被外部占用的名字按"子进程退出"
+//!    处理（EarlyExit，吃预算有上限），不发明第二种语义。
+//! ③ 不持 `SIGCHLD`、不靠 `waitpid`：收尸靠 `try_wait` + 扫尸节拍（复用
+//!    `--watchdog-tick-ms`），故"进程已死"到"rrd 知道"至多一个 sweep 的延迟。
+//! ④ depends / degraded 不在本文件裁定：boot 序由 `rr3_plan_boot` 在 daemon 仲裁；
+//!    降级账本在 `registry.rs`，本文件只把收尸事实交出去（降级不出计划、不吃预算）。
 //!
-//! 锁纪律（**违反即同线程重入自死锁**，而 `#[cfg(unix)]` 让 Windows L1 全绿也看不见）：
-//! `rr3_lock(&shared).rr3_reg_*()` 一律先 `let` 绑结果再 `match`，**绝不**写进 `match` 的
-//! 被匹配表达式或守卫 —— Rust 会把守卫临时量 `MutexGuard` 延寿到整个 `match` 语句结束，
-//! 臂内/后续臂再取同一把锁就死（11a 在 `rr3_conn_finish` 上踩过一次，由 L2 的 e2e 超时抓出）。
-//! brief 的骨架里那句 `None if rr3_lock(&shared).rr3_reg_hit_cap(&name) =>` 就是这个形状，
-//! 本文件按同一条规矩把它改成 `let capped = …` 后再 `if`（见 `rr3_absorb_exit`）。
+//! 锁纪律（违反即同线程重入自死锁）：`rr3_lock(&shared).rr3_reg_*()` 一律先 `let`
+//! 绑结果再 `match`——写进被匹配表达式或守卫会把 `MutexGuard` 延寿到整个 `match`
+//! 结束，臂内再取同一把锁即死。
 //!
-//! 线程形状（E-5）：全 daemon 只有这一条执行线程加一条 watchdog。`recv_timeout(sweep)`
-//! 既当收件也当节拍，每轮顺序固定为 收件 → `rr3_reap` → `rr3_fire_due`。
-//! `sweep` 复用 `--watchdog-tick-ms`，但**表里有更早到期的计划时本拍只等到那一刻**（见
-//! `rr3_spawn_supervisor` 里那段"取小者"）——否则 1 小时 tick 的既有测试里重启永不执行。
-//! 为什么不再加一个线程：收尸与重启必须串行（并行的话"A 的收尸产出计划、B 的执行又起一个
-//! 同名进程"没人排序），而这两件事都不阻塞别人（`try_wait` 不阻塞，`Command::spawn` 是微秒级）。
+//! 线程形状：全 daemon 只有这一条执行线程 + 一条 watchdog。`recv_timeout(sweep)`
+//! 既收件也是节拍，每轮固定 收件 → `rr3_reap` → `rr3_fire_due`；表里有更早到期
+//! 的计划时本拍只等到那一刻。收尸与重启必须串行，故不再加线程。
 //!
-//! 退避不是睡眠（E-4）：计划进 `due: Vec<(Instant, Rr3RestartPlan)>`，到期才起。
-//! **绝不允许**在本文件里 `sleep(delay)`：那会让一个模块的 60 秒退避把整台机器的收尸停摆 60 秒
-//! （其余模块的退出码、僵尸回收、重启全堵在后面）。
+//! 退避不是睡眠：计划进 `due`，到期才起。**绝不**在本文件 `sleep(delay)`——那会让
+//! 一个模块的退避把整台机器的收尸停摆。
 //!
-//! 环境注入三件（E-6）：`RR3_BUS_PATH` / `RR3_MANIFEST` / `RR3_SIM_PEER_ROLE`。子进程
-//! `stdout(Stdio::null())`、`stderr → per-unit 日志文件` —— **绝不能把子进程 stdout 接进 rrd 的
-//! stdout 管道**：`RrdTest::rr3_wait_log` / `rr3_assert_no_log` 读的就是那条管道，混进子进程
-//! 输出就把"rrd 说过什么"变成"这堆进程里谁说过什么"（`sim_peer` 打的是中文，一条 `已主动退场`
-//! 就足以扰动 needle）。
-//!
-//! stderr 定形（门 r 留痕通道，批N4 件八）：留痕不得进被丢弃的流——stdout 是 null（死路，
-//! 原先 45 处模块 `println!` 按设计不可达任何去处），stderr 接 `<socket>.log/<unit>.log`
-//! （append，重启后仍可取崩溃前的行，§17 运维留痕同轨判据）；文件打不开回退 inherit 并
-//! 点名，观测通道故障降级、不放大成可用性故障。
-//!
-//! 日志用词纪律（与测试的否定 needle 同源，改字面量前要一起看）：
-//! `spawn ` 只用于"成功起了一个进程"那一行；起不来一律写 `起进程失败`。
-//! A-5③ 第 3 条要求新文件里的 `rr3_assert_no_log` 只能用 `spawn rr3-<名>` / `跳过重启` /
-//! `停止重启` 这类**不与其它文案共用子串**的 needle。
+//! 环境注入三件：`RR3_BUS_PATH` / `RR3_MANIFEST` / `RR3_SIM_PEER_ROLE`；子进程
+//! `stdout(Stdio::null())`，stderr 接 `<socket>.log/<unit>.log`（append，重启后仍可
+//! 取崩溃前的行；打不开回退 inherit 并点名）。子进程输出绝不能进 rrd 的 stdout 管道
+//! ——测试 needle 读的就是那条管道。日志用词：`spawn ` 只用于"成功起了一个进程"，
+//! 起不来一律写 `起进程失败`；新用例的否定 needle 只用不与其它文案共用子串的串。
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

@@ -1,60 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 板侧配置腿服务（N-13 服务本体，批N13 件一；connect 册 N-13 / 全案 §7 F-18）。
+//! 板侧配置腿服务：WiFi 上的极简 HTTP 面（不经桥），载体是 ESP-IDF `esp_http_server`
+//! （HTTP/1.1 子集，与 host 面板同形）。**TLS 不做**（局域网可信面、板侧无 TLS 栈
+//! 现役、零新依赖；公网暴露立项时与凭据面同批评审）。
 //!
-//! rtos 形态"自己的配置/观测腿"——不经桥（[`crate::frame`] 的 `rr3.set_bindings`
-//! 是 host **推给**板的另一条腿，基-24），板自己在 WiFi 上开极简 HTTP 面。
-//! 载体选型随批N4 件二定案：ESP-IDF 内置组件 `esp_http_server`（HTTP/1.1 子集：
-//! GET/POST + JSON，与 host 面板 [server.rs](../../../modules/rr3-interact/src/panel/server.rs)
-//! 同形）；**TLS 不做**（四条理由在案：局域网可信面同 host 面板 Q3 裁定／板侧无
-//! TLS 栈现役，引 mbedtls 堆账不可收／零新依赖纪律／公网暴露立项时与凭据面同批
-//! 评审）。
+//! 写口（配网半边）：`POST /api/board/wifi` 事务性配网——读旧值 → 写 NVS → STA
+//! 重配置重连 → 有界等连 → 败即回退旧值 → 如实应答 `{ok, connected, reverted,
+//! stage}`；`connected` 只取实测等连结果，永不因请求被接受而置真。`POST
+//! /api/board/reboot` 应答先行落链再 `esp_restart`。事务全程不持 bus 锁、不碰
+//! 观测面（零回显契约的第二道墙）。
 //!
-//! 写口（批N14 件二，N-10 ② 配网半边）：**POST /api/board/wifi** 事务性配网——
-//! 读旧值 → 写 NVS → STA 重配置重连 → 有界等连 → 败即回退旧值重连 → 如实应答
-//! `{ok, connected, reverted, stage}`（fail-safe 方向：消灭"写坏凭据板掉网"砖
-//! 路径；`connected` 字段＝实测等连结果，**永不因请求被接受而置真**，同 connect
-//! RPC 纪律）；**POST /api/board/reboot** 动作面——应答先行落链再 `esp_restart`。
-//! 事务全程**不持 bus 锁**（不碰 [`crate::state::PeriphState`]，观测面结构上无
-//! WiFi 字段——零回显契约的第二道墙，[`crate::cred`] 模块文档）。
+//! 应答送达半边物理不可达（reconnect/reboot 都会杀 TCP 会话），故客户端确认语义
+//! 以旁证为准：写口 = 板重新可达后 `GET /api/board/state` 的 `connected`；reboot =
+//! 复位后 boot 横幅"凭据源=…"点名。
 //!
-//! 动作面应答送达半边（批N16 件二裁定：**旁证契约化**，decisions §3）：事务内
-//! reconnect 与 reboot 的 `esp_restart` 都会杀 TCP 会话——四字段应答**取读数半边**
-//! 真板成立、**送达半边物理不可达**（实现已是"事务完成后应答"，无更延迟的应答位
-//! 可取；批N15 真板实录：坏凭据 POST curl 35s 超时应答丢失／reboot 应答先行落链
-//! 仍不可达）。客户端**确认语义以旁证为准**：写口＝板重新可达后
-//! `GET /api/board/state` 的 `connected` 字段（新凭据连上＝生效／板仍以旧凭据可达
-//! ＝回退生效——砖路径消灭实证语义）；reboot＝复位后 boot 横幅「凭据源=…」点名。
+//! 分层：纯逻辑层（白名单路由表 [`RR3_BOARD_ROUTES`] + 查表 + JSON 组包/解析纯函数，
+//! 单测可钉）；unsafe 壳层 [`rr3_httpd_spawn`]（WiFi STA 起栈 + `httpd_start` +
+//! 注册 handler）。表即分派真值，无第二份。
 //!
-//! 分层（机制与策略分离）：
-//! - **纯逻辑层**（单测可钉）：白名单路由表 [`RR3_BOARD_ROUTES`]（前四列与
-//!   host `RR3_PANEL_ROUTES` 同构，第五列处理臂）＋查表函数
-//!   [`rr3_route_lookup`]＋快照 JSON 组包纯函数＋写口 body 解析/应答组包纯函数。
-//!   表即分派真值（无表↔臂第二份），method/path 交叉拒由
-//!   `route_table_truth` 单测钉死。
-//! - **unsafe 壳层**（[`rr3_httpd_spawn`]）：WiFi STA 起栈（裸 sys——
-//!   [`wifi_init_config_t`] 手抄 v5.2.2 `WIFI_INIT_CONFIG_DEFAULT()` 宏展开，
-//!   字段真值逐项对表本项目生成 sdkconfig，见 [`wifi_default_config`]）＋
-//!   `httpd_start` ＋注册白名单 handler。
-//!
-//! 凭据：**NVS 优先 → 编译期注入回落**（批N14 件一读链；存储对象见 [`crate::cred`]，
-//! namespace `"rr3"` 单真值——N-10 ② 主体半边）：
-//! - **NVS 优先**：`rr3_cred_read()` 读时现取（配网写口批N14 件二落值的消费点）；
-//! - **编译期回落**：`option_env!` 读 `RR3_BOARD_WIFI_SSID`/`RR3_BOARD_WIFI_PASS`
-//!   （构建期烘焙进 .rodata，值不落仓——**批N14 订正**：批N13 码面误用
-//!   `std::env::var` 运行期读，而板上 IDF newlib 把 `environ` 初始化为空数组
-//!   （newlib_init.c :169-174），运行期 env 永远缺席＝配置腿真机永不装配——文档
-//!   所述"编译期注入"与码面不符，本批按文档口径落实）；
-//! - 都缺＝**配置腿缺席**：boot 点名后 fail-honest 返回，不阻塞既有链路。
-//!
-//! 账面：httpd 任务栈 16KB（[`HTTPD_STACK_SIZE`]，`task_stack_budget_bytes =
-//! 65536` 容既有两 16KB 线程＋本面余量充足；起栈线程短命同栈）；WiFi/httpd
-//! 常驻堆从批N4 件二预留 16384 出——**取值对账归真板**（`esp_get_free_heap_size`
-//! 实测，`heap_reserved_bytes` 回填口径已注明，WiFi 静态缓冲 ~16KB 量级＋
-//! httpd 会话面，预留是否充足以真板实测为准，本件如实留痕不冒领）。写口瞬时
-//! 面（批N14 件二；批N15 件二真板订正：等连判据改 `esp_netif_ip_info_t`
-//! DHCP 得 IP——`esp_wifi_sta_get_ap_info` 关联瞬态误报缺陷在案）：body 收包
-//! 缓冲 ≤512B＋`esp_netif_ip_info_t` ~16B 栈上临时——16KB 栈富余；事务不新增
-//! 常驻堆。
+//! 凭据读链：NVS 优先 → `option_env!` 编译期回落（板上 newlib 的 `environ` 为空，
+//! 运行期 env 永不成立）；两者都缺 = 配置腿缺席，boot 点名后 fail-honest 返回。
+//! 栈 16KB（[`HTTPD_STACK_SIZE`]）；写口瞬时缓冲 ≤512B，不新增常驻堆。
 
 use std::sync::{Arc, Mutex, OnceLock};
 
