@@ -57,6 +57,9 @@
 # ---- 产物与再生件 ----
 **/target/
 **/build/
+**/.embuild/
+**/sdkconfig
+**/sdkconfig.old
 **/__pycache__/
 **/*.py[cod]
 *.wav

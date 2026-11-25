@@ -74,3 +74,9 @@ modules/rr3-<域>/
 
 > 生成器 `rr3-mkmod` 实际落盘 **5 个文件**：上面四类结构角色 + crate 的 `Cargo.toml`
 > （清单与校验流程见 [conventions.md](conventions.md) §3）。
+> **在仓模块位不止生成模板**：随施工推进，每个模块根固定为六件 + 两目录
+> （`Cargo.lock` 与 `composite.toml` ⊗ 装配清单另入），可选件按承载形态出现
+> （`.cargo/`、`build.rs` + `sdkconfig.defaults`、`config-<板>.toml`）。
+> 固定件/可选件全表见 [modules/README.md](../../modules/README.md)；
+> espidf 档构建现场（`.embuild`/`sdkconfig*`）由仓根 `.gitignore` 统一排除，
+> 模块目录不再各放一份。

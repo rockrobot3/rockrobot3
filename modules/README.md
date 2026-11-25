@@ -25,10 +25,16 @@
 
 **目录里有什么**：六个模块位都已建好，六模块全 Rust 同形——rr3-sense / rr3-act /
 rr3-interact / rr3-power / rr3-connect / rr3-brain（批N32 件四起 rr3-brain 亦 Rust 化，
-与其余模块同形）。各模块在五件基础之上另带 `atoms/<名>/`（原子件五件套：`atom.toml` +
-入口 + `mech.rs` + `assemble.toml` + `private.rs`）与 `composite.toml`（⊗ 装配清单），
-组合件入口瘦身只装配与启动——每个模块的内构目录见各自
-README 与 [`architecture.md`](../docs/architecture/architecture.md) §3。
+与其余模块同形）。模块根目录的文件集合是固定的（2026-11-25 批46 件四一致化）：
+
+| 类别 | 件 | 说明 |
+|---|---|---|
+| 固定件（六模块全有） | `README.md` · `Cargo.toml` · `Cargo.lock` · `module.toml` · `composite.toml` · `config.toml` · `src/` · `atoms/` | `composite.toml` 是 ⊗ 装配清单；`atoms/<名>/` 为原子件五件套（`atom.toml` + 入口 + `mech.rs` + `assemble.toml` + `private.rs`） |
+| 可选件（按承载形态） | `.cargo/config.toml` · `build.rs` + `sdkconfig.defaults` · `config-<板>.toml` | xtensa 交叉链接配置；espidf 形态构建钩子；装机板变体档（如 rr3-sense 的 `config-esp32.toml`/`config-pi4b.toml`） |
+
+根目录**不放**其它文档与构建现场（espidf 的 `.embuild`/`sdkconfig*` 由仓根
+`.gitignore` 统一排除）；每个模块的内构目录见各自 README 与
+[`architecture.md`](../docs/architecture/architecture.md) §3。
 
 机器把关：② 步校验六份 `module.toml` 并钉住模块集合，④ 步编译六模块 crate
 （modules/ 下独立工程全量，连同 tools/、base/ota 同口径）。
