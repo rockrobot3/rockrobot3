@@ -6,7 +6,11 @@
 
 hyg_paths() {
   local self hy_path hy_rc
-  self="${BASH_SOURCE[0]}"
+  # 步骤体自身与检测器必须排除（它们持有模式串本身）。BASH_SOURCE 在 zsh
+  # source 时为空——曾因此把排除面变成"排除全部"而本地恒绿（2026-11-25 实证），
+  # 故空值回落到固定路径，宁可点名也不静默放行。
+  self="${BASH_SOURCE[0]:-tools/ci/steps/13.sh}"
+  [ -n "$self" ] || self=tools/ci/steps/13.sh
   case "$self" in "$root"/*) self="${self#"$root"/}" ;; esac
   hy_path="$(git grep -IE -n \
     -e '/Users/[A-Za-z0-9._-]+/' \
@@ -14,6 +18,7 @@ hyg_paths() {
     -e 'C:\\\\Users\\\\' \
     -- . ':(exclude)'"$self" ':(exclude)docs/process/conventions.md' \
         ':(exclude)docs/process/conventions-receipts.md' \
+        ':(exclude)tools/ci/audit/commit_msg_audit.py' \
     2>&1)"
   hy_rc=$?
   case "$hy_rc" in
