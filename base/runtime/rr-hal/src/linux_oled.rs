@@ -1,43 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
-//! linux（I2C）SSD1306 OLED 显示后端：128x64 单色屏（W5-3 Pi 显示面换装）。
+//! Linux（I2C）SSD1306 OLED 显示后端：128x64 单色屏。
 //!
-//! 编译门是单重的：`target_os = "linux"`——依赖 libc 仅取 `ioctl`/`write`/`close`
-//! 的 extern 声明（纯 Rust 壳，musl 静态链接零额外 C 库依赖，R13 友好），无
-//! feature 门（与 [`crate::linux_display`] 同形）。主机 CI（macOS）不编译本文件；
-//! 宿主侧验证路径 = aarch64 musl 交叉 check（R13）+ 板上 `cargo test -p rr-hal`
-//! （真 linux 目标跑单测：帧缓冲/init 序列纯函数 + temp 树普通文件的错误传播
-//! 路径，不触真硬件）。
+//! 编译门单重：`target_os = "linux"`——只取 `ioctl`/`write`/`close` 的 extern 声明
+//! （纯 Rust 壳，musl 静态链接零额外 C 库依赖），无 feature 门（与
+//! [`crate::linux_display`] 同形）。宿主侧验证 = aarch64 musl 交叉 check + 板上
+//! `cargo test -p rr-hal`（帧缓冲/init 纯函数与普通文件错误传播，不触真硬件）。
 //!
-//! 接口面：I2C chardev UAPI（`/dev/i2c-N`）——`I2C_SLAVE` 定从地址，控制字节
-//! 0x00（命令流）/ 0x40（显存数据流）。SSD1306 显存是页式 8 页 × 128 列；本档
-//! 用水平寻址模式（0x20 0x00）并用列/页窗口命令（0x21/0x22）把每次整帧写限定
-//! 在 0..127 × 0..7，显存指针跨事务自动递增——与 MAX7219 的"一次 CS 一包"
-//! 级联锁存语义不同，分块写安全。
+//! 接口：i2c-dev UAPI（`/dev/i2c-N`），`I2C_SLAVE` 定从地址；控制字节 0x00 走命令、
+//! 0x40 走显存。水平寻址模式 + 列/页窗口（0x21/0x22）把整帧写限定在 0..127 × 0..7，
+//! 显存指针跨事务自增，分块写安全（与 MAX7219 的 CS 级联锁存语义不同）。
 //!
-//! 帧面契约：`Rr3FaceFrame` 8x8 行主序、bit7 最左（rr-hal-api 定案档）按 8 倍
-//! 最近邻放大成 64x64，水平居中（左右各留 [`RR3_OLED_X0`] 列）。表情的"形状"
-//! 归模块侧（rr3-interact 表情机），HAL 只把帧如实铺到屏上，不引入字体/动画语义。
+//! 帧面：`Rr3FaceFrame` 8x8 行主序、bit7 最左，按 8 倍最近邻放大成 64x64 水平居中
+//! （左右各留 [`RR3_OLED_X0`] 列）。表情语义归模块侧，HAL 只如实铺帧，不引字体/动画。
 //!
-//! 写事务分块：i2c-dev 单次 write 的载荷上限随适配器而异（BCM2835 充足），统一
-//! [`RR3_OLED_CHUNK`] 数据字节 + 1 控制字节分块——对任意适配器安全；1024 字节
-//! 整帧 = 64 笔事务，1 Hz 表情刷新下总线占用可忽略。
+//! 写事务按 [`RR3_OLED_CHUNK`] 数据字节 + 1 控制字节分块——i2c-dev 单次 write 上限
+//! 随适配器而异，分块对任意适配器安全；1024 字节整帧 = 64 笔，1 Hz 刷新占用可忽略。
 //!
-//! 开机 init 序列（datasheet 惯例：先关显示、配时钟/复用/电荷泵/寻址，最后开
-//! 显示）：DISPLAYOFF → CLOCK → MUX → OFFSET → STARTLINE → CHARGEPUMP →
-//! MEMORYMODE(horizontal) → SEGREMAP → COMSCANDEC → COMPINS → CONTRAST →
-//! PRECHARGE → VCOMH → RESUME → NORMAL → DISPLAYON。亮度取
-//! [`RR3_SSD1306_CONTRAST_DEFAULT`]（0x7F，模块常见出厂档），不留 env 旋钮——
-//! 旋钮应急键是"物理绑定"口径，对比度是体验参数。
+//! 开机 init 按 datasheet 惯例：先关显示，配时钟/复用/电荷泵/寻址，最后开显示；
+//! 对比度取 [`RR3_SSD1306_CONTRAST_DEFAULT`]，不留 env 旋钮（对比度是体验参数，
+//! 旋钮只给物理绑定）。
 //!
-//! boot 语义：选择函数（[`crate::backend::rr3_hal_display`]）不触设备：构造只存
-//! 根/总线/地址，打开总线 + `I2C_SLAVE` + init 序列延迟到首次 trait 调用
-//! （ensure，与 gpio/pwm/alsa/spidev 后端 open 延迟同形）。设备不在位/地址无
-//! 应答/权限不足在此显式报错，rr3-interact 开机探活按"能力缺失显式回错"
-//! exit(1)，不静默退化。
-//!
-//! [`Rr3Display::frame`] 的"读回 == 上次 draw 的帧"由 `last` 快照承载
-//! （SSD1306 的 GDDRAM 回读依 I2C 读时序，本档不做回读——快照是探活与对账的
-//! 真值，与 MAX7219 档同语义）。
+//! boot 语义：构造只存根/总线/地址，打开总线与 init 延迟到首次 trait 调用（ensure），
+//! 与 gpio/pwm/alsa/spidev 后端同形；设备不在位/无应答/权限不足显式报错，上层按
+//! "能力缺失显式回错"处理，不静默退化。`frame()` 的读回由 `last` 快照承载
+//! （本档不做 GDDRAM 回读），快照即探活与对账真值。
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
