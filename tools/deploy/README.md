@@ -1,5 +1,9 @@
 # RR3 板侧固件烧录（发布制品）
 
+**部署态口径（2026-11-25 批47 裁定，见 [decisions §2](../../docs/process/decisions.md)）**：
+MCU 的交付形态 = 只烧基本功能档（classic `safe`），全链档只作验证选项；
+MCU 无 A/B 分区，升级一律线下重烧。每个芯片平台独立部署，没有主/副板。
+
 本说明随 tag release 资产与 ghcr OCI 制品
 `ghcr.io/<owner>/rockrobot3-firmware:<tag>` 一同发布；制品由流水线构建，
 本地不编译。
