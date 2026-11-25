@@ -89,8 +89,10 @@ for name in sorted(latest):
         same_head += 1
         if status != "completed":
             has_pending = 1
-        elif conc in red:
-            has_red = 1
+    # 红按"各 workflow 最新一条"计，不按本地头过滤：纯文档提交会被 paths-ignore
+    # 跳过，若最新一条仍在上一头红着，它就是"最新代码的结论"，不能因头不同而放行。
+    if status == "completed" and conc in red:
+        has_red = 1
     if status != "completed":
         mark = "RUNNING"
     elif conc in red:
