@@ -141,6 +141,22 @@ Node 20 档引用会在 annotations 里持续告警并将于后续移除。现�
 未暴露）；`setup-buildx@v4` 移除的输入本仓未使用，升级无行为变化。升级动作
 仍走"显式提交改矩阵 + 同批换引用"，与 rust-toolchain 钉版同一纪律。
 
+**发布触发（需仓库凭据，本地不可代劳）**：正式发布 = 一次 tag 事件，两条前提：
+
+1. 仓库 Secrets 配置 `RR3_OTA_SIGNING_KEY`（64 hex）——`buildroot` 发布腿缺它即
+   fail-closed（设计如此，不降级为未签名）；
+2. tag 必须与 `VERSION` 同源且指向 `release(vX.Y.Z)` 提交（`release-tag.sh` 执法）：
+
+```bash
+git commit --allow-empty -m 'release(v0.0.8)：<发布说明>'
+git tag v0.0.8 && git push origin v0.0.8 && git push github v0.0.8
+```
+
+验证（匿名可读的部分）：`gh api repos/<owner>/rockrobot3/actions/runs` 看 publish /
+buildroot 两条流水线；`oras manifest fetch ghcr.io/<owner>/rockrobot3-firmware:v0.0.8`
+与 `rockrobot3-ota` / `rockrobot3-buildroot` 同标签。不带凭据时可用
+`workflow_dispatch` 输入 `edge` 只验运行镜像腿（不产 Release、不签名）。
+
 **权限与失败显形（2026-11-18 续轮十六）**：
 
 - 每个 workflow 必须有顶层 `permissions:`，至少 `contents: read`，不得
