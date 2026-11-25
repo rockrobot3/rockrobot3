@@ -1,7 +1,4 @@
-# Rockrobot3 仓库追踪策略：默认忽略所有，仅白名单放行。
-# 白名单逐项登记——目录级通配只用于源码骨架（CI 门按名执法）与既有
-# 档案子树；新增文档/顶层路径必须先在本文件登记，否则不会出现在
-# git status，静默丢件（策略正文见 docs/process/conventions.md §1.1）。
+# 追踪策略：默认忽略全部，白名单逐项放行；新增顶层路径必须先在此登记。
 *
 # ---- 仓级说明与许可 ----
 !.gitignore
@@ -9,19 +6,18 @@
 !README.md
 !README_zh.md
 !LICENSE
-# 产品版本唯一真源（发布/deb/OCI 标签同读）
+# 产品版本唯一真源
 !VERSION
 # ---- 构建与供应链配置 ----
 !.cargo/
 !.cargo/**
-# ---- CI 与门禁 ----
+# ---- CI ----
 !.github/
 !.github/**
-# ---- 项目文档：顶层逐项登记，非项目必须的文档不追踪 ----
+# ---- 文档 ----
 !docs/
 !docs/README.md
 !docs/status.md
-# 在制品历史台账（status.md 结构化拆分，2026-11-17）
 !docs/status-history.md
 !docs/openitems.toml
 !docs/洛克三号-开源智能硬件赛道-参赛介绍.md
@@ -34,20 +30,17 @@
 !docs/evidence/
 !docs/evidence/**
 !docs/process/
-# docs/process 顶层文档逐项登记：新增文档先来此登记再入库
 !docs/process/ci-workflows.md
 !docs/process/conventions.md
-# 规约 §2 的日期回执存档（2026-11-18 纯移位迁出）
 !docs/process/conventions-receipts.md
 !docs/process/decisions.md
 !docs/process/legacy-digest.md
 !docs/process/naming.md
-# 架构决策记录与批次开发档案（整体子树，既有档案史完整保留）
 !docs/process/adr/
 !docs/process/adr/**
 !docs/process/dev/
 !docs/process/dev/**
-# ---- 结构化源码骨架（通配放行，散件由门禁 ⑦/⑬ 执法） ----
+# ---- 源码树 ----
 !base/
 !base/**
 !modules/
@@ -61,7 +54,7 @@
 !tools/
 !tools/**
 
-# ---- 产物面：白名单目录内的再排除，一律不追踪 ----
+# ---- 产物与再生件 ----
 **/target/
 **/build/
 **/__pycache__/
@@ -83,7 +76,7 @@
 **/.copilot/
 **/.aider*
 
-# ---- 凭据、覆盖率、调试符号与系统元数据 ----
+# ---- 凭据、调试符号与系统元数据 ----
 .env
 .env.*
 *.pem
