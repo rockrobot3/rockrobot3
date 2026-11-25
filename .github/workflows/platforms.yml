@@ -310,6 +310,21 @@ jobs:
         with:
           # 每腿只装自己芯片的工具链：S3 腿不再为 classic 工具链付时间，反之亦然。
           targets: ${{ matrix.chip }}
+      # 整片烧录镜像的装配件（classic 腿）：官方预编译 espflash + sha256 校验。
+      # cargo install 在共享 runner 要 5–8 分钟，且版本漂移不可见。
+      - name: 安装 espflash 4.6.0（预编译件 + sha256）
+        if: matrix.chip == 'esp32'
+        run: |
+          set -euo pipefail
+          d=/tmp/espflash
+          mkdir -p "$d"
+          curl -fsSL --retry 3 --retry-delay 3 -o "$d/espflash.zip" \
+            https://github.com/esp-rs/espflash/releases/download/v4.6.0/espflash-x86_64-unknown-linux-gnu.zip
+          echo "c4fcfa32ddc3155608f003a230e6f3c184eff9641ec9cfa8eb54f1b515d403e7  $d/espflash.zip" \
+            | sha256sum -c -
+          unzip -o -q "$d/espflash.zip" -d "$d"
+          install -m 0755 "$d/espflash" /usr/local/bin/espflash
+          espflash --version
       # 两芯片共有的外设底座门：脚本名按芯片命名（esp32-/esp32s3- 前缀），直接拼名。
       - uses: ./.github/actions/guarded-run
         with:
@@ -393,6 +408,15 @@ jobs:
         with:
           name: esp32-classic-nohttp-firmware
           path: /tmp/rr3-build/esp32-classic-nohttp
+          if-no-files-found: error
+          retention-days: 7
+      # 生产烧录档（basic 功能）：整片镜像，产线/esptool 直烧 0x0 即可。
+      - name: 上传 classic 整片烧录镜像
+        if: matrix.chip == 'esp32'
+        uses: actions/upload-artifact@v7
+        with:
+          name: esp32-classic-merged-image
+          path: /tmp/rr3-build/esp32-classic-safe-merged.bin
           if-no-files-found: error
           retention-days: 7
 

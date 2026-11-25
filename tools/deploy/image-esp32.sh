@@ -1,89 +1,94 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# image-esp32 —— 微型形态（ESP32）镜像装配件（0.0.5 增补轮六 批N18 件一，敞口 13
-# 产线闭环四件之"镜像装配"；另两件 OTA/回滚语义裁定随件二/件三同批落档）。
+# image-esp32 —— 生产烧录档装配：ELF → 单文件整片镜像（espflash save-image --merge）。
+# 缺省从构建树取 classic ELF 并先过 flash-esp32.sh --check-only；--elf 供流水线
+# 复用已构建产物（不重复编译）。装配后自检三点 magic 与整片尺寸，不上产线。
 #
-# 为什么需要它：产线交付需要一个"从 ELF 到可直接烧录的完整镜像"的装配面——
-# [flash-esp32.sh](flash-esp32.sh) 是"构建+校验+烧板"（板在手），本件是"构建+
-# 校验+装配成单镜像"（板不在手也能产出产线交付物）。espflash 4.x save-image
-# --merge 把 bootloader、分区表与 app 段按 flash 偏移合成单文件（0x1000/0x8000/
-# 0x10000 三段，缺省 padding 到整片 flash 尺寸——本工程 4MB 板恰 4194304 B，供
-# esptool write_flash_address 0x0 整片直烧或产线复制分发），随附布局三点 magic
-# 断言与整片尺寸断言——装配错误应在出厂前拦下，不上产线。
-#
-# 验证面真值单点：构建与 descriptor 三查复用 flash-esp32.sh --check-only（批N9
-# 件二五步链：工具链门→构建→产物在树断言→descriptor 三查→干跑止步），本件不抄
-# 第二份——验证判据变了只改一处。
-#
-# 用法: image-esp32.sh [--release]
-#   --release     release 构建（缺省 debug）
-# 本件全程不触串口（装配是纯文件面）——直接运行即干跑语义，无板机器可验
-# （先例：flash-esp32.sh --check-only，批N9 件二口径）。前置门与工具链要求
-# 同 flash-esp32.sh（espflash 4.x / esp 工具链 / ldproxy / esp-clang / IDF v5.2.2）。
-#
-# 分区事实（2026-10-23 侦查手读 partition-table.bin，magic 0xAA50 逐项）：
-# nvs@0x9000/0x6000（批N14/15 凭据源）+ phy_init@0xf000/0x1000 +
-# factory@0x10000/0x100000 —— factory 单槽、无 ota_0/ota_1/otadata，是批N18
-# 件二/件三（升级=重烧即升级、不可回滚终态裁定）的物理前提；语义明文落
-# docs/design/分区布局与OTA槽位.md 批N18 段。
+# 用法: image-esp32.sh [--release] [--elf <path>] [--chip <esp32|esp32s3>]
+#                      [--flash-size <4mb|8mb|16mb>] [--out <path>]
+#                      [--bootloader <bin>] [--partitions <csv>]
 set -euo pipefail
 
-cd "$(dirname "$0")/../.." # 仓根
-# 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
-# crate 内 target/（否则装配面必报"镜像源不存在"）。
+cd "$(dirname "$0")/../.."
 . tools/ci/lib/cargo-artifact.sh
 
 BUILD=debug
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --release) BUILD=release; shift ;;
-    *) echo "FAIL  未知参数: ${1}（用法见脚本头注释）" >&2; exit 2 ;;
-  esac
-done
+ELF=""
+OUT=""
+BOOT=""
+PARTS=""
+CHIP=esp32
+FLASH=4mb
 
 die() { echo "FAIL  $1" >&2; exit 1; }
 
-echo "== ① 验证面（flash-esp32.sh --check-only：工具链门+构建+descriptor 三查）=="
-verif_args=()
-if [ "$BUILD" = release ]; then verif_args+=(--release); fi
-# 哨兵展开必加（批N9 教训）：bash 3.2 + set -u 下空数组 "${arr[@]}" 即 unbound
-# variable——空时不展开任何词
-bash tools/deploy/flash-esp32.sh --check-only ${verif_args[@]+"${verif_args[@]}"} \
-  || die "验证面未过（flash-esp32.sh --check-only）"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --release) BUILD=release; shift ;;
+    --elf) ELF="${2:?--elf 缺路径}"; shift 2 ;;
+    --out) OUT="${2:?--out 缺路径}"; shift 2 ;;
+    --bootloader) BOOT="${2:?--bootloader 缺路径}"; shift 2 ;;
+    --partitions) PARTS="${2:?--partitions 缺路径}"; shift 2 ;;
+    --chip) CHIP="${2:?--chip 缺值}"; shift 2 ;;
+    --flash-size) FLASH="${2:?--flash-size 缺值}"; shift 2 ;;
+    *) die "未知参数: ${1}（用法见脚本头注释）" ;;
+  esac
+done
 
-ELF="$( cd tools/esp32-periph-base && rr3_cargo_artifact xtensa-esp32-espidf "$BUILD" esp32-periph-base )" \
-  || die "无法解析 cargo target_directory（metadata 不可用）"
-[ -f "$ELF" ] || die "ELF 不在树: $ELF"
-OUT="$(dirname "$ELF")/esp32-periph-base-merged.bin"
+case "$CHIP" in
+  esp32) BOOT_OFF=4096 ;;
+  esp32s3) BOOT_OFF=0 ;;
+  *) die "chip 只支持 esp32 / esp32s3: ${CHIP}" ;;
+esac
+case "$FLASH" in
+  4mb) FLASH_BYTES=4194304 ;;
+  8mb) FLASH_BYTES=8388608 ;;
+  16mb) FLASH_BYTES=16777216 ;;
+  *) die "flash-size 只支持 4mb / 8mb / 16mb: ${FLASH}" ;;
+esac
 
-echo "== ② 装配面（save-image --merge：bootloader+分区表+app 按偏移合单镜像）=="
-export PATH="$HOME/.cargo/bin:$PATH"
+if [ -z "$ELF" ]; then
+  echo "== ① 验证面（flash-esp32.sh --check-only）=="
+  verif_args=()
+  if [ "$BUILD" = release ]; then verif_args+=(--release); fi
+  bash tools/deploy/flash-esp32.sh --check-only ${verif_args[@]+"${verif_args[@]}"} \
+    || die "验证面未过（flash-esp32.sh --check-only）"
+  ELF="$( cd tools/esp32-periph-base \
+    && rr3_cargo_artifact xtensa-esp32-espidf "$BUILD" esp32-periph-base )" \
+    || die "无法解析 cargo target_directory（metadata 不可用）"
+  [ -n "$OUT" ] || OUT="$(dirname "$ELF")/esp32-periph-base-merged.bin"
+else
+  echo "== ① 复用已构建 ELF（跳过构建）: ${ELF} =="
+  [ -f "$ELF" ] || die "ELF 不在树: ${ELF}"
+  [ -n "$OUT" ] || OUT="$(dirname "$ELF")/$(basename "${ELF%.elf}")-merged.bin"
+fi
+[ -f "$ELF" ] || die "ELF 不在树: ${ELF}"
+mkdir -p "$(dirname "$OUT")"
+
+echo "== ② 工具链门（espflash 4.x）=="
 espflash_ver="$(espflash --version 2>/dev/null)" || die "espflash 未安装（cargo install espflash --locked）"
-# ${…} 截断必加（批N9 教训）：bash 3.2 C locale 下 $espflash_ver 后接全角字符
-# 即 unbound variable
 printf '%s\n' "$espflash_ver" | grep -qE '^espflash 4\.' \
-  || die "espflash 非 4.x: ${espflash_ver}（版本钉 4.x，实测 4.6.0）"
-espflash save-image --chip esp32 --merge --flash-size 4mb \
-  "$ELF" "$OUT" || die "save-image 装配失败"
-echo "PASS  merged 镜像在树: $OUT"
+  || die "espflash 非 4.x: ${espflash_ver}（版本钉 4.x）"
 
-echo "== ③ 自校验面（merged 布局三点 magic + 整片尺寸）=="
-# 查一：bootloader@0x1000 首字节 0xE9（ESP image magic，2026-10-23 实测钉值）
-boot_magic="$(xxd -p -s 4096 -l 1 "$OUT")"
-[ "$boot_magic" = "e9" ] || die "bootloader@0x1000 首字节 $boot_magic ≠ e9"
-# 查二：分区表@0x8000 头两字节 AA50（分区表条目 magic；与 2026-10-23 侦查
-# partition-table.bin 手读同源）
+echo "== ③ 装配面（save-image --merge）=="
+merge_args=(--chip "$CHIP" --merge --flash-size "$FLASH")
+[ -n "$BOOT" ] && merge_args+=(--bootloader "$BOOT")
+[ -n "$PARTS" ] && merge_args+=(--partition-table "$PARTS")
+espflash save-image ${merge_args[@]+"${merge_args[@]}"} "$ELF" "$OUT" \
+  || die "save-image 装配失败"
+
+echo "== ④ 自校验面（三点 magic + 整片尺寸）=="
+# 引导镜像@BOOT_OFF 首字节 0xE9（classic 0x1000 / S3 0x0，按芯片别）
+boot_magic="$(xxd -p -s "$BOOT_OFF" -l 1 "$OUT")"
+[ "$boot_magic" = "e9" ] || die "bootloader@${BOOT_OFF} 首字节 ${boot_magic} ≠ e9"
+# 分区表@0x8000 头两字节 AA50（ESP-IDF 分区表条目 magic，两类芯片同位）
 pt_magic="$(xxd -p -s 32768 -l 2 "$OUT")"
-[ "$pt_magic" = "aa50" ] || die "分区表@0x8000 头两字节 $pt_magic ≠ aa50"
-# 查三：app@0x10000 首字节 0xE9（factory 槽 app image magic）
+[ "$pt_magic" = "aa50" ] || die "分区表@0x8000 头两字节 ${pt_magic} ≠ aa50"
+# app@0x10000 首字节 0xE9（factory 槽 app image magic）
 app_magic="$(xxd -p -s 65536 -l 1 "$OUT")"
-[ "$app_magic" = "e9" ] || die "app@0x10000 首字节 $app_magic ≠ e9"
-# 查四：整片尺寸恰 4MB（merge 缺省 padding 到 flash 全尺寸 4194304 B——
-# 非整片即装配参数漂移，直烧面失效）
+[ "$app_magic" = "e9" ] || die "app@0x10000 首字节 ${app_magic} ≠ e9"
 img_bytes="$(wc -c < "$OUT" | tr -d ' ')"
-[ "$img_bytes" = "4194304" ] || die "镜像尺寸 $img_bytes ≠ 4194304（4MB 整片；merge padding 行为漂移即红）"
-echo "PASS  布局三点 magic（0x1000=e9 / 0x8000=aa50 / 0x10000=e9）+ 整片 4194304 B"
-
-# ${…} 截断必加（批N9 教训）：$OUT 后紧跟全角括号，bash 3.2 C locale 下即 unbound
-# variable（2026-10-23 实测，本脚本第四处同坑）
-echo "== ④ 产线交付物就绪: ${OUT}（整片直烧面，不触串口）=="
+[ "$img_bytes" = "$FLASH_BYTES" ] \
+  || die "镜像尺寸 ${img_bytes} ≠ ${FLASH_BYTES}（${FLASH} 整片；merge padding 漂移即红）"
+echo "PASS  三点 magic（${BOOT_OFF}=e9 / 0x8000=aa50 / 0x10000=e9）+ 整片 ${FLASH_BYTES} B"
+echo "== ⑤ 产线交付物就绪: ${OUT}（整片直烧 0x0，不触串口）=="
