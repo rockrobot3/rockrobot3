@@ -15,7 +15,7 @@ export CARGO_HTTP_LOW_SPEED_LIMIT="${CARGO_HTTP_LOW_SPEED_LIMIT:-1}"
 # ldproxy + 乐鑫 LLVM fork esp-clang），宿主工具链 check 必红，本脚本显式
 # --target 单独覆盖（与 tools/ 专用门"整目录排除"的形状不同：那类工程 config
 # 写死 target，本门不写死、按双档工程显式传）。SKIP 纪律同 espidf-sentinel-check.sh：
-# 工具链缺位 = 本地 SKIP / CI 即红（tools/ci/skip.sh）；工具链在位但编译失败 = FAIL；编译退出 0
+# 工具链缺位 = 本地 SKIP / CI 即红（tools/ci/lib/skip.sh）；工具链在位但编译失败 = FAIL；编译退出 0
 # 但产物不在树 = FAIL。板侧固件 crate 收编与 [hardware] 进位归真板批（批N9），
 # 本件范围红线 = 只建编译面。
 #
@@ -31,8 +31,8 @@ export PATH="$HOME/.cargo/bin:$PATH"
 export CARGO_TERM_COLOR=never
 # 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
 # crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
-. "$root/tools/ci/cargo-artifact.sh"
-. "$root/tools/ci/skip.sh"
+. "$root/tools/ci/lib/cargo-artifact.sh"
+. "$root/tools/ci/lib/skip.sh"
 fail=0
 
 # 芯片档解析放在工具链五查之前：参数笔误要立刻报错，不能先花时间查工具链。

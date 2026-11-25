@@ -14,6 +14,6 @@ ops = [
   { slot = "link_report_period_ms", src_key = "rr3-connect.wifi.link_report_period_ms" },
   { slot = "timeout_ms", src_key = "rr3-connect.wifi.timeout_ms" },
   # 配网口令下限（批N4 件五 N-11①/M-6：自组合件码内数据化——门 d 分母随之 +1，
-  # 基线 tools/ci/gate-d-baseline.txt 同批上调）
+  # 基线 tools/ci/baseline/gate-d-baseline.txt 同批上调）
   { slot = "min_pass_len", src_key = "rr3-connect.wifi.min_pass_len" },
 ]

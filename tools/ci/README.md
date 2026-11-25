@@ -7,6 +7,21 @@
 必须从仓库根或任意子目录执行——脚本自己 `git rev-parse --show-toplevel` 定位仓库根，
 不在 git 仓库内则直接拒绝执行。
 
+**目录地图（2026-11-25 分层）**：根目录只留入口与本文，其余按职责归四层——
+新件按这张表落位，不再往根目录平铺。
+
+| 目录 | 放什么 | 件 |
+|---|---|---|
+| 根 | 入口 | `check.sh`（规约门）、`ci-status.sh`（漂红巡检）、本文 |
+| `steps/` | `check.sh` 的步骤体，由入口显式 source | `<门号>.sh` |
+| `lib/` | 被 ≥3 处共用的公共件 | `skip.sh`、`cargo-artifact.sh`、`log-digest.sh`、`release-tag.sh` |
+| `audit/` | 静态审计与自检（Python，同目录平铺 import） | `metrics*.py`、`workflows_audit*.py`、`workflow_*.py`、`baselines_audit.py`、`gate_steps_audit.py`、`lockio_audit.py`、`unsafe_audit.py`、`ci_steady.py` |
+| `baseline/` | 棘轮基线数据（只降不升） | `gate-*-baseline.txt`、`gate_steps.txt`、`metrics-baseline.json`、`unsafe-baseline.txt` |
+| `platform/` | 工作流直调的平台腿、esp 专用门与自检 | `cross-*.sh`、`sim-*.sh`、`*-check.sh`、`matrix.sh`、`docs_gate_selftest.sh` 等 |
+
+搬动规则：脚本文件名是工作流审计的判据锚（`workflow_rules.py` 的 `JOB_STEPS` / `CHIP_MATRIX`
+按名钉住），改名须同批评审；基线内容不按路径登记，搬动不改数值。
+
 **步骤体拆分（2026-11-20）**：`check.sh` 保留 `step` 标题与调用序；各步实现按族放
 `tools/ci/steps/<id>.sh`，由入口显式 source。`gate_steps_audit.py` 仍解析入口的
 `step` 行，步骤清单与顺序不因搬文件而失锚。当前已拆：`4b`（独立工程 clippy）、
@@ -32,13 +47,13 @@
 | ⑨-n | 判据静态扫描（详见脚本 ⑨-n 段注释） | 注入路径唯一门 n 静态面执法位（n1-11，全案 §8 门 n / 施工图 Task 8 Step 2）：键名单自代码常量 `RR3_PIN_DERIVED_KEYS`（`rrd/src/profile.rs`）awk 导出——单真值点不抄第二份，键集扩缩自动跟随；扫面前件 fail-closed 四查（声明数非空 / 实解析数非零 / 两数判等 / profiles 份数非零，任一不成立即"门禁失效，不放行"）；逐 `profiles/*.toml` 扫 `[hardware]` 段（行注释先剥）出现物理键任一即逐行点名（file:line）后 FAIL——稳态＝物理键一律 `[pins]` 派生，`[hardware]` 只留非引脚键 `alsa_device`/`link_ifname`（批N3 件六 SPI 词形收口：`spi_device` 已进派生键集、扫面 8 键，敞口 18 行已结）；装载期判据实体与反例用例在 `rrd/src/profile.rs` 门 n 段（经步 ①b 进 CI） |
 
 | ⑩ | `steps/10.sh`（读 contracts 快照与分母基线） | 面板覆盖率对账（门 d）：分子 = covers 申报 + applies 生效路径，分母 = 字段级五路并集；红账 0、分母下限 83，缩分母即红 |
-| ⑫ | `python3 tools/ci/metrics.py`（真值 `metrics-baseline.json`） | 质量度量门：重复率 ≤3%、CC 均值 ≤2.50 / 最大 ≤11、生产函数 >80 行 =0、>60 行 =0、>50 行 ≤4（目标档棘轮，只降不升）、生产 panic ≤60、>20B 生产函数名 0、≥1000ms 长睡 0；基线只降不升 |
+| ⑫ | `python3 tools/ci/audit/metrics.py`（真值 `metrics-baseline.json`） | 质量度量门：重复率 ≤3%、CC 均值 ≤2.50 / 最大 ≤11、生产函数 >80 行 =0、>60 行 =0、>50 行 ≤4（目标档棘轮，只降不升）、生产 panic ≤60、>20B 生产函数名 0、≥1000ms 长睡 0；基线只降不升 |
 | ⑬ | `steps/13.sh`（git grep + git status） | 仓面卫生门：追踪文件无本机绝对路径、无构建目录、源码类新件必须入册、shell `$name` 后接非 ASCII 即红 |
 | ⑭ | `steps/14.sh` | 装载门体量基线门（裁-13/基-38）：装配单锚函数的块行数、`read_to_string` 样板数、rr-registry 同形函数数按 `gate-size-baseline.txt` 只降不升；锚函数缺失或基线形状坏即红 |
-| ⑮ | `python3 tools/ci/lockio_audit.py`（先 `--self-test`） | 锁内 I/O 门：`lock·log` 同行 / 条件位临时 guard 延寿到块体 / 直调会写待落盘日志的 registry 方法；扫面打空即门禁失效；gate `scripts` 同源执法 |
+| ⑮ | `python3 tools/ci/audit/lockio_audit.py`（先 `--self-test`） | 锁内 I/O 门：`lock·log` 同行 / 条件位临时 guard 延寿到块体 / 直调会写待落盘日志的 registry 方法；扫面打空即门禁失效；gate `scripts` 同源执法 |
 | ⑯ | `steps/16.sh` | 源文件行数门：每个 `.rs/.py/.sh` <500 行（铁律，2026-11-22 收紧）；按 `gate-lines-baseline.txt` 只降不升 |
 
-**基线只降不升审计（`baselines_audit.py`，gate `scripts` job）**：把 `tools/ci/*-baseline.*`
+**基线只降不升审计（`baselines_audit.py`，gate `scripts` job）**：把 `tools/ci/baseline/*-baseline.*`
 与 base ref 的同名文件逐键比对——已存在的键上调即红；新键/缺键告警；未登记基线文件即红。
 比对点取 `merge-base(HEAD, base)`，避免把 base 分支自身的前进误判成回涨。
 
@@ -59,7 +74,7 @@
 **⑨-a…⑨-z 各门**（门 a/c/r/y/z 等，后续批次续增）：判据以 `check.sh` 各 `step`
 段注释为唯一真值，本表不逐行抄录——抄一份就多一处漂移面。
 
-**CI 稳态取数（`ci_steady.py`，只读，无需 token）**：`python3 tools/ci/ci_steady.py
+**CI 稳态取数（`ci_steady.py`，只读，无需 token）**：`python3 tools/ci/audit/ci_steady.py
 [--head <sha>] [--repo owner/name]` 按 head 找 `sim-chain` check-run、读 annotations
 打出一行稳态摘要（since / 续命峰值 / 看门狗下限 / 写超时 / 慢写 / 落盘峰值 / `boot_max`）。
 job 日志匿名 403，注解是唯一无需凭据的取数通道；**取不到数值即非 0 退出**——不拿
@@ -84,7 +99,7 @@ CI 单一事实源在 [`.github/workflows/`](../../.github/workflows)（gate / p
 
 ## 供应链审计入口：`supply-audit.sh`
 
-[supply-audit.sh](supply-audit.sh) 不发散策略，只枚举工程根并逐项调用
+[supply-audit.sh](platform/supply-audit.sh) 不发散策略，只枚举工程根并逐项调用
 `cargo deny check --locked`：工程根 = `base/runtime` 工作区 + `modules/`、`tools/`、
 `base/ota/` 下各自带锁文件的独立工程（工作区成员不重复执法）。判据唯一真源是
 [`.cargo/deny.toml`](../../.cargo/deny.toml)——许可证显式白名单、RustSec 公告、来源白名单、通配依赖。
@@ -102,7 +117,7 @@ CI 单一事实源在 [`.github/workflows/`](../../.github/workflows)（gate / p
 
 ## 构建失败归因入口：`log-digest.sh`
 
-[log-digest.sh](log-digest.sh) 是 CI 失败日志的**单点归因**（2026-11-17 立）：
+[log-digest.sh](lib/log-digest.sh) 是 CI 失败日志的**单点归因**（2026-11-17 立）：
 信号提取（error/fatal/failed/…）→ 噪音过滤（`Error 1 (ignored)`、makeinfo 版本
 提示、`pyerrors.h` 等不指向失败的命中）→ 单行 `::error` 注解 → 末段回显。
 buildroot 轨的 `stage-build`/`br-defconfig`/`br-uboot`/`br-build`/`ota-build`
@@ -115,10 +130,10 @@ check.sh / supply / clippy / alsa / ota-build 各步也用同一入口，`--head
 
 ## unsafe 注释审计入口：`unsafe_audit.py`
 
-[unsafe_audit.py](unsafe_audit.py) 静态扫描 `base/`、`modules/`、`tools/` 的生产面
+[unsafe_audit.py](audit/unsafe_audit.py) 静态扫描 `base/`、`modules/`、`tools/` 的生产面
 `.rs`（跳过测试路径），要求每个 `unsafe` 关键字上方有 `SAFETY` 前言（同一行或紧邻
 注释段，到空行为止；`unsafe fn` 的 `/// # Safety` 调用方契约同权）。允许条数住
-[unsafe-baseline.txt](unsafe-baseline.txt)，**只降不升**：新增未注释 unsafe 即红。
+[unsafe-baseline.txt](baseline/unsafe-baseline.txt)，**只降不升**：新增未注释 unsafe 即红。
 基线现为 **0**（Linux 目标面、esp32 板侧与 macaudio 开发面均已补前言）；gate 的
 `scripts` job 先跑 `--self-test`（生产/测试/extern 三类扫描面各一条夹具）再执法。
 `--report` 是**只读扩面报告**：单列测试路径未注释 unsafe 与生产面 `extern "C"`
@@ -129,12 +144,12 @@ macaudio `ffi.rs`）已逐块核对：调用点 SAFETY 全覆盖（生产面审�
 
 ## 流水线结构审计入口：`workflows_audit.py`
 
-[workflows_audit.py](workflows_audit.py) 把 CI 自身的结构面纳入门禁（2026-11-17 立）：
+[workflows_audit.py](audit/workflows_audit.py) 把 CI 自身的结构面纳入门禁（2026-11-17 立）：
 每个 workflow 必须有顶层 `on:` 与 `concurrency:`、每个 job 必须有 `timeout-minutes:`、
 第三方 `uses:` 必须命中 `ACTION_MATRIX`（`checkout@v7`、`upload-artifact@v7`、
 `download-artifact@v8`、`cache@v5`、`setup-qemu@v4` 等）；本地 action（`./`）不查。
-规则核按职责分三件（2026-11-24）：[workflow_common.py](workflow_common.py) 文本切分、
-[workflow_release.py](workflow_release.py) 发布面/正式制品面、[workflow_rules.py](workflow_rules.py)
+规则核按职责分三件（2026-11-24）：[workflow_common.py](audit/workflow_common.py) 文本切分、
+[workflow_release.py](audit/workflow_release.py) 发布面/正式制品面、[workflow_rules.py](audit/workflow_rules.py)
 结构面与入口；切法单点，两处规则不各写一套扫描。
 **版本升级 = 显式改矩阵**，同一工作流两版 action 并存即红（首查抓到 ipct003 的
 qemu v3 残留并修复）。**触发与依赖图**：`push:` 必须收窄到 `branches`/`tags`
@@ -200,7 +215,7 @@ raw termios），`base/ota/rr3-ota-ctl` 依赖 `rr-ota::bootenv`（模块实现�
 
 ## 点验矩阵出数入口：`matrix.sh`
 
-[matrix.sh](matrix.sh) 不改判据、只出数（0.0.5 批K H3/C12/C11）：按 architecture §12.6
+[matrix.sh](platform/matrix.sh) 不改判据、只出数（0.0.5 批K H3/C12/C11）：按 architecture §12.6
 七列（①字节契约 ②机制核编译面 ③供给自证 ④描述符装载 ⑤安全核生效 ⑥生命周期
 ⑦时序达标）把"本环境实跑了什么"记成一行矩阵，每行带环境指纹三件套（载体/镜像
 + `rustc -Vv` + 目标三元组）。`--strict` 口径下 SKIP/无载体计未跑、不放行（退 2）；

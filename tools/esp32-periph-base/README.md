@@ -13,7 +13,7 @@ espidf std 固件：SSD1306 OLED（I2C）+ 云台双轴舵机（LEDC PWM）+ UAR
 ## 构建（专用门）
 
 ```bash
-bash tools/ci/esp32-periph-base-check.sh
+bash tools/ci/platform/esp32-periph-base-check.sh
 ```
 
 SKIP 纪律同 espidf-sentinel-check.sh（esp 工具链/ldproxy/ESP-IDF v5.2.2/esp-clang 缺位 = SKIP 明说）。

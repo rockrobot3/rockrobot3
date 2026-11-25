@@ -20,7 +20,7 @@ ADR-0016 把 brain 迁到 Rust 后 Python 腿退役，现由
 
 **效力边界**（与 [`../README.md`](../README.md) 一致）：它只钉住"本机 Rust 编解码与契约
 字节逐位一致"。跨架构等值（x86 与 aarch64 布局一致，即 IPC-T-003）由**契约外**的对拍脚本
-`tools/ci/ipct003.sh` 承载（多路对拍含本 golden 为第三方）——2026-10-11 CI ipct003 job
+`tools/ci/platform/ipct003.sh` 承载（多路对拍含本 golden 为第三方）——2026-10-11 CI ipct003 job
 `--strict` 四路全绿回执在案，IPC-T-003 已移入 `envelope.schema.json` 的
 `x-rock3-v0.0.1-coverage`；实况见 [`../../docs/status.md`](../../docs/status.md)。
 

@@ -7,7 +7,7 @@
 #
 # 与两个既有面的分工（单真值点纪律，谁答什么不混装）：
 # - 门 d 差集的**机器真值** = `tools/ci/check.sh` step ⑩ 逐条 " D " 行打印
-#   （哪些字段红着，步 ⑩ 说了算；低水位基线 `tools/ci/gate-d-baseline.txt`）；
+#   （哪些字段红着，步 ⑩ 说了算；低水位基线 `tools/ci/baseline/gate-d-baseline.txt`）；
 # - **status.md 敞口表** = 本机无法收口的项与里程碑进度（敞口表章程：缺码＋工单号
 #   与无载体证据不许混装一行）；
 # - **本表** = 归因登记：每个红项组"为什么红、谁负责（工单号）、证据在哪、现状态"。
@@ -42,7 +42,7 @@ kind = "无载体"
 fields = [
 ]
 owner = "批N4 件九二（已收口）：五模块 ops/list RPC＋面板 /api/{act,connect,interact,power,sense}/ops 五 GET 端点＋covers 申报 30 槽"
-evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（0）；contracts/topics.toml 五 ops/list 主题"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/baseline/gate-d-baseline.txt 行 1（0）；contracts/topics.toml 五 ops/list 主题"
 status = "done"
 
 [[gap]]
@@ -51,7 +51,7 @@ kind = "无载体"
 fields = [
 ]
 owner = "批N4 件九笔4（已收口）：rrd rr3.ctl.wiring 快照读口＋面板 GET /api/wiring＋covers 申报 pin 11 字段"
-evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（0）；base/runtime/rrd/src/assembly.rs"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/baseline/gate-d-baseline.txt 行 1（0）；base/runtime/rrd/src/assembly.rs"
 status = "done"
 
 [[gap]]
@@ -60,7 +60,7 @@ kind = "无载体"
 fields = [
 ]
 owner = "批N4 件九笔4（已收口）：rrd rr3.ctl.wiring 快照读口＋面板 GET /api/wiring＋covers 申报 role 7 字段"
-evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（0）；base/runtime/rrd/src/assembly.rs"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/baseline/gate-d-baseline.txt 行 1（0）；base/runtime/rrd/src/assembly.rs"
 status = "done"
 
 [[gap]]
@@ -69,7 +69,7 @@ kind = "无载体"
 fields = [
 ]
 owner = "批N4 件九笔4（已收口）：rrd rr3.ctl.wiring 快照读口＋面板 GET /api/wiring＋covers 申报 domain 11 字段"
-evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（0）；base/runtime/rrd/src/assembly.rs"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/baseline/gate-d-baseline.txt 行 1（0）；base/runtime/rrd/src/assembly.rs"
 status = "done"
 
 [[gap]]
@@ -78,7 +78,7 @@ kind = "无载体"
 fields = [
 ]
 owner = "批N4 件九笔4（已收口）：rrd rr3.ctl.wiring 快照读口＋面板 GET /api/wiring＋covers 申报 axis 14 字段"
-evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（0）；base/runtime/rrd/src/assembly.rs"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/baseline/gate-d-baseline.txt 行 1（0）；base/runtime/rrd/src/assembly.rs"
 status = "done"
 
 # ============ 批B13 静态审计登记（2026-11-10） ============

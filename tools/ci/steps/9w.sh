@@ -114,7 +114,7 @@ dep_wl_base() {
     printf 'FAIL  ⑨-w 白名单条目数提取打空（判据 2) 白名单行不在或形状漂移）——门禁失效，不放行\n'
     dep_fail=1
   else
-    gate_w_base="tools/ci/gate-w-baseline.txt"
+    gate_w_base="tools/ci/baseline/gate-w-baseline.txt"
     if [ ! -r "$gate_w_base" ]; then
       printf 'FAIL  ⑨-w 基线文件不可读: %s（裁定配套 fail-closed——白名单条目基线缺位即红，不放行）\n' "$gate_w_base"
       dep_fail=1
@@ -131,7 +131,7 @@ dep_wl_base() {
               "$wl_count" "$wl_baseline" "$gate_w_base"
             dep_fail=1
           elif [ "$wl_count" -lt "$wl_baseline" ]; then
-            printf 'PASS  ⑨-w 白名单条目 %s ≤ 基线 %s（**条目收紧 %s 类：须同批下调 tools/ci/gate-w-baseline.txt**）\n' \
+            printf 'PASS  ⑨-w 白名单条目 %s ≤ 基线 %s（**条目收紧 %s 类：须同批下调 tools/ci/baseline/gate-w-baseline.txt**）\n' \
               "$wl_count" "$wl_baseline" "$((wl_baseline - wl_count))"
           else
             printf 'PASS  ⑨-w 白名单条目 %s = 基线 %s（四类冻结设计态：backend 装配/sim/provision_store/Rr3PcmStream，只降不升在账）\n' \

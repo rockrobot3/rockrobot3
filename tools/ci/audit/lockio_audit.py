@@ -14,14 +14,14 @@
 # 的 mod 块与 mod 声明摘除——只摘块、不截尾）。扫面打空即门禁失效，不放行。
 # 本门不做全控制流分析：只拦上述三种形态，其余形态靠评审。
 #
-# 用法: python3 tools/ci/lockio_audit.py [--self-test]
+# 用法: python3 tools/ci/audit/lockio_audit.py [--self-test]
 
 import pathlib
 import re
 import sys
 import tempfile
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
+ROOT = pathlib.Path(__file__).resolve().parents[3]
 SRC = ROOT / "base" / "runtime" / "rrd" / "src"
 
 COND_KW = re.compile(r"\b(if|while|match)\b")

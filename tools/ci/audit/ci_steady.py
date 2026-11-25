@@ -7,10 +7,10 @@
 # 不拿"没查到"当"很健康"。
 #
 # 用法:
-#   python3 tools/ci/ci_steady.py                 # 本地 HEAD
-#   python3 tools/ci/ci_steady.py --head 2a03b7b
-#   python3 tools/ci/ci_steady.py --repo owner/name
-#   python3 tools/ci/ci_steady.py --head <sha> --assert   # 叠加实时性判据
+#   python3 tools/ci/audit/ci_steady.py                 # 本地 HEAD
+#   python3 tools/ci/audit/ci_steady.py --head 2a03b7b
+#   python3 tools/ci/audit/ci_steady.py --repo owner/name
+#   python3 tools/ci/audit/ci_steady.py --head <sha> --assert   # 叠加实时性判据
 #
 # 退出码: 0 = 打印到摘要（--assert 时且判据全过）; 1 = 有 check-run 但无摘要注解;
 #         2 = API 不可读/无 check-run; 3 = --assert 判据越界

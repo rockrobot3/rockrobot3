@@ -43,7 +43,7 @@ toml = "0.8"
 # 照 tools/espidf-sentinel 先例（xtensa-esp32-espidf + build-std + esp-idf-sys），但
 # 本 crate 是**双档工程**（宿主 linux 档照常进 ④/⑥ 扫面）：espidf 专属依赖挂 target
 # 表（同 rr-hal 的 alsa 先例），宿主构建不解析、零扰动；编译面由专用门
-# tools/ci/rr3-act-sense-espidf-check.sh 执法（SKIP 纪律同 espidf-sentinel-check.sh）。
+# tools/ci/platform/rr3-act-sense-espidf-check.sh 执法（SKIP 纪律同 espidf-sentinel-check.sh）。
 # 版本组合对表批W1 钉死登记（tools/espidf-std-hello/README.md）：
 # esp-idf-sys =0.35.0 ↔ ESP-IDF v5.2.2 ↔ embuild =0.32.0 ↔ ldproxy 0.3.5。
 [target.'cfg(target_os = "espidf")'.dependencies]

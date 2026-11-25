@@ -49,7 +49,7 @@ pub const LEN_RESERVED: usize = 80;
 // aarch64-unknown-linux-gnu` 交叉编译——只要编译通过，下列偏移连续性、头长合计、
 // magic 小端线上字节与 payload 类型枚举值即已成立，不依赖 `cargo test` 有没有人跑。
 // 它们与运行期守护（本模块 tests 与 tests/envelope_meta.rs 读契约 JSON 的那批）分工：
-// 这里钉"布局自洽"，那里钉"与契约文件一致"；跨架构等值本身由 `tools/ci/ipct003.sh`
+// 这里钉"布局自洽"，那里钉"与契约文件一致"；跨架构等值本身由 `tools/ci/platform/ipct003.sh`
 // 三方对拍（登记于 conventions.md §2，不进七步门）。
 const _: () = assert!(OFF_MAGIC == 0 && LEN_MAGIC == 4, "magic 必须在偏移 0、宽 4");
 const _: () = assert!(
@@ -335,10 +335,10 @@ const fn put_le(buf: &mut [u8], off: usize, v: u64, len: usize) {
 // IPC-T-003 第④路（0.0.7 批B）：golden 头编译期对拍。
 //
 // 编码器 `to_bytes` 已 const 化：`cargo +esp check`（xtensa 裸机 none-elf 目标，
-// 具体写法见 tools/ci/rr-core-xtensa-check.sh——机制核源码不写板级目标名，批E 零策略门）
+// 具体写法见 tools/ci/platform/rr-core-xtensa-check.sh——机制核源码不写板级目标名，批E 零策略门）
 // 等**任意目标**编译 rr-ipc 时，下面的 `const _` 都会在该目标的编译器里重新求值——
 // 求值通过即"该目标编译出的编码器产出与 golden 文件逐字节一致"，无需运行任何代码。
-// 运行期 dump 对拍（x86 / aarch64 / arm64 容器）由 `tools/ci/ipct003.sh` 承担，
+// 运行期 dump 对拍（x86 / aarch64 / arm64 容器）由 `tools/ci/platform/ipct003.sh` 承担，
 // xtensa 真机运行期 dump 归批C UART 夹具（同一判据的第二重证据）。
 // golden 路径以 CARGO_MANIFEST_DIR 构建期注入（基-32：契约根不靠手写跨仓层数，
 // 目录动一层不再炸机制核）——"路径无关"须注入后才成立（裁-12）。

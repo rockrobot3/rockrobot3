@@ -5,7 +5,7 @@
 # HEAD rrd + 旧 profile/旧模块 → 装载拒启 + 描述符键不认 → 模块崩溃循环）。
 #
 # 用法：bash tools/deploy/pack-bundle.sh [target-triple] [out.tar.gz]
-# 前置：先跑 bash tools/ci/arm64-cross-check.sh（产物在 /tmp/rr3-build）。
+# 前置：先跑 bash tools/ci/platform/arm64-cross-check.sh（产物在 /tmp/rr3-build）。
 # 产物：<out>.tar.gz，内含 rockrobot3-<commit>/{bin,modules,profiles,contracts,
 #       hardware,BUNDLE_VERSION}；BUNDLE_VERSION 记录 commit/target/构建时间。
 #
@@ -24,7 +24,7 @@ STAGE=$(mktemp -d "${TMPDIR:-/tmp}/rr3-bundle.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
 
 # 产物定位共享单点（与烧录/镜像门同源）：target-dir 在源码区外，不得写死
-. "$ROOT/tools/ci/cargo-artifact.sh"
+. "$ROOT/tools/ci/lib/cargo-artifact.sh"
 
 die() { echo "FAIL  $*" >&2; exit 1; }
 
@@ -34,12 +34,12 @@ mkdir -p "$B/bin" "$B/profiles" "$B/contracts" "$B/hardware" "$B/modules"
 for name in rrd rr3-ctl; do
   src=$( cd "$ROOT/base/runtime" && rr3_cargo_artifact "$TARGET" release "$name" ) \
     || die "$name 产物定位失败"
-  [ -f "$src" ] || die "$name 未构建: ${src}（先跑 bash tools/ci/arm64-cross-check.sh）"
+  [ -f "$src" ] || die "$name 未构建: ${src}（先跑 bash tools/ci/platform/arm64-cross-check.sh）"
   install -m755 "$src" "$B/bin/$name"
 done
 src=$( cd "$ROOT/base/ota/rr3-ota-ctl" && rr3_cargo_artifact "$TARGET" release rr3-ota-ctl ) \
   || die "rr3-ota-ctl 产物定位失败"
-[ -f "$src" ] || die "rr3-ota-ctl 未构建: ${src}（先跑 bash tools/ci/arm64-cross-check.sh）"
+[ -f "$src" ] || die "rr3-ota-ctl 未构建: ${src}（先跑 bash tools/ci/platform/arm64-cross-check.sh）"
 install -m755 "$src" "$B/bin/rr3-ota-ctl"
 
 NATIVE_DIR=${RR3_BUNDLE_NATIVE_DIR:-}
@@ -58,7 +58,7 @@ for m in rr3-act rr3-connect rr3-interact rr3-power rr3-sense; do
   if [ -z "$src" ]; then
     src=$( cd "$ROOT/modules/$m" && rr3_cargo_artifact "$TARGET" release "$m" ) \
       || die "$m 产物定位失败"
-    [ -f "$src" ] || die "$m 未构建: ${src}（先跑 bash tools/ci/arm64-cross-check.sh）"
+    [ -f "$src" ] || die "$m 未构建: ${src}（先跑 bash tools/ci/platform/arm64-cross-check.sh）"
   fi
   mkdir -p "$B/modules/$m"
   install -m755 "$src" "$B/modules/$m/$m"

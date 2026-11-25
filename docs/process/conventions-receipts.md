@@ -21,12 +21,12 @@ host-only；本机末梢只有 MAX7219/USB 声卡回放，act/sense 不启用）
 双向执法。
 
 **2026-11-08 B11 质量度量步（⑫，已建成）**：`tools/ci/check.sh` 末尾新增
-`step "⑫ 质量度量门"`，度量核为纯标准库脚本 `tools/ci/metrics.py`（无外网依赖；
+`step "⑫ 质量度量门"`，度量核为纯标准库脚本 `tools/ci/audit/metrics.py`（无外网依赖；
 python3 缺位按 SKIP 纪律明说）。四条判据：**重复率硬门槛 3%**（W=10 有效行滑窗，
 去注释/字符串、剔纯标点行，生成物与测试面不参与）；**圈复杂度均值/单函数最大值**、
 **生产面 panic 落点数**（`.unwrap()`/`.expect(`，测试面同口径截除）与**超长生产
-函数名数**按 `tools/ci/metrics-baseline.json` 钉基线、只降不升（与红账基线门同款
-纪律）。**数值真值 = `tools/ci/metrics-baseline.json`，本文只放与它同批核对的快照**
+函数名数**按 `tools/ci/baseline/metrics-baseline.json` 钉基线、只降不升（与红账基线门同款
+纪律）。**数值真值 = `tools/ci/baseline/metrics-baseline.json`，本文只放与它同批核对的快照**
 （防"文档写一套、门禁跑一套"）：重复率 0.57%、CC 均值 2.46 / 最大 13（目标均值
 2.5 已达）、生产 panic 落点 73、>20B 生产函数名 0 个（FFI `AudioQueue*` 豁免）。
 **2026-11-12 对表（P1 审计件三）**：各批拆件已把峰值 21→14、均值 3.93→3.65，
@@ -154,7 +154,7 @@ board 具名装配直给、无 `[[pin]]` 角色消费者，平台表的 ③-b/�
 （门 a 第 ③ 层执法位，全案 §8 门 a / §24.1 第 5 条 + 裁-6）⇒ 可数 step **15 行**、
 **专属执法位建成 4 把＋报告位 1 把、待建门 19 把**（门 a 转入"已建·报告模式"——报告不置红，转红随基-39
 全刀落完）；判据＝红账三段（A 未覆盖 normal 格／B roles 四外键悬空——应恒 0，悬空是错不是账、硬红不进
-基线／C TRAITS·PIN_KEYS 差集）对低水位基线文件 `tools/ci/gate-a-baseline.txt`（count>基线即红防回涨、
+基线／C TRAITS·PIN_KEYS 差集）对低水位基线文件 `tools/ci/baseline/gate-a-baseline.txt`（count>基线即红防回涨、
 文件缺/坏即红 fail-closed、count 下降打印须同批下调）；配套 (a) 报告走 stdout 可见面，配套 (b) 转红
 终点＝基-39 角色覆盖扩表（N2 那一刀同件落 roles.toml 两角色 power.rail.sense/power.current.sense，
 covered normal 4→5、红账 23＝基线初值；switch/charger 归批N3——switch 需新派生键属契约级裁定、
@@ -197,7 +197,7 @@ center/lo/hi 三键，host 经 `RR3_ACT_AXIS_STATE` 装配注入、板侧经 `ax
 词表外/缺斜杠/多段＝申报面错硬红不进基线，⑨-a B 段同款）；③ 差集机器生成逐条 "D " 行打印
 （ADR-0022 裁定 6.3 开放项的差集产出位；敞口表章程"缺码＋工单号不许混装"，开放项数据结构表
 随批N4 件九同批立——本件红账以步 ⑩ 打印为机器真值，不进敞口表）；**红项数不许靠缩分母减少**
-（I-19 判据字面）机器化＝双行基线 `tools/ci/gate-d-baseline.txt`（行 1 红账上限：回涨 FAIL、
+（I-19 判据字面）机器化＝双行基线 `tools/ci/baseline/gate-d-baseline.txt`（行 1 红账上限：回涨 FAIL、
 下降打印须同批下调；行 2 分母下限：缩分母 FAIL——I-19 判据字面、扩面打印须同批上调；文件缺/坏/
 非纯整数 FAIL fail-closed）；初值 70/70＝**建即红如实在账**（今日 14 端点读配置者 0＝I-15 实况，
 covers 全 `&[]` 如实申报），红项随批N4 件九三面扩端点逐批转绿、转绿终点＝差集空、门 d 转红退役；
@@ -570,7 +570,7 @@ Windows 半边结项。首跑 4 处红全部是**跨平台假设**而非产品�
 （改 `-CaseSensitive`）。
 
 **2026-11-16 供应链门建成（`supply`）**：`gate.yml` 新增 `supply` job，
-[`.cargo/deny.toml`](../../.cargo/deny.toml) 是策略唯一真源，[`tools/ci/supply-audit.sh`](../../tools/ci/supply-audit.sh)
+[`.cargo/deny.toml`](../../.cargo/deny.toml) 是策略唯一真源，[`tools/ci/platform/supply-audit.sh`](../../tools/ci/platform/supply-audit.sh)
 枚举 **22** 个工程根（`base/runtime` 工作区 + `modules/`/`tools/`/`base/ota/` 独立工程）
 逐个 `cargo deny --locked check`。四类判据：①许可证**显式白名单**（2026-11-16 全根
 实测只有 MIT / Apache-2.0 / ISC / Unicode-3.0 / BSD-3-Clause / Unlicense /
@@ -606,7 +606,7 @@ classic 腿 17.6 分钟（08:40:41→08:58:18，5 门全 PASS）、S3 腿 12.1 �
 **2026-11-13 源文件行数上限（⑭，新立）**：每个 `.rs` 源文件必须 **<600 行**
 （含测试文件）——超过即按职责结构化拆分，不是加白名单。`check.sh` 新增
 `step "⑭ 源文件行数门"`：`git ls-files '*.rs'` 逐文件计行，≥600 的文件数
-与低水位基线 `tools/ci/gate-lines-baseline.txt` 比对（**只降不升**：新增超标
+与低水位基线 `tools/ci/baseline/gate-lines-baseline.txt` 比对（**只降不升**：新增超标
 即红；拆完同批下调，不许直接上调）；基线文件缺/无整数即红（fail-closed）。
 立规时存量 **58** 个（最大三件：`rr-registry/tests/contract.rs` 2632、
 `rr3-interact/src/panel/server.rs` 2079、`rrd/src/registry/tests.rs` 1917），
@@ -671,7 +671,7 @@ keypub/manifest/sign/verify 端到端、错私钥 key_id、0600 权限、超大�
 `cross-artifacts`（八件产物）、`distro-smoke`、`pack-arm64`、`pack-bundle`、
 `stage-image`、Buildroot `BINARIES_DIR` 注入与 ghcr `publish` 构建；
 `rr3-pack` 入口清单收敛为 `RR3_PAYLOAD_BINS` 单常量，缺件逐件点名，
-测试 13 条。新增 `tools/ci/ota-sign-smoke.sh` 与 `integration.yml` 的
+测试 13 条。新增 `tools/ci/platform/ota-sign-smoke.sh` 与 `integration.yml` 的
 `ota-sign` job：临时测试种子走 keypub→manifest→sign→verify，正例 + 镜像篡改/
 清单篡改/错公钥/未允许降级四负例，真实私钥不进 CI。aarch64-unknown-linux-musl
 静态交叉实测：`ELF 64-bit ARM aarch64, statically linked`。`check.sh` 全绿；
@@ -778,7 +778,7 @@ cfg 守卫挤在一个函数里）。处置——按后端拆成 `rr3_src_linux`
 
 **2026-11-17 长阻塞静态门（生产长睡字面量基线 0）**：事实——"长阻塞主循环"
 此前只有评审、没有机器判据；模块/守护面一旦有人写 `sleep(2s)`，检查全绿而
-看门狗窗口可能小于它。处置——[metrics.py](../../tools/ci/metrics.py) 增"生产长睡字面量"
+看门狗窗口可能小于它。处置——[metrics.py](../../tools/ci/audit/metrics.py) 增"生产长睡字面量"
 项：只扫 `modules/rr3-*` 与 `base/runtime/rrd/src`（排除 bin），认
 `sleep(Duration::from_millis|from_secs(数字))`（含 `std::time::Duration` 全限定）
 且 ≥1000ms，基线 `long_sleep_max = 0`；`check.sh` ⑫ 标题同步。**负例实测**——
@@ -1033,7 +1033,7 @@ rr3-obs，模块注册耗时全列可见），CI sim-chain job 每拍打印同�
 
 **2026-11-17 失败日志归因单点与 action 运行时（续轮二）**：事实——buildroot 轨五处
 失败注解各写一份 grep、gate 轨九处各写一份，噪音口径不一（`pyerrors.h` 这类命中会
-把真因挤掉）；Node 20 档 action 已告弃用。处置——`tools/ci/log-digest.sh` 成单点
+把真因挤掉）；Node 20 档 action 已告弃用。处置——`tools/ci/lib/log-digest.sh` 成单点
 （信号提取 → 噪音过滤 → 单行注解 → 末段回显，`--head` 用于"命令级错误在前"的日志），
 13 处调用收敛；`--self-test` 正例 + 四负例进 gate `scripts` job；
 checkout/upload/download 升 v7/v7/v8，setup-qemu 升 v4（只换 Node 24 运行时，
@@ -1043,8 +1043,8 @@ checkout/upload/download 升 v7/v7/v8，setup-qemu 升 v4（只换 Node 24 运�
 **2026-11-17 unsafe/FFI 注释审计门（续轮四）**：事实——生产面 122 处 `unsafe`
 关键字中 78 处没有 SAFETY 前言，集中在 esp32 板侧、macaudio 开发面与少数 Linux
 目标面；"有没有注释"此前没有任何门在管。处置——新增
-`tools/ci/unsafe_audit.py`（静态扫描，关键字匹配 + 到空行的紧邻注释段，跳过测试
-路径），允许条数住 `tools/ci/unsafe-baseline.txt`（**只降不升**，与 gate-a/gate-d/
+`tools/ci/audit/unsafe_audit.py`（静态扫描，关键字匹配 + 到空行的紧邻注释段，跳过测试
+路径），允许条数住 `tools/ci/baseline/unsafe-baseline.txt`（**只降不升**，与 gate-a/gate-d/
 行数/体积门同款）；gate `scripts` job 执法。首批把 Linux 目标面 11 处补全
 （rr-ipc uart/excl、rrd daemon/ctl 的 signal/write/chmod/getgrnam/chown、
 rr-hal linux_gpio/linux_power 的 close、nmcli 的 fcntl），基线自 78 降至 **67**。
@@ -1061,7 +1061,7 @@ macaudio 18 处补齐 `// SAFETY:` / `/// # Safety`（unsafe fn 用调用方契�
 **2026-11-17 流水线结构审计门（续轮七）**：事实——五条 workflow 的 21 个 job 均有
 `timeout-minutes` 与顶层 `concurrency`，但 action 版本靠人记：platforms 的 ipct003
 仍用 `setup-qemu@v3`，而 cross 腿已升 v4（同一工作流两版并存），"升级漏一拍"
-没有任何门在管。处置——新增 `tools/ci/workflows_audit.py`（文本扫描：并发组 /
+没有任何门在管。处置——新增 `tools/ci/audit/workflows_audit.py`（文本扫描：并发组 /
 job 超时 / `ACTION_MATRIX` 版本矩阵；升级走显式提交改表），ipct003 的 qemu 升 v4；
 gate `scripts` job 先 `--self-test`（好例 + 缺并发/缺超时/版本漂移三负例）后执法。
 
@@ -1101,7 +1101,7 @@ macOS runner 时序更紧）。处置——`rr3_log` 改**落盘先于 stdout**�
 **2026-11-18 流水线审计对齐新结构（续轮九）**：事实——远端结构治理把 CI 政策写成
 [ci-workflows.md](ci-workflows.md)（工具链钉 1.100.0、缓存 `workspaces` 必填与
 `cache-all-crates`、触发 `paths-ignore`、job ≤10、publish 不可中断），但
-`tools/ci/workflows_audit.py` 仍只查版本矩阵/并发/超时/needs——政策没有执法位。
+`tools/ci/audit/workflows_audit.py` 仍只查版本矩阵/并发/超时/needs——政策没有执法位。
 处置——审计扩到新政策六类（工具链钉版、缓存参数、触发过滤、job 上限、publish
 cancel 语义、needs 图沿用），自检负例由六条扩到十一条；全仓五条 workflow 通过。
 

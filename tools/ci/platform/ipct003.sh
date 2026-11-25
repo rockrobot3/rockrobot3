@@ -29,7 +29,7 @@ export CARGO_HTTP_LOW_SPEED_LIMIT="${CARGO_HTTP_LOW_SPEED_LIMIT:-1}"
 #      第④路 export IPCT003_CARGO_OFFLINE=1（缓存已齐后离线求值，缺包先按批A'
 #      记录用镜像刷一次缓存）与 IPCT003_CARGO_MIRROR=1（构建依赖走 rsproxy）恢复旧行为。
 #
-# 用法：bash tools/ci/ipct003.sh [--strict]
+# 用法：bash tools/ci/platform/ipct003.sh [--strict]
 #   --strict：缺 Docker/跨架构环境时不放行（退 2）。供有容器环境的一方使用；
 #   默认宽容（退 0）但每个 SKIP 都打到 stdout，谁看了都知道哪步没跑。
 set -uo pipefail

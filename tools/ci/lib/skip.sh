@@ -6,7 +6,7 @@
 # 门一 SKIP，这些工程就变成"零覆盖但流水线绿"。SKIP 只在本地开发机有意义。
 #
 # 用法：
-#   . "$root/tools/ci/skip.sh"
+#   . "$root/tools/ci/lib/skip.sh"
 #   rr3_skip "esp 工具链未安装（rustup toolchain list 无 'esp'）——xxx 门不执行"
 #
 # CI 判据：GitHub Actions 注入 CI=true；本地可用 RR3_CI_STRICT=1 模拟 CI 严格口径。

@@ -24,7 +24,7 @@ rr3_step_9c() {
   #              且 planned_until 非空（终点登记）——**应恒 0**，硬红不进基线；
   #              sensor.env/imu 两角色 planned 终点 = D9 器件到货转自动可判）。
   #     门 a 数学（§24.1 第 5 条 + 裁-17）：置红 ＝ A + B + C + D。
-  #     机器判据（裁定配套 (c)）：低水位基线文件 tools/ci/gate-a-baseline.txt——
+  #     机器判据（裁定配套 (c)）：低水位基线文件 tools/ci/baseline/gate-a-baseline.txt——
   #       count > 基线即 FAIL（防红账回涨）；文件缺/坏/非整数即 FAIL（fail-closed）；
   #       count < 基线 PASS 并打印"须同批下调基线"提醒。
   #       **2026-11-12 转执法**：基线已降至 0（基-39 转绿收口件落地），故 count>0 即

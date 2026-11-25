@@ -10,7 +10,7 @@ export CARGO_HTTP_LOW_SPEED_LIMIT="${CARGO_HTTP_LOW_SPEED_LIMIT:-1}"
 # ESP-IDF 哨兵构建门（0.0.7 批D1）。check.sh ④/⑥ 显式排除 tools/espidf-sentinel：
 # xtensa-esp32-espidf 目标编译需 esp fork 工具链（cargo +esp）+ build-std + esp-idf-sys
 # （ESP-IDF v5.2.2 本地克隆 + ldproxy + 乐鑫 LLVM fork esp-clang），宿主工具链 check
-# 必红，本脚本单独覆盖。SKIP 纪律同 espidf-std-check.sh：工具链缺位 = 本地 SKIP / CI 即红（tools/ci/skip.sh）；工具链在位但编译失败 = FAIL；编译退出 0 但产物不在树 = FAIL。
+# 必红，本脚本单独覆盖。SKIP 纪律同 espidf-std-check.sh：工具链缺位 = 本地 SKIP / CI 即红（tools/ci/lib/skip.sh）；工具链在位但编译失败 = FAIL；编译退出 0 但产物不在树 = FAIL。
 # 双证之①（编译面）在本门执法：rr-core + rr-ipc + 哨兵在 xtensa-esp32-espidf
 # 目标可编译；双证之②（板上真跑）走 README runbook，不属 CI。
 # 伴生对手件 harness 已落 tools/rr3-sentinel-harness（独立宿主 crate，不落哨兵目录
@@ -29,8 +29,8 @@ fail=0
 cd "$root/tools/espidf-sentinel" || { echo "ERROR: 无法进入 tools/espidf-sentinel" >&2; exit 1; }
 # 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
 # crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
-. "$root/tools/ci/cargo-artifact.sh"
-. "$root/tools/ci/skip.sh"
+. "$root/tools/ci/lib/cargo-artifact.sh"
+. "$root/tools/ci/lib/skip.sh"
 
 # ① esp fork 工具链（rustup alias esp，0.0.7 批A'）
 if ! rustup toolchain list 2>/dev/null | grep -q '^esp'; then

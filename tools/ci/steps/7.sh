@@ -237,7 +237,7 @@ rr3_7e_docs() {
 #     （机制核 crate 面与静态扫面同步）；打空属门禁失效。
 rr3_7e_xtensa() {
   local xtensa_targets t
-  xtensa_targets="$(grep -oE '\-p rr-[a-z-]+' tools/ci/rr-core-xtensa-check.sh | awk '{print $2}' | sort -u)"
+  xtensa_targets="$(grep -oE '\-p rr-[a-z-]+' tools/ci/platform/rr-core-xtensa-check.sh | awk '{print $2}' | sort -u)"
   if [ -z "$xtensa_targets" ]; then
     printf 'FAIL  ⑦-e 自指判等: rr-core-xtensa-check.sh 的 -p rr-* 目标集打空（门禁失效，不放行）\n'
     static_fail=1

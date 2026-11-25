@@ -3,7 +3,7 @@
 //!
 //! 不依赖 ESP 工具链与真实时钟：240 拍 = 30 s 的喂拍/判死/恢复全在宿主跑完。
 //! 判据与板侧 `/api/board/health` 同源（[`rr3_health_json`]），CI 腿
-//! `tools/ci/autonomy-face.sh` 直接执行本文件。
+//! `tools/ci/platform/autonomy-face.sh` 直接执行本文件。
 
 use rr_autonomy::{
     rr3_health_json, Rr3RestartGate, Rr3SupCfg, Rr3Supervisor, Rr3Task, Rr3TaskState,

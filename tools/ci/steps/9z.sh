@@ -34,7 +34,7 @@ rr3_step_9z() {
   #    §25.8 #9，批N8 件六）。判据：cargo check --target x86_64-pc-windows-msvc
   #    （check 不链接，宿主无需 MSVC）--keep-going 尽量多编，base/runtime 十成员的
   #    **红 crate 数**（按 crate 名去重——同 crate lib/bin 双单元红只计一）不得超过
-  #    tools/ci/gate-win-baseline.txt 的钉数（只降不升）。
+  #    tools/ci/baseline/gate-win-baseline.txt 的钉数（只降不升）。
   #    fail-closed 三查：基线文件缺/坏/首个非注释行非纯整数即红（gate-a 同款）；
   #    Windows target 未装即红（附安装命令，**不设 SKIP**——裁-10 同族理由：能跑的
   #    机器越少，漂移越没人发现，ci.yml conventions job 同批装 target）；count < 基线

@@ -55,7 +55,7 @@ jobs:
           exit 1
       - name: 规约门禁检查（check.sh 全步，含 ⑫ 质量度量）
         run: |
-          # 失败归因走 tools/ci/log-digest.sh 单点（信号提取/噪音过滤/单行注解/
+          # 失败归因走 tools/ci/lib/log-digest.sh 单点（信号提取/噪音过滤/单行注解/
           # 末段回显）；本步只给策略——标题、信号面与回显行数。
           # 匿名日志接口 403 时 check-run annotations 是唯一公开可读通道，
           # 注解必须单行（多行会被拆条并只留前 10 条，真因被挤掉）。
@@ -63,7 +63,7 @@ jobs:
           if ! bash tools/ci/check.sh 2>&1 | tee /tmp/gate.log; then
             # 失败测试名与 panic 行同样进注解：日志匿名不可读，只有注解是公开取数面；
             # 只抓 FAIL/ERROR 会把「哪个测试挂了」挤掉（实测 brain 用例失败不可归因）。
-            bash tools/ci/log-digest.sh --title check.sh --log /tmp/gate.log \
+            bash tools/ci/lib/log-digest.sh --title check.sh --log /tmp/gate.log \
               --sig '^FAIL|^ERROR|^test .* FAILED|panicked at' --tail 30
             exit 1
           fi
@@ -86,7 +86,7 @@ jobs:
           set -o pipefail
           if ! cargo test --locked --release --workspace \
                --manifest-path base/runtime/Cargo.toml 2>&1 | tee /tmp/release-test.log; then
-            bash tools/ci/log-digest.sh --title release-test --log /tmp/release-test.log \
+            bash tools/ci/lib/log-digest.sh --title release-test --log /tmp/release-test.log \
               --sig 'FAILED|panicked at|error(\[|:)' --tail 12
             exit 1
           fi
@@ -96,7 +96,7 @@ jobs:
   # 形状抄了第二份——重复面退役，失败仍由 conventions 的 check.sh 显形。
 
   # 供应链门（cargo-deny）：许可证 / RustSec 公告 / 来源白名单 / 通配依赖。
-  # 策略唯一真源 = .cargo/deny.toml，工程根枚举与汇总在 tools/ci/supply-audit.sh；
+  # 策略唯一真源 = .cargo/deny.toml，工程根枚举与汇总在 tools/ci/platform/supply-audit.sh；
   # 本 job 只负责装工具（预编译，不占 runner 编译时间）与把失败压成注解。
   supply:
     runs-on: ubuntu-latest
@@ -112,11 +112,11 @@ jobs:
           tool: cargo-deny
       - name: 供应链审计（全部工程根，--strict）
         run: |
-          # 失败归因单点见 tools/ci/log-digest.sh：诊断行优先，缺诊断时退
+          # 失败归因单点见 tools/ci/lib/log-digest.sh：诊断行优先，缺诊断时退
           # FAIL 行与末段（命令级错误不带 error[...] 形态，不能被挤掉）。
           set -o pipefail
-          if ! bash tools/ci/supply-audit.sh --strict 2>&1 | tee /tmp/supply.log; then
-            bash tools/ci/log-digest.sh --title supply --log /tmp/supply.log \
+          if ! bash tools/ci/platform/supply-audit.sh --strict 2>&1 | tee /tmp/supply.log; then
+            bash tools/ci/lib/log-digest.sh --title supply --log /tmp/supply.log \
               --sig '^error(\[|:)|^FAIL' --head --tail 12
             exit 1
           fi
@@ -143,7 +143,7 @@ jobs:
             echo "::warning title=apt::apt-get update 失败，继续尝试安装"
           fi
           if ! sudo apt-get install -y -qq libasound2-dev pkg-config 2>&1 | tee /tmp/apt-alsa.log; then
-            bash tools/ci/log-digest.sh --title apt-alsa --log /tmp/apt-alsa.log \
+            bash tools/ci/lib/log-digest.sh --title apt-alsa --log /tmp/apt-alsa.log \
               --sig 'unable to locate|has no installation candidate|depends|error' --tail 3
             exit 1
           fi
@@ -152,14 +152,14 @@ jobs:
           set -o pipefail
           if ! cargo check --locked --all-targets --manifest-path base/runtime/Cargo.toml \
                -p rr-hal --features alsa 2>&1 | tee /tmp/alsa.log; then
-            bash tools/ci/log-digest.sh --title alsa --log /tmp/alsa.log \
+            bash tools/ci/lib/log-digest.sh --title alsa --log /tmp/alsa.log \
               --sig 'error(\[|:)' --tail 12
             exit 1
           fi
           # 单测不打开音频设备（选择器只在 open 时真连 PCM），CI 无设备也可跑。
           if ! cargo test --locked -q --manifest-path base/runtime/Cargo.toml \
                -p rr-hal --features alsa --lib 2>&1 | tee /tmp/alsa-test.log; then
-            bash tools/ci/log-digest.sh --title alsa-test --log /tmp/alsa-test.log \
+            bash tools/ci/lib/log-digest.sh --title alsa-test --log /tmp/alsa-test.log \
               --sig 'error(\[|:)|FAILED|panicked at' --tail 12
             exit 1
           fi
@@ -184,7 +184,7 @@ jobs:
           set -o pipefail
           if ! cargo build -q --locked --release \
                --manifest-path base/ota/rr3-ota-ctl/Cargo.toml 2>&1 | tee /tmp/ota-build.log; then
-            bash tools/ci/log-digest.sh --title ota-build --log /tmp/ota-build.log \
+            bash tools/ci/lib/log-digest.sh --title ota-build --log /tmp/ota-build.log \
               --sig 'error(\[|:)' --tail 12
             exit 1
           fi
@@ -251,36 +251,36 @@ jobs:
       # 归因脚本自身的判据也要有回执：噪音过滤/信号提取写成"看起来跑过了"
       # 时，构建失败会更难读；自检用 --plain 不产生假注解。
       - name: log-digest 自检（正例 + 四条负例）
-        run: bash tools/ci/log-digest.sh --self-test
+        run: bash tools/ci/lib/log-digest.sh --self-test
       # unsafe/FFI 审计（基线只降不升）：生产面 122 处已全部带前言，基线 0；
       # 自检先钉扫描面（生产/测试/extern 三类），再执法——新增未注释项即红。
       - name: unsafe 审计自检（夹具三条判定）
-        run: python3 tools/ci/unsafe_audit.py --self-test
+        run: python3 tools/ci/audit/unsafe_audit.py --self-test
       - name: unsafe 注释审计（基线只降不升）
-        run: python3 tools/ci/unsafe_audit.py
+        run: python3 tools/ci/audit/unsafe_audit.py
       # 基线只降不升：所有 *-baseline.* 与 base ref 同名文件逐键比对；
       # 上调即红，新键/缺键告警，未登记基线文件即红。
       - name: 基线只降不升自检（上调/下调/新键/未登记四例）
-        run: python3 tools/ci/baselines_audit.py --self-test
+        run: python3 tools/ci/audit/baselines_audit.py --self-test
       - name: 基线只降不升（对比 base ref）
-        run: python3 tools/ci/baselines_audit.py
+        run: python3 tools/ci/audit/baselines_audit.py
       # SKIP 纪律单点：本地缺工具链退 0，CI 内缺工具链退 1（覆盖缺口不得冒充绿）。
       - name: SKIP 纪律自检（本地 SKIP / CI 即红）
-        run: bash tools/ci/skip.sh --self-test
+        run: bash tools/ci/lib/skip.sh --self-test
       # 版本纪律的执法件：tag 与 VERSION 同源 + 指向 release 提交，六例正负对照。
       - name: 发布点执法自检（同源/不同源/rc/手输/分支/非 release 提交六例）
-        run: bash tools/ci/release-tag.sh --self-test
+        run: bash tools/ci/lib/release-tag.sh --self-test
       # 步骤清单是 check.sh 的显式契约：删/改/换序一个 step、或一号两门，都会被这条抓住。
       - name: 门禁步骤清单自检（一致/删除/新增/改名/换序/门号重复/子号放行/打空八例）
-        run: python3 tools/ci/gate_steps_audit.py --self-test
+        run: python3 tools/ci/audit/gate_steps_audit.py --self-test
       - name: 门禁步骤清单（check.sh 与 gate_steps.txt 逐字同序）
-        run: python3 tools/ci/gate_steps_audit.py
+        run: python3 tools/ci/audit/gate_steps_audit.py
       # 流水线自身的结构面也要有门：并发组 / job 超时 / action 版本矩阵。
       # 版本升级 = 显式改 ACTION_MATRIX，防同一工作流里两版 action 并存。
       - name: 流水线审计自检（好例 + 缺并发/缺超时/版本漂移三负例）
-        run: python3 tools/ci/workflows_audit.py --self-test
+        run: python3 tools/ci/audit/workflows_audit.py --self-test
       - name: 流水线结构审计（并发组 / job 超时 / action 版本矩阵 / 五芯片覆盖）
-        run: python3 tools/ci/workflows_audit.py
+        run: python3 tools/ci/audit/workflows_audit.py
       # YAML/表达式语法面（2026-11-24 补盲）：workflows_audit 是文本扫描器，workflow
       # 若被改坏缩进/表达式类型，GitHub 直接不跑或整个文件失败，而文本门仍全绿——
       # 覆盖会静默消失。actionlint 用官方 schema 解析触发面/上下文/表达式；
@@ -329,15 +329,15 @@ jobs:
       # 无自检回执——扫描面（生产/测试剔除、重复窗口、函数行数、超长名、长睡、
       # panic 落点）一旦腐化会静默少计/多计。九例夹具先钉判据，再落执法。
       - name: 质量度量自检（九例夹具）
-        run: python3 tools/ci/metrics.py --self-test
+        run: python3 tools/ci/audit/metrics.py --self-test
       # 文档门自检（2026-11-24）：⑤ 的三条 fail-closed 路径（空文档/断链/导航漏链）
       # 与"好档通过"由夹具仓四例钉住；判据腐化时先在这里红，而不是真仓静默放行。
       - name: 文档门自检（好档/空文档/断链/导航漏链四例）
-        run: bash tools/ci/docs_gate_selftest.sh
+        run: bash tools/ci/platform/docs_gate_selftest.sh
       # 锁内 I/O 机器判据（续轮二十二）：人工巡检三轮归零后改为门——三类已实证
       # 回潮形态（lock·log 同行 / 条件位临时 guard / 直调 reg 日志方法）。
       - name: 锁内 I/O 审计自检（好例 + 三类负例）
-        run: python3 tools/ci/lockio_audit.py --self-test
+        run: python3 tools/ci/audit/lockio_audit.py --self-test
       - name: 锁内 I/O 审计（lock·log 同行 / 条件位 guard / 直调 reg 日志方法）
-        run: python3 tools/ci/lockio_audit.py
+        run: python3 tools/ci/audit/lockio_audit.py
 

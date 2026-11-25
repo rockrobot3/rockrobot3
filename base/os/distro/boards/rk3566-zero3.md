@@ -15,8 +15,8 @@
 ## 0. 到货前静态点验
 
 ```bash
-bash tools/ci/rk3566-onboard-check.sh          # 数据面齐不齐、是否自相矛盾
-bash tools/ci/rk3566-onboard-check.sh --strict # 发布前：轴档案也必须标定
+bash tools/ci/platform/rk3566-onboard-check.sh          # 数据面齐不齐、是否自相矛盾
+bash tools/ci/platform/rk3566-onboard-check.sh --strict # 发布前：轴档案也必须标定
 ```
 
 静态点验只证明装配数据面自洽，**不替代**真板启动、器件读数与时序证据。

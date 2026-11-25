@@ -11,7 +11,7 @@ export CARGO_HTTP_LOW_SPEED_LIMIT="${CARGO_HTTP_LOW_SPEED_LIMIT:-1}"
 # xtensa-esp32-none-elf 目标编译需 esp fork 工具链（cargo +esp）+ Xtensa esp-gcc
 # （链接走 ldproxy，rust-lld 吃不下 exception.x 的 location counter 回退），宿主
 # 工具链 check 必红，本脚本单独覆盖该工程。
-# 纪律：工具链缺位 = 本地 SKIP / CI 即红（tools/ci/skip.sh）；
+# 纪律：工具链缺位 = 本地 SKIP / CI 即红（tools/ci/lib/skip.sh）；
 #       工具链在位但编译失败 = FAIL；编译退出 0 但 ELF 不在树 = FAIL。
 set -uo pipefail
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -21,8 +21,8 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 cd "$root/tools/esp32-uart-echo" || { echo "ERROR: 无法进入 tools/esp32-uart-echo" >&2; exit 1; }
 # 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
 # crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
-. "$root/tools/ci/cargo-artifact.sh"
-. "$root/tools/ci/skip.sh"
+. "$root/tools/ci/lib/cargo-artifact.sh"
+. "$root/tools/ci/lib/skip.sh"
 
 export PATH="$HOME/.cargo/bin:$PATH"
 

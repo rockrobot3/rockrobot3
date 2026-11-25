@@ -1,6 +1,6 @@
 # 规约门步骤清单（check.sh 的机器真值）：顺序与名称必须逐字一致。
 # 新增/删除/改名步骤 = 改本文件 + 同批评审；漏登记或静默删除由
-# tools/ci/gate_steps_audit.py 在 gate scripts job 判红。
+# tools/ci/audit/gate_steps_audit.py 在 gate scripts job 判红。
 ① workspace 编译
 ①b workspace 全量测试（含未被点名的守护用例）
 ①c 代码风格门 rustfmt --check（base/runtime + 全部独立工程，CI lint 同源）

@@ -56,7 +56,7 @@ chip = "esp32"
 # watchdog_feeder = "rr-core"：板侧无 rrd，平台看门狗由 rr-core::runtime 运行环喂
 # （本地守护输出格式 = 批K H6）。watchdog_timeout_ms 平台兜底宽于模块级
 # health.watchdog_timeout_ms = 10000；时序三位为**声明预算位**，与 0.0.7 板侧
-# 生产真值的对账归点验矩阵轻承载档行（architecture §12.6 / tools/ci/matrix.sh）。
+# 生产真值的对账归点验矩阵轻承载档行（architecture §12.6 / tools/ci/platform/matrix.sh）。
 watchdog_present = true
 watchdog_timeout_ms = 15000
 watchdog_feeder = "rr-core"

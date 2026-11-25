@@ -136,7 +136,7 @@ jobs:
       - name: 目标平台构建（七件产物 + brain 视工具链 + ELF 断言；失败压成单行注解）
         run: |
           set -o pipefail
-          if ! bash tools/ci/cross-artifacts.sh "${{ matrix.triple }}" "${{ matrix.arch }}" "${{ matrix.assert }}" "${{ matrix.extra }}" 2>&1 | tee /tmp/cross.log; then
+          if ! bash tools/ci/platform/cross-artifacts.sh "${{ matrix.triple }}" "${{ matrix.arch }}" "${{ matrix.assert }}" "${{ matrix.extra }}" 2>&1 | tee /tmp/cross.log; then
             # 链接错误的关键行不在 "error"/"failed" 上（undefined reference / collect2 /
             # cannot find），只抓前四行会丢掉真因——关键词按实测补全。
             errs=$(grep -iE "error(\[|:)|failed|FAIL|undefined reference|cannot find|collect2|ld returned" /tmp/cross.log | tail -5 | tr '\n' ' ')
@@ -193,7 +193,7 @@ jobs:
       # 交叉腿（musl/gnu）。
       - name: 目标 ISA 单测（纯逻辑 crate）
         if: matrix.mode != 'native'
-        run: bash tools/ci/cross-tests.sh "${{ matrix.triple }}" "${{ matrix.mode }}" "${{ matrix.platform }}"
+        run: bash tools/ci/platform/cross-tests.sh "${{ matrix.triple }}" "${{ matrix.mode }}" "${{ matrix.platform }}"
       - name: 上传产物
         uses: actions/upload-artifact@v7
         with:
@@ -323,26 +323,26 @@ jobs:
         with:
           title: esp-uart-echo
           prelude: ~/export-esp.sh
-          command: bash tools/ci/esp-uart-echo-check.sh
+          command: bash tools/ci/platform/esp-uart-echo-check.sh
       - uses: ./.github/actions/guarded-run
         if: matrix.chip == 'esp32'
         with:
           title: espidf-std
           prelude: ~/export-esp.sh
-          command: bash tools/ci/espidf-std-check.sh
+          command: bash tools/ci/platform/espidf-std-check.sh
       - uses: ./.github/actions/guarded-run
         if: matrix.chip == 'esp32'
         with:
           title: espidf-sentinel
           prelude: ~/export-esp.sh
-          command: bash tools/ci/espidf-sentinel-check.sh
+          command: bash tools/ci/platform/espidf-sentinel-check.sh
       # 双档模块门：脚本接芯片参数（esp32 / esp32s3 / all），每条腿只跑自己那一档；
       # 缺省 all 保持本地整门口径不变。
       - uses: ./.github/actions/guarded-run
         with:
           title: ${{ matrix.chip }}-act-sense
           prelude: ~/export-esp.sh
-          command: bash tools/ci/rr3-act-sense-espidf-check.sh ${{ matrix.chip }}
+          command: bash tools/ci/platform/rr3-act-sense-espidf-check.sh ${{ matrix.chip }}
       # 缓存评估数据（2026-11-24）：把 target 树与 embuild 体积打到可匿名读取的
       # 注解上（日志 403 不可读）。只读数，不改变任何判据；用于决定 ESP 构建缓存
       # 缓存评估数据（2026-11-24）：把 target 树与 crate 本地 `.embuild` 体积打到
@@ -407,7 +407,7 @@ jobs:
         with:
           toolchain: "1.100.0"
       - name: 自治健康面集成（真跑）
-        run: bash tools/ci/autonomy-face.sh
+        run: bash tools/ci/platform/autonomy-face.sh
 
   # IPC-T-003 跨架构对拍（ADR-0006 后果项，平台条件脚本——不进门禁步序，
   # 但 ubuntu runner 恰好具备全部平台条件：x86_64 宿主 + QEMU arm64 仿真 +
@@ -436,7 +436,7 @@ jobs:
         with:
           title: ipct003
           prelude: ~/export-esp.sh
-          command: bash tools/ci/ipct003.sh --strict
+          command: bash tools/ci/platform/ipct003.sh --strict
 
   # Windows（登记平台 L1，敞口 #5）：本地无该环境，此前只有"推算条数"。
   # GitHub 的 windows-latest 是现成载体——POSIX 段由 cfg 门控不参与编译，

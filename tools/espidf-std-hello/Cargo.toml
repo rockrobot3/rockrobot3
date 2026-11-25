@@ -9,7 +9,7 @@ description = "0.0.5 增补轮四 批W1 espidf std 构建链冒烟件（ESP-IDF 
 
 # 独立 workspace：xtensa-esp32-espidf 目标 + build-std 与 base/runtime 主 workspace 互斥，
 # 门禁 ④ 的宿主 check 不扫本目录（check.sh 显式排除；编译走
-# tools/ci/espidf-std-check.sh，工具链缺位 SKIP 纪律同 esp-uart-echo-check.sh）。
+# tools/ci/platform/espidf-std-check.sh，工具链缺位 SKIP 纪律同 esp-uart-echo-check.sh）。
 [workspace]
 
 [dependencies]

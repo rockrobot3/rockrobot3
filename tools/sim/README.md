@@ -39,7 +39,7 @@ F4 起本入口是**脚本化全链路演练**：全部真进程、真套接字�
   观察者取证；`--hold-ms <毫秒>`（仅 `--chain`，1000–600000）在取证后保持稳态，每 500ms
   采 `rr3-ctl health`，聚合各模块 `since_beat_ms` 峰值与末拍相位——判据＝四产品模块
   末拍 running 且峰值不触各自看门狗（实时性基线口径；观察者不计）。CI 入口
-  `tools/ci/sim-chain.sh` 缺省 hold 60s（`RR3_SIM_HOLD_MS` 可覆写，0 关闭）。
+  `tools/ci/platform/sim-chain.sh` 缺省 hold 60s（`RR3_SIM_HOLD_MS` 可覆写，0 关闭）。
 - **`--profile <装配单>`**（D9 装配演练，`assemble.rs`）：装配单驱动 rrd 装配链正门
   （`--profile` + `--contracts`，与 rrd.service 的 ExecStart 同形）boot 全部 face 模块。
   演练 modules-root 是**装机布局**：仓源 manifest 原文只把 entry 改写为产物绝对路径
@@ -47,7 +47,7 @@ F4 起本入口是**脚本化全链路演练**：全部真进程、真套接字�
   同目录就位（全部模块用仓源 config；brain 云端由 env `RR3_BRAIN_CLOUD=mock` 压成
   mock 档）。判据：全部 face 模块真进程 running + `denied_publish = 0` + 四命令巡检
   （批N32 件四起六模块全 Rust，产物 = `target/debug` 同名二进制）。CI 入口
-  `bash tools/ci/sim-assemble.sh`（构建 + 运行同一脚本）。
+  `bash tools/ci/platform/sim-assemble.sh`（构建 + 运行同一脚本）。
 
 sim 设备源（`devices.rs`，`rr-hal` 的 sim 后端消费方）保留：报告里带一段静音流的时长
 换算（`Rr3PcmStream::rr3_pcm_duration_ms()`——sim 不算第二遍），钉住"sim 与 linux

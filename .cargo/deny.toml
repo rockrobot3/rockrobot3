@@ -1,5 +1,5 @@
 # 供应链策略唯一真源：依赖许可证、RustSec 安全公告、来源白名单与通配依赖。
-# 执法入口是 CI `gate.yml` 的 `supply` job，脚本 `tools/ci/supply-audit.sh`
+# 执法入口是 CI `gate.yml` 的 `supply` job，脚本 `tools/ci/platform/supply-audit.sh`
 # 负责枚举工程根并逐项调用 cargo-deny。
 #
 # 判据只约束第三方依赖：本仓全部工程 `license = "Apache-2.0"` 且 `publish = false`，

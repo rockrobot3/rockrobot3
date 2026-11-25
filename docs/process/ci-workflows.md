@@ -44,7 +44,7 @@ check-run annotation 是唯一无需凭据的取数通道。`sim-chain` 的稳�
 `peak_max` / `wd_min` / `fd` / `wr` / `slow` / `log_max_us` / `boot_max`）以 notice
 注解回传（失败拍以 error + 失败拍摘要回传）；读法 = `GET /repos/{owner}/{repo}/
 check-runs/{id}/annotations`，无需 token；取数收成单点
-`python3 tools/ci/ci_steady.py [--head <sha>] [--assert]`（只读；`--assert` 按暂行
+`python3 tools/ci/audit/ci_steady.py [--head <sha>] [--assert]`（只读；`--assert` 按暂行
 阈值逐键判据，缺键/越界退 3——积压丢帧/写超时/慢写必须为 0）。
 | `publish.yml`（4） | build ×2 / build-riscv64 / merge / firmware | 发布面：原生架构双腿构建 + riscv64 交叉腿（QEMU）→ merge 去重（三架构）→ firmware 双芯片（release asset + ghcr OCI） |
 | `buildroot.yml`（3） | dtb-backport / image / release | Buildroot 装配轨：交叉工具链与装配冒烟、出厂镜像轨 |
@@ -55,7 +55,7 @@ check-runs/{id}/annotations`，无需 token；取数收成单点
 tag 与它同名并打在该提交上。atomgit 是主仓，github 是镜像仓（只借流水线），
 tag 先推 atomgit 再镜像 github。口径全文见 [conventions §7 版本纪律](conventions.md)。
 
-执法点只有一处：`tools/ci/release-tag.sh`——publish 的 build / build-riscv64 / merge
+执法点只有一处：`tools/ci/lib/release-tag.sh`——publish 的 build / build-riscv64 / merge
 三步与 buildroot 的 release 腿都先调它取 `tag=` / `version=`；tag 与 `VERSION`
 不同源、或 tag 未指向 release 提交即非 0 退出，不出制品。`workflow_dispatch`
 与分支推送两条路径不做版本判定（它们不发 Release，行为不变）。自检
@@ -72,7 +72,7 @@ with 入参），不依赖 runner 镜像预装版本；交叉 job 同时显式�
 步序与每步判据见 `conventions.md` §2；脚本说明见
 [`../../tools/ci/README.md`](../../tools/ci/README.md)。
 
-本文件的**结构判据**由 [`tools/ci/workflows_audit.py`](../../tools/ci/workflows_audit.py)
+本文件的**结构判据**由 [`tools/ci/audit/workflows_audit.py`](../../tools/ci/audit/workflows_audit.py)
 在 gate `scripts` job 执法（工具链钉版 / 缓存参数 / 触发过滤 / 作业上限 / needs 图 /
 并发语义 / 权限面 / 失败显形 / 五芯片矩阵腿 / 作业覆盖契约 / 发布面与正式制品托管），
 政策变更须同批改脚本与自检夹具。**作业覆盖契约（2026-11-20 补）**：gate /
@@ -128,7 +128,7 @@ esp-toolchain 的 `targets` 允许逗号（espup 语法），归一必须在 act
 
 **运行时基线（2026-11-24 弃用面巡检）**：GitHub 已强制 Node 24 运行 action，
 Node 20 档引用会在 annotations 里持续告警并将于后续移除。现行矩阵（真源 =
-`tools/ci/workflow_rules.py` 的 `ACTION_MATRIX`）：`actions/cache@v5`、
+`tools/ci/audit/workflow_rules.py` 的 `ACTION_MATRIX`）：`actions/cache@v5`、
 `docker/login-action@v4`、`docker/setup-buildx-action@v4`、
 `softprops/action-gh-release@v3`（release 路径三件原本只在 tag 时执行，告警此前
 未暴露）；`setup-buildx@v4` 移除的输入本仓未使用，升级无行为变化。升级动作

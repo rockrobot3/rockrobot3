@@ -176,13 +176,13 @@ jobs:
             br-dl-2024.02.11-
 
       # 交叉构建失败极少是环境问题，多是本仓代码/特性组合问题：日志归因交给
-      # tools/ci/log-digest.sh 的单点口径（与 br-* 各步同一套噪音过滤）。
+      # tools/ci/lib/log-digest.sh 的单点口径（与 br-* 各步同一套噪音过滤）。
       - name: 交叉构建注入产物（aarch64-musl 静态）
         run: |
           set -o pipefail
-          if ! bash tools/ci/cross-artifacts.sh aarch64-unknown-linux-musl \
+          if ! bash tools/ci/platform/cross-artifacts.sh aarch64-unknown-linux-musl \
               'ARM aarch64' static > /tmp/stage-build.log 2>&1; then
-            bash tools/ci/log-digest.sh --title stage-build --log /tmp/stage-build.log --tail 8
+            bash tools/ci/lib/log-digest.sh --title stage-build --log /tmp/stage-build.log --tail 8
             exit 1
           fi
 
@@ -214,7 +214,7 @@ jobs:
           # 不一致时，Buildroot 会重下（2026-11-16 实测）。
           if ! make -C /tmp/buildroot O=/tmp/br-out BR2_DL_DIR=/tmp/buildroot/dl \
               rock3_zero3_defconfig > /tmp/br-defconfig.log 2>&1; then
-            bash tools/ci/log-digest.sh --title br-defconfig --log /tmp/br-defconfig.log --tail 8
+            bash tools/ci/lib/log-digest.sh --title br-defconfig --log /tmp/br-defconfig.log --tail 8
             exit 1
           fi
 
@@ -230,7 +230,7 @@ jobs:
               -j"$(nproc)" uboot > /tmp/br-uboot.log 2>&1; then
             # dtc 版本是 scripts_dtc 失败的第一现场：缺文件/版本过旧都在这里现形。
             dtc_v=$([ -x /tmp/br-out/host/bin/dtc ] && /tmp/br-out/host/bin/dtc -v 2>&1 | head -1 || echo MISSING)
-            bash tools/ci/log-digest.sh --title br-uboot --log /tmp/br-uboot.log \
+            bash tools/ci/lib/log-digest.sh --title br-uboot --log /tmp/br-uboot.log \
               --tail 80 --note "dtc=${dtc_v}"
             exit 1
           fi
@@ -245,7 +245,7 @@ jobs:
               -j"$(nproc)" > /tmp/br-build.log 2>&1; then
             # 阶段推进（末 3 条 `>>>`）与信号行一起进注解；genimage/post-image
             # 的失败只报 target-post-image Error 1，真因在末段，故回显 40 行。
-            bash tools/ci/log-digest.sh --title br-build --log /tmp/br-build.log \
+            bash tools/ci/lib/log-digest.sh --title br-build --log /tmp/br-build.log \
               --phases --tail 40
             exit 1
           fi
@@ -426,7 +426,7 @@ jobs:
           set -o pipefail
           if ! cargo build -q --locked --release \
                --manifest-path base/ota/rr3-ota-ctl/Cargo.toml 2>&1 | tee /tmp/ota-build.log; then
-            bash tools/ci/log-digest.sh --title ota-build --log /tmp/ota-build.log --tail 12
+            bash tools/ci/lib/log-digest.sh --title ota-build --log /tmp/ota-build.log --tail 12
             exit 1
           fi
       - name: 版本与密钥前置（fail-closed）
@@ -436,7 +436,7 @@ jobs:
           set -euo pipefail
           # 正式制品只认 vX.Y.Z：release-tag.sh 已核"tag 与 VERSION 同源且指向 release 提交"，
           # 这里的形状门再把 rc 预发布挡在签名发布之外。
-          meta="$(bash tools/ci/release-tag.sh "${GITHUB_EVENT_NAME}" "${GITHUB_REF}" "${GITHUB_REF_NAME}" "${{ inputs.tag }}")"
+          meta="$(bash tools/ci/lib/release-tag.sh "${GITHUB_EVENT_NAME}" "${GITHUB_REF}" "${GITHUB_REF_NAME}" "${{ inputs.tag }}")"
           tag="$(printf '%s\n' "$meta" | sed -n 's/^tag=//p')"
           ver="$(printf '%s\n' "$meta" | sed -n 's/^version=//p')"
           if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then

@@ -217,7 +217,7 @@ ga_ledger() {
     printf 'FAIL  ⑨-a iface 实现者缺位 %s 笔（D 段应恒 0——iface 在册 ≠ 有实现者，硬红不进基线，裁-17）\n' "$ga_d"
     gate_a_fail=1
   fi
-  ga_base="tools/ci/gate-a-baseline.txt"
+  ga_base="tools/ci/baseline/gate-a-baseline.txt"
   if [ ! -r "$ga_base" ]; then
     printf 'FAIL  ⑨-a 基线文件不可读: %s（裁定配套(c) fail-closed——低水位基线缺位即红，不放行）\n' "$ga_base"
     gate_a_fail=1
@@ -233,7 +233,7 @@ ga_ledger() {
           printf 'FAIL  ⑨-a 红账回涨: %s > 基线 %s（"红条数单调不增"被破——回涨必有一笔未登记的新红，先归因再动基线）\n' "$ga_total" "$ga_baseline"
           gate_a_fail=1
         elif [ "$ga_total" -lt "$ga_baseline" ]; then
-          printf 'PASS  ⑨-a 红账 %s ≤ 基线 %s（**红账下降 %s 笔：须同批下调 tools/ci/gate-a-baseline.txt；转红终点 = 基-39 全覆盖 count=0，届时本门转红、基线文件退役**）\n' \
+          printf 'PASS  ⑨-a 红账 %s ≤ 基线 %s（**红账下降 %s 笔：须同批下调 tools/ci/baseline/gate-a-baseline.txt；转红终点 = 基-39 全覆盖 count=0，届时本门转红、基线文件退役**）\n' \
             "$ga_total" "$ga_baseline" "$((ga_baseline - ga_total))"
         else
           printf 'PASS  ⑨-a 红账 %s = 基线 %s（执法态：转绿收口后本门对任何新红即 FAIL）\n' "$ga_total" "$ga_baseline"

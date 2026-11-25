@@ -9,7 +9,7 @@
 - 同一行或紧邻上方（到空行为止，最多 12 行）出现 `SAFETY` 即视为已注释；
   跨多行的 SAFETY 说明按"到空行"整段收，不要求贴在同一行。
 
-基线纪律（与 gate-a/gate-d/行数/体积门同款）：`tools/ci/unsafe-baseline.txt`
+基线纪律（与 gate-a/gate-d/行数/体积门同款）：`tools/ci/baseline/unsafe-baseline.txt`
 是允许的未注释条数上限，只降不升。新增未注释 unsafe 即红；降到基线以下通过，
 提示同批下调基线（基线不回写不算失败，但数字不会自己变小）。
 
@@ -168,7 +168,7 @@ def baseline_of(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--baseline", default="tools/ci/unsafe-baseline.txt")
+    ap.add_argument("--baseline", default="tools/ci/baseline/unsafe-baseline.txt")
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--report", action="store_true", help="只读扩面报告（不计基线）")
     ap.add_argument("--self-test", action="store_true", help="夹具自检")

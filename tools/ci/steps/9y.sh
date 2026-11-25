@@ -12,10 +12,10 @@ gy_windows() {
            --target x86_64-pc-windows-msvc --keep-going >"$gy_log" 2>&1; then
       gy_red="$(grep -oE 'could not compile `[a-z0-9_-]+`' "$gy_log" | sort -u | wc -l | tr -d ' ')"
     fi
-    gy_b="$(grep -vE '^[[:space:]]*(#|$)' tools/ci/gate-win-baseline.txt 2>/dev/null | sed -n '1p' | tr -d '[:space:]')"
+    gy_b="$(grep -vE '^[[:space:]]*(#|$)' tools/ci/baseline/gate-win-baseline.txt 2>/dev/null | sed -n '1p' | tr -d '[:space:]')"
     case "$gy_b" in
       ''|*[!0-9]*)
-        printf 'FAIL  ⑨-y 基线文件形状坏: tools/ci/gate-win-baseline.txt（首个非注释行须为纯整数，实得"%s"）——fail-closed，不放行\n' "${gy_b:-<缺文件或空>}"
+        printf 'FAIL  ⑨-y 基线文件形状坏: tools/ci/baseline/gate-win-baseline.txt（首个非注释行须为纯整数，实得"%s"）——fail-closed，不放行\n' "${gy_b:-<缺文件或空>}"
         gate_y_fail=1
         ;;
       *)
@@ -25,7 +25,7 @@ gy_windows() {
           grep -oE 'could not compile `[a-z0-9_-]+`' "$gy_log" | sort -u | sed 's/^/      红 crate: /'
           gate_y_fail=1
         elif [ "$gy_red" -lt "$gy_b" ]; then
-          printf 'PASS  ⑨-y Windows 红 crate %s < 基线 %s（**红账下降 %s：须同批下调 tools/ci/gate-win-baseline.txt**；转绿终点 = 基-33 拆修全落 count=0）\n' \
+          printf 'PASS  ⑨-y Windows 红 crate %s < 基线 %s（**红账下降 %s：须同批下调 tools/ci/baseline/gate-win-baseline.txt**；转绿终点 = 基-33 拆修全落 count=0）\n' \
             "$gy_red" "$gy_b" "$((gy_b - gy_red))"
         else
           printf 'PASS  ⑨-y Windows 红 crate %s = 基线 %s（只降不升在账；基-33 转绿终点已至（批N19 结案），本门自此防回涨）\n' \

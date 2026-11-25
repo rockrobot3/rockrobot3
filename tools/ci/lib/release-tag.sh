@@ -8,7 +8,7 @@
 # 那两条路径不发 Release。
 #
 # 用法（在仓根执行；向标准输出打两行 `tag=` / `version=`，供 GITHUB_OUTPUT）：
-#   bash tools/ci/release-tag.sh <事件名> <ref> <ref 名> <手输标签>
+#   bash tools/ci/lib/release-tag.sh <事件名> <ref> <ref 名> <手输标签>
 # 前三参取 GITHUB_EVENT_NAME / GITHUB_REF / GITHUB_REF_NAME，第四参是 workflow_dispatch
 # 的 inputs.tag（其余事件传空）。任一判据不成立即非 0 退出，不打输出。
 rr3_release_tag() {

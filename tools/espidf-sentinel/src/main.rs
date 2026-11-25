@@ -12,7 +12,7 @@
 //! + 心跳线程 + 一次一答 pending 表）。
 //!
 //! 双证之一（编译面）：`cargo +esp build` 在 xtensa-esp32-espidf 上编译
-//! rr-core + rr-ipc + 本哨兵（专用门 tools/ci/espidf-sentinel-check.sh）；
+//! rr-core + rr-ipc + 本哨兵（专用门 tools/ci/platform/espidf-sentinel-check.sh）；
 //! 双证之二（板上真跑）：注册→心跳→round-trip + 三点堆采样（README runbook）。
 //! D1→D2 触发判据：实测运行峰值剩余堆 < 20% 总堆（§9.3 ④）。
 //!

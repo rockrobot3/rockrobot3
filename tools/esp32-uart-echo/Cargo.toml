@@ -9,7 +9,7 @@ description = "0.0.7 批C 层② UART 板级 round-trip 夹具（ESP32 裸金属
 
 # 独立 workspace：xtensa 目标 + build-std 标志与 base/runtime 主 workspace 互斥，
 # 门禁 ④ 的宿主 check 不扫本目录（check.sh 显式排除，xtensa 编译走
-# tools/ci/esp-uart-echo-check.sh），rot 由该脚本按 ipct003 同款 SKIP 纪律盯防。
+# tools/ci/platform/esp-uart-echo-check.sh），rot 由该脚本按 ipct003 同款 SKIP 纪律盯防。
 [workspace]
 
 [dependencies]

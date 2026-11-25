@@ -58,7 +58,7 @@ gs_measure() {
 }
 
 rr3_step_14() {
-  gs_base=tools/ci/gate-size-baseline.txt
+  gs_base=tools/ci/baseline/gate-size-baseline.txt
   gs_fail=0
   if [ ! -f "$gs_base" ]; then
     printf 'FAIL  ⑭ 基线文件缺失: %s\n' "$gs_base"

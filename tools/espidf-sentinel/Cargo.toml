@@ -9,7 +9,7 @@ description = "0.0.7 批D1 层③ 哨兵（esp-rs std，内跑 rr-core::runtime 
 
 # 独立 workspace：xtensa-esp32-espidf 目标 + build-std 与 base/runtime 主 workspace 互斥，
 # 门禁 ④/⑥ 的宿主 check/test 不扫本目录（check.sh 显式排除；编译走
-# tools/ci/espidf-sentinel-check.sh，工具链缺位 SKIP 纪律同 espidf-std-check.sh）。
+# tools/ci/platform/espidf-sentinel-check.sh，工具链缺位 SKIP 纪律同 espidf-std-check.sh）。
 [workspace]
 
 [dependencies]

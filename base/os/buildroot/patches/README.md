@@ -43,5 +43,5 @@ rrd / 模块二进制**不在 Buildroot 里编译**：用本仓 workspace 做
 （`rrd`、`rr3-ctl`、`rr3-ota-ctl`）与 `$BINARIES_DIR/rr3-modules/<name>/{bin,manifest.toml}`，
 由 `post-build.sh` 装入目标根（模块 manifest 归位 `module.toml`，entry 改写为
 装机绝对路径）。缺席时 post-build 只警告不阻断；产物注入的真值单点是
-[`tools/ci/cross-artifacts.sh`](../../../../tools/ci/cross-artifacts.sh) 与
+[`tools/ci/platform/cross-artifacts.sh`](../../../../tools/ci/platform/cross-artifacts.sh) 与
 `buildroot.yml` 的注入步，两处不得各写一份清单。

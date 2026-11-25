@@ -11,7 +11,7 @@
 # 本机未装时默认 SKIP 并明说——本机只写代码，不承担验证；CI 用 `--strict`
 # 把"工具缺位"判红，禁止用 SKIP 冒充通过。
 #
-# 用法：bash tools/ci/supply-audit.sh [--strict]
+# 用法：bash tools/ci/platform/supply-audit.sh [--strict]
 set -uo pipefail
 
 strict=0

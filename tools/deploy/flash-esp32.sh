@@ -30,7 +30,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.." # 仓根
 # 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
 # crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
-. tools/ci/cargo-artifact.sh
+. tools/ci/lib/cargo-artifact.sh
 
 PROJ=tools/esp32-periph-base
 ELF_NAME=esp32-periph-base

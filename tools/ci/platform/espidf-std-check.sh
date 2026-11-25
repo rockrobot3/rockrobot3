@@ -11,7 +11,7 @@ export CARGO_HTTP_LOW_SPEED_LIMIT="${CARGO_HTTP_LOW_SPEED_LIMIT:-1}"
 # xtensa-esp32-espidf 目标编译需 esp fork 工具链（cargo +esp）+ build-std + esp-idf-sys
 # （ESP-IDF v5.2.2 本地克隆 + ldproxy + 乐鑫 LLVM fork esp-clang——上游 libclang 无 Xtensa
 # 后端，bindgen 会报 unknown target triple 'xtensa'），宿主工具链 check 必红，本脚本单独覆盖。
-# 纪律：工具链缺位 = 本地 SKIP / CI 即红（tools/ci/skip.sh）；
+# 纪律：工具链缺位 = 本地 SKIP / CI 即红（tools/ci/lib/skip.sh）；
 #       工具链在位但编译失败 = FAIL；编译退出 0 但 ELF 不在树 = FAIL。
 set -uo pipefail
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -21,8 +21,8 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 cd "$root/tools/espidf-std-hello" || { echo "ERROR: 无法进入 tools/espidf-std-hello" >&2; exit 1; }
 # 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
 # crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
-. "$root/tools/ci/cargo-artifact.sh"
-. "$root/tools/ci/skip.sh"
+. "$root/tools/ci/lib/cargo-artifact.sh"
+. "$root/tools/ci/lib/skip.sh"
 
 export PATH="$HOME/.cargo/bin:$PATH"
 

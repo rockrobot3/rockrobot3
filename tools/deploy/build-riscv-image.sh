@@ -50,7 +50,7 @@ for b in "$CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER" \
 done
 
 # 1) 产物：复用交叉门（同一构建集合与 ELF 断言；brain 的 ring 需要 CC/AR）。
-bash tools/ci/cross-artifacts.sh "$target" RISC-V any with-brain
+bash tools/ci/platform/cross-artifacts.sh "$target" RISC-V any with-brain
 
 # 2) 打包器必须是宿主原生（stage-image 会执行它，riscv 二进制在 x86 跑不了）。
 cargo build -q --locked --release --manifest-path tools/rr3-pack/Cargo.toml

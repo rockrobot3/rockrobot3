@@ -6,7 +6,7 @@
 # 基线键 hard_500，缺键或形状坏 fail-closed；扫面打空亦红（防 glob 失效）。
 
 rr3_step_16() {
-  lines_base_file="tools/ci/gate-lines-baseline.txt"
+  lines_base_file="tools/ci/baseline/gate-lines-baseline.txt"
   if [ ! -f "$lines_base_file" ]; then
     printf 'FAIL  ⑯ 缺基线文件 %s（fail-closed）\n' "$lines_base_file"
     fail=1

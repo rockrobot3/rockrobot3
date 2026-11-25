@@ -147,7 +147,7 @@ pub const RR3_PANEL_APPLY_MODES: [&str; 3] = ["live", "reboot", "reflash"];
 /// 四路字段级全集，与 rrd 渲染完整性测试同源钉死；domain 12 = 批N21 件二 evidence
 /// 键入 RR3_DOMAIN_KEYS 后件四同批补申报——assembly 快照批N21 件二起渲染 evidence，
 /// 读面可读即申报，写面半边随批N22 件一 `/api/profile/domain` 收口）⇒ 红账 43 全转绿，基线
-/// tools/ci/gate-d-baseline.txt 行 1 同批 43→0；密钥面两端点（keys/key）不申报
+/// tools/ci/baseline/gate-d-baseline.txt 行 1 同批 43→0；密钥面两端点（keys/key）不申报
 /// covers——密钥不在五路分母（secrets 不住 assemble.toml 槽表），如实空。
 /// applies 今日四条申报 = `POST /api/model/key`（secrets 凭据写入，brain 现读
 /// ⇒ live）＋ `POST /api/brain/ops`（写臂重建受影响客户端，live 内存生效**不落盘**，

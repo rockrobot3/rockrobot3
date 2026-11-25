@@ -11,7 +11,7 @@ export CARGO_HTTP_LOW_SPEED_LIMIT="${CARGO_HTTP_LOW_SPEED_LIMIT:-1}"
 # tools/esp32-periph-base：xtensa-esp32-espidf 目标编译需 esp fork 工具链
 # （cargo +esp）+ build-std + esp-idf-sys（ESP-IDF v5.2.2 本地克隆 + ldproxy +
 # 乐鑫 LLVM fork esp-clang），宿主工具链 check 必红，本脚本单独覆盖。SKIP 纪律
-# 同 espidf-sentinel-check.sh：工具链缺位 = 本地 SKIP / CI 即红（tools/ci/skip.sh）；工具链在位但
+# 同 espidf-sentinel-check.sh：工具链缺位 = 本地 SKIP / CI 即红（tools/ci/lib/skip.sh）；工具链在位但
 # 编译失败 = FAIL；编译退出 0 但产物不在树 = FAIL。
 # 批B 判据之①（构建面）在本门执法：SSD1306 I2C 驱动 + LEDC 双轴舵机 + UART2
 # 行指令面在 xtensa-esp32-espidf 可编译。判据之②（板上真跑：I2C 扫描 0x3C
@@ -32,8 +32,8 @@ fail=0
 cd "$root/tools/esp32-periph-base" || { echo "ERROR: 无法进入 tools/esp32-periph-base" >&2; exit 1; }
 # 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
 # crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
-. "$root/tools/ci/cargo-artifact.sh"
-. "$root/tools/ci/skip.sh"
+. "$root/tools/ci/lib/cargo-artifact.sh"
+. "$root/tools/ci/lib/skip.sh"
 
 # W7-b1a 分区表核验时间锚：先于本门任何构建创建。缓存恢复的旧 partition-table.bin
 # （早于锚点）不参与判定，避免"拿上一轮的绿表冒充本轮"。

@@ -8,9 +8,9 @@
 # 七列把"本环境实跑了什么、跑出什么"记成一行矩阵，不另立第二套判定逻辑。
 #
 # 列 → 生产者（本环境能出的证据）：
-#   ① 字节契约      tools/ci/ipct003.sh（默认宽容口径跑，矩阵记**实跑 N/4 路** + SKIP 原因，
+#   ① 字节契约      tools/ci/platform/ipct003.sh（默认宽容口径跑，矩阵记**实跑 N/4 路** + SKIP 原因，
 #                   §12.6：不许写"① 已过"）
-#   ② 机制核编译面  tools/ci/rr-core-xtensa-check.sh（工具链缺位 = 脚本自身 SKIP 明说）
+#   ② 机制核编译面  tools/ci/platform/rr-core-xtensa-check.sh（工具链缺位 = 脚本自身 SKIP 明说）
 #   ③ 供给自证      cargo test -q -p rrd --lib profile::tests——装载门定性：只证
 #                   "描述符没撒谎"，**不证 port 正确**（§12.6 v0.9；实测值归 E4）
 #   ④ 描述符装载    cargo test -q -p rr-registry --test contract（查册/形状 pin/
@@ -19,10 +19,10 @@
 #                   ——E1 形态 = host 数值一致（腿一确定性 + 腿二契约期望值）；
 #                   目标上真跑归 E4，不得由本环境冒领
 #   ⑥ 生命周期      python3 ≥3.11 预检（sim-chain.sh 的 stdlib tomllib 前提）后：
-#                   cargo test -q -p rrd --tests（e2e 全家）+ tools/ci/sim-chain.sh
+#                   cargo test -q -p rrd --tests（e2e 全家）+ tools/ci/platform/sim-chain.sh
 #   ⑦ 时序达标      **无固定载体**——真值只能来自 E4 真板周期直方图（云 runner 是共享
 #                   x86、qemu-user 是指令级模拟，时间都不是硬件时间）。手测回填：
-#                   bash tools/ci/matrix.sh --manual 7 --evidence <仓内证据文件>
+#                   bash tools/ci/platform/matrix.sh --manual 7 --evidence <仓内证据文件>
 #
 # 环境指纹三件套（§13.2 版本钉三则）：每行产出必带——
 #   载体/镜像（容器载体请设 RR3_MATRIX_IMAGE_DIGEST=镜像@digest）+ `rustc -Vv` + 目标三元组。
@@ -46,7 +46,7 @@ cd "$root" || exit 1
 export PATH="$HOME/.cargo/bin:$PATH"
 
 usage() {
-  echo "用法: bash tools/ci/matrix.sh [--strict] [--manual <列号> --evidence <仓内证据文件路径>]"
+  echo "用法: bash tools/ci/platform/matrix.sh [--strict] [--manual <列号> --evidence <仓内证据文件路径>]"
 }
 
 strict=0
@@ -126,11 +126,11 @@ st5=skip tx5="未出数"; st6=skip tx6="未出数"
 st7=skip tx7="未出数"
 
 # ① 字节契约：ipct003.sh 默认宽容口径，矩阵只如实记"实跑 N/4 路"。
-echo "--- ① 字节契约（tools/ci/ipct003.sh，记实跑 N/4 路）---"
+echo "--- ① 字节契约（tools/ci/platform/ipct003.sh，记实跑 N/4 路）---"
 if [ "$has_toolchain" -eq 0 ]; then
   tx1="无载体（rustc/cargo 缺位）"
 else
-  if bash tools/ci/ipct003.sh >"$scratch/c1.out" 2>&1; then
+  if bash tools/ci/platform/ipct003.sh >"$scratch/c1.out" 2>&1; then
     p1="$(grep -c '^PASS' "$scratch/c1.out" || true)"
     s1="$(grep -c '^SKIP' "$scratch/c1.out" || true)"
     if [ "${s1:-0}" -eq 0 ]; then
@@ -150,11 +150,11 @@ fi
 printf '状态: %s ｜ %s\n\n' "$st1" "$tx1"
 
 # ② 机制核编译面：xtensa 三查（SKIP 语义脚本内定，矩阵照抄）。
-echo "--- ② 机制核编译面（tools/ci/rr-core-xtensa-check.sh）---"
+echo "--- ② 机制核编译面（tools/ci/platform/rr-core-xtensa-check.sh）---"
 if [ "$has_toolchain" -eq 0 ]; then
   tx2="无载体（rustc/cargo 缺位）"
 else
-  if bash tools/ci/rr-core-xtensa-check.sh >"$scratch/c2.out" 2>&1; then
+  if bash tools/ci/platform/rr-core-xtensa-check.sh >"$scratch/c2.out" 2>&1; then
     if grep -q '^SKIP' "$scratch/c2.out"; then
       tx2="无载体（$(grep '^SKIP' "$scratch/c2.out" | sed 's/^SKIP  //; s/——.*//' | sed -n '1p')）"
     else
@@ -243,7 +243,7 @@ fi
 printf '状态: %s ｜ %s\n\n' "$st5" "$tx5"
 
 # ⑥ 生命周期：rrd e2e 全家 + sim-chain 六真进程闭环（python3 ≥3.11 是 sim 链前提）。
-echo "--- ⑥ 生命周期（rrd e2e + tools/ci/sim-chain.sh；python3 ≥3.11 前提）---"
+echo "--- ⑥ 生命周期（rrd e2e + tools/ci/platform/sim-chain.sh；python3 ≥3.11 前提）---"
 py_ok=0
 py_ver=""
 if command -v python3 >/dev/null 2>&1; then
@@ -258,7 +258,7 @@ elif [ "$py_ok" -eq 0 ]; then
   tx6="无载体（python3 ${py_ver:-缺位} < 3.11——sim-chain.sh 的 stdlib tomllib 前提；触发条件：E1 ubuntu 载体或本机升 python ≥3.11）"
 else
   if cargo_test_ok base/runtime -p rrd --tests; then
-    if bash tools/ci/sim-chain.sh >"$scratch/c6.out" 2>&1; then
+    if bash tools/ci/platform/sim-chain.sh >"$scratch/c6.out" 2>&1; then
       st6=pass
       tx6="rrd e2e 全家 + rr3-sim --chain 六真进程 mock 闭环全绿（注册→心跳→分发→节拍→断开→监督重启）"
     else
@@ -276,7 +276,7 @@ printf '状态: %s ｜ %s\n\n' "$st6" "$tx6"
 
 # ⑦ 时序达标：E4 真板专属，本环境固定"无载体 + 触发条件"（§13.2：不得由标准环境冒领）。
 echo "--- ⑦ 时序达标（E4 真板专属，本环境固定无载体）---"
-tx7="无载体（E4 真板专属——云 runner 共享 x86 / qemu-user 指令级模拟，时间非硬件时间，不得冒领）；触发条件：0.0.6 树莓派真板批 / 0.0.7 轻承载档真板（周期直方图）；手测回填：bash tools/ci/matrix.sh --manual 7 --evidence <仓内证据文件>"
+tx7="无载体（E4 真板专属——云 runner 共享 x86 / qemu-user 指令级模拟，时间非硬件时间，不得冒领）；触发条件：0.0.6 树莓派真板批 / 0.0.7 轻承载档真板（周期直方图）；手测回填：bash tools/ci/platform/matrix.sh --manual 7 --evidence <仓内证据文件>"
 printf '状态: %s ｜ %s\n\n' "$st7" "$tx7"
 
 # —— [手测] 回填（C12 契约：证据三样齐才收，不覆盖自动 FAIL 格）——

@@ -63,7 +63,7 @@ jobs:
         # 版本纪律的执法点：VERSION 只能在 release(vX.Y.Z) 提交内变更，tag 与之同名；
         # 判据单点在 release-tag.sh（自检在 gate scripts job），不同源或非 release 提交即红。
         run: >-
-          bash tools/ci/release-tag.sh "${{ github.event_name }}" "${{ github.ref }}"
+          bash tools/ci/lib/release-tag.sh "${{ github.event_name }}" "${{ github.ref }}"
           "${{ github.ref_name }}" "${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
       - name: 原生构建运行面（rrd / 六模块 / rr3-ctl / rr3-ota-ctl / rr3-pack）
         env:
@@ -167,7 +167,7 @@ jobs:
       - name: 计算发布标签（版本唯一真源 = 仓根 VERSION；tag 须指向 release 提交）
         id: meta
         run: >-
-          bash tools/ci/release-tag.sh "${{ github.event_name }}" "${{ github.ref }}"
+          bash tools/ci/lib/release-tag.sh "${{ github.event_name }}" "${{ github.ref }}"
           "${{ github.ref_name }}" "${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
       - name: 登录 ghcr.io
         uses: docker/login-action@v4
@@ -206,7 +206,7 @@ jobs:
       - name: 计算发布标签（版本唯一真源 = 仓根 VERSION；tag 须指向 release 提交）
         id: meta
         run: >-
-          bash tools/ci/release-tag.sh "${{ github.event_name }}" "${{ github.ref }}"
+          bash tools/ci/lib/release-tag.sh "${{ github.event_name }}" "${{ github.ref }}"
           "${{ github.ref_name }}" "${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
       - name: 登录 ghcr.io
         uses: docker/login-action@v4
@@ -324,7 +324,7 @@ jobs:
           export IDF_GITHUB_ASSETS=dl.espressif.com/github_assets
           export PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.cloud.tencent.com/pypi/simple}"
           export PIP_DEFAULT_TIMEOUT=60
-          . "$GITHUB_WORKSPACE/tools/ci/cargo-artifact.sh"
+          . "$GITHUB_WORKSPACE/tools/ci/lib/cargo-artifact.sh"
           cd "$GITHUB_WORKSPACE/tools/esp32-periph-base"
           fw_args=(
             --release

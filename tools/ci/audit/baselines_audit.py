@@ -33,14 +33,14 @@ from pathlib import Path
 
 # 已登记基线文件：新增基线必须同批加入本表；未登记文件由审计判红。
 BASELINES = (
-    "tools/ci/gate-a-baseline.txt",
-    "tools/ci/gate-d-baseline.txt",
-    "tools/ci/gate-lines-baseline.txt",
-    "tools/ci/gate-size-baseline.txt",
-    "tools/ci/gate-w-baseline.txt",
-    "tools/ci/gate-win-baseline.txt",
-    "tools/ci/metrics-baseline.json",
-    "tools/ci/unsafe-baseline.txt",
+    "tools/ci/baseline/gate-a-baseline.txt",
+    "tools/ci/baseline/gate-d-baseline.txt",
+    "tools/ci/baseline/gate-lines-baseline.txt",
+    "tools/ci/baseline/gate-size-baseline.txt",
+    "tools/ci/baseline/gate-w-baseline.txt",
+    "tools/ci/baseline/gate-win-baseline.txt",
+    "tools/ci/baseline/metrics-baseline.json",
+    "tools/ci/baseline/unsafe-baseline.txt",
 )
 KEY_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\d+)$")
 BARE_INT = re.compile(r"^\d+$")
@@ -144,7 +144,7 @@ def audit(root, point, files=BASELINES, strict_unlisted=True):
     root = Path(root)
     if strict_unlisted:
         known = set(files)
-        for p in sorted((root / "tools" / "ci").glob("*-baseline.*")):
+        for p in sorted((root / "tools" / "ci" / "baseline").glob("*-baseline.*")):
             rel = p.relative_to(root).as_posix()
             if rel not in known:
                 fails.append(f"未登记基线文件 {rel}（新增基线须加入审计表）")
@@ -202,14 +202,14 @@ def self_test():
 
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
-        txt = root / "tools/ci/gate-x-baseline.txt"
-        js = root / "tools/ci/metrics-baseline.json"
+        txt = root / "tools/ci/baseline/gate-x-baseline.txt"
+        js = root / "tools/ci/baseline/metrics-baseline.json"
         _write(txt, "# 基线\n5\n")
         _write(js, '{"unwrap_max": 10}\n')
         subprocess.run(["git", "init", "-q"], cwd=td, check=True)
         subprocess.run(["git", "add", "-A"], cwd=td, check=True)
         _commit(td, "base")
-        files = ("tools/ci/gate-x-baseline.txt", "tools/ci/metrics-baseline.json")
+        files = ("tools/ci/baseline/gate-x-baseline.txt", "tools/ci/baseline/metrics-baseline.json")
 
         def run_case(name, text_txt, text_json, expect_fail):
             _write(txt, text_txt)
@@ -225,7 +225,7 @@ def self_test():
             run_case("新增 JSON 键只告警", "5\n", '{"unwrap_max": 10, "new_max": 1}\n', False),
             run_case("删键只告警", "5\n", "{}\n", False),
         ]
-        _write(root / "tools/ci/extra-baseline.txt", "1\n")
+        _write(root / "tools/ci/baseline/extra-baseline.txt", "1\n")
         fails, _, _ = audit(td, "HEAD", files, strict_unlisted=True)
         cases.append(("未登记基线文件即红", any("未登记" in f for f in fails), fails))
 

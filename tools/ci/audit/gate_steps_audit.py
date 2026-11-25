@@ -5,7 +5,7 @@
 判据（只做静态比对，不执行门禁）：
 - 解析 check.sh 的 `step "..."` 与 `printf '\n=== ... ===\n'` 两种出口；
   `汇总` 不是门步骤，排除。
-- 与 `tools/ci/gate_steps.txt` 的非注释行逐项比对：缺失/新增/改名/换序均红。
+- 与 `tools/ci/baseline/gate_steps.txt` 的非注释行逐项比对：缺失/新增/改名/换序均红。
 - 门号唯一：圈号（①…⑳）是一把门的身份，同一圈号出现两次即双义红
   （子号 ①b/⑨-a 不冲突；历史实证：⑭ 同时用于装载门与源文件行数门）。
 - 任一侧打空即门禁失效（fail-closed）。
@@ -27,7 +27,7 @@ from pathlib import Path
 STEP = re.compile(r'^\s*step "([^"]+)"')
 PRINTF = re.compile(r"^\s*printf '\\n=== (.*) ===\\n'\s*$")
 GATE_ID = re.compile("^([①-⑳][^ ]*)")
-MANIFEST = "tools/ci/gate_steps.txt"
+MANIFEST = "tools/ci/baseline/gate_steps.txt"
 SCRIPT = "tools/ci/check.sh"
 SUMMARY = "汇总"
 
@@ -127,7 +127,7 @@ def self_test():
 def main():
     if "--self-test" in sys.argv[1:]:
         return self_test()
-    root = Path(__file__).resolve().parent.parent.parent
+    root = Path(__file__).resolve().parents[3]
     try:
         parsed = parse_steps((root / SCRIPT).read_text(encoding="utf-8"))
         manifest = load_manifest(root / MANIFEST)

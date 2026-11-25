@@ -21,7 +21,7 @@
 ```sh
 export PATH="$HOME/.cargo/bin:$PATH"
 export IDF_PATH="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
-cargo +esp build   # 镜像注入见 tools/ci/espidf-std-check.sh
+cargo +esp build   # 镜像注入见 tools/ci/platform/espidf-std-check.sh
 ```
 
 产物：`target/xtensa-esp32-espidf/debug/espidf-std-hello`（ELF）。
@@ -53,4 +53,4 @@ cargo +esp build   # 镜像注入见 tools/ci/espidf-std-check.sh
 ## 门禁
 
 本工程被 `tools/ci/check.sh` ④ 显式排除（xtensa 工具链宿主必红），由
-`tools/ci/espidf-std-check.sh` 单独覆盖，SKIP 纪律同 esp32-uart-echo 门。
+`tools/ci/platform/espidf-std-check.sh` 单独覆盖，SKIP 纪律同 esp32-uart-echo 门。

@@ -9,7 +9,7 @@ export CARGO_HTTP_TIMEOUT="${CARGO_HTTP_TIMEOUT:-120}"
 export CARGO_HTTP_LOW_SPEED_LIMIT="${CARGO_HTTP_LOW_SPEED_LIMIT:-1}"
 # ESP32-S3 外设底座构建门（W1/T2，批N35 件八）。与 esp32-periph-base-check.sh
 # 同款门禁形态：宿主工具链 check 必红（xtensa + build-std + esp-idf-sys），本脚本
-# 单独覆盖。SKIP 纪律同款：工具链缺位 = 本地 SKIP / CI 即红（tools/ci/skip.sh）；在位但编译失败 = FAIL；
+# 单独覆盖。SKIP 纪律同款：工具链缺位 = 本地 SKIP / CI 即红（tools/ci/lib/skip.sh）；在位但编译失败 = FAIL；
 # 退出 0 但产物不在树 = FAIL。
 #
 # 与 classic 门的差异只有三处：MCU=esp32s3、--target xtensa-esp32s3-espidf、ELF 路径；
@@ -35,8 +35,8 @@ fail=0
 cd "$root/tools/esp32-periph-base" || { echo "ERROR: 无法进入 tools/esp32-periph-base" >&2; exit 1; }
 # 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
 # crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
-. "$root/tools/ci/cargo-artifact.sh"
-. "$root/tools/ci/skip.sh"
+. "$root/tools/ci/lib/cargo-artifact.sh"
+. "$root/tools/ci/lib/skip.sh"
 
 # W7-b1a 分区表核验时间锚：先于本门任何构建创建（语义同 classic 门）。
 part_marker=/tmp/rr3-part-marker-esp32s3

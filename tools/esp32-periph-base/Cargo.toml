@@ -9,7 +9,7 @@ description = "0.0.5 增补轮五 批B 外设底座档 + 批C 帧执行面 + 批
 
 # 独立 workspace：xtensa-esp32-espidf 目标 + build-std 与 base/runtime 主 workspace 互斥，
 # 门禁 ④/⑥ 的宿主 check/test 不扫本目录（check.sh 显式排除；编译走
-# tools/ci/esp32-periph-base-check.sh，工具链缺位 SKIP 纪律同 espidf-sentinel-check.sh）。
+# tools/ci/platform/esp32-periph-base-check.sh，工具链缺位 SKIP 纪律同 espidf-sentinel-check.sh）。
 # 批B 不进城（行协议临时面）；批C 起加帧执行面——rr-ipc（字节契约 + 窄缝 +
 # blanket conn，xtensa 编译面由批J G2 真绿背书）+ serde_json（帧体组包/拆包，
 # 依赖闭包 L1 档位，与哨兵同口径），但**不进城**（不依赖 rr-core，不注册总线

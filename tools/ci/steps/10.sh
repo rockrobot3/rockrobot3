@@ -203,7 +203,7 @@ gd_cov_verdict() {
 # 基线双行判据（fail-closed）：行 1 = 红账上限，行 2 = 分母下限（I-19 判据字面）。
 gd_baseline() {
   local gd_base gd_b1 gd_b2
-  gd_base="tools/ci/gate-d-baseline.txt"
+  gd_base="tools/ci/baseline/gate-d-baseline.txt"
   if [ ! -r "$gd_base" ]; then
     printf 'FAIL  ⑩ 基线文件不可读: %s（裁定配套(c) fail-closed——低水位基线缺位即红，不放行）\n' "$gd_base"
     gate_d_fail=1

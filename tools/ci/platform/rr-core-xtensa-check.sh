@@ -10,7 +10,7 @@
 #   裸机面：xtensa 编译过，且 rr-ipc golden 头 `const _` 断言随依赖链在该目标编译期
 #           重求值（0.0.7 层① 免费资产，批D① 起 rr-core 依赖 rr-ipc 同链生效）；
 #   宿主面：cargo test -p rr-core 真跑（golden 形状 / 控制图逐拍一致用例，本门内断言）。
-# 纪律：工具链缺位 = 本地 SKIP / CI 即红（tools/ci/skip.sh）；
+# 纪律：工具链缺位 = 本地 SKIP / CI 即红（tools/ci/lib/skip.sh）；
 #       工具链在位但编译失败 = FAIL；tripwire（全局分配器 / std 逃逸）命中 = FAIL；
 #       宿主测试 0 通过 = FAIL（fail-open 封死，同 check.sh run_tests 口径）。
 # rr-mech 零外部依赖、rr-ipc 零外部依赖、rr-core 仅依赖 rr-mech + rr-ipc，本门全程无网络。
@@ -23,7 +23,7 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "ERROR: git rev-parse --show-toplevel 失败——当前目录不在 git 仓库内。" >&2
   exit 1
 }
-. "$root/tools/ci/skip.sh"
+. "$root/tools/ci/lib/skip.sh"
 cd "$root/base/runtime" || { echo "ERROR: 无法进入 base/runtime" >&2; exit 1; }
 
 export PATH="$HOME/.cargo/bin:$PATH"

@@ -87,7 +87,7 @@ fn header_rej_bad_magic() {
 
 /// 与 golden 向量逐字节一致，且 decode→encode 往返无损。
 /// 这是**同机**字节基准（IPC-T-001 侧）；IPC-T-003 要求的 x86↔aarch64 交叉编译等值
-/// 由契约外对拍脚本 `tools/ci/ipct003.sh` 承载（CI ipct003 job `--strict` 四路全绿，
+/// 由契约外对拍脚本 `tools/ci/platform/ipct003.sh` 承载（CI ipct003 job `--strict` 四路全绿，
 /// 2026-10-11 起 IPC-T-003 已移入 `contracts/envelope.schema.json` 的 coverage）。
 #[test]
 fn header_golden_vector() {

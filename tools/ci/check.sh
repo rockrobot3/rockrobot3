@@ -14,20 +14,20 @@
 # ④ 是独立工程编译步（不是测试步）：modules/、tools/、base/ota 各自成 workspace，①/①b 覆盖不到。
 #    例外：tools/esp32-uart-echo 是 ESP32 固件工程（xtensa-esp32-none-elf 目标），编译需 esp fork
 #    工具链（cargo +esp）+ Xtensa esp-gcc，宿主工具链 check 必红——它由专用门
-#    tools/ci/esp-uart-echo-check.sh 覆盖（工具链缺位时本地 SKIP / CI 即红，编译成功还断言 ELF 出树）。
+#    tools/ci/platform/esp-uart-echo-check.sh 覆盖（工具链缺位时本地 SKIP / CI 即红，编译成功还断言 ELF 出树）。
 #    同例：tools/espidf-std-hello（0.0.5 增补轮四 批W1，xtensa-esp32-espidf 目标 + build-std +
-#    esp-idf-sys，还须 ESP-IDF 克隆与乐鑫 esp-clang）——专用门 tools/ci/espidf-std-check.sh，
+#    esp-idf-sys，还须 ESP-IDF 克隆与乐鑫 esp-clang）——专用门 tools/ci/platform/espidf-std-check.sh，
 #    SKIP 纪律同上（本地 SKIP / CI 即红）。同例：tools/espidf-sentinel（0.0.7 批D1 层③ 哨兵，同款 espidf 工具链
-#    + 主仓 rr-core/rr-ipc path 依赖）——专用门 tools/ci/espidf-sentinel-check.sh（甲面
+#    + 主仓 rr-core/rr-ipc path 依赖）——专用门 tools/ci/platform/espidf-sentinel-check.sh（甲面
 #    xtensa 构建 = 双证之①），SKIP 纪律同上（本地 SKIP / CI 即红）；其宿主对手件是普通独立工程
 #    tools/rr3-sentinel-harness（不在哨兵目录内的原因见其 Cargo.toml 注记），照常进 ④/⑥。
 #    同例：tools/esp32-periph-base（0.0.5 增补轮五 批B 外设底座档，同款 espidf
-#    工具链，OLED/舵机/UART2 指令面）——专用门 tools/ci/esp32-periph-base-check.sh，
+#    工具链，OLED/舵机/UART2 指令面）——专用门 tools/ci/platform/esp32-periph-base-check.sh，
 #    SKIP 纪律同上（本地 SKIP / CI 即红）。
 #    同例（0.0.5 增补轮六 批N8 件三）：modules/rr3-act、modules/rr3-sense 是
 #    **双档工程**——espidf 档专属依赖挂 Cargo.toml target 表（宿主构建不解析），
 #    宿主 linux 档照常进本门 ④/⑥，**不**整目录排除（与上述 tools/ 专用工程不同）；
-#    espidf 档编译面由专用门 tools/ci/rr3-act-sense-espidf-check.sh 执法（显式
+#    espidf 档编译面由专用门 tools/ci/platform/rr3-act-sense-espidf-check.sh 执法（显式
 #    --target，SKIP 纪律同上（本地 SKIP / CI 即红）。
 # ⑧ 件级判据三门（0.0.5 批K H2）：⑧-a 两腿对拍计数门（slots.toml status 三态 join
 #    atom.toml provides，normal 格须 fn parity_leg1_+parity_leg2_ 各 ≥1，C10 stub 反例
@@ -310,7 +310,7 @@ rr3_step_9e
 #   5) 单元 use 面（modules/**，行注释先剥同判据 2 口径）`rr_bus::` 零命中——承载
 #      客户端走 rr_bus_api，语义常量直引 rr_core（真值单点，不经 re-export 中介）；
 #   6) 白名单条目数基线钉数（基-35 窄化①裁定配套，§25.8 #1 终态"白名单条目数只降
-#      不升"机器化）：判据 2) 白名单正则的交替项数对基线文件 tools/ci/gate-w-baseline.txt，
+#      不升"机器化）：判据 2) 白名单正则的交替项数对基线文件 tools/ci/baseline/gate-w-baseline.txt，
 #      count > 基线即红（扩白名单须同批上调基线——diff 即登记）；count < 基线 PASS 并
 #      打印"须同批下调基线"提醒；文件缺/坏/非整数即红 fail-closed（同 gate-a 纪律）。
 step "⑨-w 依赖面禁令（单元契约面走 rr-hal-api/rr-bus-api + use 面白名单冻结＋条目数基线钉数 + 板侧禁实现 crate，基-35）"
@@ -365,12 +365,12 @@ step "⑩ 门 d 面板覆盖率对账·基线钉数门（当前上限 0）（分
 rr3_step_10
 
 # ⑫ 质量度量门（B11，基线钉数）：重复率硬门槛 3%；圈复杂度、超长生产函数名与
-# 生产长睡字面量按 tools/ci/metrics-baseline.json 只降不升（长睡项补"长阻塞主
+# 生产长睡字面量按 tools/ci/baseline/metrics-baseline.json 只降不升（长睡项补"长阻塞主
 # 循环"的静态半边：模块/rrd 主循环面 ≥1s 的字面量 sleep 基线 0）。度量核为纯
 # Python 标准库脚本（无外网依赖）；python3 缺位按 SKIP 纪律明说不放行静默。
 printf '\n=== ⑫ 质量度量门（重复率 / 圈复杂度 / panic 落点 / 函数名长度 / 长睡） ===\n'
 if command -v python3 >/dev/null 2>&1; then
-  if python3 tools/ci/metrics.py; then
+  if python3 tools/ci/audit/metrics.py; then
     :
   else
     fail=1
@@ -388,7 +388,7 @@ printf '\n=== ⑬ 仓面卫生门（追踪文件本机路径 / 构建目录） =
 rr3_step_13
 
 # ⑭ 装载门体量基线门（裁-13／基-38；批N8 件六"执法位下轮再论"兑现）：三项块
-# 计数各不得超过 tools/ci/gate-size-baseline.txt 钉数（只降不升）。锚函数缺失
+# 计数各不得超过 tools/ci/baseline/gate-size-baseline.txt 钉数（只降不升）。锚函数缺失
 # = 基线失锚，红（B7 实证：旧名已改、无读者基线的注记烂掉无人知——失锚不许
 # 静默跳过）。计数命令与基线行尾注同源；钉数解析按 "^<名> = <纯整数>"，
 # 形状坏照 ⑩ 纪律 fail-closed。
@@ -398,7 +398,7 @@ rr3_step_14
 # ⑯ 源文件行数门（2026-11-13 立规，2026-11-22 硬线收紧）：每个 .rs/.py/.sh 源文件
 # 必须 <500 行（铁律）；存量按基线只降不升。
 # 门号 ⑯ 是身份不是序位：原号 ⑭ 与装载门双义（2026-11-20 订正），执行序以本文件调用序为准。
-# 存量基线 tools/ci/gate-lines-baseline.txt（hard_500，只降不升）：
+# 存量基线 tools/ci/baseline/gate-lines-baseline.txt（hard_500，只降不升）：
 # 新增超标文件即红；拆完一个就同批下调基线。判据面 = git ls-files（追踪面即
 # 执法面），测试文件同样计入——"测试代码不是代码"是自欺。
 # 2026-11-21 扩面：此前只扫 .rs，workflows_audit.py 689 行整段藏出（盲区实证）。
@@ -410,7 +410,7 @@ rr3_step_16
 # registry 方法；扫面打空即门禁失效（fail-closed）。
 printf '\n=== ⑮ 锁内 I/O 门（lock·log 同行 / 条件位临时 guard / 直调 reg 日志方法） ===\n'
 if command -v python3 >/dev/null 2>&1; then
-  if ! python3 tools/ci/lockio_audit.py; then
+  if ! python3 tools/ci/audit/lockio_audit.py; then
     fail=1
   fi
 else

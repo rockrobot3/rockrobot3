@@ -87,6 +87,6 @@ harness 退场后板侧心跳 5s 超时 → mark_down → `esp_restart` → 重�
 ## 门禁
 
 本工程被 `tools/ci/check.sh` ④/⑥ 显式排除（xtensa 工具链宿主必红），由
-`tools/ci/espidf-sentinel-check.sh` 单独覆盖（甲面 xtensa 构建 = 双证之①），SKIP
+`tools/ci/platform/espidf-sentinel-check.sh` 单独覆盖（甲面 xtensa 构建 = 双证之①），SKIP
 纪律同 espidf-std-check.sh。伴生对手件 harness 是普通宿主 crate
 （tools/rr3-sentinel-harness），由主门禁 ④/⑥ 与 CI lint 全覆盖，不入专用门。

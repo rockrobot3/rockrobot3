@@ -47,7 +47,7 @@ rr3_step_5() {
 
 # 自检（2026-11-24）：夹具仓四例——好档通过 / 空文档红 / 断链红 / 导航漏链红。
 # 文档门的判据（列表打空、链接归一、README 覆盖）腐化时先在这里红，而不是在
-# 真仓上静默放行。调用方见 tools/ci/docs_gate_selftest.sh。
+# 真仓上静默放行。调用方见 tools/ci/platform/docs_gate_selftest.sh。
 check_docs_selftest() {
   local root td ok=1 d out rc
   root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1

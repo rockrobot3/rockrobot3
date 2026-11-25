@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # 质量度量核（B11，规约门第 ⑫ 步）：重复率 / 圈复杂度 / 生产 panic 落点 / 函数名长度。
-# 入口 = tools/ci/metrics.py（CLI + 自检）；本文件只放测量口径与扫描实现（<500 行）。
+# 入口 = tools/ci/audit/metrics.py（CLI + 自检）；本文件只放测量口径与扫描实现（<500 行）。
 #
 # 判据与口径（真值单点在本文件，check.sh 只调它，不重复实现）：
 # - 重复率：**硬门槛 3%**。相邻 W=10 条"有效行"滑窗取哈希，出现 ≥2 次的窗口
@@ -9,7 +9,7 @@
 #   `tests.rs` 测试模块文件、cfg(test) 门 mod 块之后的尾部）不参与——它们是夹具/
 #   生成数据，不是可复用缺陷。测试面判定：cfg 谓词**测试专用**（`test` 裸项/
 #   `all(…test…)`），`any(…)`/`not(…)` 门是生产件不剔除（backend.rs 613 行教训）。
-# - 圈复杂度：均值与单函数最大值按 `tools/ci/metrics-baseline.json` **钉基线、
+# - 圈复杂度：均值与单函数最大值按 `tools/ci/baseline/metrics-baseline.json` **钉基线、
 #   只降不升**（与仓内红账基线门同款纪律）。目标均值 2.5，当前 2.49 已达标；
 #   基线只能随重构下调，上调须在评审里说明理由。
 # - 生产函数体量：单函数 >80 行计红（测试面不计——表驱动用例允许更长）；
@@ -444,6 +444,6 @@ def _long_sleeps(rel, src):
 
 
 def load_baseline(root):
-    path = os.path.join(root, "tools", "ci", "metrics-baseline.json")
+    path = os.path.join(root, "tools", "ci", "baseline", "metrics-baseline.json")
     with open(path, encoding="utf-8") as f:
         return json.load(f)
