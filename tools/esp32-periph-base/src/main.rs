@@ -6,17 +6,15 @@
 //! LEDC（OLED 出字 / 舵机 / 五点扫描 + 自主节拍）。两面经 `Arc<Mutex<Bus>>` 通信，
 //! 锁只护状态读写，绝不跨 I2C 持有。
 //!
-//! 引脚（全案 §5；与 0.0.7 实测接线一致）：UART2 = GPIO18 TX / GPIO19 RX（1.5M）；
-//! I2C0 = GPIO21 SDA / GPIO22 SCL（100kHz，SSD1306 0x3C）；LEDC = GPIO32 pan /
-//! GPIO33 tilt（避开 strapping 与 UART/I2C/I2S 面）；UART0 控制台经 `console-log.py`
-//! 采集（raw 8N1 + 清 DTR/RTS）。
+//! 引脚：UART2 = GPIO18 TX / GPIO19 RX（1.5M）；I2C0 = GPIO21 SDA / GPIO22 SCL
+//! （100kHz，SSD1306 0x3C）；LEDC = GPIO32 pan / GPIO33 tilt（避开 strapping 与
+//! UART/I2C/I2S 面）；UART0 控制台经 `console-log.py` 采集。
 //!
 //! 供电铁律：舵机由 UBEC 独立 5V 轨供电（堵转 ~700mA/只，禁接板载 5V），单点共地；
 //! 无 UBEC 时复合动作按"pan 到位 → 整定 → tilt"串行降级，削峰值电流。
 //!
 //! 平台事实：xtensa LX6 无 64 位原子，状态面用 `Arc<Mutex<..>>`（角度 u32 直传）；
-//! esp-idf-hal 0.44.1 的 I2c/Ledc/Uart 驱动均已 `Send`，wrapper 无需 unsafe 补。
-//! 线程 16KB 是实测运行下限，勿调低。批次沿革见 docs/process/dev 与 status。
+//! esp-idf-hal 0.44.1 的 I2c/Ledc/Uart 驱动均已 `Send`；线程 16KB 是实测运行下限。
 
 // 自治壳（W3-2b）：健康快照与监督核接线；/api/board/health 常驻。
 mod autonomy;

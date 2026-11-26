@@ -1,23 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-//! esp32-uart-echo —— 0.0.7 批C 层② UART 板级 round-trip 夹具（ESP32 裸金属）。
+//! esp32-uart-echo —— UART 板级 round-trip 夹具（ESP32 裸金属）。
 //!
-//! 职责（方案 §9.2 ④⑤）：
+//! 职责：
 //! 1. **xtensa 运行期 dump（第二重证据）**：启动时经 UART0 控制台打印与宿主
 //!    `ipct003_dump` 逐字节同构的七行（header + 五种 payload 类型整帧 + version），
-//!    宿主抓取后与 `contracts/golden/event-header-128.hex` 对拍——批B 第④路是
-//!    编译期 const 求值，本 dump 是真机运行期编码线上字节的物理复核。
+//!    宿主抓取后与 `contracts/golden/event-header-128.hex` 对拍——真机运行期编码的
+//!    物理复核。
 //! 2. **板级 echo**：UART2（GPIO16/17，115200）收帧回发——合法帧（128B 头 +
 //!    payload）整帧原样回发；坏 magic / reserved 非零 / 超长 payload / 半帧静默
-//!    一律拒收并打日志，注入后不死锁，后续帧经滑动重同步照常收发。
+//!    拒收并打日志，注入后不死锁，后续帧经滑动重同步照常收发。
 //!
-//! 契约字节面单源（方案 §5）：编解码直接复用 rr-ipc——`Rr3Header::from_bytes`
-//! 校验、`Rr3Header::to_bytes`（const 化，批B 第④路已证明任意目标编译期成立）
-//! 出 dump 线上字节、`rr3_body_encode` 出类型前缀体。固件内没有任何"ESP32 版
-//! 协议"代码；本文件只写 IO 形状（滑窗重同步、静默超时、回发）。
+//! 契约字节面单源：编解码直接复用 rr-ipc——`Rr3Header::from_bytes` 校验、
+//! `Rr3Header::to_bytes` 出 dump 线上字节、`rr3_body_encode` 出类型前缀体。固件内
+//! 没有任何"ESP32 版协议"代码；本文件只写 IO 形状（滑窗重同步、静默超时、回发）。
 //!
-//! 落点说明：跑在裸金属（xtensa-esp32-none-elf），不走 espidf std——层③ 哨兵
-//! 的 std 运行时（Q2 裁定 a）归批D1；本夹具只承担层② 字节面验证，std 面的
-//! transport blanket impl 复用由批D1 的 espidf 语境补验。
+//! 落点：裸金属（xtensa-esp32-none-elf），不走 espidf std；std 面 transport blanket
+//! impl 复用由 espidf 语境补验。
 
 #![no_std]
 #![no_main]
