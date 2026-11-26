@@ -279,6 +279,7 @@ jobs:
       # 一次就整腿红。只缓存注册表与 git 检出面；target 树（ESP-IDF 产物）不在此处，
       # 体积大且与工具链缓存面分开治理。锁文件变即换键，旧键经 restore-keys 兜底。
       - name: 缓存 crates 注册表（ESP 腿）
+        id: cargo-cache
         uses: actions/cache@v5
         with:
           path: |
@@ -340,13 +341,11 @@ jobs:
           title: ${{ matrix.chip }}-act-sense
           prelude: ~/export-esp.sh
           command: bash tools/ci/platform/rr3-act-sense-espidf-check.sh ${{ matrix.chip }}
-      # 缓存评估数据（2026-11-24）：把 target 树与 embuild 体积打到可匿名读取的
-      # 注解上（日志 403 不可读）。只读数，不改变任何判据；用于决定 ESP 构建缓存
-      # 缓存评估数据（2026-11-24）：把 target 树与 crate 本地 `.embuild` 体积打到
-      # 可匿名读取的注解上（日志 403 不可读）。只读数，不改变任何判据。
-      # `embuild_root=/tmp/...` 一栏已撤：实测 global 工具模式不产生该目录，
-      # 留着只会每次打 na（批22 账实核对）。
-      - name: 构建树体积快照（缓存评估用）
+      # 缓存评估数据：把 target 树、crate 本地 `.embuild` 体积与注册表缓存命中打到可匿名
+      # 读取的注解上（日志 403 不可读）。只读数，不改变任何判据——两腿时长差（classic 五门
+      # vs S3 两门）要能一眼归因到"门数"还是"缓存没命中"。
+      # `embuild_root=/tmp/...` 一栏已撤：实测 global 工具模式不产生该目录，留着只会打 na。
+      - name: 构建树体积与缓存命中快照（缓存评估用）
         run: |
           t=$(du -sh /tmp/rr3-build 2>/dev/null | cut -f1)
           eb=""
@@ -355,8 +354,14 @@ jobs:
             s=$(du -sh "$d/.embuild" 2>/dev/null | cut -f1)
             if [ -n "$s" ]; then eb="${eb}${d##*/}=${s} "; fi
           done
-          echo "target=${t:-na} crate=${eb:-none}"
-          echo "::notice title=esp-build-size::${{ matrix.chip }} target=${t:-na} crate=${eb:-none}"
+          case "${{ steps.cargo-cache.outputs.cache-hit }}" in
+            true) hit=hit ;;
+            "") hit=miss ;;
+            *) hit=partial ;;
+          esac
+          line="target=${t:-na} crate=${eb:-none} cargo_cache=${hit}"
+          echo "$line"
+          echo "::notice title=esp-build-size::${{ matrix.chip }} $line"
       # 全链固件制品：真板全链复验必须用 **release** 档（debug 档内部 SRAM 余量
       # 更低，TLS 会 mbedtls_ssl_setup -0x7F00 分配失败）；debug 制品仅作编译
       # 门产物保留。两芯片分别上传，W7 classic 重烧不再依赖本地构建。
