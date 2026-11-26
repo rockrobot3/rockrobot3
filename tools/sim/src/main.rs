@@ -9,10 +9,10 @@
 //! 4. `rr3-ctl` 四命令巡检：status（断言 `denied_publish = 0`）、health、logs、ota
 //!    （恒拒随 M6，预期非 0 退出）；
 //! 5. 报告 + 收尾（`--keep` 保留现场）。
+//!
 //! 另有三个互斥模式：`--brain`（全语音对话闭环）、`--profile`（装配单驱动 boot + 全模块
-//! 真进程巡检，`assemble.rs`）与 `--chain`（六真进程全链 mock 闭环，`chain.rs`）。
-//! sim 设备源（`devices.rs`）保留：报告里带一段静音流的时长换算，证明"sim 与 linux 后端
-//! 交出同一种流"这条不变量仍有落点。
+//! 真进程巡检，`assemble.rs`）与 `--chain`（六真进程全链 mock 闭环，`chain.rs`）；sim 设备
+//! 源（`devices.rs`）保留：报告带一段静音流换算，证明"sim 与 linux 交出同一种流"。
 
 #[cfg(not(unix))]
 fn main() {
