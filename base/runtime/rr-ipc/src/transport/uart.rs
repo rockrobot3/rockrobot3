@@ -7,16 +7,15 @@
 //! [`Rr3TransportEndpoint`] 与 listener 两 trait 不适用——硬套点对点等于撒谎。
 //!
 //! 系统调用面：手写 `extern "C"` 壳（open/close/read/write/tcgetattr/tcsetattr/
-//! cfmakeraw/cfsetispeed/cfsetospeed/tcflush/ioctl/fcntl），不引 libc crate；
-//! termios 结构与常量按 Linux/macOS 分 `cfg`（定义面 `uart/sys.rs`），并用
-//! `const _` 断言结构尺寸，编译期先拦 ABI 漂移。
+//! cfmakeraw/cfsetispeed/cfsetospeed/tcflush/ioctl/fcntl），不引 libc crate；termios
+//! 结构与常量按 Linux/macOS 分 `cfg`（`uart/sys.rs`），`const _` 断言结构尺寸。
 //!
 //! 排他开口：按 (进程, 路径) 的 flock 登记账本——每路径首个 open 开长寿命 guard fd
 //! 并 `flock(LOCK_EX|LOCK_NB)`，同进程后续 open 只记账重入（桥 rx/tx 双开合法）；
 //! 跨进程第二 opener 当场拒绝（ResourceBusy 点名）。不用 TIOCEXCL：Linux 连自家
 //! 双开一起拦，macOS 的 TS_XCLUDE 对 O_NOCTTY 开口无效。外部进程（espflash/
-//! monitor）不守 flock，须按 runbook 先清场。fd 一律 `O_CLOEXEC`：锁的释放点不得
-//! 被子进程生命周期拖长；`Command::spawn` 复制 fd 表瞬间的短暂持锁属合法瞬态。
+//! monitor）不守 flock，须按 runbook 先清场。fd 一律 `O_CLOEXEC`，锁的释放点不得
+//! 被子进程生命周期拖长；`Command::spawn` 复制 fd 表瞬间短暂持锁属合法瞬态。
 //!
 //! 波特率只收 [`rr3_uart_baud_speed`] 认识的档位（115200 缺省 / 9600 / 921600 /
 //! 1.5M / 2M）；高速档只显式选择。

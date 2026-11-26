@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! rr3-sim —— x86 全链路联调入口（F4 完整化）。
+//! rr3-sim —— x86 全链路联调入口。
 //!
 //! 规划（architecture.md §3）：mock HAL + 假模块，让整条链路在无板设备上跑起来。
 //! 本入口**脚本化**走一遍真实链路（全部真进程、真套接字、真契约）：
@@ -7,16 +7,14 @@
 //! 1. 起 rrd，`--manifest` 带 **rr3-interact**（boot spawn，resident 常驻喂狗）；
 //! 2. 等 rr3-interact 到 `running`（轮询 `rr3-ctl status`，一次性 ctl 连接）；
 //! 3. **外部**起第二个真模块 **rr3-sense**（sim_peer + `publish_once`），
-//!    发布 `rr3-sense/audio/vad_start` 后退场——事件真的流过一次总线
-//!    （C14①：asr/text 走 retired 后演练主题换 vad_start，发布方身份随之换位）；
-//! 4. `rr3-ctl` 四命令巡检：status（断言 `denied_publish = 0`——发布被拒会在这里现形）、
-//!    health、logs、ota（恒拒随 M6，预期非 0 退出）；
+//!    发布 `rr3-sense/audio/vad_start` 后退场——事件真的流过一次总线；
+//! 4. `rr3-ctl` 四命令巡检：status（断言 `denied_publish = 0`）、health、logs、
+//!    ota（恒拒随 M6，预期非 0 退出）；
 //! 5. 报告 + 收尾（`--keep` 保留现场）。
 //!
-//! 另有三个互斥模式：`--brain`（M4 全语音对话闭环，`brain.rs`）、`--profile`
-//! （D9 装配演练：装配单驱动 boot + 全模块真进程巡检，`assemble.rs`）与
-//! `--chain`（0.0.6 批F4 sim 档：采集→意图→判向→转向→表情六真进程全链 mock
-//! 闭环 + 总线观察者取证，`chain.rs`）。
+//! 另有三个互斥模式：`--brain`（全语音对话闭环，`brain.rs`）、`--profile`
+//! （装配单驱动 boot + 全模块真进程巡检，`assemble.rs`）与 `--chain`（六真进程
+//! 全链 mock 闭环 + 总线观察者取证，`chain.rs`）。
 //!
 //! sim 设备源（`devices.rs`，rr-hal 的 sim 后端消费方）保留：报告里带一段
 //! 静音流的时长换算，证明"sim 与 linux 后端交出同一种流"这条不变量仍有落点。

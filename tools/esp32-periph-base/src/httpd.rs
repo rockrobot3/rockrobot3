@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! 板侧配置腿服务：WiFi 上的极简 HTTP 面（不经桥），载体是 ESP-IDF `esp_http_server`
 //! （HTTP/1.1 子集，与 host 面板同形）。**TLS 不做**（局域网可信面、板侧无 TLS 栈
-//! 现役、零新依赖；公网暴露立项时与凭据面同批评审）。
+//! 现役、零新依赖）。
 //!
 //! 写口（配网半边）：`POST /api/board/wifi` 事务性配网——读旧值 → 写 NVS → STA
 //! 重配置重连 → 有界等连 → 败即回退旧值 → 如实应答 `{ok, connected, reverted,
@@ -15,10 +15,8 @@
 //!
 //! 分层：纯逻辑层（白名单路由表 [`RR3_BOARD_ROUTES`] + 查表 + JSON 组包/解析纯函数，
 //! 单测可钉）；unsafe 壳层 [`rr3_httpd_spawn`]（WiFi STA 起栈 + `httpd_start` +
-//! 注册 handler）。表即分派真值，无第二份。
-//!
-//! 凭据读链：NVS 优先 → `option_env!` 编译期回落（板上 newlib 的 `environ` 为空，
-//! 运行期 env 永不成立）；两者都缺 = 配置腿缺席，boot 点名后 fail-honest 返回。
+//! 注册 handler）。表即分派真值，无第二份。凭据读链：NVS 优先 → `option_env!`
+//! 编译期回落（板上 newlib 的 `environ` 为空）；都缺 = 配置腿缺席，boot fail-honest。
 //! 栈 16KB（[`HTTPD_STACK_SIZE`]）；写口瞬时缓冲 ≤512B，不新增常驻堆。
 
 use std::sync::{Arc, Mutex, OnceLock};
