@@ -1,20 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 自治形态的网络时间（W3-2a）：开机 SNTP 对时，失败显式点名、不静默降级。
+//! 自治形态的网络时间：开机 SNTP 对时，失败显式点名、不静默降级。
 //!
-//! 只在 `--features autonomy` 时编译；默认外设底座固件零行为变化。
-//! TLS 证书校验依赖正确系统时间，因此云请求前必须先确认 `synced=true`；
-//! 本模块只负责对时与状态上报，是否发云请求由 dialog 任务决定。
+//! 只在 `--features autonomy` 时编译；默认外设底座固件零行为变化。TLS 证书校验依赖
+//! 正确系统时间，故云请求前必须先确认 `synced=true`；本模块只负责对时与状态上报，
+//! 是否发云请求由 dialog 任务决定。
 //!
-//! **重试窗（S3 余量①，0015 余量 4）**：POLL 模式下 lwIP 自己按轮询间隔重试，
-//! 旧实现只观察 30 s 就置 FAILED——WiFi 晚于 30 s 就绪的板子必须重启才能对时。
-//! 现改为有界后台重试窗：1 s 轮询、30 s 首报（只提示"继续重试"，不置失败）、
-//! 300 s 终判。状态机只有 UNKNOWN（重试中）/ SYNCED / FAILED 三值，`/health`
-//! 可读；窗口内同步即转 SYNCED，窗口耗尽才置 FAILED 并点名。
+//! 重试窗：POLL 模式下 lwIP 自己按轮询间隔重试，只观察 30 s 就置 FAILED 会让 WiFi 晚
+//! 就绪的板子必须重启才能对时。现有界后台重试窗：1 s 轮询、30 s 首报（只提示"继续
+//! 重试"，不置失败）、300 s 终判。状态机只有 UNKNOWN（重试中）/ SYNCED / FAILED 三值，
+//! `/health` 可读；窗口内同步即转 SYNCED，窗口耗尽才置 FAILED 并点名。
 //!
 //! IDF 5.2.2 `esp_sntp_*` 为 lwIP SNTP 的线程安全别名（`esp_sntp.h`）：
-//! `esp_sntp_setoperatingmode(0)` = POLL、`esp_sntp_setservername`、
-//! `esp_sntp_init`、`sntp_get_sync_status() == 1` = 已同步（`esp_sntp_*` 是宏别名，
-//! 绑定面只生成底层 `sntp_get_sync_status`）。
+//! `esp_sntp_setoperatingmode(0)` = POLL、`esp_sntp_setservername`、`esp_sntp_init`、
+//! `sntp_get_sync_status() == 1` = 已同步。
 
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

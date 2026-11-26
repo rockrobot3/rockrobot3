@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 板侧云 TTS/对话 worker（W4-2b 起，W7-b2 改流式）：有界作业队列 → NVS 配置 →
-//! 4 KB 流式收 PCM → 16 KB 播放环；ASR/LLM 仍走整段小 JSON。
+//! 板侧云 TTS/对话 worker：有界作业队列 → NVS 配置 → 4 KB 流式收 PCM → 16 KB 播放环；
+//! ASR/LLM 仍走整段小 JSON。
 //!
-//! 契约（docs/process/dev/0.0.8/单板全链/0.0.8版本单板全链云API契约.md）：
-//! - 只请求 `response_format=pcm`、16 kHz；不做 MP3/AAC 解码；
-//! - 单次 8 s 超时、最多 2 次尝试、500 ms 间隔；429/5xx/传输失败可重试；
-//!   流式 TTS 一旦开始播不再重试（重放音频比失败更糟）；
-//! - key 只存 NVS、永不出日志/回显（零回显墙同 `cred`）；
-//! - 传输层用 IDF `esp_http_client` + mbedTLS 证书束，不引 ureq/rustls。
+//! 契约（见 0.0.8 单板全链云 API 契约）：只请求 `response_format=pcm`、16 kHz，不做
+//! MP3/AAC 解码；单次 8 s 超时、最多 2 次尝试、500 ms 间隔，429/5xx/传输失败可重试，
+//! 流式 TTS 一旦开始播不再重试（重放音频比失败更糟）；key 只存 NVS、永不出日志/回显；
+//! 传输层用 IDF `esp_http_client` + mbedTLS 证书束，不引 ureq/rustls。
 //!
-//! 线程模型：一条常驻 worker（24 KB 栈——TLS 握手栈需求高于普通 IO 线程），
-//! 有界作业队列（容量 2）串行处理 TTS 朗读 / 对话整轮 / 已收全 PCM 播放。
-//! 播放面负责半双工门与 `audio-out` 心跳；本模块只管取数与错误点名。
+//! 线程模型：一条常驻 worker（24 KB 栈——TLS 握手栈需求高于普通 IO 线程），有界作业
+//! 队列（容量 2）串行处理 TTS 朗读 / 对话整轮 / 已收全 PCM 播放。播放面负责半双工门
+//! 与 `audio-out` 心跳；本模块只管取数与错误点名。
 //!
 //! 凭据/配置读写拆在 [`cfg`]（NVS 与形制门），HTTP 在 [`http`]，TTS 流式接收在
 //! [`tts`]；本文件只留队列与编排。

@@ -8,11 +8,9 @@
 //!
 //! 引脚：UART2 = GPIO18 TX / GPIO19 RX（1.5M）；I2C0 = GPIO21 SDA / GPIO22 SCL
 //! （100kHz，SSD1306 0x3C）；LEDC = GPIO32 pan / GPIO33 tilt（避开 strapping 与
-//! UART/I2C/I2S 面）；UART0 控制台经 `console-log.py` 采集。
-//!
+//! UART/I2C/I2S 面）。
 //! 供电铁律：舵机由 UBEC 独立 5V 轨供电（堵转 ~700mA/只，禁接板载 5V），单点共地；
 //! 无 UBEC 时复合动作按"pan 到位 → 整定 → tilt"串行降级，削峰值电流。
-//!
 //! 平台事实：xtensa LX6 无 64 位原子，状态面用 `Arc<Mutex<..>>`（角度 u32 直传）；
 //! esp-idf-hal 0.44.1 的 I2c/Ledc/Uart 驱动均已 `Send`；线程 16KB 是实测运行下限。
 

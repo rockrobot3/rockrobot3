@@ -1,21 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 板侧凭据存储对象（N-10 ② 主体半边，批N14 件一；connect 册 N-10 ②／全案 §3.6 家族 F 凭据行）。
+//! 板侧凭据存储对象（connect 册 N-10 ②／全案 §3.6 家族 F 凭据行）。
 //!
-//! 工单原文三条要求，落法逐条对表：
-//! 1. **读取窄缝**——凭据值唯一出入口是 [`rr3_cred_read`]（读时现取：NVS → 调用方，
-//!    本模块不缓存不驻留），消费面只有两处：boot 读链（[`crate::httpd`] spawn 段）与
-//!    配网写口（批N14 件二）。`Rr3Cred` 的 `pass` 字段私有，取值 accessor 不给
-//!    `Debug`/`Display` 任何落点（值类型**不派生 `Debug`**——格式化路径编译期不可达，
-//!    零回显的第一道机器墙）。
-//! 2. **不落日志**——错误点名只出键名与长度，永不出值（同 host 面板"值零回显"纪律）。
-//! 3. **零回显是契约要求**——观测面（`/api/board/state`/`bindings`）结构上不含凭据字段
-//!    （httpd.rs JSON 形状单测钉死）；本模块任何返回值/日志路径不含凭据值。
+//! 三条硬要求：读取窄缝——凭据值唯一出入口是 [`rr3_cred_read`]（读时现取：NVS →
+//! 调用方，本模块不缓存不驻留），消费面只有 boot 读链（[`crate::httpd`] spawn 段）与
+//! 配网写口；`Rr3Cred` 的 `pass` 字段私有，值类型不派生 `Debug`（格式化路径编译期
+//! 不可达，零回显的第一道机器墙）。不落日志——错误点名只出键名与长度，永不出值。
+//! 零回显是契约要求——观测面（`/api/board/state`/`bindings`）结构上不含凭据字段
+//! （httpd.rs JSON 形状单测钉死），本模块任何返回值/日志路径不含凭据值。
 //!
-//! namespace [`RR3_CRED_NAMESPACE`] 单真值（"rr3"——全案 §3.6 凭据行 `cred_store =
-//! "nvs:rr3"` 的板侧实现值；该键进 `[hardware]`/绑定域**缓批**：契约级三处同批＋桥上
-//! 注入晚于 WiFi 起栈，boot 读链不可能消费桥上键——批N14 计划册 §1 不排项表）。
-//! boot 读链（[`crate::httpd`]）：**NVS 优先 → 编译期 `option_env!` 回落 → 都缺＝配置腿
-//! 缺席 fail-honest**——NVS 空时行为与批N13 逐字一致（零回归，真板会话链不感知）。
+//! namespace [`RR3_CRED_NAMESPACE`] 单真值（"rr3"，即 `cred_store = "nvs:rr3"` 的板侧
+//! 实现值）；该键进 `[hardware]`/绑定域缓批：桥上注入晚于 WiFi 起栈，boot 读链不可能
+//! 消费桥上键。boot 读链：NVS 优先 → 编译期 `option_env!` 回落 → 都缺＝配置腿缺席
+//! fail-honest。
 
 use std::ffi::CString;
 

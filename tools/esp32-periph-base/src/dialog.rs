@@ -1,21 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 对话整轮执行（W6-1/W6-2）：语音段 → 云 ASR → 意图 → 云 LLM → 云 TTS →
-//! 本板播放 → 表情回落。**线程归 cloud worker**（与 TTS 朗读共用一条 24 KB TLS
-//! 栈；W6-3 真板内存门实锤：独立 dialog 线程把 free heap 压到 18 KB，httpd 起栈
-//! 失败）。
+//! 对话整轮执行：语音段 → 云 ASR → 意图 → 云 LLM → 云 TTS → 本板播放 → 表情回落。
+//! 线程归 cloud worker（与 TTS 朗读共用一条 24 KB TLS 栈——真板内存门实测独立 dialog
+//! 线程把 free heap 压到 18 KB，httpd 起栈失败）。
 //!
-//! 分工（计划册 §3.2）：VAD/切段在 mic（audio-in），本模块只吃**已完成的一段**
-//! 16 kHz 单声道 PCM；三跳请求体/应答解析全部走 [`rr_cloud_proto`] 共享纯函数，
-//! 传输走 [`crate::cloud`] 的 `esp_http_client` 面（不引第二份 HTTP 栈）。
+//! 分工：VAD/切段在 mic（audio-in），本模块只吃已完成的一段 16 kHz 单声道 PCM；三跳
+//! 请求体/应答解析全部走 [`rr_cloud_proto`] 共享纯函数，传输走 [`crate::cloud`] 的
+//! `esp_http_client` 面（不引第二份 HTTP 栈）。
 //!
-//! 意图（W6-1）：[`rr_intent_mech`] 产出结构化动作；S3 单板只有 servo 执行面
-//! （relay 动作如实点名跳过），舵机作业走运行面 `Job::Move`，表情四态
-//! （listen/think/talk/idle）由 `rr3_expr_set` 切换。
-//!
-//! 心跳：轮内每步续 `dialog`（超时窗 10 s）；空转心跳由 cloud worker 负责。
-//! 播放等待按 `tts_played/tts_fail` 计数收敛，最长 = 估算时长 + 3 s 余量。
-//!
-//! 凭据零回显：配置只经 [`crate::cloud::rr3_dialog_cfg`] 读 NVS，日志不出 key。
+//! 意图：[`rr_intent_mech`] 产出结构化动作；S3 单板只有 servo 执行面（relay 动作如实
+//! 点名跳过），舵机作业走运行面 `Job::Move`，表情四态（listen/think/talk/idle）由
+//! `rr3_expr_set` 切换。
+//! 心跳：轮内每步续 `dialog`（超时窗 10 s），空转心跳由 cloud worker 负责；播放等待按
+//! `tts_played/tts_fail` 计数收敛，最长 = 估算时长 + 3 s 余量。凭据零回显：配置只经
+//! [`crate::cloud::rr3_dialog_cfg`] 读 NVS，日志不出 key。
 
 use std::sync::{Arc, LazyLock, Mutex};
 use std::thread;

@@ -1,20 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 //! 语音段 flash spool 的 ESP 分区后端与写线程（ADR-0031）。
 //!
-//! 机制（记录头 magic/len/CRC、顺序写、分块读、断电语义）在
-//! [`rr_audio_mech::Rr3Spool`]；本件做两件策略事：
-//! 1. **分区绑定**——按 label 找分区、校验几何、把 `esp_partition_*` 的
-//!    `esp_err_t` 如实上报；分区缺位或几何不符时 boot 点名，不伪造容量。
-//! 2. **写线程**——擦/写/读全部在独立线程串行执行，I2S 采集线程只做非阻塞投递；
-//!    擦除是毫秒级操作，绝不允许在音频热路径上发生。
+//! 机制（记录头 magic/len/CRC、顺序写、分块读、断电语义）在 [`rr_audio_mech::Rr3Spool`]；
+//! 本件做两件策略事：分区绑定——按 label 找分区、校验几何、把 `esp_partition_*` 的
+//! `esp_err_t` 如实上报，分区缺位或几何不符时 boot 点名、不伪造容量；写线程——擦/写/读
+//! 全在独立线程串行执行，I2S 采集线程只做非阻塞投递，擦除是毫秒级操作，绝不允许在音频
+//! 热路径上发生。
 //!
-//! 状态机（`SPOOL_STATE`，单写多读）：`Idle → Rec → Done → Idle`。`Rec` 期间
-//! 只有写线程能落盘；`Done` 表示记录已提交、等待 dialog 分块读走并
-//! `rr3_spool_clear` 释放。`Done` 未释放前无法开新段——状态即背压。
-//!
-//! 命令通道容量 16 块（320 ms）；满即拒（调用方弃段并计数），写线程空闲 2 s
-//! 仍处 `Rec` 时自行弃段。跨重启只清理残留记录（语音已过期，不做补传）；
-//! 分区真值见 crate 根 `partitions.csv`（label=spool，1MB，data/undefined）。
+//! 状态机（`SPOOL_STATE`，单写多读）：`Idle → Rec → Done → Idle`。`Rec` 期间只有写线程
+//! 能落盘；`Done` 表示记录已提交、等待 dialog 分块读走并 `rr3_spool_clear` 释放。`Done`
+//! 未释放前无法开新段——状态即背压。
+//! 命令通道容量 16 块（320 ms）；满即拒（调用方弃段并计数），写线程空闲 2 s 仍处 `Rec`
+//! 时自行弃段。跨重启只清理残留记录（语音已过期，不做补传）；分区真值见 crate 根
+//! `partitions.csv`（label=spool，1MB，data/undefined）。
 
 use std::sync::atomic::{AtomicU16, AtomicU8, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};

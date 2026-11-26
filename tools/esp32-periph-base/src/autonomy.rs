@@ -2,19 +2,17 @@
 //! 自治壳：把 `rr-autonomy` 监督核接到板侧，提供 `/api/board/health` 真状态与
 //! "接线任务心跳 → 判死 → 整机复位"闭环。
 //!
-//! 接线范围：**net / audio-in / motion / ui** 为真心跳；`tts` 档另接 `audio-out`；
-//! `dialog`（云对话主循环）尚未落地，显式 `rr3_sup_degrade` 不参与判死——不伪造
-//! 心跳，也不把"未实现"报成故障。
+//! 接线范围：net / audio-in / motion / ui 为真心跳；`tts` 档另接 `audio-out`；
+//! `dialog` 尚未落地，显式 `rr3_sup_degrade` 不参与判死——不伪造心跳，也不把
+//! "未实现"报成故障。
 //!
-//! 心跳通道：按任务**位图**（[`BEATS`]）合并——生产者只做一次原子 OR，不排队、
-//! 不丢拍、不取锁；监督线程每 200 ms 栅格 `swap` 清零后逐位续命。音频与运行
-//! 线程的心跳成本与耗时无关，不会把音频路径拖进锁竞争。
-//!
-//! 重启策略（判死归 `rr-autonomy`，动作归本壳）：**有过心跳**的已接线任务持续
-//! dead 才复位（`ever` 闸门）——从未起过的任务如实留在 dead，不制造重启环；
-//! 连续 [`DEAD_TICKS`] 拍（≈400 ms）仍 dead 才动作。Rust 无法安全终止卡在 IDF
-//! 阻塞调用里的线程，故重启粒度是整机 `esp_restart`。`/api/board/health` 只读
-//! 本模块的静态快照；锁只护快照读写，不跨 HTTP 组包持有。
+//! 心跳通道：按任务位图（[`BEATS`]）合并——生产者只做一次原子 OR，不排队、不丢拍、
+//! 不取锁；监督线程每 200 ms 栅格 `swap` 清零后逐位续命。音频与运行线程的心跳成本
+//! 与耗时无关，不会把音频路径拖进锁竞争。
+//! 重启策略（判死归 `rr-autonomy`，动作归本壳）：有过心跳的已接线任务持续 dead 才
+//! 复位（`ever` 闸门）——从未起过的任务如实留在 dead，不制造重启环；连续
+//! [`DEAD_TICKS`] 拍（≈400 ms）仍 dead 才动作。Rust 无法安全终止卡在 IDF 阻塞调用里
+//! 的线程，故重启粒度是整机 `esp_restart`；`/api/board/health` 只读本模块静态快照。
 
 use std::sync::atomic::{AtomicBool, AtomicI8, AtomicU8, Ordering};
 use std::sync::Mutex;

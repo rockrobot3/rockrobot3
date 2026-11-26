@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-//! capture 原子件 · 机制核（批N23 件三，MC-7 缺② 收编原子模块形态）。
+//! capture 原子件 · 机制核（MC-7 缺② 收编原子模块形态）。
 //!
-//! **格位对齐申报**：本件服务 `audio.capture` 格位（esp32-mini 装配单格主 =
-//! rr3-capture 宿主件，板侧经桥执行——宿主申报面在 modules/rr3-capture/atoms/
-//! capture，板侧执行面**不冒领格主**、不立 atom.toml：`provides` 恰一格与板无关
-//! 断言是格主面法则，见批N23 计划册 §2「三不三立」）。
+//! 格位对齐申报：本件服务 `audio.capture` 格位（esp32-mini 装配单格主 = rr3-capture
+//! 宿主件，板侧经桥执行——宿主申报面在 modules/rr3-capture/atoms/capture，板侧执行面
+//! 不冒领格主、不立 atom.toml：`provides` 恰一格与板无关断言是格主面法则）。
 //!
-//! **机制与策略分离**（文件级，收编落点）：本文件收拢音频采集上行面的**纯算术**
-//! ——32bit 帧解析（大端线序 → 24bit 符号幅度）、增益饱和钳位、分片变换（跨片
-//! DC 阻断 → 24bit 截 16bit → s16le 双通道交错）与有界背压入队（满丢最旧）；
-//! 零 I2S、零时钟、零锁。策略量（增益标定值 [`crate::board::MIC_GAIN`]、采样率
-//! [`crate::board::MIC_SR_HZ`]、分片帧数/队列深度 `AUDIO_*`）由调用方**按参
-//! 传入**；I2S 采集线程与 Event 帧组帧（b64+JSON+帧头，依赖时钟与 topics 生成
-//! 物）留 [`crate::mic`]——策略→机制单向依赖。
+//! 机制与策略分离（文件级）：本文件只收拢音频采集上行面的纯算术——32bit 帧解析
+//! （大端线序 → 24bit 符号幅度）、增益饱和钳位、分片变换（跨片 DC 阻断 → 24bit 截
+//! 16bit → s16le 双通道交错）与有界背压入队（满丢最旧）；零 I2S、零时钟、零锁。
+//! 策略量（增益 [`crate::board::MIC_GAIN`]、采样率 [`crate::board::MIC_SR_HZ`]、分片
+//! 帧数/队列深度 `AUDIO_*`）由调用方按参传入；I2S 采集线程与 Event 组帧留
+//! [`crate::mic`]——策略→机制单向依赖。
 
 use std::collections::VecDeque;
 

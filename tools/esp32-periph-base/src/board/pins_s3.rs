@@ -1,18 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 //! ESP32-S3 N16R8（xtensa-esp32s3-espidf）引脚装配对账锚。
 //!
-//! 与 classic 的关键差异：**GPIO26–37 被 16MB Flash / 8MB Octal PSRAM 占用**，
-//! classic 的 26/27/32/33/34 全部不可用。避让区：GPIO0/3/45/46（strapping）、
-//! 19/20（原生 USB）、26–37（Flash/PSRAM）、43/44（UART0 控制台）。
+//! 与 classic 的关键差异：GPIO26–37 被 16MB Flash / 8MB Octal PSRAM 占用，classic 的
+//! 26/27/32/33/34 全部不可用。避让区：GPIO0/3/45/46（strapping）、19/20（原生 USB）、
+//! 26–37（Flash/PSRAM）、43/44（UART0 控制台）。
 //!
-//! 真板接线（面包板档）：
-//! - UART2 = GPIO41→TX / GPIO42←RX（1.5M；**2026-10-29 真板订正**：原定 17/18
-//!   双向不通，两套适配器/两种对调/换地均零回包，同排针 8/9、4/5、6/7/15 正常，
-//!   故排除排针/地/丝印错行；17 在板左下舵机座同名丝印，不宜作 UART RX）
-//! - I2C0  = GPIO8 SDA / GPIO9 SCL（SSD1306 0x3C）
-//! - LEDC  = GPIO4 pan / GPIO5 tilt（50Hz 14bit）
-//! - I2S0  = GPIO6 BCLK / GPIO15 SD / GPIO7 WS（INMP441 双麦）
-//! - ADC   = GPIO1（ADC1_CH0，5V 轨测点；ADC2 与 Wi-Fi 冲突不可用）
+//! 真板接线（面包板档）：UART2 = GPIO41→TX / GPIO42←RX（1.5M；原定 17/18 双向不通，
+//! 两套适配器/对调/换地均零回包而同排针其它脚正常，且 17 在板上另有丝印，故不用）；
+//! I2C0 = GPIO8 SDA / GPIO9 SCL（SSD1306 0x3C）；LEDC = GPIO4 pan / GPIO5 tilt
+//! （50Hz 14bit）；I2S0 = GPIO6 BCLK / GPIO15 SD / GPIO7 WS（INMP441 双麦）；
+//! ADC = GPIO1（ADC1_CH0，5V 轨测点；ADC2 与 Wi-Fi 冲突不可用）。
 //!
 //! 常量只作装配对账与打印自证，不进消费路径。
 
