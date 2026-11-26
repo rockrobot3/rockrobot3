@@ -5,16 +5,13 @@
 //! nmcli 子进程下单。连接名锚 [`RR3_NM_PROVISION_CON`] 是稳定主键（换网 = 同名
 //! profile 改 ssid/psk，不为每个 SSID 建连接）。
 //!
-//! nmcli 序列：在册查询（`-t -f NAME con show` 找锚名）；connect（在册→`con modify`，
-//! 不在册→`con add`，key-mgmt 显式 wpa-psk；密码长度策略归模块侧，此处不重复校验）；
-//! forget（在册→`con delete`，不在册→Ok，未连先忘是幂等语义）；SSID 读回
-//! （`-t -f 802-11-wireless.ssid con show <锚>`）。
+//! nmcli 序列：在册查询 → connect（在册 `con modify`，不在册 `con add`，key-mgmt
+//! 显式 wpa-psk；密码长度策略归模块侧）→ forget（不在册即 Ok，未连先忘幂等）→
+//! SSID 读回。psk 经 argv 传递，与 `nmcli dev wifi connect … password` 同口径
+//! （同机 ps 可见是 nmcli 全家共有暴露面）。
 //!
-//! psk 经 argv 传递，与 `nmcli dev wifi connect … password` 同口径（同机 ps 可见是
-//! nmcli 全家共有暴露面）；passwd-file 收敛留待改口径，不在此另发明。
-//!
-//! 编译门 `cfg(any(linux, test))`：假 nmcli 以 `NMCONF_HOME` 为配置目录模拟 NM 持久化，
-//! 同夹具重建后端即"重启后仍在册"。
+//! 编译门 `cfg(any(linux, test))`：假 nmcli 以 `NMCONF_HOME` 为配置目录模拟 NM
+//! 持久化，同夹具重建后端即"重启后仍在册"。
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;

@@ -1,21 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 契约**元数据**守护（最终整枝评审 Group A / C1 与 I3）。
+//! 契约元数据守护：每条断言读的不是 Rust 常量自己对自己，而是
+//! `contracts/envelope.schema.json` 里的键——钉住四个"文档写着、门禁没人管"的值。
 //!
-//! 这里每条断言读的都不是 Rust 常量自己对自己，而是 `contracts/envelope.schema.json`
-//! 里的键——评审证明的四个"文档里写着、门禁里没人管"的值：
-//!
-//! - `properties.header.x-byte-size`：头条真相"128B 消息头"。必须同时等于
-//!   Rust `RR3_IPC_HDR_SIZE`、`x-offset-table` 的 length 合计、`contracts/golden/
-//!   event-header-128.hex` 的解码字节数。
-//! - `…fields.x-offset-sum`：字符串形态的**第二份记账**，必须与自身加数、与偏移表、
-//!   与 128 三处一致——两处记账不许各说各话。
-//! - `…payload_len.minimum|maximum`：`MAX_PAYLOAD_LEN`（`src/protocol/header.rs`）实现的
-//!   就是这两个契约值，故必须由契约侧钉，而不是 Rust 比 Rust。
-//! - 顶层 `x-schema-version`：`RR3_CONTRACT_SCHEMA_VERSION`（rrd 横幅的
-//!   "contracts schema v1"）此前无物断言，现与 JSON 逐值对齐。
-//!
-//! 路径深度与 `src/protocol/header.rs` 同一写法：`CARGO_MANIFEST_DIR` 是
-//! `base/runtime/rr-ipc`，回仓根要**三级** `../../../`；golden hex 读入须 `.trim()`。
+//! - `properties.header.x-byte-size`：头条真相 128B，须同时等于 `RR3_IPC_HDR_SIZE`、
+//!   `x-offset-table` 的 length 合计、`contracts/golden/event-header-128.hex` 的解码字节数。
+//! - `fields.x-offset-sum`：字符串形态的第二份记账，须与自身加数、偏移表、128 三处
+//!   一致——两处记账不许各说各话。
+//! - `payload_len.minimum|maximum`：`MAX_PAYLOAD_LEN` 实现的就是这两个契约值，须由
+//!   契约侧钉，而不是 Rust 比 Rust。
+//! - 顶层 `x-schema-version` 与 `RR3_CONTRACT_SCHEMA_VERSION`（rrd 横幅的 "contracts
+//!   schema v1"）逐值对齐。路径深度与 `src/protocol/header.rs` 同写法：
+//!   `CARGO_MANIFEST_DIR` 是 `base/runtime/rr-ipc`，回仓根要三级 `../../../`；
+//!   golden hex 读入须 `.trim()`。
 
 use rr_ipc::{
     opcode, Rr3HdrError, Rr3Header, MAX_PAYLOAD_LEN, RR3_CONTRACT_SCHEMA_VERSION, RR3_IPC_HDR_SIZE,

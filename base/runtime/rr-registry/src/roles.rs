@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 角色词表（增补轮六 §4.1）：`contracts/roles.toml` 的集合视图与校验①真值。
+//! 角色词表（§4.1）：`contracts/roles.toml` 的集合视图与校验①真值。
 //!
-//! 生产真相只有 `contracts/roles.toml`。本文件实现它的装载与形状检查：
-//! profiles `[pins]` 的 role 外键、`requires` 必填字段集（校验①-b 判据对象）、
-//! `derives` 派生键集（rrd 派生器的一致性对账面）都在这张表上裁定。
-//! 空角色表是契约事故，不是放行许可证。
+//! 生产真相只有 `contracts/roles.toml`。本文件实现装载与形状检查：profiles `[pins]`
+//! 的 role 外键、`requires` 必填字段集（校验①-b 判据对象）、`derives` 派生键集
+//! （rrd 派生器的一致性对账面）都在这张表上裁定。空角色表是契约事故，不是放行
+//! 许可证。
 //!
-//! `group`（W5-3 增补）：同 (slot, group) 的角色是同一物理位置的**可替代实现**
-//! （ui.face 的 SPI 点阵与 I2C OLED），缺省 = 角色名本身 = 各自成组；校验②
-//! 按组判"至少一条 [pins] 绑定"，组语义归 rrd 消费（[`rr3_role_group`] 只供数）。
-//!
-//! 六表对账（门 a，§8 待建）的真值源之一：`roles.slot ⊆ slots.toml` 与
-//! `roles.iface ⊆ RR3_ASSEMBLE_HANDLE_TRAITS` 两条**在装载侧由调用方携带
-//! 对方真值判定**（rrd 装载链两张表都在手）；本 crate 只判自身形状，
-//! 不写第二份 slots/traits 真值。
+//! `group`（W5-3）：同 (slot, group) 的角色是同一物理位置的可替代实现（ui.face 的
+//! SPI 点阵与 I2C OLED），缺省 = 角色名本身 = 各自成组；校验②按组判"至少一条
+//! [pins] 绑定"，组语义归 rrd 消费（[`rr3_role_group`] 只供数）。
+//! 六表对账（门 a）的真值源之一：`roles.slot ⊆ slots.toml` 与 `roles.iface ⊆
+//! RR3_ASSEMBLE_HANDLE_TRAITS` 两条在装载侧由调用方携带对方真值判定（rrd 装载链
+//! 两张表都在手）；本 crate 只判自身形状，不写第二份 slots/traits 真值。
 
 use std::collections::BTreeMap;
 use toml::Value;

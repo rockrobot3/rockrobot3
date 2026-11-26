@@ -2,18 +2,15 @@
 //! 装配清单（`atoms/<名>/assemble.toml`，五件套④）形状契约与注入缺校验（ADR-0019）。
 //!
 //! 两级真值、两处消费（rrd 与裸机装配段共用本模块，不各说一套）：
-//! - **形状级**（[`rr3_assemble_parse`]）：schema 版本、未知字段点名、trait 与
-//!   desc_key 须在册、参数槽与来源键须为点路径。空数组合法，但两数组均空须明写
+//! - 形状级（[`rr3_assemble_parse`]）：schema 版本、未知字段点名、trait 与 desc_key
+//!   须在册、参数槽与来源键须为点路径；空数组合法，但两数组均空须明写
 //!   `no_injection = true`（把"漏填"与"确无注入面"分开）。
-//! - **注入缺级**（[`rr3_injection_gaps`]）：ops 的 `src_key` 在模块 `config.toml`
-//!   点路径取不到即注入缺；handles 的 desc_key 存在性归 spawn 时探测面。
-//!
-//! `[assemble].demands`（电流申报，ADR-0021 裁定 2）：每角色实例需求
-//! `{rail, peak_ma, sustained_ma, critical, concurrency_group}`，按实例数扩算后比域
-//! cap；只管形状（sustained ≤ peak、critical/组键显式）；缺申报 = 空合法，执法在 rrd。
-//!
-//! `task_stack_bytes` / `heap_peak_bytes`（校验⑩ 分子）：件级**非每实例**语义，缺省 0 = 未申报不进 Σ；给键须非负整数。预算分母住 `[supplies].budget`。
-//!
+//! - 注入缺级（[`rr3_injection_gaps`]）：ops 的 `src_key` 在模块 `config.toml` 点路径
+//!   取不到即注入缺；handles 的 desc_key 存在性归 spawn 时探测面。
+//! `[assemble].demands`（电流申报，ADR-0021 裁定 2）：每角色实例
+//! `{rail, peak_ma, sustained_ma, critical, concurrency_group}` 按实例数扩算后比域
+//! cap，只管形状（sustained ≤ peak、critical/组键显式），缺申报 = 空合法，执法在 rrd；
+//! `task_stack_bytes`/`heap_peak_bytes`（校验⑩ 分子）为件级非每实例，缺省 0 = 未申报。
 //! 装配段缺项处置：该格 `Degraded` 并点名到件，不 fatal。trait 真值源 = `rr-hal-api`，
 //! 键真值源 = rr-hal `descriptor.rs`（不扩键）；本表滞后的方向是"新 trait/键被拒"。
 

@@ -2,18 +2,16 @@
 //! linux（I2C）电池读数后端：INA219 总线电压 / 电流（BOM #5，0x40）。
 //!
 //! 编译门单重 `target_os = "linux"`，无 feature；libc 仅取 ioctl/read/write/close
-//! 的 extern 声明（musl 静态零额外 C 库）。主机 CI 不编译本文件；验证 = aarch64
-//! musl 交叉 check + 板上 `cargo test`（换算纯函数与假设备错误路径，不触真件）。
-//!
-//! 接口：I2C chardev UAPI（`/dev/i2c-N`）——`I2C_SLAVE` 定址，原生寄存器读 =
-//! 写 1 字节寄存器号 + 读 2 字节（大端，与 `i2cget w` 的小端字不同，对拍先交换）。
-//! INA219：0x00 配置（复位值 0x399F，即 `contracts/devices.toml` 的 `id_reg.expect`）、
-//! 0x02 总线电压（bits[15:3]，LSB 4mV）、0x04 电流（i16，符号=方向）、0x05 校准。
+//! 的 extern 声明。主机 CI 不编译本文件，验证 = aarch64 musl 交叉 check + 板上
+//! `cargo test`（换算纯函数与假设备错误路径，不触真件）。
+//! 接口：I2C chardev UAPI（`/dev/i2c-N`），`I2C_SLAVE` 定址，原生寄存器读 = 写
+//! 1 字节寄存器号 + 读 2 字节（大端，与 `i2cget w` 的小端字不同，对拍先交换）。
+//! INA219：0x00 配置（复位值 0x399F = devices.toml 的 `id_reg.expect`）、0x02 总线
+//! 电压（bits[15:3]，LSB 4mV）、0x04 电流（i16，符号=方向）、0x05 校准。
 //! 打开总线先读 0x00 校验，不符点名拒；给了分流参数 [`Rr3InaCal`] 才算 CAL 并写
-//! 0x05，**写成功前 charging 恒 false**——不把"没校过"冒充"没在充"。
-//!
-//! percent 是派生面：OCV 线性近似 3200–4200mV ↔ 0–100%，越界 clamp 不越权，
-//! `voltage_mv` 永远原样报真读数；boot 显式 `RR3_HAL_BACKEND=linux` 后 bus 不在位/
+//! 0x05，写成功前 charging 恒 false——不把"没校过"冒充"没在充"。
+//! percent 是派生面（OCV 线性近似 3200–4200mV ↔ 0–100%，越界 clamp 不越权，
+//! `voltage_mv` 原样报真读数）；boot 显式 `RR3_HAL_BACKEND=linux` 后总线不在位或
 //! 地址无应答即显式回错 exit(1)，不静默退化。
 
 use std::os::fd::{AsRawFd, IntoRawFd};

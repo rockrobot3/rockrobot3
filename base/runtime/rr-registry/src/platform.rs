@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 //! 平台事实登记表：`contracts/platform/<平台>.toml` 的装载与形状检查。
 //!
-//! 生产真相只有 `contracts/platform/<平台>.toml`（按平台一份、按形态选用）。它承载
+//! 生产真相只有 `contracts/platform/<平台>.toml`（按平台一份、按形态选用），承载
 //! 一颗芯片的事实四段：`[[controller]]` 在册控制器词表、`[capabilities]` 能力集、
-//! `[[conflict]]` 冲突矩阵、`[construction]` 具名构造表。**不是器件型号**（D10a：
-//! 器件能力住 devices.toml）、不是供给预算（住 profiles `[supplies]`）——三份数据
-//! 三个主人，不许并表。
-//!
-//! **与 roles.rs/devices.rs 的关键差异：本表解析 fail-closed 回 `Err`**：roles/devices
-//! 对坏文本回空表走"表为空"点名，那是集合词表的宽容；平台表是校验 ④⑤⑧ 的**判据
-//! 前件**——表读不到还当空表，④-b 就会被静默跳过（§18 F-6 病）。故任何一段缺、
-//! 任何键坏都逐条点名回 `Err`，调用方必须拿着错误拒 boot，不许降级。
-//!
+//! `[[conflict]]` 冲突矩阵、`[construction]` 具名构造表。不是器件型号（D10a：器件
+//! 能力住 devices.toml）、不是供给预算（住 profiles `[supplies]`）——三份数据三个
+//! 主人，不许并表。
+//! 与 roles/devices 的关键差异：本表解析 fail-closed 回 `Err`。roles/devices 对坏
+//! 文本回空表走"表为空"点名，那是集合词表的宽容；平台表是校验 ④⑤⑧ 的判据前件，
+//! 表读不到还当空表，④-b 会被静默跳过（§18 F-6 病）。任何一段缺、任何键坏都逐条
+//! 点名回 `Err`，调用方必须拿错误拒 boot，不许降级。
 //! 同文件内一致性：`[construction]` 与 `[[conflict]]` 的 controller 成员都必须命中
-//! 本表 `[[controller]]` 在册——真值同源，不是立第二份词表。
+//! 本表 `[[controller]]` 在册——真值同源，不立第二份词表。
 
 use std::collections::{BTreeMap, BTreeSet};
 use toml::Value;

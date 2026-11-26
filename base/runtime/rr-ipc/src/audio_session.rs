@@ -1,19 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 板面音频会话握手（A 批 c2 自 tools/rr3-audio-rec 上提的机制单点）。
+//! 板面音频会话握手（机制单点，自 tools/rr3-audio-rec 上提）。
 //!
-//! 板面音频会话的行命令协议（`AUDIO OFF`/`AUDIO ON` + 行应答）与开口/断流
-//! 重连纪律常量，收流端（rr3-audio-rec）与宿主音频源后端（rr-hal esp32audio）
-//! 共用——机制与策略分离：本模块只持"怎样跟板子把音频流开起来"的协议事实，
-//! 各消费者的收流节奏/落盘/记账归各面。
-//!
-//! 纪律（d4/p2/p3 系列实锤，随迁原文）：
-//! - 开口 settle：open 后停 [`SETTLE`] 让开口翻转的板复位走完，再
-//!   `rr3_flush_input` 净化残留；
-//! - 防御 AUDIO OFF：上一会话异常退出的板面残流会抢在 OK 应答前进线（d4
-//!   重跑实锤），停流冲净才 AUDIO ON；OFF 应答读了即弃但**超时可见**（d4
-//!   run#2 排障教训：静默丢弃害排查）；
-//! - ON 应答判据 = [`REPLY_TIMEOUT_MS`] 总预算内逐行扫 [`ok_reply_line`]
-//!   （p2/p3 实锤放宽：`OK audio on` 可与首帧流字节同行进线）。
+//! 板面音频会话的行命令协议（`AUDIO OFF`/`AUDIO ON` + 行应答）与开口/断流重连
+//! 纪律常量，收流端（rr3-audio-rec）与宿主音频源后端（rr-hal esp32audio）共用——
+//! 机制与策略分离：本模块只持"怎样跟板子把音频流开起来"的协议事实，各消费者的
+//! 收流节奏/落盘/记账归各面。
+//! 纪律：open 后停 [`SETTLE`] 让开口翻转的板复位走完，再 `rr3_flush_input` 净化
+//! 残留；先防御 AUDIO OFF——上一会话异常退出的板面残流会抢在 OK 应答前进线，停流
+//! 冲净才 AUDIO ON，OFF 应答读了即弃但超时可见（静默丢弃害排查）；ON 应答判据 =
+//! [`REPLY_TIMEOUT_MS`] 总预算内逐行扫 [`ok_reply_line`]（`OK audio on` 可与首帧
+//! 流字节同行进线）。
 //!
 //! cfg 门与 [`crate::transport::uart::Rr3UartConn`] 同径（linux/macos）。
 

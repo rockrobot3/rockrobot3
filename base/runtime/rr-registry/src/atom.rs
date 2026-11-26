@@ -1,20 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Atom manifest（`atoms/<名>/atom.toml`）的字段契约与校验（0.0.5 批B①，ADR-0019）。
+//! Atom manifest（`atoms/<名>/atom.toml`）的字段契约与校验（ADR-0019）。
 //!
-//! Atom 层 manifest 只声明四事（0.0.5 方案 §9）：占哪个格（`provides.slots`，每格一件
-//! 恰一项）、装配期依赖哪些格（`uses.slots`）、publishes/subscribes（topic 形状）、
-//! **板无关**（manifest 文本禁词断言）。字段契约内嵌于 `atom.schema.toml`，与
-//! `module.schema.toml` 同构（`[[field]]` 数组），规则函数复用 [`crate::validate`] 的
-//! `rr3_registry_check`——不建第二套规则实现。
+//! Atom 层只声明四事：占哪个格（`provides.slots`，每格一件恰一项）、装配期依赖哪些
+//! 格（`uses.slots`）、publishes/subscribes（topic 形状）、板无关（manifest 文本禁词
+//! 断言）。字段契约内嵌于 `atom.schema.toml`，与 `module.schema.toml` 同构
+//! （`[[field]]`），规则函数复用 [`crate::validate`] 的 `rr3_registry_check`，
+//! 不建第二套规则实现。
 //!
 //! 查册门共用 [`crate::slots::Rr3SlotTable`] 真值（ADR-0012 裁定 5②）：`provides`/
-//! `uses` 的每一格都必须命中 `contracts/slots.toml`，空格位表 fail-closed（承
-//! `validate.rs`/`topics.rs` 的空注册表纪律，空表不是放行许可证）。
-//!
-//! 板无关断言（ADR-0019 裁定 5 硬规 2 的 manifest 侧）：Atom manifest 文本不得出现
-//! 引脚/总线/厂商/产品 token——板级拓扑只进 `rr-hal` 后端与描述符绑定表，策略与器件
-//! 决策只经 `ops`/config 数据化注入。禁词表是 rock3 自有清单（从本仓实况板卡与器件
-//! 名提炼），ADR-0019 明确不搬外部模板禁词表。
+//! `uses` 的每一格都必须命中 `contracts/slots.toml`，空格位表 fail-closed。
+//! 板无关断言（ADR-0019 裁定 5 硬规 2）：manifest 文本不得出现引脚/总线/厂商/产品
+//! token——板级拓扑只进 `rr-hal` 后端与描述符绑定表，策略与器件决策只经
+//! `ops`/config 数据化注入；禁词表是 rock3 自有清单，不搬外部模板。
 
 use std::path::{Path, PathBuf};
 use toml::Value;

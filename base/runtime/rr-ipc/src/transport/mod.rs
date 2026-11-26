@@ -1,18 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 //! 传输层：trait 定型 + uds 唯一实现（ADR-0008）。
 //!
-//! 门下沉（ADR-0018）：`target_os = "none"` 也编译——窄缝 [`Rr3ByteStream`]（bytestream）
-//! 与帧缓冲（buf，alloc 面）no_std 可达；std::io 半边（frame/uds/uart、Listener/
-//! Endpoint、std adapter）留门内。裸金属"接总线 = 实现两个 usize 方法"。
+//! 门下沉（ADR-0018）：`target_os = "none"` 也编译——窄缝 [`Rr3ByteStream`] 与帧
+//! 缓冲（buf，alloc 面）no_std 可达；std::io 半边（frame/uds/uart、Listener/
+//! Endpoint、std adapter）留门内，裸金属接总线＝实现两个 usize 方法。
 //!
-//! 三个 trait 是接缝：`Rr3TransportConn` 所有权移交（send 消费整个帧缓冲，recv 返回
-//! 新分配缓冲；tcp 预留 6060）；`Rr3TransportListener` 一次 accept 的 Err 只属那一次；
-//! `Rr3TransportEndpoint` 清理残留→bind（uds：删残留 socket→`UnixListener::bind`）。
-//!
-//! **不引 async**：rrd 是"每连接 2 线程 + 阻塞 IO"，async 运行时只进模块侧（M3）。
-//! 分层：uds（M2 唯一实现，[`RR3_UDS_PATH_DEFAULT`] 可被 [`RR3_BUS_PATH_ENV`] 覆盖）/
-//! tcp（多机协作，预留）/ uart（跨机点对点，conn 面 blanket impl 同源帧语义）。
-//! 反射环（电机 FOC/PID）永不进总线；shm 位已按 L-32 摘面，本模块无第二实现。
+//! 三 trait 即接缝：`Rr3TransportConn` 所有权移交（send 消费整个帧缓冲，recv 返回
+//! 新分配缓冲）；`Rr3TransportListener` 一次 accept 的 Err 只属那一次；
+//! `Rr3TransportEndpoint` 清理残留→bind。不引 async：rrd 是"每连接 2 线程 + 阻塞
+//! IO"，async 运行时只进模块侧（M3）。
+//! 分层：uds（[`RR3_UDS_PATH_DEFAULT`]，可被 [`RR3_BUS_PATH_ENV`] 覆盖）/ tcp（多机
+//! 协作，预留）/ uart（跨机点对点，conn 面 blanket impl 同源帧语义）。反射环永不
+//! 进总线；shm 位已按 L-32 摘面，本模块无第二实现。
 
 pub mod buf;
 pub mod bytestream;

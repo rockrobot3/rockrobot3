@@ -1,18 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 //! 后端标识与选择入口（architecture.md §5、ADR-0007）。
 //!
-//! | 后端 | 承载 |
-//! |---|---|
-//! | `linux` | ALSA 采集/回放（`linux.rs`，`alsa` feature + `target_os` 双门） |
-//! | `linux` 舵机/GPIO/显示/电源/链路 | sysfs PWM、chardev GPIO、MAX7219/SSD1306、INA219、nmcli——各单门文件，设备路径取描述符 |
-//! | `sim` | 虚拟麦克风/扬声器（`tools/sim` 与 CI、无硬件开发） |
-//! | `mac` | AudioQueue 真麦/扬声器（显式 `RR3_HAL_BACKEND=mac`，缺省仍 sim） |
-//! | `esp32` | 外设桥 UART 能力帧 + 音频上行（板不进城，宿主直连，flock 单消费者） |
-//! | `placeholder` | 恒回 `Unsupported`（能力缺失显式回错） |
+//! 六个后端：`linux`（ALSA 采集/回放、sysfs PWM、chardev GPIO、MAX7219/SSD1306、
+//! INA219、nmcli，设备路径取描述符）、`sim`（虚拟麦/扬，工具与 CI 无硬件开发）、
+//! `mac`（AudioQueue 真麦/扬，仅显式 `RR3_HAL_BACKEND=mac`，缺省仍 sim）、
+//! `esp32`（外设桥 UART 能力帧 + 音频上行，板不进城、宿主直连、flock 单消费者）、
+//! `placeholder`（恒回 `Unsupported`，能力缺失显式回错）。
 //!
 //! 反射环（1k–10kHz 电机 FOC/PID）不进这些 trait，留在 `rr3-act` 进程内。
-//! 模块按能力面分件：`selector` 判定、`parse` env 裁决、`sink` 音频、`acts`
-//! servo/gpio/display、`power` 电源与轨压、`link` 链路与配网存储。
+//! 模块按能力面分件：selector 判定、parse env 裁决、sink 音频、acts
+//! servo/gpio/display、power 电源与轨压、link 链路与配网存储。
 
 mod acts;
 mod link;

@@ -3,18 +3,15 @@
 //!
 //! 点对点字节流：宿主侧按 raw termios 打开串口，帧语义由 blanket impl 免费覆盖
 //! （下底 [`Rr3ByteStream`](crate::transport::bytestream::Rr3ByteStream)），半帧 /
-//! 坏 magic / 长度不符的拒收与 uds 同源。无"监听/accept"语义，故
-//! [`Rr3TransportEndpoint`] 与 listener 两 trait 不适用——硬套点对点等于撒谎。
+//! 坏 magic / 长度不符的拒收与 uds 同源。无监听/accept 语义，endpoint 与 listener
+//! 两 trait 不适用——硬套点对点等于撒谎。
+//! 系统调用面手写 `extern "C"` 壳（open/close/read/write/tcgetattr/tcsetattr/
+//! cfmakeraw/ioctl/fcntl），不引 libc；termios 按平台分 `cfg`，`const _` 断言尺寸。
 //!
-//! 系统调用面：手写 `extern "C"` 壳（open/close/read/write/tcgetattr/tcsetattr/
-//! cfmakeraw/…/ioctl/fcntl），不引 libc；termios 按平台分 `cfg`，`const _` 断言结构尺寸。
-//!
-//! 排他开口：按 (进程, 路径) 的 flock 登记账本——每路径首个 open 开长寿命 guard fd
-//! 并 `flock(LOCK_EX|LOCK_NB)`，同进程后续 open 只记账重入（桥 rx/tx 双开合法）；
-//! 跨进程第二 opener 当场拒绝（ResourceBusy）。不用 TIOCEXCL：Linux 连自家双开一起拦，
-//! macOS 的 TS_XCLUDE 对 O_NOCTTY 无效；外部进程不守 flock，须按 runbook 先清场。
-//! fd 一律 `O_CLOEXEC`，锁的释放点不得被子进程生命周期拖长（spawn 瞬间持锁属合法瞬态）。
-//!
+//! 排他开口：按 (进程, 路径) flock 登记账本——每路径首个 open 开长寿命 guard fd 并
+//! `flock(LOCK_EX|LOCK_NB)`，同进程后续 open 只记账重入（桥 rx/tx 双开合法），跨进程
+//! 第二 opener 当场拒绝。不用 TIOCEXCL（Linux 连自家双开一起拦、macOS 的 TS_XCLUDE
+//! 对 O_NOCTTY 无效），外部进程不守 flock 须按 runbook 先清场；fd 一律 `O_CLOEXEC`。
 //! 波特率只收 [`rr3_uart_baud_speed`] 认的档位（115200 缺省 / 9600 / 921600 / 1.5M / 2M）。
 
 use std::io::{Read, Write};

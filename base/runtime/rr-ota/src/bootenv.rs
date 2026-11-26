@@ -2,20 +2,16 @@
 //! U-Boot 环境变量写侧（回滚链板侧件；解析/渲染/状态迁移主机可测）。
 //!
 //! 载体格式是 U-Boot 标准 raw env：`[crc32: u32 LE][k=v\0]…[\0]`，CRC 覆盖其后的
-//! 全部字节（含补齐 0 尾）。算法与 `rr_ipc::protocol::header::rr3_crc32` 同一份
-//! （IEEE 802.3 反射多项式）——U-Boot 的 `crc32(0, …)` 即此形态，单点真值。
+//! 全部字节（含补齐 0 尾）；算法与 `rr_ipc::protocol::header::rr3_crc32` 同一份
+//! （IEEE 802.3 反射多项式），U-Boot 的 `crc32(0, …)` 即此形态，单点真值。
 //!
-//! 三件面：
-//! 1. [`Rr3BootEnv`]：env 体解析/渲染 + `get`/`set`/`unset`（坏 CRC、重复键、
-//!    非 UTF-8 一律 fail-closed）；
-//! 2. [`Rr3EnvDev`]：解析 `/etc/fw_env.config`（`device offset env_size [sector num]`，
-//!    数支持 `0x` 十六进制，`#` 行注释）；
-//! 3. 回滚链状态迁移：`rr3_rollback_arm` / `rr3_rollback_ok` 落实
-//!    `docs/design/分区布局与OTA槽位.md` 标准序第 4/6 步（四变量 bootcount/bootlimit/
-//!    altbootcmd/upgrade_available）。
+//! 三件面：`Rr3BootEnv`（env 体解析/渲染 + get/set/unset，坏 CRC、重复键、非 UTF-8
+//! 一律 fail-closed）、`Rr3EnvDev`（解析 `/etc/fw_env.config` 的 `device offset
+//! env_size [sector num]`，支持 `0x` 十六进制与 `#` 行注释）、回滚链状态迁移
+//! `rr3_rollback_arm`/`rr3_rollback_ok`（分区布局标准序第 4/6 步）。
 //!
-//! 区读写走 `std::fs`（无 ioctl），只在 `cfg(unix)` 下编译：板上 Linux 与主机 macOS
-//! 测试面同一份代码。**明确不做**：冗余双份 env 同步写、坏块探测、布局核对；altbootcmd 由调用方给。
+//! 区读写走 `std::fs`（无 ioctl），只在 `cfg(unix)` 下编译。明确不做：冗余双份 env
+//! 同步写、坏块探测、布局核对；altbootcmd 由调用方给。
 
 use rr_ipc::protocol::header::rr3_crc32;
 

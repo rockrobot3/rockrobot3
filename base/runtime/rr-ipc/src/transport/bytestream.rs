@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 总线字节流窄缝（批J G1，ADR-0018 修订 1 ③ / 修订 3 ①，architecture §12.8 接缝二）。
+//! 总线字节流窄缝（ADR-0018 修订 1 ③ / 修订 3 ①，architecture §12.8 接缝二）。
 //!
-//! 机制核面的一条**两方法缝**：无错误类型、不引 `std::io`、不装箱——板侧要接总线
-//! 从"实现两个 std trait"降成"写两个 `usize` 方法"。[`Rr3TransportConn`](crate::transport::Rr3TransportConn)
-//! 的 blanket impl 在它上面换底（`transport/mod.rs`）；std 承载侧由同模块的单向
-//! adapter（`impl<T: Read + Write> Rr3ByteStream for T`）接住，宿主三实现的行为与
-//! 线上字节零改动（§15 缝清单："动 blanket impl 的下底、加一个 adapter"）。
+//! 机制核面的一条两方法缝：无错误类型、不引 `std::io`、不装箱——板侧接总线从
+//! "实现两个 std trait"降成"写两个 `usize` 方法"。[`Rr3TransportConn`](crate::transport::Rr3TransportConn)
+//! 的 blanket impl 在它上面换底；std 承载侧由同模块的单向 adapter
+//! （`impl<T: Read + Write> Rr3ByteStream for T`）接住，线上字节零改动。
 //!
-//! **错误折叠语义**（缝上没有错误通道的代价，两侧都如实写明）：
-//! - 读：返回 0 = 对端关闭**或读失败**（std adapter 把 io 错误折叠为 0）——缝上
-//!   只看得见"没了"，看不见"为什么没了"；
-//! - 写：返回值 < `buf.len()` = 写失败（可能是部分写出）；blanket impl 据此报 `Io`。
+//! 错误折叠语义（缝上没有错误通道的代价，两侧都如实写明）：读返回 0 = 对端关闭
+//! 或读失败（std adapter 把 io 错误折为 0），缝上只看得见"没了"；写返回值 <
+//! `buf.len()` = 写失败（可能部分写出），blanket impl 据回报 `Io`。
 //!
-//! 本文件 `target_os = "none"` 可编译（core+alloc）；测试只在宿主跑（帧语义的
-//! 形状证据在 `transport/mod.rs` 的板侧 conn 形状用例）。
+//! `target_os = "none"` 可编译（core+alloc）；测试只在宿主跑（帧语义的形状证据
+//! 在 `transport/mod.rs` 的板侧 conn 形状用例）。
 
 use crate::protocol::wire::Rr3FrameError;
 

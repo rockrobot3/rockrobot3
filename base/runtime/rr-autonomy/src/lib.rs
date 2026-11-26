@@ -1,18 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 自治运行核（supervisor-lite）：固定任务表、心跳、固定栅格看门狗与健康快照。
+//! 自治运行核（supervisor-lite）：固定六任务表（net / audio-in / dialog /
+//! audio-out / motion / ui，ADR-0029 裁定 2）、心跳、固定栅格看门狗与健康快照。
 //!
-//! 平台无关机制核（W3-1）：时间由调用方传入，核心零 IO、零线程、零分配
-//! （健康 JSON 渲染是纯字符串函数，按 `alloc` 构串）；ESP-IDF 固件与宿主测试
-//! 共用。任务表固定六项（net / audio-in / dialog / audio-out / motion / ui），
-//! 与 ADR-0029 裁定 2 一致。
+//! 平台无关机制核（W3-1）：时间由调用方传入，零 IO、零线程；任务表与健康 JSON
+//! 渲染按 `alloc` 构串，ESP-IDF 固件与宿主测试共用。
 //!
-//! 语义：
-//! - 每个任务在 `timeouts_ms[i]` 内必须至少 beat 一次；超时即置 `Dead`，
-//!   超时计数与重启请求各加一，由策略层决定如何重启。
-//! - tick 按固定栅格推进；调用晚于栅格不补跳，超拍记 `overruns`。
-//! - 显式降级（`Degraded`）不参与超时判死；显式致命（`rr3_sup_dead`）置
-//!   `Dead` 并计一次重启请求。
-//! - 所有状态迁移都是纯函数可测，不依赖真实时钟。
+//! 不变量：每任务须在 `timeouts_ms[i]` 内 beat 一次，超时置 `Dead` 并各计一次
+//! 超时与重启请求；tick 按固定栅格推进，晚到不补跳、超拍记 `overruns`；
+//! `Degraded` 不参与判死，`rr3_sup_dead` 置死并计一次重启请求；状态迁移全是
+//! 纯函数，不读真实时钟。
 
 #![no_std]
 
