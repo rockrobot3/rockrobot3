@@ -12,11 +12,10 @@
 //! 在帧后——250ms 量级节拍一圈内毫秒级挪移不可观测，等价性由 SURFACE diff＋
 //! 48 测＋chain 两跑承担（批N30 计划册取证笔6）。
 //!
-//! 失败语义与 connect/sense/interact/power 同一口径（rr3mod 两档）：on_rpc 返
-//! Err = 业务性失败折 `{"error": …}` 应答（状态流发布失败走同一返 Err 面——
-//! socket 死亡时随后的应答写同样失败经 serve `?` 上抛致命，死亡探针兜底，与
-//! 现行 `exit(1)` 口径在可观测面等价）；on_event / on_tick 返 Err = 传输性上抛
-//! 致命，模块不装"活着"，死交给 supervisor 按 restart_policy=always 重启。
+//! 失败语义与其余模块同一口径（rr3mod 两档）：on_rpc 返 Err = 业务性失败折
+//! `{"error": …}` 应答（状态流发布失败同面——serve `?` 上抛致命，死亡探针兜底）；
+//! on_event / on_tick 返 Err = 传输性上抛致命，模块不装"活着"，死交 supervisor
+//! 按 restart_policy=always 重启。
 
 use std::time::Instant;
 

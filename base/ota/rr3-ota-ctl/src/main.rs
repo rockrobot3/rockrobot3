@@ -9,10 +9,9 @@
 //!                                        U-Boot 回滚链上膛（四变量）
 //!   rollback ok        --env P           回滚链解除（两变量）
 //!
-//! 判定与改写逻辑全在 `rr-ota`（`bootconf` / `bootenv`，base/runtime workspace 内，
-//! 随七步门 ③ 全量跑测试）；本 CLI 只做参数解析与落盘调用，且**不缺省碰任何
-//! 路径**——四个写命令必须显式给 `--bootconf` / `--env`。退出码：0 成功 /
-//! 1 业务拒或 IO 失败 / 2 用法错。
+//! 判定与改写逻辑全在 `rr-ota`（`bootconf` / `bootenv`）；本 CLI 只做参数解析与落盘调用，
+//! 且**不缺省碰任何路径**——四个写命令必须显式给 `--bootconf` / `--env`。退出码 0/1/2 =
+//! 成功 / 业务拒或 IO 失败 / 用法错。
 //!
 //! `sign` / `verify` / `manifest` / `keypub` 的机制在 `rr-ota::sign`（ADR-0026），
 //! 本文件只保留分派与 usage；参数面在 `args`，子命令面在 `bootconf_cmd` /

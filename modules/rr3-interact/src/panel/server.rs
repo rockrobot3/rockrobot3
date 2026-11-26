@@ -12,8 +12,7 @@
 //!   （mpsc）请求主循环代执行，串行无锁，与 TTS 点名天然互斥。
 //!
 //! 端点全集与 covers/applies 申报以 [`RR3_PANEL_ROUTES`] 为真值：`GET /`、
-//! `GET /api/status`、`GET /api/data`、`GET /api/logs`、`POST /api/relay`、
-//! `POST /api/beep`、`POST /api/face`、`POST /api/selftest`、`POST /api/reboot`、
+//! `GET /api/status|data|logs`、`POST /api/relay|beep|face|selftest|reboot`、
 //! `GET /api/wifi/scan` + `POST /api/wifi/connect|forget`（BusCall 透传 connect
 //! 三 RPC，参数裁决在 owner 模块）＋模型密钥面与 brain/五模块 ops 读口（同一
 //! BusCall 透传范式）。

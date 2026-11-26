@@ -14,9 +14,8 @@
 //! **四处同批**——副本滞后时方向是拒绝（fail-closed），不会带病放行。
 //!
 //! 键分两轨：**引脚派生键**（`ui.face.i2c` 的 addr → `oled_addr` 等）由装配单 `[pins]`
-//! 派生；**板侧直给键**（`i2c_sda`/`i2c_scl`/`adc_rail_pin`/`uart2_*`/`ledc_*`/`i2s_*`/
-//! `cred_store`）无能力面角色、不进派生集，也**不设** `RR3_HAL_*` 应急覆盖位——现场
-//! 只改装配单 + 重启。`cred_store` 是**非 GPIO** 存储标记（`nvs:<namespace>`）。
+//! 派生；**板侧直给键**（`i2c_sda`/`uart2_*`/`ledc_*`/`i2s_*`/`cred_store` 等）不进派生集、
+//! 不设 `RR3_HAL_*` 覆盖位——现场只改装配单。`cred_store` 是非 GPIO 存储标记。
 
 use std::collections::BTreeMap;
 

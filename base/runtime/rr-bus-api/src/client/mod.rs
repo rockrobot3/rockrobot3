@@ -14,9 +14,8 @@
 //! 心跳失败 = stderr 一行 + `exit(1)`：模块不装"活着"，把死交给 supervisor 按
 //! restart_policy 裁定（rrd 的进程语义）。
 //!
-//! `rr3.call`（[`RR3_METHOD_CALL`])是 M3 定型的第 4 个上行 RPC 方法（trace_id
-//! 语义：0 = 非代理；代理请求的 trace_id = 调用方 task，见 contracts/README.md
-//! 演进登记）——被调模块用 [`Rr3BusClient::rr3_reply_call`] 顺原路回话。
+//! `rr3.call`（[`RR3_METHOD_CALL`]）是 M3 定型的第 4 个上行 RPC 方法（trace_id：0 =
+//! 非代理；代理请求 = 调用方 task）——被调模块用 [`Rr3BusClient::rr3_reply_call`] 回话。
 
 mod conn;
 mod parse;

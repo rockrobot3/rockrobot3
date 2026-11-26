@@ -9,11 +9,10 @@
 //! 失败：设备打不开 / 看门狗到点）。
 //!
 //! 批G 扩面：④ 安全核逐拍对拍——下行 `rr3.call` 点名 `rr3-sentinel/diag/parity`，
-//! 板回向量与**宿主同一 runner** `rr_core::control::parity::rr3_parity_run()` 的
-//! 输出及 `RR3_PARITY_EXPECTED`（契约期望腿）三方两腿对拍；⑦ 时序达标——心跳
-//! 间隔直方图与 `[supplies]` 名义值对表（tick_period_ms=heartbeat_ms /
-//! tick_jitter_ms=100 出自 profiles/esp32-mini.toml），可留证据文件（C12 三样
-//! 契约：环境指纹/采样窗口/样本数/原始数据）。
+//! 板回向量与**宿主同一 runner** `rr_core::control::parity::rr3_parity_run()` 的输出
+//! 及 `RR3_PARITY_EXPECTED` 三方两腿对拍；⑦ 时序达标——心跳间隔直方图与
+//! `[supplies]` 名义值对表（tick_period_ms=heartbeat_ms / tick_jitter_ms=100），
+//! 可留证据文件（C12：环境指纹/采样窗口/样本数/原始数据）。
 //!
 //! 用法：`cargo run -p rr3-sentinel-harness -- <串口设备> [拍数，缺省 8] [证据文件路径]`
 //! （macOS：/dev/tty.usbserial-*；树莓派：/dev/ttyUSB0。板侧 monitor 先行，再跑本件）。

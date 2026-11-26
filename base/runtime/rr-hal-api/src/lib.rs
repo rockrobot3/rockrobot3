@@ -2,8 +2,7 @@
 //! rr-hal-api —— 能力面契约（no_std，ADR-0018 修订 1 ③）。
 //!
 //! 件 ↔ 硬件的唯一契约面：10 trait **同步签名**、去 `Send + Sync`、值类型去
-//! `String`/`Vec`（core-only）。async 留模块侧（ADR-0008 裁定 1），契约名与路径
-//! 由 `rr-hal` re-export 保持不变。
+//! `String`/`Vec`（core-only）。async 留模块侧；契约名与路径由 `rr-hal` re-export。
 //!
 //! # 定形要点
 //!

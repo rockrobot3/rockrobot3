@@ -15,8 +15,7 @@
 //!   "contracts schema v1"）此前无物断言，现与 JSON 逐值对齐。
 //!
 //! 路径深度与 `src/protocol/header.rs` 同一写法：`CARGO_MANIFEST_DIR` 是
-//! `base/runtime/rr-ipc`，回到仓库根要 **三级** `../../../`，不是两级。
-//! golden hex 文件以单个 LF 结尾，读入后必须 `.trim()` 再解码。
+//! `base/runtime/rr-ipc`，回仓根要**三级** `../../../`；golden hex 读入须 `.trim()`。
 
 use rr_ipc::{
     opcode, Rr3HdrError, Rr3Header, MAX_PAYLOAD_LEN, RR3_CONTRACT_SCHEMA_VERSION, RR3_IPC_HDR_SIZE,

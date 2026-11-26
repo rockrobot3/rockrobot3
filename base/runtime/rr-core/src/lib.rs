@@ -8,10 +8,9 @@
 //! - 帧组装 [`rr3_frame_compose`]：opcode/flags/trace_id/timestamp_ns/src/dst 全由
 //!   调用方注入，本 crate 不读时钟、不睡眠、不碰 io。
 //!
-//! [`runtime`] 承载 `net.online` 的机制切片：连接态 [`runtime::Rr3LinkState`]、心跳调度
-//! [`runtime::Rr3ModuleRuntime`]、收帧分类 [`runtime::rr3_dispatch_class`]、自足档守护行
-//! [`runtime::Rr3GuardBuf`]。控制原语（限速/低电边沿/饱和/限位）已下沉叶子件 `rr-mech`，
-//! 本 crate re-export 保持路径逐字可用。
+//! [`runtime`] 承载 `net.online` 机制切片：连接态 [`runtime::Rr3LinkState`]、心跳调度
+//! [`runtime::Rr3ModuleRuntime`]、收帧分类 [`runtime::rr3_dispatch_class`]、守护行
+//! [`runtime::Rr3GuardBuf`]。控制原语（限速/低电边沿/饱和/限位）已下沉 `rr-mech`。
 //!
 //! 主承载层（UDS、线程、serde_json）不在这里——那是 `rr-bus`；本 crate 是其在裸金属上
 //! 可复用的语义内核。

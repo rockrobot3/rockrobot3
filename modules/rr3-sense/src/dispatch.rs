@@ -15,8 +15,7 @@
 //! 整窗回看交 capture::rr3_doa_fix）。策略量全在 config（Rr3ReflexConfig 等），
 //! 此处只有判定与算术。
 //!
-//! 发布/读帧失败 Err 上抛致命：模块不装"活着"，死交给 supervisor 按
-//! restart_policy=always 重启（rrd 的进程语义）。
+//! 发布/读帧失败 Err 上抛致命：模块不装"活着"，死交 supervisor 按 restart_policy=always 重启。
 
 mod nod;
 mod pan;

@@ -15,8 +15,7 @@
 //! `AudioQueueStop(true)` 等在途回调收尾，再 `AudioQueueDispose(true)`，最后回收
 //! Shared（两 API 的同步语义保证此后 C 侧无引用）。
 //!
-//! 设备：不传 device 走系统缺省；麦克风 TCC 首次弹窗，拒权表现为 `AudioQueueStart`
-//! 失败（显式回错）或拾音静默。
+//! 设备：不传 device 走系统缺省；麦克风 TCC 首次弹窗，拒权表现为 `AudioQueueStart` 失败或拾音静默。
 
 mod ffi;
 mod shared;

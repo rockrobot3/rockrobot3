@@ -5,8 +5,7 @@
 //!
 //! 状态机只管"一轮 utterance 的边界"：
 //! - **onset** 边沿起一轮，此后到达的 pcm 帧持续积累（s16le 小端字节）；
-//! - **offset** 边沿判停（sense 的 VAD 已按 silence_tail_ms 判静默——brain 不重复
-//!   一套静默计时，两本真值是错误形状）；
+//! - **offset** 边沿判停（sense 的 VAD 已按 silence_tail_ms 判静默——brain 不重复计时）；
 //! - **时长上限** max_utterance_ms 到点同样判停：连续语音无 offset 时也要有界；
 //! - 上限之内的 pcm 帧在无 utterance 时丢弃（不开轮不积累）。
 //!

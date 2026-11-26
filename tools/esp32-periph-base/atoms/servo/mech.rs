@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! servo 原子件 · 机制核（MC-7 缺② 收编原子模块形态）。
 //!
-//! **格位对齐申报**：本件服务 `act.servo` 格位（esp32-mini 装配单格主 = rr3-act
-//! 宿主件，板侧经桥执行）；板侧执行面**不冒领格主**、不立 atom.toml——`provides`
-//! 恰一格与板无关断言是格主面法则。
+//! **格位对齐申报**：本件服务 `act.servo` 格位（esp32-mini 装配单格主 = rr3-act 宿主件，
+//! 板侧经桥执行）；板侧执行面**不冒领格主**、不立 atom.toml——`provides` 恰一格是格主面法则。
 //!
 //! **机制与策略分离**：本文件零策略字面量——行程/中位读生成表（真值点
 //! hardware/esp32-mini/axis/*.toml），duty 锚点（`DUTY_MIN`/`DUTY_MAX`）由调用方

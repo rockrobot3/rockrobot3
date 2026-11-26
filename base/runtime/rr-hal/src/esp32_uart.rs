@@ -15,8 +15,7 @@
 //! 且 `trace_id` 原样回带，本侧按 `dst==1` 门 + id 回显校验。位形/主题/信封真值单点在
 //! `rr-periph-proto`（ADR-0024，固件双向复用），本模块 re-export 保持路径不变。
 //!
-//! 慢速事件级（ADR-0007）：set_angle/draw 一次 round-trip ~26ms（115200/300B），远低于
-//! 100Hz 事务上限，不碰反射环边界。
+//! 慢速事件级（ADR-0007）：set_angle/draw 一次 round-trip ~26ms（115200/300B），远低于 100Hz 事务上限。
 
 use std::path::PathBuf;
 use std::sync::Mutex;
