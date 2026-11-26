@@ -19,8 +19,8 @@ usage() {
   bash tools/deploy/flash-artifact.sh <elf> [--chip esp32|esp32s3]
                                        [--bootloader <bin>] [--port <dev>] [--monitor]
 例:
-  bash tools/deploy/flash-artifact.sh ~/Downloads/rr3-periph-base-esp32-safe-dev.elf \
-    --bootloader ~/Downloads/rr3-bootloader-esp32-dev.bin --monitor
+  bash tools/deploy/flash-artifact.sh ./rr3-periph-base-esp32-safe-dev.elf \
+    --bootloader ./rr3-bootloader-esp32-dev.bin --monitor
 EOF
   exit "${1:-2}"
 }

@@ -34,6 +34,7 @@ cd "$(dirname "$0")/../.." # 仓根
 
 PROJ=tools/esp32-periph-base
 ELF_NAME=esp32-periph-base
+PARTITIONS="$PROJ/partitions.csv"
 BUILD=debug
 MONITOR=0
 PORT=
@@ -101,6 +102,12 @@ ELF="$( cd "$PROJ" && rr3_cargo_artifact xtensa-esp32-espidf "$BUILD" "$ELF_NAME
 [ -f "$ELF" ] || die "ELF 不在树: $ELF"
 echo "PASS  ELF 在树: $ELF"
 
+# 分区表必须钉到工程真值：espflash 按 cwd 猜 partitions.csv，猜不到就用内置缺省，
+# spool 分区随之缺位——语音段静默降级，属 fail-closed 面必须拦下的错配。
+[ -f "$PARTITIONS" ] || die "分区表缺位: $PARTITIONS"
+grep -Eq '^[[:space:]]*spool' "$PARTITIONS" || die "分区表无 spool 条目: $PARTITIONS"
+echo "PASS  分区表: ${PARTITIONS}（含 spool）"
+
 echo "== ④ descriptor 校验（.flash.appdesc 三查）=="
 # 工具链根随装机布局而异：crate 本地 `.embuild`（esp-idf-sys 按 workspace 根推导；
 # 外部显式注入 EMBUILD_ROOT 时优先）或 ESP-IDF 全局工具目录
@@ -129,10 +136,10 @@ if [ "$CHECK_ONLY" = 1 ]; then
 fi
 
 echo "== ⑤ 烧录（espflash flash$([ "$MONITOR" = 1 ] && echo ' + monitor，退出键 Ctrl+]')）=="
-flash_args=()
+flash_args=(--chip esp32 --partition-table "$PARTITIONS")
 if [ -n "$PORT" ]; then flash_args+=(--port "$PORT"); fi
 if [ "$MONITOR" = 1 ]; then flash_args+=(--monitor); fi
 # 哨兵展开必加：bash 3.2（macOS 默认）+ set -u 下空数组 "${arr[@]}" 即 unbound
-# variable（无 --port/--monitor 时 flash_args 为空）——空时不展开任何词
+# variable（无 --port/--monitor 时数组仅含固定两项）——空时不展开任何词
 espflash flash ${flash_args[@]+"${flash_args[@]}"} "$ELF" || die "espflash 烧录失败"
 echo "PASS  烧录完成: $ELF → 板"

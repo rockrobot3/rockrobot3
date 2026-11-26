@@ -16,7 +16,7 @@ BUILD=debug
 ELF=""
 OUT=""
 BOOT=""
-PARTS=""
+PARTS="tools/esp32-periph-base/partitions.csv"
 CHIP=esp32
 FLASH=4mb
 
@@ -71,9 +71,11 @@ printf '%s\n' "$espflash_ver" | grep -qE '^espflash 4\.' \
   || die "espflash 非 4.x: ${espflash_ver}（版本钉 4.x）"
 
 echo "== ③ 装配面（save-image --merge）=="
-merge_args=(--chip "$CHIP" --merge --flash-size "$FLASH")
+# 分区表缺省钉工程真值：espflash 猜不到即用内置缺省，spool 分区缺位 = 语音段静默降级。
+[ -f "$PARTS" ] || die "分区表缺位: $PARTS"
+grep -Eq '^[[:space:]]*spool' "$PARTS" || die "分区表无 spool 条目: $PARTS"
+merge_args=(--chip "$CHIP" --merge --flash-size "$FLASH" --partition-table "$PARTS")
 [ -n "$BOOT" ] && merge_args+=(--bootloader "$BOOT")
-[ -n "$PARTS" ] && merge_args+=(--partition-table "$PARTS")
 espflash save-image ${merge_args[@]+"${merge_args[@]}"} "$ELF" "$OUT" \
   || die "save-image 装配失败"
 
