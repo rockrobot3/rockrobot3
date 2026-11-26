@@ -143,12 +143,22 @@ jobs:
       - name: 安装 ALSA 开发头
         run: |
           set -o pipefail
-          if ! sudo apt-get update -qq 2>&1 | tail -2; then
-            echo "::warning title=apt::apt-get update 失败，继续尝试安装"
-          fi
-          if ! sudo apt-get install -y -qq libasound2-dev pkg-config 2>&1 | tee /tmp/apt-alsa.log; then
+          # Ubuntu 归档偶发单包 404（索引与池短暂不一致）：安装做有界重试，
+          # 每次重试前刷新索引，第三次仍失败才判红。
+          ok=0
+          for i in 1 2 3; do
+            sudo apt-get update -qq 2>&1 | tail -2 || \
+              echo "::warning title=apt::apt-get update 失败（第 ${i} 次），继续尝试安装"
+            if sudo apt-get install -y -qq libasound2-dev pkg-config 2>&1 | tee /tmp/apt-alsa.log; then
+              ok=1
+              break
+            fi
+            echo "::warning title=apt::安装失败（第 ${i} 次），10s 后重试"
+            sleep 10
+          done
+          if [ "$ok" != 1 ]; then
             bash tools/ci/lib/log-digest.sh --title apt-alsa --log /tmp/apt-alsa.log \
-              --sig 'unable to locate|has no installation candidate|depends|error' --tail 3
+              --sig 'unable to locate|has no installation candidate|depends|error|404' --tail 3
             exit 1
           fi
       - name: rr-hal alsa 特性全目标编译 + 单测
