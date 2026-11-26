@@ -1,26 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-//! wifi 原子件机制主体（五件套③，自原 src/wifi.rs 逐字迁入，逻辑零改动）。
-//!
-//! WiFi 链路：`rr3-connect/net/link` 状态机与周期流 + 配网面三 RPC（0.0.4 批D）。
+//! wifi 原子件机制主体：WiFi 链路状态机与配网面三 RPC。
 //!
 //! HAL 读数（`Rr3LinkState`）→ 状态机裁决（翻转必发 + 周期保底）→ 事件体上路。
-//! 漫游/重连是**模块侧策略**，本轮不实装（0.0.5 批I N-6：无读者的
-//! roam_probe_enabled 键已删除，漫游实装时再随工单进册）；NetworkManager/D-Bus
-//! 属板上件（cfg 门骨架，0.0.2 方案 D7），sim 后端状态由环境注入定死——状态机
-//! 的翻转分支只有纯函数单测能钉，e2e 只见首拍基线与周期流（e2e_power 的时序
-//! 教训同款分工）。
+//! 漫游/重连是**模块侧策略**，本轮不实装；NetworkManager/D-Bus 属板上件（cfg 门
+//! 骨架），sim 后端状态由环境注入定死——状态机的翻转分支只有纯函数单测能钉，
+//! e2e 只见首拍基线与周期流。
 //!
-//! 配网面（0.0.4 方案 D4/Q3）：AP 配网状态机是**模块内策略**，不进 HAL——sim
-//! 是"设备"不是"策略"，HAL 只如实报数（up/ssid/rssi），凭据态归
-//! [`Rr3Provision`]，net/link 体以 `mode` 字段随流发布（契约只增不改，0.0.4
-//! 批D append）。connect/forget 只改状态机与凭据态：**凭据持久化由后端承载**
-//! （MC-6：linux = NetworkManager 连接配置，经 `Rr3WifiStore` 注入），件内
-//! 不自写文件、不出现落盘路径字面量——[`Rr3Provision`] 只管态不管存。
-//! scan 回 sim 模拟列表（`backend:"sim"` 诚实标注），板上换 NetworkManager。
+//! 配网面：AP 配网状态机是**模块内策略**，不进 HAL——sim 是"设备"不是"策略"，
+//! HAL 只如实报数（up/ssid/rssi），凭据态归 [`Rr3Provision`]，net/link 体以
+//! `mode` 字段随流发布（契约只增不改）。connect/forget 只改状态机与凭据态：
+//! **凭据持久化由后端承载**（linux = NetworkManager 连接配置，经 `Rr3WifiStore`
+//! 注入），件内不自写文件、不出现落盘路径字面量。scan 回 sim 模拟列表
+//! （`backend:"sim"` 诚实标注），板上换 NetworkManager。
 //!
-//! 载荷组装与参数下钻面（0.0.5 批I N-7，ADR-0019 修订 4）：`rr3_link_body`、
-//! 三枚 `*_result` 与三枚 `*_parse_args` 的 json!/Value 下钻上移承载层
-//! （src/composite.rs），件面 serde_json 清零——本件只交纯结构体与判定。
+//! 载荷组装与参数下钻面（ADR-0019 修订 4）：`rr3_link_body`、三枚 `*_result` 与
+//! 三枚 `*_parse_args` 的 json!/Value 下钻上移承载层（src/composite.rs），件面
+//! serde_json 清零——本件只交纯结构体与判定。
 
 use rr_hal_api::Rr3SsidText;
 

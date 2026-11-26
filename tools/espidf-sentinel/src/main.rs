@@ -11,16 +11,13 @@
 //!
 //! 安全核逐拍对拍：manifest 的 `rr3-sentinel/diag/parity` 应答跑
 //! `rr_core::control::parity::rr3_parity_run()` 真实原语，输出经 serde_json 手工展开
-//! 回带，**不回显 RR3_PARITY_EXPECTED**（板上输出与期望向量必须相互独立）；输入序列
-//! 与语义单源在 rr-core，本文件零向量复制。
+//! 回带，**不回显 RR3_PARITY_EXPECTED**（输出与期望向量相互独立）。
 //!
 //! 接线：UART2 = GPIO17→适配器 RXD / GPIO16←适配器 TXD，115200，3.3V TTL，共地；
-//! UART0 控制台（monitor 观测面）。
-//!
-//! 平台事实（esp-idf-hal 0.44.1）：同一 UART 口只能 `uart_driver_install` 一次，故整装
-//! 后 `Box::leak` + `split()` 出 `'static` 半体；半体 io 面是 `embedded_io`，std 桥在
-//! `uart.rs` 手写；半体漏标 `Send`，以两个 `unsafe impl Send` 补齐；LX6 无 64 位原子，
-//! id 与计数全用 `AtomicU32`。
+//! UART0 控制台（monitor 观测面）。平台事实（esp-idf-hal 0.44.1）：同一 UART 口只能
+//! `uart_driver_install` 一次，故整装后 `Box::leak` + `split()` 出 `'static` 半体；
+//! 半体 io 面是 `embedded_io`，std 桥在 `uart.rs` 手写；半体漏标 `Send`，以两个
+//! `unsafe impl Send` 补齐；LX6 无 64 位原子，id 与计数全用 `AtomicU32`。
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};

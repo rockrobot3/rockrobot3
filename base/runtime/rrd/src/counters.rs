@@ -1,26 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 //! 运维计数聚合的持久化：聚合表**断电尽量不丢**的落点。
 //!
-//! 落盘时机（裁定演进，结论）：不再 write-through 逐次刷——真板 eMMC 上高频小写 =
-//! 磨损 + I/O 抖动。改为**心跳合并写**：M 毫秒窗口至多一次 + N 拍兜底 + 优雅关停
-//! 强制 flush；写序仍是同一条原子写序（tmp → fsync → rename），数据面零改动。
-//! 代价 = 断电丢 ≤M 秒运维账（计数是运维账不是账本事实，裁定接受）。
+//! 落盘时机：不再 write-through 逐次刷——真板 eMMC 上高频小写 = 磨损 + I/O 抖动。
+//! 改为**心跳合并写**：M 毫秒窗口至多一次 + N 拍兜底 + 优雅关停强制 flush；写序仍是
+//! 同一条原子写序（tmp → fsync → rename）。代价 = 断电丢 ≤M 秒运维账（计数是运维账
+//! 不是账本事实，裁定接受）。
 //!
-//! 执行面（续轮十三）：窗口到点的落盘**不在心跳 reader 线程里做**——一次 SD 抖动会
-//! 把其余模块的心跳处理排在磁盘后面，慢过看门狗即误判死。reader 只 `try_send`
-//! 投递"该落盘了"（非阻塞），快照与 fsync 全在 `rrd-ctr-store` 单线程；
-//! `Rr3CountersGate` 的 `in_flight` 防重复排程，判活记账先于计数归并。
+//! 执行面：窗口到点的落盘**不在心跳 reader 线程里做**——一次 SD 抖动会把其余模块的
+//! 心跳处理排在磁盘后面，慢过看门狗即误判死。reader 只 `try_send` 投递"该落盘了"
+//! （非阻塞），快照与 fsync 全在 `rrd-ctr-store` 单线程；`Rr3CountersGate` 的
+//! `in_flight` 防重复排程，判活记账先于计数归并。
 //!
-//! 存亡可读（续轮二十一）：`ctl.status.ctr_store` 三态 `off`/`on`/`dead`——线程
-//! panic 或起不来都记 `dead`（启用过但执行面不在，不能读成"未启用"）。
+//! 存亡可读：`ctl.status.ctr_store` 三态 `off`/`on`/`dead`——线程 panic 或起不来都记
+//! `dead`（启用过但执行面不在，不能读成"未启用"）。
 //!
-//! 旋钮（env，parse-or-default；运维账旋钮不走 CLI fail-closed）：
-//! `RR3_COUNTERS_FLUSH_MS` 合并窗口（缺省 10_000）、`RR3_COUNTERS_FLUSH_MAX`
-//! 拍数兜底（缺省 64）。
-//!
-//! 路径（[`rr3_path_with`] 纯函数）：`RR3_DATA_DIR` 有值 → `$RR3_DATA_DIR/counters.json`；
-//! linux 无 env → `/data/rr3/counters.json`（rr_data 分区挂载点）；其余 → `None`，
-//! 启动日志一行点名，不报错。
+//! 旋钮（env，parse-or-default）：`RR3_COUNTERS_FLUSH_MS` 合并窗口（缺省 10_000）、
+//! `RR3_COUNTERS_FLUSH_MAX` 拍数兜底（缺省 64）。路径（[`rr3_path_with`] 纯函数）：
+//! `RR3_DATA_DIR` 有值 → `$RR3_DATA_DIR/counters.json`；linux 无 env →
+//! `/data/rr3/counters.json`；其余 → `None`，启动日志一行点名，不报错。
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

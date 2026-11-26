@@ -9,18 +9,14 @@
 //! 分层：`profiles/<机型>.toml` 是人写数据源（rrd 解析并点名形状错误）；本模块是运行期
 //! 消费端——解析注入文本、合成生效绑定，键位语义与取值域在这里裁。
 //!
-//! 键集纪律（C4 裁定）：`[hardware]` **不扩键**，扩键/扩 role 走契约级评审，且必须
-//! 本文件、`rr3_env_override_map`、rr-registry `RR3_ASSEMBLE_DESC_KEYS` 与
-//! `tests/contract.rs` **四处同批**——副本滞后时方向是拒绝（fail-closed），不会带病放行。
+//! 键集纪律：`[hardware]` **不扩键**，扩键/扩 role 走契约级评审，且必须本文件、
+//! `rr3_env_override_map`、rr-registry `RR3_ASSEMBLE_DESC_KEYS` 与 `tests/contract.rs`
+//! **四处同批**——副本滞后时方向是拒绝（fail-closed），不会带病放行。
 //!
 //! 键分两轨：**引脚派生键**（`ui.face.i2c` 的 addr → `oled_addr` 等）由装配单 `[pins]`
-//! 派生，rrd 门 n 收；**板侧直给键**（`i2c_sda`/`i2c_scl`/`adc_rail_pin`/`uart2_*`/
-//! `ledc_*`/`i2s_*`/`cred_store`）无能力面角色、不进派生集，也**不设** `RR3_HAL_*`
-//! 应急覆盖位——现场只改装配单 + 重启，不设第二注入面。`cred_store` 是**非 GPIO**
-//! 存储标记（`nvs:<namespace>`），取值域裁决单点在 rr-ipc。
-//!
-//! `ledc_pan`/`ledc_tilt` 与 esp32-mini 的 `[[pin]] physical` 同源同值，[pins] 派生
-//! 落位后这两个直给键退役（本文件与在册表同批删）。
+//! 派生；**板侧直给键**（`i2c_sda`/`i2c_scl`/`adc_rail_pin`/`uart2_*`/`ledc_*`/`i2s_*`/
+//! `cred_store`）无能力面角色、不进派生集，也**不设** `RR3_HAL_*` 应急覆盖位——现场
+//! 只改装配单 + 重启。`cred_store` 是**非 GPIO** 存储标记（`nvs:<namespace>`）。
 
 use std::collections::BTreeMap;
 

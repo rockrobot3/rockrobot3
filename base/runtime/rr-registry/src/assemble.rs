@@ -11,16 +11,13 @@
 //!
 //! `[assemble].demands`（电流申报，ADR-0021 裁定 2）：每角色实例需求
 //! `{rail, peak_ma, sustained_ma, critical, concurrency_group}`，读者按实例数扩算
-//! 后比域 cap；本模块只管形状（sustained ≤ peak、critical 显式、组键显式——
-//! 缺省与漏填不可区分）。缺 demands = 空申报合法，执法面在 rrd 装载拒链（门 c）。
+//! 后比域 cap；只管形状（sustained ≤ peak、critical/组键显式）；缺申报 = 空合法，执法在 rrd 拒链。
 //!
 //! `task_stack_bytes` / `heap_peak_bytes`（校验⑩ 分子）：件级**非每实例**语义，
-//! 缺省 0 = 未申报不进 Σ；给键须非负整数。组合件级不认这两键。预算分母住
-//! `[supplies].budget`（rrd 域，ADR-0021 修订 3）。
+//! 缺省 0 = 未申报不进 Σ；给键须非负整数。预算分母住 `[supplies].budget`。
 //!
-//! 装配段缺项处置：该格 `Degraded` 并点名到件，不 fatal（件没病，改数据 + 重启
-//! 是唯一解除路）。trait 真值源 = `rr-hal-api`，键真值源 = rr-hal `descriptor.rs`
-//! （不扩键）；本表滞后的方向是"新 trait/键被拒"（fail-closed，不带病放行）。
+//! 装配段缺项处置：该格 `Degraded` 并点名到件，不 fatal。trait 真值源 = `rr-hal-api`，
+//! 键真值源 = rr-hal `descriptor.rs`（不扩键）；本表滞后的方向是"新 trait/键被拒"。
 
 use toml::Value;
 

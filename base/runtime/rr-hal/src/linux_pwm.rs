@@ -1,26 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-//! linux（sysfs PWM）舵机后端：SG90 硬件 PWM（R22 定案档，0.0.6 方案 §5.4 R11①）。
+//! linux（sysfs PWM）舵机后端：SG90 硬件 PWM。
 //!
-//! 编译门是单重的：`target_os = "linux"`——纯 std（sysfs 读写），无外部依赖、
-//! 无 feature 门（与 [`crate::linux`] 的 alsa 双门不同）。主机 CI（macOS）不编译
-//! 本文件；宿主侧验证路径 = aarch64 musl 交叉 check（R13）+ 板上
-//! `cargo test -p rr-hal`（真 linux 目标跑全部单测，单测用临时目录假 sysfs 树，
-//! 确定性、不触真硬件）。真件档验收（真舵机到位后的脉宽/抖动实测）留批F5a
-//! 真件档，随 R9 矩阵"舵机"行验收（方案 §5.2）。
+//! 编译门单重 `target_os = "linux"`——纯 std（sysfs 读写），无外部依赖、无 feature
+//! 门。主机 CI（macOS）不编译本文件；验证路径 = aarch64 musl 交叉 check + 板上
+//! `cargo test -p rr-hal`（临时目录假 sysfs 树，确定性、不触真硬件）。真件档验收
+//! （脉宽/抖动实测）随 R9 矩阵"舵机"行。
 //!
 //! 接口面：内核 pwm sysfs（`/sys/class/pwm/pwmchipN/{export,unexport,pwmM/…}`）。
-//! SG90 定案参数（方案 §5.5.2 接线 1 / R22）：50Hz（20ms 周期），脉宽
-//! 0.5–2.5ms 线性映射 0–180°；通道经 `RR3_HAL_PWM_CHIP` / `RR3_HAL_PWM_CHANNEL`
-//! 选（缺省 pwmchip0/pwm0 = GPIO12，R8 引脚预算表的硬件 PWM 行）。
+//! SG90 定案参数：50Hz（20ms 周期），脉宽 0.5–2.5ms 线性映射 0–180°；通道经
+//! `RR3_HAL_PWM_CHIP` / `RR3_HAL_PWM_CHANNEL` 选（缺省 pwmchip0/pwm0 = GPIO12）。
 //!
-//! boot 语义（R11①）：真件档装配单显式 `RR3_HAL_BACKEND=linux` 后，模块开机
-//! 探活读 [`crate::Rr3PwmServo::angle`] 触发首次 ensure——芯片/通道不在位
-//! （dtoverlay 未开、权限不足）在此显式报错，rr3-act 按"能力缺失显式回错"
-//! exit(1)，不静默退化。取通道所有权即落定全量配置（50Hz + 中位 90° 脉宽 +
-//! 使能）：与 sim 后端"初始角 90°"同语义（探活读回 90，两后端观测一致，
-//! R11 换装判据"编排与契约零改动"），也避免沿用上一进程遗留的未知占空比
-//! 起动。进程退出（Drop）停发脉冲 + 归还通道（仅限自己导出的），防舵机在
-//! 无人驱动时维持抖动。
+//! boot 语义：真件档装配单显式 `RR3_HAL_BACKEND=linux` 后，开机探活读
+//! [`crate::Rr3PwmServo::angle`] 触发首次 ensure——芯片/通道不在位（dtoverlay
+//! 未开、权限不足）显式报错，rr3-act 按"能力缺失显式回错"exit(1)，不静默退化。
+//! 取通道所有权即落定全量配置（50Hz + 中位 90° 脉宽 + 使能）：与 sim 后端"初始角
+//! 90°"同语义，也避免沿用上一进程遗留占空比起动。Drop 停发脉冲 + 归还通道，
+//! 防舵机在无人驱动时维持抖动。
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
