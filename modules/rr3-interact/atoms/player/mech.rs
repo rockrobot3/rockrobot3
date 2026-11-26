@@ -1,27 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
-//! player 原子件机制主体（五件套③，0.0.5 MC-1 重铺：占位合成退役，件面只搬运）。
+//! player 原子件机制主体：件面只搬运，不做合成。
 //!
-//! M3 的正弦 burst 占位合成（60ms/字符、封顶 10s）随 MC-1 退役：brain 的 TTS
-//! 引擎经 `rr3-brain/audio/tts_pcm` 流下发真 PCM（s16le/16k/mono），件面只做
-//! **搬运**——20ms（320 样点）分块写 sink，块边界不改造样本。写块粒度与采集
-//! 侧（rr3-sense）的 frame_ms 同拍：sim 后端 write 即时返回（无时钟），实时
+//! brain 的 TTS 引擎经 `rr3-brain/audio/tts_pcm` 流下发真 PCM（s16le/16k/mono），
+//! 件面只做**搬运**——20ms（320 样点）分块写 sink，块边界不改造样本。写块粒度与
+//! 采集侧（rr3-sense）的 frame_ms 同拍：sim 后端 write 即时返回（无时钟），实时
 //! 后端（ALSA）write 本身就耗一个节拍——两种后端同一形状。
 //!
-//! 载荷组装（`rr3_tts_result` 的 json!）、流收缓冲与点名下钻（`rr3_tts_parse_args`）
-//! 在承载层 `src/composite.rs`（0.0.5 批I I-8，ADR-0019 修订 4）：件面只交播放
-//! 机制，线上字节归承载层。
+//! 载荷组装、流收缓冲与点名下钻在承载层 `src/composite.rs`（ADR-0019 修订 4）：
+//! 件面只交播放机制，线上字节归承载层。
 //!
 //! ⑧-b：机制主体不 `use std`、不分配——`&[i16]` 借用进、`u64` 毫秒出。
 //!
-//! 错误面零堆化（0.0.8 批N24 件四，L-3 形状清理）：`rr3_tts_play` 返回
-//! [`Rr3TtsPlayError`] 零堆枚举（写腿失败携 `Rr3HalError` 原样随行，机制层
-//! 不落 `String` 堆），人读文案由编排层渲染（`src/composite.rs` 的
-//! `rr3_tts_err_text`，与改前逐字一致）；HAL 句柄入参改泛型
-//! （`S: Rr3AudioSink + ?Sized`，调用点单态化不改行为）。
+//! 错误面零堆化：`rr3_tts_play` 返回 [`Rr3TtsPlayError`] 零堆枚举（写腿失败携
+//! `Rr3HalError` 原样随行），人读文案由编排层渲染（`rr3_tts_err_text`）；HAL 句柄
+//! 入参泛型化（`S: Rr3AudioSink + ?Sized`），调用点单态化不改行为。
 //!
-//! clippy `result_large_err` 模块级豁免：`Rr3ErrText` 内联 128B 是 no_std 面
-//! 定长契约（无堆可 Box），错误变体随行 HAL 错即必然 >128B——缩容会破坏零堆
-//! 契约，不属可清的临时债。
+//! clippy `result_large_err` 模块级豁免：`Rr3ErrText` 内联 128B 是 no_std 面定长
+//! 契约（无堆可 Box），缩容会破坏零堆契约，不属可清的临时债。
 
 #![allow(clippy::result_large_err)]
 

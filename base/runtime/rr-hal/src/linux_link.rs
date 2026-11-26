@@ -2,26 +2,22 @@
 //! Linux（NetworkManager）链路读数后端。编译门单重：`target_os = "linux"`。
 //!
 //! 承载选 **nmcli 子进程轮询**而非 D-Bus 直连：配网/对拍全套命令已在 nmcli 上，
-//! `std::process::Command` 零新依赖，不破"libc 声明壳纯 Rust、musl 静态"纪律
-//! （D-Bus 要 zbus 级大库且 async 耦合）。轮询节拍由模块侧 `link_report_period_ms`
-//! 控制；HAL 每次 `state()` 现读现报，不持 fd 无 ensure——这里是进程面不是设备面。
+//! `std::process::Command` 零新依赖（D-Bus 要 zbus 级大库且 async 耦合）。轮询节拍
+//! 由模块侧 `link_report_period_ms` 控制；HAL 每次 `state()` 现读现报，不持 fd。
 //!
 //! 一轮两次调用（terse `-t`，冒号分隔、值内 `:`/`\` 转义）：
 //! 1. `nmcli -t -f GENERAL.STATE,GENERAL.CONNECTION,GENERAL.TYPE dev show <if>`：
-//!    STATE=100 即 up；CONNECTION 是活动 profile 名（可改名，仅作 SSID 回落）；
-//!    TYPE 区分 wifi/有线（非 wifi 无 SSID/RSSI 语义，如实 None）。
+//!    STATE=100 即 up；CONNECTION 是活动 profile 名；TYPE 区分 wifi/有线。
 //! 2. up 且 wifi：`nmcli -t -f IN-USE,SSID,SIGNAL dev wifi list ifname <if> --rescan no`，
-//!    取 `*` 行。SIGNAL 是 0–100 质量不是 dBm，按 q/2−100 近似折算（注释钉死）；
-//!    `--rescan no` 只读缓存（扫描是秒级阻塞，不许进周期拍）；缓存空/失败 →
-//!    SSID 回落 CONNECTION、RSSI None，不编造。
+//!    取 `*` 行。SIGNAL 是 0–100 质量不是 dBm，按 q/2−100 近似折算；`--rescan no`
+//!    只读缓存（扫描是秒级阻塞，不许进周期拍）；缓存空/失败 → SSID 回落
+//!    CONNECTION、RSSI None，不编造。
 //!
-//! 分工与 sim 同一条：NM 承载配网与重连（autoconnect），模块侧只读翻转上报，HAL
-//! 只如实报数。`up=false` 时 ssid/rssi 强制 None——真设备断链后拿不到读数，不许从
-//! "down 还带着 ssid"发明语义。
+//! 分工与 sim 同一条：NM 承载配网与重连，模块侧只读翻转上报，HAL 只如实报数。
+//! `up=false` 时 ssid/rssi 强制 None，不许从"down 还带着 ssid"发明语义。
 //!
 //! 超时：每次调用受模块 `timeout_ms` 管住——spawn 后轮询 `try_wait`，到点 kill 并
-//! 显式回错。正常退出后的管道读也套同一 deadline：kill 只收直子进程，幸存孙进程
-//! 持写端时阻塞读会拖到孙退出（`rr3_nm_read_capped`，nmcli_support 共享层）。
+//! 显式回错；管道读同套 deadline（`rr3_nm_read_capped`，幸存孙进程持写端不拖死）。
 
 use std::path::PathBuf;
 use std::time::Duration;

@@ -1,27 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
-//! dialog 原子件机制主体（五件套③，批N32 件四 Rust 拆分定形：utterance 边界
-//! （onset 起轮 / offset 判停 / 时长上限判停）。纯逻辑不碰总线不碰网络不碰
-//! JSON——机制核（ADR-0017 五层表机制层；件面零 std/serde 直引，⑧-b 依赖闭包
-//! 纪律，alloc/契约层编解码同 rr-ipc 先例），事件体字段适配上移组合件
-//! [`crate::dispatch`]（0.0.5 批I S-7 同款），编排消费面亦在该组合件。
+//! dialog 原子件机制主体：utterance 边界（onset 起轮 / offset 判停 / 时长上限判停）。
+//! 纯逻辑不碰总线不碰网络不碰 JSON——机制核（ADR-0017 五层表机制层；件面零
+//! std/serde 直引），事件体字段适配与编排消费面上移组合件 [`crate::dispatch`]。
 //!
 //! 状态机只管"一轮 utterance 的边界"：
 //! - **onset** 边沿起一轮，此后到达的 pcm 帧持续积累（s16le 小端字节）；
 //! - **offset** 边沿判停（sense 的 VAD 已按 silence_tail_ms 判静默——brain 不重复
 //!   一套静默计时，两本真值是错误形状）；
-//! - **时长上限** max_utterance_ms 到点同样判停（继承 legacy asr_begin(max_seconds)
-//!   的精神：连续语音无 offset 时也要有界）；
+//! - **时长上限** max_utterance_ms 到点同样判停：连续语音无 offset 时也要有界；
 //! - 上限之内的 pcm 帧在无 utterance 时丢弃（不开轮不积累）。
 //!
 //! 判停后交出的 PCM = **onset 前的预滚**（至多 [`RR3_PREROLL_MS`]）+ onset 起到
-//! 判停帧为止的全部字节。预滚的必要性：sense 的 onset 事件要凑满 `min_speech_ms`
-//! （config 200ms）连续有声才发出——这段「判据语音」本体在 onset 事件**之前**就
-//! 已流过总线；无预滚则每轮削头 200ms+，短句（~0.5s 的「你好」级）所剩过短，云端
-//! ASR 对过短音频回空文本（2026-10-21 真板 E2E 实测「识别为空文本」的健康流成因）。
+//! 判停帧为止的全部字节。sense 的 onset 要凑满 `min_speech_ms`（config 200ms）
+//! 才发出——这段判据语音本体在 onset 事件之前就已流过总线；无预滚则短句削头
+//! 200ms+，云端 ASR 对过短音频回空文本（真板实测健康流成因）。
 //!
-//! 时钟纪律（0.0.5 批I A-2 同款）：状态机不持时钟，`now_ms` 由调用方注入
-//! （Dispatcher 的单调时基 [`rr_bus_api::Rr3TimeBase`]）——合成时钟逐拍注入，
-//! 单测不真等墙钟。
+//! 时钟纪律：状态机不持时钟，`now_ms` 由调用方注入（Dispatcher 的单调时基
+//! [`rr_bus_api::Rr3TimeBase`]）——合成时钟逐拍注入，单测不真等墙钟。
 
 extern crate alloc;
 
