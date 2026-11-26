@@ -231,27 +231,15 @@ log_max_us=66 boot_max=60`，续命余量 2.5×、落盘余量约 750×。阈值
 [0.0.8 无硬件窗续轮计划](process/dev/0.0.8/无硬件开发/0.0.8版本无硬件开发计划-续轮.md) 为单一真源；
 本节只留「码面已落、回执未到」的项，收口即删：
 
-- **Buildroot 全量镜像**：构建 + 内容断言双绿（run `44035094772`，artifact 265,842,537 B）；
+- **Buildroot 全量镜像**：构建 + 内容断言 + release/ghcr 推送全绿（v0.0.8 窗）；
   串口出 shell / maskrom 实烧仍待硬件；
-- **ADR-0028 release job**：码面在案（`6369880`）；缺一次 `v*` 标签 + Secret
-  `RR3_OTA_SIGNING_KEY` 的正回执；
-- **action 运行时升级**：全量引用已升 Node 24 档（checkout / upload / download /
-  setup-qemu / cache v5）；2026-11-24 再升发布路径三件——`docker/login v4`、
-  `docker/setup-buildx v4`、`gh-release v3`（v4 仅运行时/ESM 变更，buildx 移除的
-  输入本仓未使用；v3 历史回执 run `44257954571` **不覆盖**这次升级）。
-  `buildroot` 的 dtb 腿已用 cache v5 实跑成功（2026-11-24）；login/buildx/gh-release
-  只在 tag 执行，**待 `v*` 窗口取 v4/v3 正回执**；platforms 的 esp32 双腿 cache v5
-  已实跑成功（`b507855`，注解只剩 build-size notice）；
-- **发布面 provenance/SBOM**：码面在案（2026-11-24，三条镜像腿 `buildx --push` 附
-  `--provenance=mode=max --sbom=true`；riscv 走 `build-riscv-image.sh --push`）；
-  缺一次 `v*` 窗口回执（runbook B 的 attestation 计数 ≥2）；签名（cosign）未启用；
-- **unsafe 注释审计**：生产面 122 处全部带前言，基线 **0**（`957a093` + `42722d1`）；
-  新代码由 gate `scripts` job 执法；
 - **CI 冷启动基线取回**：`rr3-sim --chain` 的「启动基线」行数值需 job 日志鉴权，
-  待取回归档（不拿本机值替代）；
-- **publish 合并标签冒烟**：历史 main 推送曾给正回执（run `44257954571`：edge 镜像
-  build×2 + merge 全 success，多架构清单与 image-smoke 通过；该分支此后不在本流程）；
-  `v*` tag / 自定义 dispatch 仍待凭据。
+  待取回归档（不拿本机值替代）。
+
+v0.0.8 发布窗已结清：ADR-0028 release job（run `45757282210`，五腿 success +
+九件资产）、发布路径 action 升级（`docker/login v4` / `setup-buildx v4` /
+`gh-release v3` 在同一次 tag 执行）、provenance/SBOM（三镜像腿 attestation
+计数在作业日志内断言）、publish 合并标签冒烟（多架构清单 + image-smoke）。
 
 历史在制品与 0.0.5–0.0.8 批次全景（原文照搬，含历次锚点重锚记录）已迁出为
 [status-history.md](status-history.md)；**历史原文不改写**，与现状冲突处以本节、

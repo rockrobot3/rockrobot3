@@ -1270,3 +1270,29 @@ scripts job。判据——`commit_msg_audit.py` 自检与主体通过（2 条豁
 提交输出 `tag=v0.0.8 version=0.0.8`。
 **契约记录**：⑤/⑫ 以函数/进程退出码报红，⑬/⑯ 以全局 `fail` 报红——体检与复算
 必须按各自契约取值，只读退出码会把 ⑯ 的判红误读成绿。
+
+**2026-11-26 批53 烧录面收口（静态一致性）**：事实——`flash-esp32.sh` 直接
+`espflash flash "$ELF"`，分区表靠 cwd 猜；从仓根跑猜不到 `tools/esp32-periph-base/
+partitions.csv`，内置缺省表没有 `spool`，语音段会静默降级；`image-esp32.sh`
+未给 `--partitions` 时同样吃内置表。处置：两条路径都把分区表钉到工程真值并在烧录/
+装配前 `fail-closed` 校验 `spool` 条目；`flash-artifact.sh` 只改示例路径（`~/Downloads`
+→ `./`），语义不变。判据——三脚本 `bash -n` 通过、⑬ 全绿；未实板执行（硬件未到位），
+实板首烧按 `tools/deploy/README.md` §验收回填。RK3566 侧核对：maskrom 手册的
+32KiB/6MiB 裸区与 `genimage.cfg` 的 `offset = 32K/6M` 一致，镜像名与 `post-image.sh`
+注入链一致，无需改动。
+
+**2026-11-26 批54 运行流畅度静态审计（不改代码）**：逐点核对三个热路径——
+① 广播扇出在注册表锁内只做 `try_send` 到有界队列，满队列丢当前帧并计数、不阻塞
+（`registry/view.rs` `rr3_reg_fanout`）；② 看门狗按固定栅格排拍，扫描耗时不计入
+周期，超时只点名不补跳（`daemon/tick.rs` `rr3_watchdog_loop`）；③ sim 采集在
+`open` 时预解波形函数指针与每通道增益/相位，`read` 不走逐样本查找
+（`sim/source.rs` `Rr3SimOpen`）。三处均已是目标形态，未发现可被现有测试/指标
+证明的退化项，故本轮不动生产代码。
+
+**2026-11-26 批56 apt 安装收拢（`apt-retry` 复合 action）**：事实——gate 有
+三次有界重试，platforms/publish/buildroot 共五处各自内联单次安装或复制重试骨架，
+口径漂移且失败归因不一致。处置——新增 `.github/actions/apt-retry`（每轮先刷新索引
+再装、三次有界重试、末次经 `log-digest` 压注解），六处调用统一为"包名 + 标题 +
+日志名"；`tools/deploy` 与工作流文档同步。判据——`workflows_audit.py` 通过；head
+`8ef6a51` 四工作流全绿，其中 gate（alsa）、platforms（riscv64 ×2）、buildroot
+（dts + 宿主依赖 ×2）实际执行了本 action。
