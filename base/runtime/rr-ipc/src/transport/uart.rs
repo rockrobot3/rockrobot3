@@ -17,8 +17,7 @@
 //! monitor）不守 flock，须按 runbook 先清场。fd 一律 `O_CLOEXEC`，锁的释放点不得
 //! 被子进程生命周期拖长；`Command::spawn` 复制 fd 表瞬间短暂持锁属合法瞬态。
 //!
-//! 波特率只收 [`rr3_uart_baud_speed`] 认识的档位（115200 缺省 / 9600 / 921600 /
-//! 1.5M / 2M）；高速档只显式选择。
+//! 波特率只收 [`rr3_uart_baud_speed`] 认的档位（115200 缺省 / 9600 / 921600 / 1.5M / 2M）。
 
 use std::io::{Read, Write};
 use std::path::Path;

@@ -17,8 +17,7 @@
 //! fail-closed。
 //!
 //! python 模块（`lang = "python"`）产物是 shim 脚本而非 ELF：`PYTHONPATH` 与
-//! `config` 必须是装机绝对路径，故 shim 由本器生成；仓内六模块当前全 Rust，
-//! 该路径是机制保留位。运行期语言不分支（rrd 只看 entry 可执行）。
+//! `config` 必须装机绝对路径，故 shim 由本器生成；仓内六模块当前全 Rust（保留位）。
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};

@@ -5,21 +5,15 @@
 //! 解析）+ [`serve`]（死亡探针 → 分帧 → RPC/订阅分发 → 节拍）+ [`Dispatcher`]。
 //! 语义真值全在 rr-bus-api / rr-core / rr-ipc，本 crate 不立第二份实现。
 //!
-//! 定形要点：
-//! - `on_rpc` 返 `Err` = 业务性失败，serve 折 `{"error": …}` 应答；`on_event`/`on_tick`
-//!   返 `Err` = 传输/设备级失败，上抛致命（main `exit(1)` 交 supervisor）。
-//! - HAL 选择与探活归各模块 boot.rs（接入层），`Unsupported` 即 `Err`；
-//!   SURFACE 启动自述留 main（ADR-0017 裁定 3）。
-//! - 刻意不提供 subscribe：线上无订阅注册帧（全量扇出 + 本地过滤），订阅过滤是
-//!   `on_event` 的本地职责。
-//! - 六消费方同批改：本 crate API 修订须五模块 + brain 迁移件同批改，不许骨架单方漂移。
+//! 定形要点：`on_rpc` 返 `Err` = 业务失败折 `{"error": …}`；`on_event`/`on_tick` 返
+//! `Err` = 传输/设备级失败上抛致命（main `exit(1)` 交 supervisor）。HAL 选择与探活
+//! 归各模块 boot.rs，`Unsupported` 即 `Err`；SURFACE 启动自述留 main。
+//! 刻意不提供 subscribe：线上无订阅注册帧（全量扇出 + 本地过滤）。本 crate API 修订
+//! 须五模块 + brain 迁移件同批改，不许骨架单方漂移。
 //!
 //! `#[cfg(unix)]` 门与 rr-bus-api 同形状；非 unix 目标只余 [`RR3_MANIFEST_ENV`]。
 
-/// rrd spawn 注入的 manifest 绝对路径（supervisor.rs 契约环境变量）。
-/// 现五模块各自本地定义（rr3-act / rr3-sense / rr3-connect / rr3-power /
-/// rr3-interact 的 main.rs 各一份）——收编单点（0.0.8 方案 §2.2），模块侧本地
-/// 常量随批1–批5 拆分退役。
+/// rrd spawn 注入的 manifest 绝对路径（supervisor 契约；模块侧本地常量随批退役）。
 pub const RR3_MANIFEST_ENV: &str = "RR3_MANIFEST";
 
 #[cfg(unix)]

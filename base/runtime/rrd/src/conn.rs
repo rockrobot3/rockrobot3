@@ -9,15 +9,14 @@
 //!
 //! 协议面：首帧必须是 `dst=RR3_TASK_RRD` 的 `rr3.register`，否则断开；`src_task` 由
 //! rrd 分配并回带，其后上行帧必须相等（用户态不得自设），伪造帧只拒该帧不断连；
-//! 注册前不收心跳、不判活，未注册连接由读超时收掉，注册后由 2× 看门狗窗口的静默
-//! 上界回收（判死权仍归看门狗）；`rr3.unregister` 是主动退场，不走 restart_policy；
-//! `Event` 过三层归属检查（内建命名空间冒充 → 前缀/owner 越权 → 主题未登记）后转发
-//! 给除发布者外的在册连接，头改写为发布者 task + `dst=0`，拒法只回错误帧 + 计数；
+//! 注册前不收心跳、不判活，未注册连接由读超时收掉，注册后由 2× 看门狗窗口静默上界
+//! 回收（判死权归看门狗）。`Event` 过三层归属检查（内建命名空间冒充 → 前缀/owner
+//! 越权 → 主题未登记）后转发给除发布者外的在册连接，头改写为发布者 task + `dst=0`；
 //! `Response` 是 `rr3.call` 回程：trace_id = 调用方 task，body 原样、dst 改写为
-//! trace_id 定向回投，trace_id=0 或调用方不在册只回错误帧。
+//! trace_id 定向回投。
 //!
 //! 写面：reader 写应答、writer 写广播，同一 socket 的 `try_clone` 句柄 + 一把
-//! `Mutex<UnixStream>`，一帧一次 `write_all` → 整帧原子；但应答与广播的相对顺序不
+//! `Mutex<UnixStream>`，一帧一次 `write_all` → 整帧原子；应答与广播的相对顺序不
 //! 保证，测试按类型/字段挑帧，不按序号。
 
 use std::io::{ErrorKind, Write};

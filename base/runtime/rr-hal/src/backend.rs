@@ -1,24 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 //! 后端标识与选择入口（architecture.md §5、ADR-0007）。
 //!
-//! | 后端 | 落地 | 承载 |
-//! |---|---|---|
-//! | `linux` | M3（`linux.rs`，`alsa` feature + `target_os = "linux"` 双门） | Buildroot 根文件系统内的 ALSA 采集/回放 |
-//! | `linux`（舵机） | 批F5a（`linux_pwm.rs`，仅 `target_os = "linux"` 单门，纯 std） | 树莓派 sysfs PWM 驱动 SG90（R11①/R22 定案档，GPIO12/13） |
-//! | `linux`（GPIO） | 批F5a（`linux_gpio.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | 树莓派 chardev GPIO 数字输出：LED / 继电器（R11②，R8 预算表 GPIO4/17 软件路行） |
-//! | `linux`（显示） | 链④真件档（`linux_display.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | MAX7219 spidev 点阵帧渲染（R11③ trait 立面 + 链④真件到位实装；设备路径来自描述符 `spi_device`） |
-//! | `linux`（显示·OLED） | W5-3（`linux_oled.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | SSD1306 128x64 I2C 单色屏（8x8 帧 8 倍放大居中；`i2c_bus` + `oled_addr` 两键齐备即选本档，优先于 MAX7219） |
-//! | `linux`（电源） | 批F5a（`linux_power.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | INA219@0x40 I2C 总线电压读数（R18，判据 12；charging 判定随真件档校准） |
-//! | `linux`（链路） | 批F5a（`linux_link.rs`，仅 `target_os = "linux"` 单门，nmcli 子进程） | NetworkManager 链路状态读数（R18，判据 13；配网/断链重连是 NM 自身行为，HAL 只如实报数） |
-//! | `sim` | M3（`sim.rs`：正弦/噪声/静音三模式虚拟麦克风 + 尾窗虚拟扬声器） | `tools/sim`（bin `rr3-sim`）与 CI、无硬件开发 |
-//! | `mac` | 宿主真件（`macaudio.rs`，仅 `target_os = "macos"` 单门，手写 AudioQueue 绑定） | macOS 宿主真麦拾音/扬声器回放——显式 `RR3_HAL_BACKEND=mac` 才启用，平台缺省仍 sim（CI 纪律） |
-//! | `esp32` | 批C（`esp32_uart.rs`，`RR3_HAL_PERIPH_UART` 指定设备路径）；A 批 c3 音频源（`esp32audio.rs`，板面双麦流） | ESP32 外设桥：舵机/显示两能力面的 UART 能力帧承载 + 音频上行——板不进城，宿主直连；跨进程 flock 排他即单消费者 |
-//! | `placeholder` | 恒回 `Unsupported` | 能力缺失显式回错的兜底（`Rr3UnavailableSource`） |
+//! | 后端 | 承载 |
+//! |---|---|
+//! | `linux` | ALSA 采集/回放（`linux.rs`，`alsa` feature + `target_os` 双门） |
+//! | `linux` 舵机/GPIO/显示/电源/链路 | sysfs PWM、chardev GPIO、MAX7219/SSD1306、INA219、nmcli——各单门文件，设备路径取描述符 |
+//! | `sim` | 虚拟麦克风/扬声器（`tools/sim` 与 CI、无硬件开发） |
+//! | `mac` | AudioQueue 真麦/扬声器（显式 `RR3_HAL_BACKEND=mac`，缺省仍 sim） |
+//! | `esp32` | 外设桥 UART 能力帧 + 音频上行（板不进城，宿主直连，flock 单消费者） |
+//! | `placeholder` | 恒回 `Unsupported`（能力缺失显式回错） |
 //!
 //! 反射环（1k–10kHz 电机 FOC/PID）不进这些 trait，留在 `rr3-act` 进程内。
-//!
-//! 模块按能力面分件：`selector` 后端判定、`parse` 各 env 值裁决、`sink` 音频
-//! 输入/输出、`acts` servo/gpio/display、`power` 电源与轨压、`link` 链路与配网存储。
+//! 模块按能力面分件：`selector` 判定、`parse` env 裁决、`sink` 音频、`acts`
+//! servo/gpio/display、`power` 电源与轨压、`link` 链路与配网存储。
 
 mod acts;
 mod link;

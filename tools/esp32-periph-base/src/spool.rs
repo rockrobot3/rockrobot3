@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 语音段 flash spool 的 ESP 分区后端与写线程（ADR-0031，W7-b1a/W7-b3b）。
+//! 语音段 flash spool 的 ESP 分区后端与写线程（ADR-0031）。
 //!
 //! 机制（记录头 magic/len/CRC、顺序写、分块读、断电语义）在
 //! [`rr_audio_mech::Rr3Spool`]；本件做两件策略事：
@@ -9,16 +9,12 @@
 //!    擦除是毫秒级操作，绝不允许在音频热路径上发生。
 //!
 //! 状态机（`SPOOL_STATE`，单写多读）：`Idle → Rec → Done → Idle`。`Rec` 期间
-//! 只有写线程能落盘；`Done` 表示记录已提交、等待策略面（dialog）分块读走并
-//! `rr3_spool_clear` 释放。`Done` 未释放前语音段无法开新段——状态即背压，
-//! 不排队、不覆盖。
+//! 只有写线程能落盘；`Done` 表示记录已提交、等待 dialog 分块读走并
+//! `rr3_spool_clear` 释放。`Done` 未释放前无法开新段——状态即背压。
 //!
 //! 命令通道容量 16 块（320 ms）；满即拒（调用方弃段并计数），写线程空闲 2 s
-//! 仍处 `Rec` 时自行弃段——防语音侧异常导致的记录悬挂。
-//!
-//! 跨重启：上电只清理残留记录（语音已过期，不做补传），并打印 seq/len/crc 供
-//! 现场对账。分区真值见 crate 根 `partitions.csv`（label=spool，1MB，
-//! data/undefined）。
+//! 仍处 `Rec` 时自行弃段。跨重启只清理残留记录（语音已过期，不做补传）；
+//! 分区真值见 crate 根 `partitions.csv`（label=spool，1MB，data/undefined）。
 
 use std::sync::atomic::{AtomicU16, AtomicU8, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};

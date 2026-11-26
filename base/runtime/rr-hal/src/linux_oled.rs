@@ -16,9 +16,8 @@
 //! 适配器而异）。init 按 datasheet：关显示 → 时钟/复用/电荷泵/寻址 → 开显示；对比度
 //! 取 [`RR3_SSD1306_CONTRAST_DEFAULT`]，不留 env 旋钮（旋钮只给物理绑定）。
 //!
-//! boot：构造只存根/总线/地址，打开总线与 init 延迟到首次 trait 调用（ensure）；
-//! 设备不在位/无应答/权限不足显式报错，不静默退化。`frame()` 读回由 `last` 快照
-//! 承载（本档不做 GDDRAM 回读）。
+//! boot：构造只存根/总线/地址，打开总线与 init 延迟到首次 trait 调用（ensure）。设备
+//! 不在位/无应答/权限不足显式报错，不静默退化；`frame()` 读回由 `last` 快照承载。
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
