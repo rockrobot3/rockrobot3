@@ -1,34 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
-//! # rr-core —— 机制核切片：总线语义层
+//! # rr-core —— 机制核切片：总线语义层（ADR-0018 裁定 1：与 OS 无关、no_std、契约冻结）。
 //!
-//! 承 ADR-0018（docs/process/adr/ 在册）裁定 1：机制核与操作系统无关、`no_std`（core+alloc）可达、契约级冻结。字节协议层
-//! 已下沉（`rr-ipc` protocol，0.0.7 批B）；本 crate（0.0.5 第 II 轮批D₁）把**总线语义**
-//! 从 `rr-bus`（std 客户端 crate）里抽出下沉：
+//! 字节协议在 `rr-ipc`；本 crate 只装总线语义：
+//! - 常量层：task 号空间（0 广播 / 1 rrd / ≥2 模块）、EVENT 优先级带、主题分隔符、
+//!   schema 版本、点名方法名——唯一真值在此，`rr-bus` 仅 re-export 保持 import 不变；
+//! - 寻址：task 归属 [`rr3_task_kind`]、trace_id 直连 [`RR3_TRACE_ID_DIRECT`]；
+//! - 帧组装 [`rr3_frame_compose`]：opcode/flags/trace_id/timestamp_ns/src/dst 全由
+//!   调用方注入，本 crate 不读时钟、不睡眠、不碰 io。
 //!
-//! - **常量层**：task 号空间（0 广播 / 1 rrd / ≥2 模块）、EVENT 优先级占位带、主题分隔符、
-//!   契约 schema 版本透传、模块间点名方法名——唯一真值在 `rr-core`，`rr-bus` re-export
-//!   保持既有 import 路径逐字不变；
-//! - **寻址规则**：task 号归属判定（[`rr3_task_kind`]）与 trace_id 直连语义
-//!   （[`RR3_TRACE_ID_DIRECT`]）；
-//! - **帧组装**：[`rr3_frame_compose`] —— opcode/flags/trace_id/**timestamp_ns**/src/dst
-//!   全部由调用方注入，本 crate 不读任何时钟、不睡眠、不碰 io（ADR-0018 裁定 5 的
-//!   机制侧前提）；payload 类型前缀复用 `rr-ipc` 的 body 编解码。
+//! [`runtime`] 承载 `net.online` 的机制切片：连接态 [`runtime::Rr3LinkState`]、心跳调度
+//! [`runtime::Rr3ModuleRuntime`]、收帧分类 [`runtime::rr3_dispatch_class`]、自足档守护行
+//! [`runtime::Rr3GuardBuf`]。控制原语（限速/低电边沿/饱和/限位）已下沉叶子件 `rr-mech`，
+//! 本 crate re-export 保持路径逐字可用。
 //!
-//! `net.online` 格（contracts/slots.toml base 层）的机制核切片落位于
-//! [`runtime`] 模块（批D₂）：执行环（连接→注册→心跳→分发→节拍）的连接态
-//! 语义 [`runtime::Rr3LinkState`] / 心跳拍点调度 [`runtime::Rr3ModuleRuntime`] /
-//! 收帧分发分类 [`runtime::rr3_dispatch_class`]；常量与寻址先行落位（批D₁）。
-//! 自足档本地守护输出行（起动态/喂拍/安全核触发-拒动，UART/RTT 行文法）落
-//! [`runtime::Rr3GuardBuf`]（0.0.5 批K H6）。
-//! 控制原语与安全核切片落 [`control`] 模块（批D₃）：限速门 / 低电边沿 / 饱和
-//! 检测 / 限位钳位，纯函数 + 注入时钟（裁定 5）。该切片已再下沉为叶子件 `rr-mech`
-//! （0.0.5 批M），本 crate 以 re-export 保持本路径逐字可用。
+//! 主承载层（UDS、线程、serde_json）不在这里——那是 `rr-bus`；本 crate 是其在裸金属上
+//! 可复用的语义内核。
 //!
-//! 主承载层（std 客户端：UDS、线程、serde_json）不在这里——那是 `rr-bus` 的事；
-//! 本 crate 是它在裸金属目标上可复用的语义内核。
-//!
-//! 零策略载荷：不得出现厂商名 / 产品名 / 业务阈值 / `if (厂商 == …)`
-//! （architecture §13 门禁，批E 接线——门禁 grep 自身禁词，本行以中文表述自指）。
+//! 零策略载荷：不得出现厂商名/产品名/业务阈值/`if (厂商 == …)`（architecture §13 门禁）。
 
 #![no_std]
 

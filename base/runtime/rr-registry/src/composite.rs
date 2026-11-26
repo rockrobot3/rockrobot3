@@ -1,33 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 组合件装配清单（`modules/<名>/composite.toml`，三层 manifest 的 Composite 层）
-//! 形状契约：组合件申报什么件、暴露哪些注入面。
+//! 组合件装配清单（`modules/<名>/composite.toml`，三层 manifest 的 Composite 层）：
+//! 申报组合哪些件、暴露哪些注入面。
 //!
-//! schema 位：组合件顶层 `schema_version` 归 [`RR3_COMPOSITE_SCHEMA_VERSION`]（=1）；
-//! 件级 `assemble.toml` 归 [`crate::assemble::RR3_ASSEMBLE_SCHEMA_VERSION`]（=2）。
-//! 两者同名不同域——各自文件形状各自的版本，**不互认、不迁移、不互相 bump**。
+//! schema 位：顶层 `schema_version` 归 [`RR3_COMPOSITE_SCHEMA_VERSION`]（=1）；件级
+//! `assemble.toml` 归 [`crate::assemble::RR3_ASSEMBLE_SCHEMA_VERSION`]（=2）——同名
+//! 不同域，不互认、不迁移、不互相 bump。
 //!
-//! 形状（与件级 [`crate::assemble`] **同形同规则**，条目解析直接共用其 helper，
-//! 不许组合件另说一套）：
+//! 形状与件级 [`crate::assemble`] 同形同规则（解析共用其 helper）：
+//! `schema_version` / `[composite] name,unit` / `[assemble] atoms,handles,ops,no_injection`。
+//! `atoms` 非空、每条非空串、不重复；`handles`/`ops` 双空时必须明写
+//! `no_injection = true`，把"漏填"与"确无注入面"分开。
 //!
-//! ```toml
-//! schema_version = 1
-//! [composite]
-//! name = "rr3-act"
-//! unit = "process"
-//! [assemble]
-//! atoms = ["servo", "led", "relay"]
-//! handles = []
-//! ops = []
-//! no_injection = true
-//! ```
-//!
-//! - `atoms`：⊗ 链，非空、每条非空串、不重复（空组合件无意义，重复申报无意义）。
-//! - `handles` / `ops` / `no_injection`：L-5 空面规则整条适用——两数组均空必须明写
-//!   `no_injection = true`，把"漏填"与"确无注入面"分开。
-//!
-//! fail-closed：键缺或取值出域逐条点名回 `Err`，与件级解析同一口径。
-//! 增键不 bump 的前提是"该形状尚无可运行的消费者"；对已激活形状做语义变更须升版本
-//! 并走契约级评审。
+//! fail-closed：键缺/取值出域逐条点名回 `Err`；对已激活形状做语义变更须升版本并走
+//! 契约级评审，增键不 bump 只对"尚无消费者"的形状成立。
 
 use crate::assemble::{
     rr3_handles_key, rr3_no_injection_err, rr3_ops_key, Rr3AssembleHandle, Rr3AssembleOp,

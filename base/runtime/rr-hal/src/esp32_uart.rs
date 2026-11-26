@@ -1,33 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
-//! ESP32 外设桥后端（0.0.5 增补轮五 批C）：舵机/显示两能力面的 UART 能力帧承载。
+//! ESP32 外设桥后端：舵机/显示两能力面的 UART 能力帧承载（路线二：板上外设不进城）。
 //!
-//! 路线二裁定（批C，Q1–Q4 对表）：板上外设**不进城**——不注册总线身份，宿主 HAL
-//! 桥后端直连 UART。"进城"读作"进传输层帧面 + 在册主题形状"：帧面 JSON-RPC
-//! `method` 恒 `rr3.call`、点名主题在 `params.topic`（conn.rs rr3_route_call 转发
-//! 形状，哨兵 handle_request 同款分发依据），主题复用在册
-//! `rr3-act/servo/command` 与 `rr3-interact/face/expression`，payload 形状与模块
-//! 应答体逐字同源（contracts/events/act-servo_command.schema.json、
-//! events/interact-face_expression.schema.json）——topics.toml/rrd/桥三个已收官
-//! 面零改动（`topics.toml` 全轮只许 P1 那一次改动的防重规则不受扰动）。
+//! 帧面仍走 JSON-RPC（`method=rr3.call`，主题在 `params.topic`），复用在册
+//! `rr3-act/servo/command` 与 `rr3-interact/face/expression`，payload 与模块应答体
+//! 同源——topics.toml / rrd / 桥三面零改动。
 //!
-//! 连接模型：**长连接**。首调 `Rr3UartConn::open_with_baud`（rr-ipc 排他开口：
-//! flock 账本，跨进程第二个 opener 当场被拒——两个模块进程同抢一块板是 fail-closed
-//! 点名，不是静默截流；open 自带 TCIFLUSH 开口即净，批D1 敞口的正式处置）。
-//! macOS CP2102 的 DTR/RTS 翻转会复位板子（E7 实锤），open 后等
-//! [`RR3_OPEN_SETTLE_MS`] 启动窗口再发首帧。io 失败 drop 连接（close + flock 退账）
-//! 下次调用重开。**读侧带应答窗口**（[`RR3_REPLY_WAIT_DS`]）：板侧对合法 Request
-//! 确定性应答，板死/断线/复位时读在窗口耗尽后回 Closed，调用方报废连接重开——
-//! 旧版缺省阻塞读会让 HAL/面板线程永久挂死（rr-ipc 只提供显式超时档，桥/哨兵等
-//! 该阻塞等的收流端语义不受影响）。
+//! 连接模型是长连接：`open_with_baud` 经 rr-ipc 排他开口（flock），第二个 opener
+//! 当场拒（fail-closed，不静默截流），open 自带 TCIFLUSH。macOS CP2102 的 DTR/RTS
+//! 翻转会复位板子，open 后须等 [`RR3_OPEN_SETTLE_MS`] 再发首帧。io 失败即 drop（close
+//! + 退账），下次调用重开。读侧带应答窗口 [`RR3_REPLY_WAIT_DS`]：板死/断线/复位时窗口
+//! 耗尽回 Closed，调用方报废重开——缺省阻塞读会让 HAL/面板线程永久挂死。
 //!
-//! task 位形（帧头约定）：宿主下行 `src=1`（rrd 位形，与 `rr-core::RR3_TASK_RRD`
-//! 同值），板上 `dst=2`（外设执行面位形，[`RR3_PERIPH_TASK`]）。应答帧板侧回
-//! `src=2/dst=1`、`trace_id` 原样回带，本侧按 `dst==1` 门 + id 回显校验。
-//! 位形/主题/信封真值单点在 `rr-periph-proto`（ADR-0024，固件双向复用），本模块
-//! re-export 保 `rr_hal::esp32_uart::*` 路径不变。
+//! 帧头位形：下行 `src=1`（rrd）、`dst=2`（[`RR3_PERIPH_TASK`]）；应答 `src=2/dst=1`
+//! 且 `trace_id` 原样回带，本侧按 `dst==1` 门 + id 回显校验。位形/主题/信封真值单点在
+//! `rr-periph-proto`（ADR-0024，固件双向复用），本模块 re-export 保持路径不变。
 //!
-//! 慢速事件级接口纪律（ADR-0007）：set_angle/draw 都是 round-trip ~26ms 量级
-//! （115200 下 300B 往返），远低于 100Hz 事务上限，不碰反射环边界。
+//! 慢速事件级（ADR-0007）：set_angle/draw 一次 round-trip ~26ms（115200/300B），远低于
+//! 100Hz 事务上限，不碰反射环边界。
 
 use std::path::PathBuf;
 use std::sync::Mutex;
