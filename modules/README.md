@@ -36,6 +36,12 @@ rr3-interact / rr3-power / rr3-connect / rr3-brain（批N32 件四起 rr3-brain 
 `.gitignore` 统一排除）；每个模块的内构目录见各自 README 与
 [`architecture.md`](../docs/architecture/architecture.md) §3。
 
+**六份 README 同形**（2026-11-27 批73 裁定）：小节固定为 *目录结构 → 总线面 →
+心跳自报计数 → 本地自检*，模块专属小节只准插在"总线面"之后（如 interact 的 Web 面板、
+brain 的意图规则面）。**没有自报计数的模块也要写这一节**，明说"不上报"与理由——
+"这节不存在"与"这模块没有计数"在读者眼里是两件事。测试条数、函数行数这类会漂的数字
+一律不抄进模块 README（要写就写"产出者 + 基线号 + 当时值"）。
+
 机器把关：② 步校验六份 `module.toml` 并钉住模块集合，④ 步编译六模块 crate
 （modules/ 下独立工程全量，连同 tools/、base/ota 同口径）。
 **这些入口今天做到哪一步**（只有自述、还是已接总线）属实况，唯一落点

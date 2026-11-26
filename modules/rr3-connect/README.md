@@ -57,6 +57,11 @@ rrd 日志环 + `rr3.ctl.logs` 与 rr3-ctl 承接，蓝牙链路暂无可发布�
 BlueZ 真后端批，⑧-a 门只读 [`slots.toml`](../../contracts/slots.toml)
 的 status 数据位）。
 
+## 心跳自报计数
+
+本模块**不上报**自报计数：没有逐拍可计的业务事件——链路状态走 `net/link` 事件面，
+配网与会话是按次应答的 RPC 面，失败在回包里点名（rrd 侧仍有 `denied_publish` 等全局计数）。
+
 ## 本地自检
 
 ```bash

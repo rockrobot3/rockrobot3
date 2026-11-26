@@ -26,7 +26,9 @@ modules/rr3-brain/
     └── rpc.rs           ← ops/list 快照 + ops/set 写臂（白名单/类型域校验 → live 生效不落盘 → 按组重建）
 ```
 
-## 与其它模块的边界
+## 总线面
+
+只经总线与其它模块相接——本模块的"边界"就是下表（不直连任何模块）：
 
 | 方向 | 主题 | 说明 |
 |---|---|---|
@@ -43,7 +45,7 @@ C14（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：原申报的 `rr3-int
 
 ## 心跳自报计数（0.0.4 批B，Q1 裁定）
 
-`dispatch.rs` 的 `counter_bump` 记账，心跳线程每拍随 `rr3.heartbeat` 的可选
+`dispatch/turn.rs` 的 `counter_bump` 记账，心跳线程每拍随 `rr3.heartbeat` 的可选
 `counters` 字段上行，rrd 按 `rr3-brain/<键>` 归并（`rr3.ctl.counters` 可查）。本模块的键：
 
 | 键 | 记账点 |
@@ -56,7 +58,7 @@ C14（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：原申报的 `rr3-int
 ## 本地自检
 
 ```bash
-# 单测（cargo test，77 条）
+# 单测
 cargo test --manifest-path modules/rr3-brain/Cargo.toml
 # 四真进程全语音对话闭环（rrd + rr3-sense + rr3-brain + rr3-interact 真二进制，云端 mock）
 cargo run --manifest-path tools/sim/Cargo.toml --bin rr3-sim -- --brain
