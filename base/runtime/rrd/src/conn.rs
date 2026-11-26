@@ -1,30 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 //! 单连接服务：本线程 reader + 一条 writer 线程。
 //!
-//! 分面（批B12）：本文件留共享件（帧构造/应答/写出口/`Rr3Flow`/拒绝出口）、
-//! 入站路由 `rr3_serve_frame`、上行方法表 `rr3_serve_request`、收尾与连接主流程；
-//! 协议分面各自成子模块——`conn/handshake.rs`（注册握手）、`conn/ctl.rs`
-//! （控制旁支）、`conn/publish.rs`（业务发布 + 低电兜底）、`conn/beat.rs`
-//! （心跳与升级）、`conn/route.rs`（`rr3.call` 与应答回程）、`conn/read.rs`
-//! （读侧循环与 ADR-0025 静默上界）。
+//! 本文件留共享件（帧构造/应答/写出口/`Rr3Flow`/拒绝出口）、入站路由
+//! `rr3_serve_frame`、上行方法表 `rr3_serve_request`、收尾与主流程；协议分面各自成
+//! 子模块：`conn/handshake.rs`（注册）、`ctl.rs`（控制旁支）、`publish.rs`（业务发布+
+//! 低电兜底）、`beat.rs`（心跳与升级）、`route.rs`（`rr3.call` 与应答回程）、
+//! `read.rs`（读侧循环与 ADR-0025 静默上界）。
 //!
-//! 协议面（spec §5.0 + 偏离 4）：
-//! - 第一条帧必须是 `Request` + `dst_task = RR3_TASK_RRD` 的 `rr3.register`，否则按协议错误断开；
-//! - `src_task` 由 rrd 分配并在应答 result 里回带；注册后上行帧的 `src_task` 必须等于分配值
-//!   （AOS-STD-IPC-024：用户态不得自设）——伪造的那一帧被拒，但连接不断（一次笔误不该让整机掉线）；
-//! - 注册完成前不收心跳、不判活（legacy 教训 76c0ad8）；未注册连接由读超时收掉；
-//!   注册后由静默上界（2 × 该模块看门狗窗口，ADR-0025）回收连接，判死权仍归看门狗；
-//! - `rr3.unregister` 是模块主动退场，**不走** restart_policy（那是崩溃语义）；
-//! - 上行 `Event` 是业务发布：过三层归属检查（冒充内建命名空间 → 前缀/在册 owner 越权 →
-//!   主题未登记）后原样转发给**除发布者外**的在册连接，头改写成发布者 task + `dst=0`；
-//!   任何一种拒法都只回错误帧 + 计数，不断连（spec §6、ADR-0006 决策 2/4）；
-//! - 上行 `Response` 是 M3 `rr3.call` 的应答回路：trace_id = 调用方 task（转发时写入），
-//!   body 原样、dst 改写为 trace_id 定向回投；trace_id=0 或调用方已不在册都只回错误帧
-//!   不断连（M3 定型，见 `route::rr3_route_call` / `route::rr3_route_response`）。
+//! 协议面：首帧必须是 `dst=RR3_TASK_RRD` 的 `rr3.register`，否则断开；`src_task` 由
+//! rrd 分配并回带，其后上行帧必须相等（用户态不得自设），伪造帧只拒该帧不断连；
+//! 注册前不收心跳、不判活，未注册连接由读超时收掉，注册后由 2× 看门狗窗口的静默
+//! 上界回收（判死权仍归看门狗）；`rr3.unregister` 是主动退场，不走 restart_policy；
+//! `Event` 过三层归属检查（内建命名空间冒充 → 前缀/owner 越权 → 主题未登记）后转发
+//! 给除发布者外的在册连接，头改写为发布者 task + `dst=0`，拒法只回错误帧 + 计数；
+//! `Response` 是 `rr3.call` 回程：trace_id = 调用方 task，body 原样、dst 改写为
+//! trace_id 定向回投，trace_id=0 或调用方不在册只回错误帧。
 //!
-//! 写面（本任务的并发形状）：reader 线程写应答、writer 线程写广播，两者持有同一 socket 的
-//! `try_clone` 句柄、共用一把 `Mutex<UnixStream>`、且一帧一次 `write_all` → **整帧原子**；
-//! 但同一 socket 上"应答 vs 广播"的**相对顺序不保证**，所以测试按类型/字段挑帧，不按序号。
+//! 写面：reader 写应答、writer 写广播，同一 socket 的 `try_clone` 句柄 + 一把
+//! `Mutex<UnixStream>`，一帧一次 `write_all` → 整帧原子；但应答与广播的相对顺序不
+//! 保证，测试按类型/字段挑帧，不按序号。
 
 use std::io::{ErrorKind, Write};
 use std::os::unix::net::UnixStream;

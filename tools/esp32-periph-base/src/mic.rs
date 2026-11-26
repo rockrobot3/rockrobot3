@@ -1,30 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 批D 采集冒烟 + 音频上行（INMP441 双麦 @ I2S0；0.0.5 增补轮五 全案 §4 批D）。
+//! 采集冒烟 + 音频上行（INMP441 双麦 @ I2S0）。
 //!
-//! 接线（README runbook 批D 节；两麦 L/R 时隙复用共一条总线）：
-//! - BCLK → GPIO4（两麦并接）、WS → GPIO26（两麦并接）、SD → GPIO27（两麦并接）
-//!   （**2026-10-20 迁移**：原 GPIO25 装配期全部音频为图案假阳性；根因为 rig 接触
-//!   面而非 pad 损坏——「BCLK 桥测」法对 BCLK 自身失明（自采样语义），撤回误判
-//!   过程见 main.rs 装配注）
-//! - 麦甲 L/R → GND（左时隙）、麦乙 L/R → 3V3（右时隙）——接错则双通道同相/单声道假象
-//! - VDD → 3V3、GND → GND；INMP441 无 MCLK 需求（mclk 传 None）
+//! 接线：BCLK→GPIO4、WS→GPIO26、SD→GPIO27（两麦并接）；麦甲 L/R→GND（左时隙）、
+//! 麦乙 L/R→3V3（右时隙）——接错即双通道同相/单声道假象；VDD→3V3、GND→GND；
+//! INMP441 无 MCLK（`mclk = None`）。
 //!
-//! API 对表实录（esp-idf-hal 0.44.1 vendored 源，批B 纪律）：
-//! - `I2sDriver::new_std_rx(i2s, config, bclk, din, mclk, ws)`（i2s/std.rs L825；
-//!   引脚序 bclk/din/mclk/ws，mclk: Option，INMP441 传 None::<AnyIOPin>）
-//! - `I2sDriver<I2sRx>::read(&mut self, buffer: &mut [u8], timeout: TickType_t)`
-//!   （i2s.rs L894）；`I2C_TIMEOUT = u32::MAX`（portMAX_DELAY 同款）复用主面常量
-//! - `StdConfig::philips(sample_rate, DataBitWidth)`（std.rs L66，Stereo 缺省）
-//!   Bits32 档 slot 默认 msb_right=false（L574：<=16bit 才置右对齐）——标准
-//!   Philips 32bit 帧，INMP441 24bit 有效数据**左对齐高位**，MSB first 大端
-//!   线序 → i32::from_be_bytes 后算术右移 8 位即 24bit 符号扩展幅度。
+//! 语义：`StdConfig::philips(rate, DataBitWidth)` 是 Stereo、32bit 帧、MSB first；
+//! INMP441 24bit 有效数据左对齐，故 `i32::from_be_bytes` 后算术右移 8 位即符号
+//! 扩展幅度；`read(buf, portMAX_DELAY)` 复用主面常量。
 //!
-//! 冒烟判据（判据①前哨）：双通道均有幅度（非全零/非饱和）、拍手可见峰值抬升、
-//! 左右通道非全等（全等 = L/R 脚接错或单麦虚接）。
+//! 冒烟判据：双通道均有幅度（非全零/非饱和）、拍手可见峰值抬升、左右非全等。
 //!
-//! 批D③ 音频上行：`AUDIO ON` 后攒满 [`AUDIO_CHUNK_FRAMES`] 帧即组 Event 帧
-//! （逐通道减本分片 DC → 24bit 截 16bit → s16le → b64 → JSON 体，topic 并入体）
-//! → 有界 audio_q → 控制面 `drain_audio` 整帧写 UART2（1.5M）；OFF 只出统计。
+//! 上行：`AUDIO ON` 后攒满 [`AUDIO_CHUNK_FRAMES`] 帧即组 Event（逐通道减本片 DC →
+//! 24bit 截 16bit → s16le → b64 → JSON 体）→ 有界 audio_q → 控制面 `drain_audio`
+//! 整帧写 UART2（1.5M）；`OFF` 只出统计。
 
 use std::sync::{Arc, Mutex};
 use std::thread;

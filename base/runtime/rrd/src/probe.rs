@@ -1,30 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 装配链硬件探测面（0.0.2 方案 D2；0.0.5 批M MC-4 实装真值接线）。
+//! 装配链硬件探测面：探测 fail-closed——探测不到与探测自身故障同判 `false`（缺格），
+//! 装配链对点名模块"绝不带病起"。拿不到答案不得当作在位。boot 前消费一次，运行期
+//! 不重排，不阻塞启动横幅。
 //!
-//! 探测 fail-closed（方案 §4、§20 第 4 条）：探测不到与探测自身故障同判——回
-//! `false` 即缺格，装配链对点名模块走"绝不带病起"。**拿不到答案不得当作在位**：
-//! 目录读失败、设备节点缺失一律 `false`。探测在 boot 前消费一次（ADR-0012 裁定 4：
-//! 运行期不重排），不阻塞启动横幅。
+//! 后端三档：[`Rr3LinuxProbe`] 生产 linux 真值探测——sysfs PWM / GPIO line / I2C /
+//! SPI / ALSA 五面在位性 + I2C 格位器件级探测（总线在 ≠ 器件在）；探测根可注入，
+//! 生产传 `/`、单测传假根，判据主机可测。[`Rr3AbsentProbe`] 非 linux 生产面——
+//! 有硬件面的格位恒缺，无硬件面可反证者判在位。[`Rr3SimProbe`] 显式档，只在 test、
+//! `RR3_PROBE=sim` 与显式注入时用，不再当缺省构造。
 //!
-//! 后端三档（MC-4 台-1 清零）：
-//! - [`Rr3LinuxProbe`]：**生产 linux 档的真值探测**，五面在位性（sysfs PWM 通道 /
-//!   GPIO line / I2C 设备 / SPI 设备 / ALSA 卡名）+ I2C 格位的**器件级探测**
-//!   （[`Rr3Probe::rr3_probe_slot_bound`]，L-14：总线在 ≠ 器件在，总线级降前置
-//!   条件）。探测根可注入（`rr3_linux_probe_new`），
-//!   生产传 `/`，单测传假根——判据因此主机可测。纯 std，无外部依赖，全平台编译。
-//! - [`Rr3AbsentProbe`]：非 linux 生产面（本机 macOS 直跑 rrd 的场合）——有硬件面的
-//!   格位恒缺（不冒充在位，fail-closed）；无硬件面可反证的格位与真值探测同判"在位"。
-//! - [`Rr3SimProbe`]：**显式档，不再当缺省构造**——sim 机无硬件可探，只在 test 面、
-//!   显式 env（`RR3_PROBE=sim`，e2e/开发机用）与显式注入
-//!   （`rr3_boot_with_probe`）里用。
+//! 选择口 [`rr3_probe_default`] 与 `RR3_HAL_BACKEND` 同纪律：env 显式优先
+//! （`RR3_PROBE=sim|linux|absent`，取值不认点名后回落），否则按目标分流（test→sim；
+//! linux→真值；其余生产面→恒缺）。
 //!
-//! 选择口（[`rr3_probe_default`]）与 `RR3_HAL_BACKEND` 同一条纪律：**env 显式取值优先**
-//! （`RR3_PROBE=sim|linux|absent`，取值不认当场 `eprintln!` 点名后回落平台默认），
-//! 否则按目标分流（test → sim；linux → 真值探测；其余生产面 → 恒缺）。
-//!
-//! 格位 → 探测面映射（[`rr3_slot_probe_face`]）：有硬件面的格位按面探，无硬件面
-//! 可反证的格位（`cognition.*` 软件格、`net.wifi`/`net.bt` 运行期格、基础层）回
-//! "在位"——那是"没有反证"不是"探测拿不到答案"，两者不同判。
+//! 格位→面映射 [`rr3_slot_probe_face`]：有硬件面按面探；`cognition.*` 软件格、
+//! `net.wifi`/`net.bt` 运行期格与基础层回"在位"——"没有反证"与"拿不到答案"不同判。
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
