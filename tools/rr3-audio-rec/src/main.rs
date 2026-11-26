@@ -2,18 +2,15 @@
 //! rr3-audio-rec —— 音频上行收流端（宿主）：板面双麦 PCM → UART → wav。
 //!
 //! 链路：板 `mic` 分片（`rr3-sense/audio/pcm` Event，dst=1）→ UART2 1.5M → 本件
-//! `AUDIO ON` 起流 → dst/topic 双门 → b64 解码 → 累积 PCM → `AUDIO OFF` 后按实测
-//! 采样率写双通道 s16le wav。帧语义/串口/b64 全走 rr-ipc 单点。
-//!
+//! `AUDIO ON` 起流 → dst/topic 双门 → b64 解码 → 累积 PCM → `AUDIO OFF` 后按实测采样率
+//! 写双通道 s16le wav。帧语义/串口/b64 全走 rr-ipc 单点。
 //! 三级防护：① 读超时（`rr3_read_timeout`，`Ok(0)` = 暂无数据非 EOF）；② 失步重同步
-//! （坏帧弃 4B magic 续扫，连续 [`ERR_STREAK_RESYNC`] 次记一次）；③ 断流重连（见过
-//! 数据后连续 [`RESYNC_ZERO_BAIL`] 次零读 = 断流，重开口 + settle + `AUDIO ON`）。
-//!
+//! （坏帧弃 4B magic 续扫，连续 [`ERR_STREAK_RESYNC`] 次记一次）；③ 断流重连（见过数据
+//! 后连续 [`RESYNC_ZERO_BAIL`] 次零读 = 断流，重开口 + settle + `AUDIO ON`）。
 //! 线程分工：读线程裸读、解码线程纯内存拆帧（[`FrameAssembler`]）、写线程落盘；看门狗
-//! （[`STALL`] 无新分片）补 wav 恢复头并 exit 3，重连期解武装。开口纪律：open 后停
-//! 1.2s 等板复位，`rr3_flush_input` 净化；握手先发防御 `AUDIO OFF`（旧会话残流会抢
-//! 在 OK 前），停流冲净才 `AUDIO ON`。seq 只对账不补救：断档即背压丢片。
-//!
+//! （[`STALL`] 无新分片）补 wav 恢复头并 exit 3，重连期解武装。开口纪律：open 后停 1.2s
+//! 等板复位，`rr3_flush_input` 净化；握手先发防御 `AUDIO OFF`（旧会话残流会抢在 OK 前），
+//! 停流冲净才 `AUDIO ON`。seq 只对账不补救：断档即背压丢片。
 //! 用法：`<device> [--out <path>] [--secs <n>] [--baud <n>] [--doa]`；退出码 0 收兵 /
 //! 1 开口握手或磁盘失败 / 2 参数错 / 3 看门狗停滞 / 4 重连失败（1/3/4 先补恢复头）。
 

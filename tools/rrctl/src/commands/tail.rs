@@ -1,20 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-//! `tail` 子命令：订阅一个主题，把 Event 以 JSONL 逐条写 stdout（计划册 §15
-//! 第 2 项；DoA 标定与现场排障共用）。
+//! `tail` 子命令：订阅一个主题，把 Event 以 JSONL 逐条写 stdout（DoA 标定与现场排障共用）。
 //!
-//! 与其余八个子命令不同，tail **必须注册**：rrd 只向在册连接广播 Event
-//! （`rrd/src/conn/publish.rs` 的 `rr3_reg_fanout`），一次性控制连接收不到任何
-//! 业务帧。因此本面直接用模块侧标准客户端 `Rr3BusClient`——连接 / 注册 / 心跳 /
-//! 收帧全走同一机制单点，本文件只负责参数、过滤与打印。
+//! 与其余八个子命令不同，tail 必须注册：rrd 只向在册连接广播 Event
+//! （`rrd/src/conn/publish.rs` 的 `rr3_reg_fanout`），一次性控制连接收不到任何业务帧。
+//! 故本面直接用模块侧标准客户端 `Rr3BusClient`——连接 / 注册 / 心跳 / 收帧全走同一机制
+//! 单点，本文件只负责参数、过滤与打印。
 //!
-//! 身份固定为 `rr3-tail`（`^rr3-[a-z]+$` 不含数字，同机同一时刻只允许一个 tail；
-//! 重复注册由 rrd 回 Busy 并点名）。订阅面声明 `events.subscribes = [topic]`，topic
-//! 必须已在 `contracts/topics.toml` 登记——拼错在注册门被拒，不会静默看不到事件。
-//!
+//! 身份固定为 `rr3-tail`（`^rr3-[a-z]+$` 不含数字，同机同一时刻只允许一个 tail；重复注册
+//! 由 rrd 回 Busy 并点名）。订阅面声明 `events.subscribes = [topic]`，topic 必须已在
+//! `contracts/topics.toml` 登记——拼错在注册门被拒，不会静默看不到事件。
 //! 输出形状（stdout，一行一条）：`{"ts_ms":<转发时刻>,"src_task":<发布者>,"body":{...}}`。
-//! body 是线上原样事件体（含 `topic`），`jq '.body.doa.deg'` 即取 DoA 标定读数；
-//! 诊断与退出摘要走 stderr，stdout 保持可管道。
-//!
+//! body 是线上原样事件体（含 `topic`），`jq '.body.doa.deg'` 即取 DoA 标定读数；诊断与
+//! 退出摘要走 stderr，stdout 保持可管道。
 //! 退出码：收满 `--count` 为 0；超时 / 断链 / 注册失败为 1（main 统一渲染）。
 
 #[cfg(unix)]

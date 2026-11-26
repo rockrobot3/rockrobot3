@@ -1,21 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 //! rr3-pack —— 发行版快路 deb 打包器（ADR-0013 裁定 5）：两份真值 → 一个 deb。
 //!
-//! 输入：`--payload` 注入产物（rrd / rr3-ctl / rr3-ota-ctl / 模块 bin 或包树 +
-//! manifest）；`--repo` 仓根（装配单、contracts 六册、`hardware/<机型>/` 与轴档案、
-//! 模块 config）。成员清单真值只有 rrd `rr3_truth_set` 一份——打包面照单收口；
-//! 打包前按装载同判据预验，坏单不出包。
+//! 输入：`--payload` 注入产物（rrd / rr3-ctl / rr3-ota-ctl / 模块 bin 或包树 + manifest）；
+//! `--repo` 仓根（装配单、contracts 六册、`hardware/<机型>/` 与轴档案、模块 config）。
+//! 成员清单真值只有 rrd `rr3_truth_set` 一份——打包面照单收口；打包前按装载同判据预验，
+//! 坏单不出包。
 //!
 //! 布局：`/usr/bin/{rrd,rr3-ctl,rr3-ota-ctl}` + `/usr/lib/rockrobot3/{profiles,contracts,
 //! modules,hardware}` + `rrd.service` + `DEBIAN/{control,postinst}`（staging 纯 Rust 可单测）。
-//!
-//! 内容改写只有两处（其余字节零差异）：① entry 装机改写——manifest.entry 换成
-//! 装机绝对路径（线上注册门禁要求绝对路径），只改引号内一个值；② `rrd.service`
-//! 的 `--profile` 装机位随 `--profile` 同步改写（模板锚定 distro）——锚点缺席即
-//! fail-closed。
-//!
-//! python 模块（`lang = "python"`）产物是 shim 脚本而非 ELF：`PYTHONPATH` 与
-//! `config` 必须装机绝对路径，故 shim 由本器生成；仓内六模块当前全 Rust（保留位）。
+//! 内容改写只有两处（其余字节零差异）：entry 装机改写——manifest.entry 换成装机绝对路径
+//! （线上注册门禁要求绝对路径），只改引号内一个值；`rrd.service` 的 `--profile` 装机位随
+//! `--profile` 同步改写（模板锚定 distro）——锚点缺席即 fail-closed。
+//! python 模块（`lang = "python"`）产物是 shim 脚本而非 ELF：`PYTHONPATH` 与 `config` 必须
+//! 装机绝对路径，故 shim 由本器生成；仓内模块当前全 Rust（保留位）。
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
