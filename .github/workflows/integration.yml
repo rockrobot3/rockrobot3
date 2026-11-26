@@ -34,7 +34,12 @@ jobs:
       # /tmp/rr3-target），宿主侧不编一行 Rust——不装宿主工具链、不挂 rust-cache
       #（2026-11-17 治理：宿主钉版与缓存对容器内构建零命中，纯烧起步时间）。
       - name: deb 装机冒烟（rust:bookworm 容器）
-        run: bash tools/ci/platform/distro-smoke.sh
+        # 经 guarded-run：容器内失败原本只留一句 "exit code 101"，注解里没有根因
+        # （job 日志匿名不可读，403 已实证）。本步只加失败归因，命令与判据不变。
+        uses: ./.github/actions/guarded-run
+        with:
+          title: distro-smoke
+          command: bash tools/ci/platform/distro-smoke.sh
 
   # OTA 签名演练（ADR-0026，A1c）：临时测试种子走 keypub→manifest→sign→verify，
   # 正例一条 + 镜像篡改/清单篡改/错公钥/降级四条负例；真实私钥不进 CI。
