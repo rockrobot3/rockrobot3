@@ -1401,3 +1401,47 @@ fanout 丢帧读不到"的前提不成立：`rr3.ctl.status` 早带 `denied_publ
 文本行）命中数 0；远端 gate / integration / platforms 三条流水线在 `258778d` 全绿；
 `platforms` 绿同时验证批66 的快照步骤（`cargo_cache=hit|partial|miss` 一行）可正常执行。
 **教训入册**：压缩行数时不许拆掉列表与段落之间的空行——那是 markdown 结构，不是排版余量。
+
+**2026-11-27 批67 对外稿取证复核**：事实——参赛介绍里三类数字不可静态核：板上证据段的
+心跳/直方图/组帧延迟/增益、S3 段 App 字节数与占用率、改动清单表的行数列。处置——板上
+证据段改为"结论 + 判据形状"，读数回指证据册与 status 历史条目（条目内自带产出者与当时
+基线）；S3 段改"约占 16 MB 的 7%、boot 堆约 8.6 MB"并点名产出者（`espflash` 输出）与
+原始条目（三平台验证计划 §6.6）；改动清单表删行数列，改"取自那次 `git diff --numstat`、
+原提交在历史重锚后不可达，故不追哈希不抄行数"，并给出今天可复核的命令。判据——文档门 ⑤
+绿；全文再无"无产出者、无命令"的实测计数（人工逐条过一遍）。
+
+**2026-11-27 批68 板档目录同形**：事实——清点六个 `modules/*` 与十八个 `tools/*` 根文件：
+模块侧六份固定件（`module.toml`/`composite.toml`/`config.toml`/`Cargo.toml`/`Cargo.lock`/
+`README.md` + `src/`/`atoms/`）齐、可选件（`build.rs`+`sdkconfig.defaults`、`config-<板>.toml`）
+已在 `modules/README.md` 登记，无缺口；tools 侧唯一缺口是**承载平台底座** `pi-periph-base`
+没有根 README（`esp32-periph-base` 有），属平台间结构不对称。处置——补
+`tools/pi-periph-base/README.md`（端口表、两个控制面、策略面单点、接线表、未收口五项，数值
+逐条按 `board.rs` 常数与 `dispatch`/`info_of` 源码核对）；`tools/README.md` 落"板侧后端目录
+同形"裁定（四件事：端口表/策略面/接线/未收口，其余小工具一支一行不另立 README）；
+`docs/README.md` 补导航一行。判据——⑤ 文档门绿（新 README 在导航内、链接可达）、⑬ 仓面
+卫生绿。
+
+**2026-11-27 批69 广播帧共享体（运行流畅度）**：事实——`rr3_reg_fanout` 对每个收件连接
+`tx.try_send(frame.clone())`，即一次广播深拷 N 份 payload（N = 收件连接数；128 ms 音频片
+约 11 KB，六连接一帧约 66 KB），且这段复制发生在 registry 锁内。处置——收件队列元素改
+`Rr3FanFrame = Arc<Rr3Frame>`：`rr3_reg_fanout` / `rr3_reg_send_to` 改按值收帧、构造即入
+共享体，每连接只加一次引用计数；写线程按 `&Rr3Frame` 写，线上字节、投递语义、满侧丢帧
+策略（`RR3_FAN_CAP` 满即丢当前帧并计数）全部不变。前后计数：每帧深拷由 **N 份 → 0 份**
+（构造期那份保留），堆分配由 1+N 次 → 1 次，锁内复制量由 `N × (body+2)` 字节 → 0。
+判据——`rrd` 325 项 lib 测试全过、clippy `-D warnings` 与 `cargo fmt --check` 干净；
+gate / integration 在 `bed8eb4` 全绿。
+**漂红与根因（本轮实证）**：首推即红，注解把失败点指到 `rrd (lib test)` 与
+`rrd (lib)`——三类编译面漏项：① `registry.rs` 去掉 `Rr3Frame` 引入后，测试模块
+（`use super::*`）失去该类型；② `beat.rs`（恢复沿）与 `supervisor/schedule.rs`（降级沿）
+两处广播仍传借用；③ 字符串替换误伤 `&frame_to(b)`，生成 `frame.clone()_to(b)`。
+**教训入册**：批量改签名时，测试模块的 glob 引入不算"跟着改"；替换模式要带词边界
+（`&frame,` / `&frame)`），否则 `&frame_to` 这类同前缀标识符会被切坏。
+
+**2026-11-27 批70 两条烧录链现状与制品对表**：事实——部署册有"平台 × 入口 × 判据"矩阵，
+但缺"这条链跑到哪一步"与"制品 tag 与 `VERSION` 怎么对"两栏；ESP32 基本功能档的真实进度
+（S3 首烧、classic 复烧）散在证据册与验证计划里，RK3566 maskrom 只有文档没有实烧。处置——
+`tools/deploy/README.md` 增两节：①两条链现状表（已跑证据编号 / 待实板项 / 命令来源），
+②制品 tag 对表（`VERSION=0.0.8`、仓内唯一发布 tag `v0.0.8`、旧号归档
+`archive/v0.0.x/*`、五类制品的 tag 形状与触发条件、开发分支不产出制品）。判据——⑤ 文档门
+绿；表中每条"已跑"都能点回证据册条目或流水线 run 号，每个制品名都能在
+`publish.yml` / `buildroot.yml` 里逐字找到。
