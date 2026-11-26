@@ -1,30 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-//! linux（chardev UAPI）GPIO 数字输出后端：LED / 继电器（R11②，0.0.6 方案
-//! §5.4 R8 引脚预算表 GPIO4/17 软件路行）。
+//! linux（chardev UAPI）GPIO 数字输出后端：LED / 继电器。
 //!
-//! 编译门是单重的：`target_os = "linux"`——依赖 libc 仅取 `ioctl`/`close` 的
-//! extern 声明（纯 Rust 壳，musl 静态链接零额外 C 库依赖，R13 友好），无
-//! feature 门（与 [`crate::linux`] 的 alsa 双门不同）。主机 CI（macOS）不编译
-//! 本文件；宿主侧验证路径 = aarch64 musl 交叉 check（R13）+ 板上
-//! `cargo test -p rr-hal`（真 linux 目标跑单测；ioctl 面无法假树模拟，确定性
-//! 单测 = 常量/布局断言 + 对 temp 树普通文件的错误传播路径，不触真硬件）。
-//! 真件档验收（真 LED/继电器到位后的电平实测）随 R9 矩阵对应行（方案 §5.2）。
+//! 编译门单重 `target_os = "linux"`，无 feature；libc 仅取 `ioctl`/`close` 的 extern
+//! （musl 静态零额外 C 库）。主机 CI 不编译本文件；验证 = aarch64 musl 交叉 check +
+//! 板上 `cargo test`（ioctl 面不可假树模拟，单测只做常量/布局断言与 temp 树普通文件
+//! 的错误传播，不触真件）。
 //!
-//! 接口面：GPIO chardev UAPI v1（`/dev/gpiochipN`，内核 4.8+ 现役 UAPI）——
-//! sysfs gpio 已在 6.12 内核弃用（CONFIG_GPIO_SYSFS 可能未编），不采用。
-//! 请求 `GPIO_GET_LINEHANDLE_IOCTL` 取 OUTPUT 句柄（v1 句柄独占 line），
-//! `GPIOHANDLE_SET/GET_LINE_VALUES_IOCTL` 写/读电平。芯片经 `RR3_HAL_GPIO_CHIP`
-//! 选（缺省 0）；线偏移按角色经 `RR3_HAL_GPIO_LED_LINE` / `RR3_HAL_GPIO_RELAY_LINE`
-//! 选（缺省 4 / 17 = R8 预算表软件路行；接线手册未单列 LED/继电器行，真件档
-//! 装配单如改脚位走 env 覆写，代码缺省不动）。
+//! 接口：GPIO chardev UAPI v1（`/dev/gpiochipN`）——sysfs gpio 已在新内核弃用，不采用。
+//! `GPIO_GET_LINEHANDLE_IOCTL` 取 OUTPUT 句柄（v1 句柄独占 line），
+//! `GPIOHANDLE_SET/GET_LINE_VALUES_IOCTL` 写/读电平。芯片 `RR3_HAL_GPIO_CHIP`（缺省 0），
+//! 线偏移 `RR3_HAL_GPIO_LED_LINE` / `RR3_HAL_GPIO_RELAY_LINE`（缺省 4 / 17，真件改脚位
+//! 走 env，代码缺省不动）。
 //!
-//! boot 语义（R11②）：真件档装配单显式 `RR3_HAL_BACKEND=linux` 后，模块开机
-//! 探活读 [`crate::Rr3GpioOut::level`] 触发首次 ensure——chip 不在位、线被
-//! 其他进程占用（v1 句柄独占，EBUSY）在此显式报错，rr3-act 按"能力缺失显式
-//! 回错" exit(1)，不静默退化。请求 OUTPUT 句柄时落初值 0（灭/断开）：与 sim
-//! 后端"初始 false"同语义（探活读回一致，R11 换装判据"编排与契约零改动"），
-//! 也避免沿用上一进程遗留电平起动。进程退出（Drop）close 句柄即释放 line
-//! （内核语义），电平回落由硬件侧上下拉定，不在此约定。
+//! boot 语义：显式 `RR3_HAL_BACKEND=linux` 后探活首次 ensure——chip 不在位、line 被占用
+//! （EBUSY）即显式报错，模块 exit(1)，不静默退化。请求 OUTPUT 句柄落初值 0（与 sim
+//! "初始 false"同语义，避免沿用上一进程遗留电平）；Drop close 句柄即释放 line，回落
+//! 由硬件上下拉定，不在此约定。
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

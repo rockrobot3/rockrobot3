@@ -1,30 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 执行件档案装载器（批N3 件二，全案 §4.4——`hardware/<形态>/axis/<instance>.toml`）。
+//! 执行件档案装载器（`hardware/<形态>/axis/<instance>.toml`）：行程的真值点。
 //!
-//! 档案是行程的真值点（§1 坑 8 的收敛终点：config 侧字面量与板侧分轴字面量都要
-//! 改读这里，收敛接线在件五/件六）。本模块只做**装载机制**——白名单、全键必填
-//! （F-6）、类型派发、外键对账（F-4）、错误全收集；键级域界与自洽判据是策略，
-//! 逐键显式写在 [`rr3_act_prof_parse`] 一处。角域 0..=180 这类**器件事实
-//! 不硬编码进装载器**（F-5：文档示例值不进代码）。
+//! 本模块只做**装载机制**——白名单、全键必填、类型派发、外键对账、错误全收集；键级
+//! 域界与自洽判据是策略，逐键写在 [`rr3_act_prof_parse`] 一处。角域 0..=180 这类器件
+//! 事实不硬编码进装载器（文档示例值不进代码）。
 //!
-//! 键真值源 = `rr-hal-api` 的 [`rr_hal_api::RR3_ACT_PROFILE_FIELDS`] 十四键词表
-//! （键名 / 值类型 / 读者三态一张表）：白名单、缺键点名、序列化键序都从本表走
-//! ——键名第二份真值点不存在。加键 = 词表 append + 装载侧同批（提取面缺新键
-//! 由编译期结构体字段与缺键扫描双面拦），契约级评审。
+//! 键真值源 = [`rr_hal_api::RR3_ACT_PROFILE_FIELDS`] 十四键词表（键名/值类型/读者三态
+//! 一张表）：白名单、缺键点名、序列化键序都从本表走，不存在第二份键名。加键 = 词表
+//! append + 装载侧同批，走契约级评审。
 //!
-//! 载体语义（§4.4 载体与写入语义①，Y-2/Y-7）：
-//! - host 档档案是文件，写入必须复用仓内那一份原子序——[`crate::counters::
-//!   rr3_atomic_store`]（tmp 写全量 → fsync → rename），本模块不出现第二条写路径；
-//! - 读侧坏件口径照抄 counters：`NotFound` → [`rr3_act_profile_load`] 回
-//!   `Ok(None)`（"无档案"是调用方的裁决输入，机制不代言缺省），形状错 →
-//!   `Err` **且不许覆盖**——`secrets.rs` 那个"坏 JSON 恒 Err 且不能自愈"的
-//!   形状就是这条要防的。
+//! 载体语义：host 档写入复用 [`crate::counters::rr3_atomic_store`]（tmp → fsync →
+//! rename），不出现第二条写路径；读侧 `NotFound` → `Ok(None)`（"无档案"是调用方裁决
+//! 输入，机制不代言缺省），形状错 → `Err` **且不许覆盖**（防"坏件被自愈覆盖"）。
 //!
-//! 消费接线（批N3 件五现状）：执行轴状态注入面已接进 boot 链（rrd profile.rs 扫
-//! `axis/`，按 `RR3_HAL_PERIPH_AXIS`（缺省契约常量）消歧——instance 与轴读数相等的
-//! 恰一份合法档案才投影 `RR3_ACT_AXIS_STATE`，文本含行程三键 lo/hi/center，空 =
-//! 模块侧折保守缺省）；行程收敛的注入半边在本文件（档案即行程真值源），config 与
-//! 板侧字面量的撤除随件五同批推进；标定写入面随件四（axis_write）。
+//! 消费接线：boot 链扫 `axis/`，按 `RR3_HAL_PERIPH_AXIS` 消歧，恰一份与轴读数相等的
+//! 档案才投影 `RR3_ACT_AXIS_STATE`（文本含 lo/hi/center，空 = 模块侧保守缺省）；
+//! 标定写入面在 [`crate::axis_write`]。
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};

@@ -1,29 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-//! rr3-brain 机制层注册面（批N32 迁移件1 立树；迁移件2 cloud 三客户端；迁移件4
-//! 语音主链编排全接线）。
+//! rr3-brain 机制层注册面：[`Rr3BrainDispatcher`] 实现 rr3mod [`Dispatcher`]。
 //!
-//! [`Rr3BrainDispatcher`] 实现 rr3mod [`Dispatcher`]（serve 骨架回调）。事务面
-//! on_rpc 六臂（module.toml [rpc].exposes 六条全接线）：`llm/completion` 已激活
-//! （[`cloud::Rr3LlmClient`]，mock 档回显/real 档带历史真调；业务失败 Err 折
-//! `{"error": …}` 应答——Python try/except RuntimeError 同 wire）、`ops/list`
-//! 快照（[`rpc::rr3_ops_snapshot`] 白名单组体）、`ops/set` 写臂（[`rpc::rr3_ops_set_arm`]
-//! 全语义：白名单/类型域校验 → live 内存生效不落盘 → 按组重建受影响客户端——
-//! asr/tts/llm 三组各重建、dialog 组就地改参 [`dialog::Rr3Dialog::max_utterance_ms`]）；
-//! `model/list|set|test` 模型行面（[`rpc::rr3_model_list`] /
-//! [`rpc::rr3_model_set_arm`] 落盘 + llm 组重建 / [`rpc::rr3_model_test_arm`] 单次探测）；
-//! 未知 topic 返 Err 由 serve 折 `{"error": …}` 应答（Python 主循环兜底分支同 wire）。
+//! `on_rpc` 六臂（module.toml `[rpc].exposes` 全接线）：`llm/completion`（mock 回显 /
+//! real 带历史真调，业务失败 Err 折 `{"error": …}`）；`ops/list` 白名单快照；`ops/set`
+//! （白名单/类型域 → live 生效不落盘 → 按组重建 asr/tts/llm 客户端，dialog 组就地改参）；
+//! `model/list|set|test`（落盘 + llm 组重建 / 单次探测）。未知 topic 返 Err，由 serve 折
+//! `{"error": …}`。
 //!
-//! 事件面 on_event 两臂（自 Python composite.py 主循环事件分支逐语义迁入）：
-//! pcm → [`dialog::Rr3Dialog`] 积累/预滚；vad_start → onset 起轮 / offset 判停
-//! 触发整轮（[`Rr3BrainDispatcher::rr3_finish_turn`]：ASR → LLM → TTS → 分帧发布
-//! tts_pcm → interact 播放点名 → intent 发布）。节拍面 on_tick 一臂：
-//! utterance_expired 时长判停触发整轮（与 offset 臂两路共用同一 rr3_finish_turn，
-//! ADR-0016 增补裁定 2）。订阅面外事件本地过滤静默（Python 主循环 if/elif 同形状）。
+//! `on_event` 两臂：pcm → [`dialog::Rr3Dialog`] 积累/预滚；vad_start → onset 起轮 /
+//! offset 判停触发整轮（[`Rr3BrainDispatcher::rr3_finish_turn`]：ASR → LLM → TTS →
+//! 分帧发布 tts_pcm → interact 播放点名 → intent 发布）。`on_tick` 一臂：
+//! utterance_expired 时长判停（与 offset 共用同一 finish_turn）；订阅面外事件本地
+//! 过滤静默。
 //!
-//! 错误语义两档（rr3mod 同款）：on_rpc 返 Err = 业务性失败折 `{"error": …}` 应答；
-//! on_event/on_tick 返 Err = 传输性/设备级失败上抛致命（云端 4xx/5xx/空文本/被调
-//! 方超时臂内弃轮返 Ok，发布/应答写不出去上抛，模块不装"活着"，死交 supervisor
-//! 按 restart_policy 裁定）。
+//! 错误语义两档（rr3mod 同款）：`on_rpc` 返 Err = 业务失败折错误应答；`on_event`/
+//! `on_tick` 返 Err = 传输/设备级失败上抛致命（云端 4xx/5xx/空文本/被调方超时臂内
+//! 弃轮返 Ok；发布/应答写不出去上抛，模块不装"活着"，死交 supervisor）。
 
 use std::time::{Duration, Instant};
 
