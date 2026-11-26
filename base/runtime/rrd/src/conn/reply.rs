@@ -4,6 +4,7 @@
 //! 写失败点名的分类与计数在父模块；本模块只负责组帧与写序。
 
 use super::*;
+use std::io::IoSlice;
 
 /// 唯一的写出口：锁覆盖整帧 → 与并发 writer 的字节永不交错。
 /// 写一帧到 `out`（持锁写，帧级原子）。返回 false = 写失败（含写超时）：
@@ -39,14 +40,15 @@ pub(super) fn rr3_write(out: &Arc<Mutex<UnixStream>>, frame: &Rr3Frame) -> bool 
     false
 }
 
-/// 持锁写一帧（头 128B + payload 分段提交 + flush），返回 `(结果, 是否写超时)`。
+/// 持锁写一帧（头 128B + payload 一次 `writev` + flush），返回 `(结果, 是否写超时)`。
 /// 只做字节面，不落日志/计数——分类与点名留给唯一调用方 `rr3_write`。
 ///
-/// **分段而不拼整块**：`rr3_frame_to_bytes` 会为每个收件连接各拼一份头+payload
+/// **零拷贝、单次提交**：`rr3_frame_to_bytes` 会为每个收件连接各拼一份头+payload
 /// （音频片约 11KB × 连接数），而广播帧在 rrd 内是共享体（`Rr3FanFrame`）——
-/// 一层深拷已在扇出处消掉，写侧不该再把整帧复制一遍。帧级原子性由出向锁保证：
-/// 同一时刻只有一个写者持锁，两次 `write_all` 之间不会插进别的帧（读侧本就按
-/// 长度字段组帧，流上分段是正常形态）。
+/// 一层深拷已在扇出处消掉，写侧不该再把整帧复制一遍。这里用两段 iovec 一次
+/// `write_vectored` 提交，既不复制，也不把单帧的写预算拆成两次系统调用
+/// （`RR3_FAN_WRITE_TIMEOUT` 的口径仍是"一帧 5s"）。部分写只在本函数的锁内
+/// 续投，别的帧插不进来；读侧本就按长度字段组帧，流上分段是正常形态。
 fn rr3_write_bytes(guard: &mut UnixStream, frame: &Rr3Frame) -> (Result<(), String>, bool) {
     if frame.header.payload_len as usize != frame.payload.len() {
         let e = rr_ipc::Rr3FrameError::LengthMismatch {
@@ -56,17 +58,29 @@ fn rr3_write_bytes(guard: &mut UnixStream, frame: &Rr3Frame) -> (Result<(), Stri
         return (Err(format!("{e:?}")), false);
     }
     let hdr = rr_ipc::rr3_header_encode(&frame.header, &frame.payload);
-    match guard
-        .write_all(&hdr)
-        .and_then(|_| guard.write_all(&frame.payload))
-        .and_then(|_| guard.flush())
-    {
+    match rr3_write_both(guard, &hdr, &frame.payload).and_then(|_| guard.flush()) {
         Ok(()) => (Ok(()), false),
         Err(e) => (
             Err(e.to_string()),
             matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut),
         ),
     }
+}
+
+/// 两段缓冲写到底：优先一次 `write_vectored`，部分写只推进已发片数。
+/// `Ok(0)` 视同 `write_all` 的口径（`WriteZero`），不静默当成功。
+fn rr3_write_both(guard: &mut UnixStream, hdr: &[u8; 128], payload: &[u8]) -> std::io::Result<()> {
+    let mut bufs = [IoSlice::new(hdr), IoSlice::new(payload)];
+    let mut rest: &mut [IoSlice<'_>] = &mut bufs;
+    while rest.iter().any(|b| !b.is_empty()) {
+        match guard.write_vectored(rest) {
+            Ok(0) => return Err(std::io::Error::from(ErrorKind::WriteZero)),
+            Ok(n) => IoSlice::advance_slices(&mut rest, n),
+            Err(e) if e.kind() == ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
 }
 
 /// 组一帧 rrd → 模块（ty=Response/Notification，dst=对端 task）
