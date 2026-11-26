@@ -1,21 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-//! # rr-core —— 机制核切片：总线语义层（ADR-0018 裁定 1：与 OS 无关、no_std、契约冻结）。
+//! # rr-core —— 机制核切片：总线语义层（ADR-0018：与 OS 无关、no_std、契约冻结）。
 //!
 //! 字节协议在 `rr-ipc`；本 crate 只装总线语义：
-//! - 常量层：task 号空间（0 广播 / 1 rrd / ≥2 模块）、EVENT 优先级带、主题分隔符、
-//!   schema 版本、点名方法名——唯一真值在此，`rr-bus` 仅 re-export 保持 import 不变；
+//! - 常量层：task 号空间、EVENT 优先级带、主题分隔符、schema 版本、点名方法名——
+//!   唯一真值在此，`rr-bus` 仅 re-export；
 //! - 寻址：task 归属 [`rr3_task_kind`]、trace_id 直连 [`RR3_TRACE_ID_DIRECT`]；
-//! - 帧组装 [`rr3_frame_compose`]：opcode/flags/trace_id/timestamp_ns/src/dst 全由
-//!   调用方注入，本 crate 不读时钟、不睡眠、不碰 io。
+//! - 帧组装 [`rr3_frame_compose`]：各字段由调用方注入，本 crate 不读时钟、不睡眠、不碰 io。
 //!
 //! [`runtime`] 承载 `net.online` 机制切片：连接态 [`runtime::Rr3LinkState`]、心跳调度
 //! [`runtime::Rr3ModuleRuntime`]、收帧分类 [`runtime::rr3_dispatch_class`]、守护行
 //! [`runtime::Rr3GuardBuf`]。控制原语（限速/低电边沿/饱和/限位）已下沉 `rr-mech`。
-//!
-//! 主承载层（UDS、线程、serde_json）不在这里——那是 `rr-bus`；本 crate 是其在裸金属上
-//! 可复用的语义内核。
-//!
-//! 零策略载荷：不得出现厂商名/产品名/业务阈值/`if (厂商 == …)`（architecture §13 门禁）。
+//! 主承载层（UDS、线程、serde_json）在 `rr-bus`；本 crate 是其裸金属语义内核。
+//! 零策略载荷：不得出现厂商名/产品名/业务阈值/`if (厂商 == …)`（architecture §13）。
 
 #![no_std]
 

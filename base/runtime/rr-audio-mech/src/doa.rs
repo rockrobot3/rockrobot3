@@ -1,21 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-//! DoA 粗判向（自 capture 原子件抽出；多通道下混已拆到 [`crate::chan`]，本件只吃
-//! 原始 L/R 对做时差判向）。
+//! DoA 粗判向：本件只吃原始 L/R 对做时差判向（多通道下混在 [`crate::chan`]）。
 //!
-//! 双麦**到达时差（TDOA）**判向：判向窗上做 plain 时域互相关
-//! `cc[d] = Σ_t R[t]·L[t+d]`，lag>0 = R 先到 = 声源在右。板档 frame[0] = 物理右麦、
-//! frame[1] = 物理左麦——板麦接线/I2S 通道序是装配事实，以板上实测锚定。
+//! 双麦**到达时差（TDOA）**判向：plain 时域互相关 `cc[d] = Σ_t R[t]·L[t+d]`，
+//! lag>0 = R 先到 = 声源在右；frame[0] = 物理右麦、frame[1] = 物理左麦（板上实测锚定）。
 //!
-//! 搜索域钉死物理可达范围 ±lag_max（lag_max = round(sr·基线/声速)，15cm 基线
-//! @16k = ±7 样本）。plain 时域而非 FFT/PHAT：离线对拍与限带 FFT 版同号同档，
-//! 时域版零浮点零滤波器，golden 纪律最短路径。
+//! 搜索域钉死物理可达范围 ±lag_max（15cm 基线 @16k = ±7 样本）。plain 时域而非
+//! FFT/PHAT：离线对拍与限带 FFT 版同号同档，零浮点零滤波器，golden 纪律最短路径。
 //!
 //! 整型化（golden 纪律，任何机器逐位一致）：① 互相关 i64 累加（窗 16000 帧 ×
 //! 32767² ≈ 1.7e13）；② 亚样本抛物线定标 Q7：sub = 32·(y0−y2)/(2y1−y0−y2)，
 //! clamp [−64, 64]；③ lag_Q7 × K_Q15 >> 7 反演 sinθ，经 256 格 asin 查表出整度。
 //!
-//! 能量门：窗内任一采集帧 rms ≥ `window_rms_min` 才判。置信度 `conf_q15 =
-//! |cc_peak| / √(ΣL²·ΣR²)`——相干声源接近满值；低置信判向由策略面按门槛丢弃。
+//! 能量门：窗内任一帧 rms ≥ `window_rms_min` 才判；置信度 `conf_q15` 低值由策略面丢弃。
 
 use alloc::vec;
 use alloc::vec::Vec;

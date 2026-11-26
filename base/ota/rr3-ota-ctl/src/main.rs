@@ -1,21 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 //! rr3-ota-ctl —— OTA 槽位查看/切换、回滚链与制品签名 CLI。
 //!
-//! 子命令：
-//!   slots                                打印在册槽位与对合关系（读侧，不碰文件）
-//!   switch <rr_a|rr_b> --bootconf P      改写引导配置 root=LABEL 做持久 A/B 切换
-//!   factory            --bootconf P      根定位切 rr_factory 做一次性出厂引导
-//!   rollback arm --limit N --altcmd C --env P
-//!                                        U-Boot 回滚链上膛（四变量）
-//!   rollback ok        --env P           回滚链解除（两变量）
+//! 子命令：`slots`（打印槽位与对合）、`switch <rr_a|rr_b> --bootconf P`（持久 A/B）、
+//! `factory --bootconf P`（一次性出厂）、`rollback arm|ok --env P`（U-Boot 四变量
+//! 上膛/解除）。
 //!
 //! 判定与改写逻辑全在 `rr-ota`（`bootconf` / `bootenv`）；本 CLI 只做参数解析与落盘调用，
-//! 且**不缺省碰任何路径**——四个写命令必须显式给 `--bootconf` / `--env`。退出码 0/1/2 =
+//! 且**不缺省碰任何路径**——写命令必须显式给 `--bootconf` / `--env`。退出码 0/1/2 =
 //! 成功 / 业务拒或 IO 失败 / 用法错。
 //!
-//! `sign` / `verify` / `manifest` / `keypub` 的机制在 `rr-ota::sign`（ADR-0026），
-//! 本文件只保留分派与 usage；参数面在 `args`，子命令面在 `bootconf_cmd` /
-//! `sign_cmd`。
+//! `sign` / `verify` / `manifest` / `keypub` 机制在 `rr-ota::sign`（ADR-0026），本文件
+//! 只保留分派与 usage；参数面在 `args`，子命令面在 `bootconf_cmd` / `sign_cmd`。
 
 mod args;
 mod bootconf_cmd;

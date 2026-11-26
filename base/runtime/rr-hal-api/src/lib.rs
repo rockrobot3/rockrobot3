@@ -4,18 +4,12 @@
 //! 件 ↔ 硬件的唯一契约面：10 trait **同步签名**、去 `Send + Sync`、值类型去
 //! `String`/`Vec`（core-only）。async 留模块侧；契约名与路径由 `rr-hal` re-export。
 //!
-//! # 定形要点
+//! - **同步签名**：方法即调用即返回，写 `&mut self`（单所有者）、读 `&self`；
+//! - **值类型定长**：SSID 用 [`Rr3SsidText`]、错文案用 [`Rr3ErrText`]（32/128 octets）；
+//! - **`Vec<i16>` 换借用**：[`Rr3AudioSource::read`] 写入调用方缓冲，[`Rr3AudioSink::write`]
+//!   借用切片（采样配置在 `open` 时固定）。
 //!
-//! - **同步签名**：方法即调用即返回，无 future。写方法 `&mut self`（单所有者），
-//!   读方法 `&self`。
-//! - **值类型去 String**：`Rr3LinkState.ssid` 用 [`Rr3SsidText`]（定长 + 长度，
-//!   SSID 上限 32 octets）；错型 [`Rr3HalError::InvalidParam`] 用 [`Rr3ErrText`]
-//!   （定长缓冲，文案语义不变）。
-//! - **`Vec<i16>` 换借用形状**：[`Rr3AudioSource::read`] 写入调用方缓冲、返有效
-//!   样本数；[`Rr3AudioSink::write`] 借用切片（采样配置在 `open` 时固定）。
-//!
-//! 占位后端 [`Rr3UnavailableSource`] 一并迁入：承载"能力缺失必须显式回错，不许
-//! 静默退化"的裁定，no_std 可达面直接复用。
+//! 占位后端 [`Rr3UnavailableSource`] 承载"能力缺失必须显式回错，不许静默退化"，no_std 可达面复用。
 
 #![cfg_attr(not(test), no_std)]
 // 契约错型 Rr3HalError 携带定长 128 octets 文案（Rr3ErrText）——Result 的体积是

@@ -1,21 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 //! 模块运行时执行环的机制核切片（ADR-0018 裁定 1/3）。
 //!
-//! 执行环 = **连接 → 注册 → 心跳 → 分发 → 节拍**的决策逻辑；本模块只装
-//! 平台无关的那一半——状态转移与拍点判定，全部纯函数、时钟由调用方注入
-//! （裁定 5：不读墙上时钟、不睡眠、不碰 io）。四类平台供给（裁定 3）不在
-//! 这里：单调时基、事件循环、transport 实现由平台（std 驱动器 = `rr-bus`
-//! 的 client；裸机 = 运行环）注入。
+//! 执行环 = **连接 → 注册 → 心跳 → 分发 → 节拍**的决策逻辑；本模块只装平台无关的
+//! 那一半——状态转移与拍点判定，全部纯函数、时钟由调用方注入（不读墙上时钟、不睡眠、
+//! 不碰 io）。单调时基、事件循环、transport 实现由平台注入。
 //!
 //! - [`Rr3ModuleRuntime`]：连接态转移（[`Rr3LinkState`]）+ 心跳拍点调度；
 //!   `net.online` 格判定落位在 [`Rr3ModuleRuntime::rr3_link_online`]；
-//! - [`rr3_dispatch_class`]：应答帧按 JSON-RPC id 路由到等待者，其余（Event /
-//!   Notification / 点名 Request / Stream）进 inbox 由模块轮询；
-//! - [`Rr3GuardBuf`] / [`Rr3GuardEvent`]：自足档**本地守护输出行**（UART/RTT）
-//!   起动态 + 喂拍 + 安全核触发/拒动原因三类行型（行文法注释即契约）。
+//! - [`rr3_dispatch_class`]：应答帧按 JSON-RPC id 路由到等待者，其余进 inbox 由模块轮询；
+//! - [`Rr3GuardBuf`] / [`Rr3GuardEvent`]：自足档**本地守护输出行**（UART/RTT）三类行型。
 //!
-//! 节拍语义钉死为**相对节拍**（每拍 = 上一拍发出时刻 + heartbeat_ms，drift
-//! 而非 catch-up）——与 std 心跳线程既有行为逐拍一致，两侧不得漂移。
+//! 节拍语义钉死为**相对节拍**（每拍 = 上一拍发出时刻 + heartbeat_ms，drift 而非
+//! catch-up）——与 std 心跳线程逐拍一致，两侧不得漂移。
 
 use rr_ipc::Rr3PayloadType;
 

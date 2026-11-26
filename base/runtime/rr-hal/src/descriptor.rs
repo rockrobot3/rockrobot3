@@ -3,19 +3,15 @@
 //!
 //! 引脚 / 控制器编号 / 总线 / 设备名收在装配单 `[hardware]` 段，由 rrd 装配链序列化
 //! 注入 `RR3_HAL_BINDINGS`；`RR3_HAL_*` 环境变量只是现场救场的**应急覆盖**（同键 env
-//! 赢）。两者都没有的键一律 **fail-closed**：对应能力面落占位后端显式回错，不回落
-//! 任何具体板的引脚——"板 = 数据"由此成立（architecture §12.3）。
+//! 赢）。两者都没有的键一律 **fail-closed**：对应能力面落占位后端显式回错——"板 = 数据"。
 //!
-//! 分层：`profiles/<机型>.toml` 是人写数据源（rrd 解析并点名形状错误）；本模块是运行期
-//! 消费端——解析注入文本、合成生效绑定，键位语义与取值域在这里裁。
+//! 分层：`profiles/<机型>.toml` 是人写数据源（rrd 点名形状错误）；本模块是运行期消费端，键义与取值域在此裁。
 //!
 //! 键集纪律：`[hardware]` **不扩键**，扩键/扩 role 走契约级评审，且必须本文件、
-//! `rr3_env_override_map`、rr-registry `RR3_ASSEMBLE_DESC_KEYS` 与 `tests/contract.rs`
-//! **四处同批**——副本滞后时方向是拒绝（fail-closed），不会带病放行。
+//! `rr3_env_override_map`、`RR3_ASSEMBLE_DESC_KEYS` 与 `tests/contract.rs` 四处同批。
 //!
-//! 键分两轨：**引脚派生键**（`ui.face.i2c` 的 addr → `oled_addr` 等）由装配单 `[pins]`
-//! 派生；**板侧直给键**（`i2c_sda`/`uart2_*`/`ledc_*`/`i2s_*`/`cred_store` 等）不进派生集、
-//! 不设 `RR3_HAL_*` 覆盖位——现场只改装配单。`cred_store` 是非 GPIO 存储标记。
+//! 键分两轨：**引脚派生键**由装配单 `[pins]` 派生；**板侧直给键**（`i2c_sda`/`uart2_*`/
+//! `ledc_*`/`i2s_*`/`cred_store` 等）不进派生集、不设 `RR3_HAL_*` 覆盖位。
 
 use std::collections::BTreeMap;
 

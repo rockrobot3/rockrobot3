@@ -1,21 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 本地语音机制核：VAD 边沿检测 + 双麦 TDOA 判向 + 多通道下混，整数运算，
-//! 零平台依赖。
+//! 本地语音机制核：VAD 边沿检测 + 双麦 TDOA 判向 + 多通道下混，整数运算，零平台依赖。
 //!
-//! VAD：每帧（20ms）调用一次 [`Rr3VadState::rr3_vad_feed`]，状态机只在**边沿**
-//! 时刻返回 `Some`：
+//! VAD：每帧（20ms）调用 [`Rr3VadState::rr3_vad_feed`]，状态机只在**边沿**返回 `Some`：
+//! `rms ≥ rms_start` 连续 ≥ min_speech_ms → Onset；`rms < rms_tail` 连续 ≥
+//! silence_tail_ms → Offset。滞回（`rms_tail < rms_start`）是内建语义，自适应见 [`noise`]。
 //!
-//! ```text
-//! （未在语音中）rms ≥ rms_start 连续 ≥ min_speech_ms ──→ Onset{rms_peak, speech_ms}
-//! （在语音中）rms <  rms_tail 连续 ≥ silence_tail_ms ──→ Offset{speech_ms}
-//! ```
-//!
-//! 滞回（`rms_tail < rms_start`）是机制内建语义：起音用高档、收尾用低档，调用方
-//! 不复用"起音后改阈"的外部编排；自适应整定见 [`noise`]。
-//!
-//! DoA：判向窗上做 plain 时域互相关，lag>0 = 右麦先到 = 声源在右；Q7 亚样本
-//! 抛物线 + 256 格 asin 查表，出整度与三档离散。整数纪律：RMS 走
-//! `isqrt(sum_sq / n)`，DoA 全程整数——golden 向量要求任何机器逐位一致。
+//! DoA：判向窗上做 plain 时域互相关，lag>0 = 右麦先到 = 声源在右；Q7 亚样本抛物线 +
+//! 256 格 asin 出整度。整数纪律：RMS 走 `isqrt(sum_sq / n)`，DoA 全程整数——golden
+//! 向量要求任何机器逐位一致。
 
 #![no_std]
 
