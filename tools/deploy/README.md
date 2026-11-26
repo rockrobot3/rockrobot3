@@ -35,6 +35,34 @@ MCU 无 A/B 分区，升级一律线下重烧。每个芯片平台独立部署�
 - **x86_64 / riscv64 镜像**：`docker run` 起不来 → 先看 `image-smoke.sh file` 是否过（装机树
   与可执行面），再看 `run` 段（六模块注册与拒绝计数）。
 
+## 两条烧录链的现状（0.0.8 发布点，2026-11-27 批70 对表）
+
+只登记**做到哪一步**与**命令从哪来**；实况的唯一落点仍是
+[`docs/status.md`](../../docs/status.md)（敞口 6/10/11），本节不复述进度。
+
+| 链 | 已跑（可回查的证据） | 待实板 | 命令来源 |
+|---|---|---|---|
+| ESP32 基本功能档（classic `safe`） | 烧录链本身跑过：S3 首烧（`espflash flash`，[三平台验证计划 §6.6](../../docs/process/dev/0.0.8/0.0.8版本通用底座三平台验证计划.md)）；classic 真板复烧后 60s 零复位（[证据 0014](../../docs/evidence/实测/0014.md)）；S3 侧此后 0018/0019/0021/0022 四份真板复验 | classic **safe 整片**（`rr3-esp32-safe-merged.bin`）单条命令的产线式实烧回执；S3 外设接线后的复验 | `tools/deploy/image-esp32.sh` 装配整片 → `esptool.py write_flash 0x0`；单件走 `tools/deploy/flash-artifact.sh`（校验 sha 后烧，缺 `spool` 分区即拒） |
+| RK3566 maskrom（Buildroot 保底轨） | 构建面全绿：全量 make + 六分区/内容断言（run `44035094772`，详见 status 能力表"Buildroot OS 层"行）；操作序文档在册 | **全链未跑**：目标板 Radxa ZERO 3 未采购，`rkdeveloptool` 实烧与串口出 shell 均未发生 | [`flash-maskrom.md`](../../base/os/buildroot/board/radxa-zero3/flash-maskrom.md)（idbloader 32K / itb 6M / boot.vfat 16M）+ `buildroot.yml` 的 image job 产物 |
+
+## 制品 tag 与 `VERSION` 对表
+
+**版本唯一真源是仓根 `VERSION`（现为 `0.0.8`）**，tag 与它同名且只打在 release 提交上；
+判据单点在 `tools/ci/lib/release-tag.sh`（`publish.yml` 每个发布 job 的第一件就是调它，
+不同源或非 release 提交即红；自检在 gate 的 scripts job）。
+仓内 tag 只保留 **`v0.0.8`** 一个发布点，历史上的高号 tag 一律归档为
+`archive/v0.0.x/<tag>`（只作回溯，不构成发布承诺）。
+
+| 流水线 | 制品 | tag 形状 | 触发 |
+|---|---|---|---|
+| `publish.yml` | 运行镜像（rrd + 六模块 + rr3-ctl + 契约/装配单） | `ghcr.io/<owner>/rockrobot3:<tag>-amd64` · `-arm64` · `-riscv64`，合并清单 `<tag>`；`latest` 只跟 `vX.Y.Z` 且与 `VERSION` 同源 | `v*` tag、`main`（edge）、手动 |
+| `publish.yml`（固件腿） | ESP32 固件包（整片 + ELF + bootloader + 分区表 + sha256） | `ghcr.io/<owner>/rockrobot3-firmware:<tag>`（`oras pull` 拉取） | 同上 |
+| `buildroot.yml` | Buildroot 全量镜像 / OTA 包 | `rockrobot3-buildroot:v<VER>` · `rockrobot3-ota:v<VER>`（`VER` 取自 `VERSION`） | 提交触发（`[buildroot-full]`）与 tag |
+
+**开发分支不产出制品**：`dev/*` 推送只跑门禁与各平台验证腿，发布面只认 tag 与 `main`。
+所以"`VERSION = 0.0.8` + tag `v0.0.8`"这一对成立时才有 `:v0.0.8` 系列制品；
+制品是否在库以 ghcr 包页为准，本仓不复制制品状态。
+
 ## 资产
 
 | 文件 | 说明 |
