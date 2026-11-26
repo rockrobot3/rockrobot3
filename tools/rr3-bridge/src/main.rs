@@ -1,30 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
-//! rr3-bridge —— UART↔UDS 传输级字节中继（连接多路器）。不是模块：不进 manifest
-//! 注册面、不进装配单 bindings；rrd 看到的是哨兵的完整 register。
+//! rr3-bridge —— UART↔UDS 传输级字节中继。不是模块：不进 manifest/装配单，
+//! rrd 看到的是哨兵的完整 register。
 //!
-//! 连接模型：一条 `--uart <dev>` = 一条 UART 链路 = 一个哨兵 ↔ 恰好一条连 rrd 的
-//! UDS 连接，1:1；多哨兵 = 多个 `--uart` 实例（多进程）。
+//! 连接模型：一条 `--uart <dev>` = 一条链路 = 一个哨兵 ↔ 一条到 rrd 的 UDS 连接（1:1）；
+//! 多哨兵 = 多个实例。
 //!
-//! 字节透传：双向全双工、**零解析**——读多少转发多少，帧边界归两端帧层。桥不认识
-//! 128B 头、不校验 magic、不组帧、不改写任何字节；握手是帧级协议，桥不可见。
+//! 字节透传：双向全双工、**零解析**——读多少转多少，帧边界归两端；桥不认识 128B 头、
+//! 不校验 magic、不组帧、不改写字节，握手对它不可见。
 //!
-//! 零策略四条（源码即证据）：不持主题清单 / 不解析帧 / 不改写字节 / 不做权限特判
-//! ——本 crate 无 serde、无 topic 字面量、无 magic 常量、无 chmod/chown，依赖闭包 L0。
+//! 零策略：不持主题清单 / 不解析帧 / 不改写字节 / 不做权限特判——本 crate 无 serde、
+//! 无 topic 字面量、无 magic 常量、无 chmod/chown，依赖闭包 L0。
 //!
-//! 寿命管理三态（每条链路独立）：
-//! - UDS 未就绪：connect 指数退避（1s 起 ×2 至 10s 封顶）；期间 UART 上行丢弃并计数
-//!   （不缓冲——自愈依据 rrd-rpc 的 TimedOut：register 应答超时即重注册）；
-//! - UART 断链：关 UDS → 持续重开设备节点 → 成功后回 UDS 重试循环，哨兵重启后重新
-//!   register，全链自愈；
-//! - UDS 断链而 UART 存活：UART 口持续持有，UDS 重连后恢复透传；
-//! - 桥退出：SIGTERM/SIGINT → 逐条关 UDS → 释放 UART 节点（退出码 0）。
+//! 寿命三态（每链路独立）：UDS 未就绪→指数退避（1s×2 至 10s），期间 UART 上行丢弃
+//! 计数（不缓冲，自愈靠 register 应答超时重注册）；UART 断链→关 UDS、持续重开设备
+//! 节点，成功后回 UDS 重试；UDS 断而 UART 存活→UART 口持续持有，重连后恢复透传；
+//! 退出（SIGTERM/SIGINT）→逐条关 UDS、释放 UART，退出码 0。
 //!
-//! 开口帧同步：残留字节由 `Rr3UartConn::open` 的 tcflush 净化，桥不再自带清缓冲。
-//!
-//! 线程模型：每链路三条线程——上行（UART 读→UDS 写）、下行（UDS 读→UART 写）、
-//! 主线程（寿命管理）。UART 侧 rx/tx 两个独立句柄（同节点 open 两次）：单句柄 +
-//! 互斥会让阻塞读持锁串行化双向；tty 输入队列设备级共享、只读方消费，分体即全双工
-//! 且无锁。下行线程持读阻塞可接受：rrd 断链以 FIN 及时显形。
+//! 开口残留由 `Rr3UartConn::open` 的 tcflush 净化。线程：每链路三条（上行/下行/主），
+//! UART 侧 rx/tx 两个独立句柄——单句柄加锁会让阻塞读串行化双向，分体即全双工且无锁。
 
 use std::path::PathBuf;
 use std::process::ExitCode;

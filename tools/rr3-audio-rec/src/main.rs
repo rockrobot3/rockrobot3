@@ -1,31 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 //! rr3-audio-rec —— 音频上行收流端（宿主）：板面双麦 PCM → UART → wav。
 //!
-//! 链路：板 `mic` 分片组帧（`rr3-sense/audio/pcm` Event，dst=1）→ UART2 1.5M →
-//! 本件 `AUDIO ON` 起流、dst/topic 双门、b64 解码、累积 PCM、`AUDIO OFF` 后按实测
-//! 采样率写双通道 s16le wav。帧语义、串口、b64 全走 rr-ipc 单点，零第二份帧层。
+//! 链路：板 `mic` 分片（`rr3-sense/audio/pcm` Event，dst=1）→ UART2 1.5M → 本件
+//! `AUDIO ON` 起流 → dst/topic 双门 → b64 解码 → 累积 PCM → `AUDIO OFF` 后按实测
+//! 采样率写双通道 s16le wav。帧语义/串口/b64 全走 rr-ipc 单点，零第二份帧层。
 //!
-//! 三级防护（机制与策略分离；判据是 600s 真流实测）：
-//! ① 读超时：`rr3_read_timeout`（poll 就绪，`Ok(0)` = 此刻无数据非 EOF）；
-//! ② 失步重同步：magic 撞进载荷会产生"合法幻影帧头"，坏帧弃 4B magic 就地续扫
-//!    （零新 I/O），连续 [`ERR_STREAK_RESYNC`] 次失败记一次重同步账；
-//! ③ 断流重连：读线程见过数据后连续 [`RESYNC_ZERO_BAIL`] 次零读 = 断流，重开口
-//!    settle 后 `AUDIO ON` 续收；握手 [`HANDSHAKE_TRIES`] 次、每轮重开 fd。
+//! 三级防护：① 读超时（`rr3_read_timeout`，`Ok(0)` = 暂无数据非 EOF）；② 失步重同步
+//! （坏帧弃 4B magic 续扫，连续 [`ERR_STREAK_RESYNC`] 次记一次）；③ 断流重连（见过
+//! 数据后连续 [`RESYNC_ZERO_BAIL`] 次零读 = 断流，重开口 + settle + `AUDIO ON`，
+//! 握手 [`HANDSHAKE_TRIES`] 次）。
 //!
-//! 线程分工：读线程只做大块裸读，解码线程纯内存拆帧（[`FrameAssembler`]），落盘走
-//! 写线程——解码循环零磁盘 I/O（逐片同步刷是冻结放大器）。看门狗（[`STALL`] 无新
-//! 分片即补 wav 恢复头并 exit 3）是最外层兜底，重连骑行期解武装。
+//! 线程分工：读线程裸读、解码线程纯内存拆帧（[`FrameAssembler`]）、写线程落盘——解码
+//! 循环零磁盘 I/O；看门狗（[`STALL`] 无新分片）补 wav 恢复头并 exit 3，重连期解武装。
 //!
-//! 开口纪律：open 后停 1.2s 等板复位走完，`rr3_flush_input` 净化残留；握手先发
-//! 防御 `AUDIO OFF`（上一会话残流会抢在 OK 前），停流冲净才 `AUDIO ON`。
+//! 开口纪律：open 后停 1.2s 等板复位，`rr3_flush_input` 净化；握手先发防御
+//! `AUDIO OFF`（旧会话残流会抢在 OK 前），停流冲净才 `AUDIO ON`。
+//! seq（wrapping u32）只对账不补救：断档即背压丢片，大步进 = 板重启记 `restarts`。
 //!
-//! seq 记账（wrapping u32）：断档即背压丢片（与 `INFO` 的 `drop` 对账）；大步进
-//! （≥ 0x8000_0000）= 板重启记 `restarts`。只对账不补救：wav 是真实收到的流。
-//!
-//! 用法：`rr3-audio-rec <device> [--out <path>] [--secs <n>] [--baud <n>] [--doa]`
-//! 缺省 out=`rr3-audio-<unix秒>.wav`、secs=30、baud=1500000（与固件同值，仍过
-//! rr-ipc 波特率白名单）。退出码：0 收兵 / 1 开口握手或磁盘失败 / 2 参数错 /
-//! 3 看门狗停滞恢复 / 4 重连失败或收流线程亡（1/3/4 先补恢复头保住已落盘数据）。
+//! 用法：`<device> [--out <path>] [--secs <n>] [--baud <n>] [--doa]`；退出码 0 收兵 /
+//! 1 开口握手或磁盘失败 / 2 参数错 / 3 看门狗停滞 / 4 重连失败（1/3/4 先补恢复头）。
 
 mod args;
 mod decode;

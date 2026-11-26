@@ -1,30 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 //! espidf-sentinel —— 机制核 `rr-core::runtime` 的真板消费者（esp-rs std）。
 //!
-//! 职责：内跑 `rr-core::runtime`——连接态转移 [`Rr3LinkState`]、心跳拍点
-//! [`Rr3ModuleRuntime`]、收帧分类 [`rr3_dispatch_class`]，**不另写状态机**；传输下底
-//! 只写窄缝 [`Rr3ByteStream`] 两方法，帧语义由 rr-ipc blanket conn 免费获得。本文件
-//! 只做平台事：UART 装配、注册、线程拉起、堆采样；reader/心跳两线程与入站分发在
-//! `worker.rs`。
+//! 内跑 [`Rr3LinkState`] / [`Rr3ModuleRuntime`] / [`rr3_dispatch_class`]，**不另写状态
+//! 机**；传输只实现窄缝 [`Rr3ByteStream`] 两方法，帧语义由 rr-ipc blanket conn 免费
+//! 获得。本文件只做平台事：UART 装配、注册、线程拉起、堆采样；reader/心跳与入站分发
+//! 在 `worker.rs`。
 //!
-//! 双证：① 编译面——`cargo +esp build` 在 xtensa-esp32-espidf 上编 rr-core + rr-ipc +
-//! 本哨兵（专用门）；② 板上真跑——注册→心跳→round-trip + 三点堆采样。D1→D2 触发判据：
-//! 实测运行峰值剩余堆 < 20% 总堆。
+//! 双证：① `cargo +esp build` 在 xtensa-esp32-espidf 上编 rr-core + rr-ipc + 本哨兵；
+//! ② 板上真跑注册→心跳→round-trip + 三点堆采样。D2 触发判据：峰值剩余堆 < 20% 总堆。
 //!
-//! 安全核逐拍对拍（载体裁定：扩本哨兵，不另立 crate）：manifest 增 `rr3-sentinel/diag/parity`，
-//! 点名应答跑 `rr_core::control::parity::rr3_parity_run()` 的**真实原语**，输出经 serde_json
-//! 手工展开回带——**不回显 RR3_PARITY_EXPECTED**（板上输出与期望向量必须相互独立，两腿
-//! 在宿主 harness 汇合）。输入序列与语义单源在 rr-core，本文件零向量复制。
+//! 安全核逐拍对拍：manifest 的 `rr3-sentinel/diag/parity` 应答跑
+//! `rr_core::control::parity::rr3_parity_run()` 真实原语，输出经 serde_json 手工展开
+//! 回带，**不回显 RR3_PARITY_EXPECTED**（板上输出与期望向量必须相互独立）；输入序列
+//! 与语义单源在 rr-core，本文件零向量复制。
 //!
-//! 板侧接线：UART2 = GPIO17→适配器 RXD / GPIO16←适配器 TXD，115200，3.3V TTL，共地；
+//! 接线：UART2 = GPIO17→适配器 RXD / GPIO16←适配器 TXD，115200，3.3V TTL，共地；
 //! UART0 控制台（monitor 观测面）。
 //!
-//! 平台事实（esp-idf-hal 0.44.1，vendored 核对）：① 同一 UART 口只能 `uart_driver_install`
-//! 一次，故整装 `UartDriver` 后 `Box::leak` + `split()` 出 `'static` 半体，不能两个
-//! `new()`；② 半体 io 面是 `embedded_io`（`read(buf, delay)`/`write`/`flush`，错误
-//! `EspError`），std::io 桥在 `uart.rs` 手写；③ 上游只给全双工驱动标了 `unsafe Send+Sync`，
-//! 半体漏标，`uart.rs` 以两个 `unsafe impl Send` 补齐（安全性论证见各结构体注记）；
-//! ④ xtensa LX6 无 64 位原子，id 发号/计数全用 `AtomicU32`。
+//! 平台事实（esp-idf-hal 0.44.1）：同一 UART 口只能 `uart_driver_install` 一次，故整装
+//! 后 `Box::leak` + `split()` 出 `'static` 半体；半体 io 面是 `embedded_io`，std 桥在
+//! `uart.rs` 手写；半体漏标 `Send`，以两个 `unsafe impl Send` 补齐；LX6 无 64 位原子，
+//! id 与计数全用 `AtomicU32`。
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
