@@ -20,6 +20,12 @@
   （tag 必须与 `VERSION` 同源且指向 `release(vX.Y.Z)` 提交，见
   [`process/conventions.md`](process/conventions.md) §7）。此前按高号 tag 烧录的板
   需按新发布点重刷。
+  **发布回执（2026-11-26）**：`v0.0.8` 的 publish 五作业全绿（Release 九件资产，
+  抽验整片镜像 sha256 与清单一致）；buildroot `release` 腿全绿——密钥前置（64 hex）、
+  组包/签名/自复验、私钥清理、ghcr 推送四段 success（run `45757282283`），
+  `RR3_OTA_SIGNING_KEY` 已生效。**ghcr 包仍为私有**（匿名 401）：开源发布需在包设置
+  把 `rockrobot3` / `rockrobot3-firmware` / `rockrobot3-ota` / `rockrobot3-buildroot`
+  改为 Public（仅包所有者可改）。
 - **开源门面口径（2026-11-25 批47）**：提交历史已全量治理——作者/提交者统一为中性
   身份，提交信息不写机器名、账号名与本地目录名；新提交一律带本地路径或私人标识即触
   卫生门 ⑬ 与评审红。
