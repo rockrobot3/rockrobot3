@@ -129,6 +129,7 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | [`../tools/espidf-std-hello/README.md`](../tools/espidf-std-hello/README.md) | espidf std 构建链冒烟件（批W1）：版本钉死登记对表（ESP-IDF/esp-idf-sys/esp-clang/ldproxy）与三坑复现必读 |
 | [`../tools/espidf-sentinel/README.md`](../tools/espidf-sentinel/README.md) | 层③ 哨兵（0.0.7 批D1）：内跑 `rr-core::runtime` 的真板消费者，板上 runbook（双证/三点堆采样/批D2 触发判据） |
 | [`../tools/esp32-periph-base/README.md`](../tools/esp32-periph-base/README.md) | 批B 外设底座档（0.0.5 增补轮五）：OLED+舵机独立固件接线表、烧录 runbook、验收判据四件套 |
+| [`../tools/pi-periph-base/README.md`](../tools/pi-periph-base/README.md) | 树莓派档板侧五端口后端：两个控制面、端口参数与策略面单点、接线表、未收口（与 esp32 档同构） |
 | [`../tools/sim/README.md`](../tools/sim/README.md) | 没有板子要跑全链路时（`rr3-sim`） |
 | [`../tools/pi-periph-probe/README.md`](../tools/pi-periph-probe/README.md) | 板上线取证工具集（15 支探针用法表＋三支判据对表速查） |
 | [`../tools/rrctl/README.md`](../tools/rrctl/README.md) | 总线侧运维 CLI 的命令面（`rr3-ctl`） |

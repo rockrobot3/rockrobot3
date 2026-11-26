@@ -23,3 +23,8 @@
 `rr3-mkmod` 是**独立工程**（`tools/mkmodule/Cargo.toml` 自带空 `[workspace]`），不在 `base/runtime` 的 workspace 内：它以路径依赖消费 `rr-registry`，把自己挂进 workspace 会让"生成器"变成"运行时的一部分"。测试用 `cargo test --manifest-path tools/mkmodule/Cargo.toml` 单独跑，CI 里单列为 ②b。
 mkmod 是规约的执行器：命名、模块骨架的五件结构、主题前缀规则都在生成器里强制，而不是靠人记
 [`docs/process/naming.md`](../docs/process/naming.md)。
+
+**板侧后端目录同形**（2026-11-27 批68 裁定）：承载某个芯片档的板侧底座（今天是
+`esp32-periph-base/` 与 `pi-periph-base/`）各有一份根 `README.md`，写同一组四件事——端口表、
+策略面单点、接线表、未收口；其余主机侧小工具不单立 README，只在上表占一行（一支一行的
+唯一说明）。新增板档按此形状落，不再散落第二份专题文档。
