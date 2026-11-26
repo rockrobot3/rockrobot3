@@ -1,36 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-//! spawn 与重启的唯一执行者（spec §5.3/§5.4）：一条线程串行收尸与起进程。
+//! spawn/重启唯一执行者：单执行线程串行收尸与起进程，全 daemon 只此一条 + watchdog。
 //!
-//! 所有权（`jobs` / `rr3_reg_own`）：没有 `SO_PEERCRED`（要 libc，破 K5 依赖预算），
-//! rrd 认不出哪条连接是自己起的进程，只能以"我起过谁"为依据——本文件是"能起谁"
-//! 的全集，不是"该起谁"的裁判。
+//! 边界（不许被"崩溃自愈已完成"盖过）：只重启本守护起的进程（无 SO_PEERCRED，
+//! 认不出外来者）；不持 SIGCHLD、不用 waitpid——`try_wait` + 扫尸节拍，死后至多
+//! 一拍才知；depends/degraded 由 daemon/registry 裁定，本文件只交出收尸事实。
 //!
-//! 四条已知边界（任何"崩溃自愈已完成"的措辞都不许盖过）：
-//! ① 非本守护起的模块永不重启：照常记账、照常出计划，执行时只打
-//!    `跳过重启 {name}：不是本守护起的进程`。要接管外来进程须先补 identity 载体。
-//! ② `rr3_reg_own` 与注册只靠 name 相关：boot 到已被外部占用的名字按"子进程退出"
-//!    处理（EarlyExit，吃预算有上限），不发明第二种语义。
-//! ③ 不持 `SIGCHLD`、不靠 `waitpid`：收尸靠 `try_wait` + 扫尸节拍（复用
-//!    `--watchdog-tick-ms`），故"进程已死"到"rrd 知道"至多一个 sweep 的延迟。
-//! ④ depends / degraded 不在本文件裁定：boot 序由 `rr3_plan_boot` 在 daemon 仲裁；
-//!    降级账本在 `registry.rs`，本文件只把收尸事实交出去（降级不出计划、不吃预算）。
-//!
-//! 锁纪律（违反即同线程重入自死锁）：`rr3_lock(&shared).rr3_reg_*()` 一律先 `let`
-//! 绑结果再 `match`——写进被匹配表达式或守卫会把 `MutexGuard` 延寿到整个 `match`
-//! 结束，臂内再取同一把锁即死。
-//!
-//! 线程形状：全 daemon 只有这一条执行线程 + 一条 watchdog。`recv_timeout(sweep)`
-//! 既收件也是节拍，每轮固定 收件 → `rr3_reap` → `rr3_fire_due`；表里有更早到期
-//! 的计划时本拍只等到那一刻。收尸与重启必须串行，故不再加线程。
-//!
-//! 退避不是睡眠：计划进 `due`，到期才起。**绝不**在本文件 `sleep(delay)`——那会让
-//! 一个模块的退避把整台机器的收尸停摆。
-//!
-//! 环境注入三件：`RR3_BUS_PATH` / `RR3_MANIFEST` / `RR3_SIM_PEER_ROLE`；子进程
-//! `stdout(Stdio::null())`，stderr 接 `<socket>.log/<unit>.log`（append，重启后仍可
-//! 取崩溃前的行；打不开回退 inherit 并点名）。子进程输出绝不能进 rrd 的 stdout 管道
-//! ——测试 needle 读的就是那条管道。日志用词：`spawn ` 只用于"成功起了一个进程"，
-//! 起不来一律写 `起进程失败`；新用例的否定 needle 只用不与其它文案共用子串的串。
+//! 纪律：`rr3_lock(...).rr3_reg_*()` 先绑定再 `match`（写进匹配式会把 guard 延寿，
+//! 臂内重入即自死锁）；退避进 `due`，**绝不** sleep——一条退避不能停摆整机收尸；
+//! 子进程 stdout 必须 null（测试 needle 读 rrd 的 stdout），stderr 进
+//! `<socket>.log/<unit>.log`；`spawn ` 只用于成功起进程，失败一律 `起进程失败`。
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

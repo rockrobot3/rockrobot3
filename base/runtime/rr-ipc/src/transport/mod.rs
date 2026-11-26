@@ -1,34 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 //! 传输层：trait 定型 + uds 唯一实现（ADR-0008）。
 //!
-//! **门下沉（批J G1，ADR-0018 修订 3 ①）**：本模块在 `target_os = "none"` 下也编译
-//! ——窄缝 [`Rr3ByteStream`]（`bytestream.rs`）与帧缓冲（`buf.rs`，alloc 面）是
-//! no_std 可达的；std::io 半边（`frame.rs` / `uds.rs` / `uart.rs`、
-//! Listener/Endpoint 两 trait、std 单向 adapter）全部留在门内。裸金属目标上
-//! "接总线 = 实现两个 usize 方法"由此成立，宿主侧零变化。
+//! 门下沉（ADR-0018）：`target_os = "none"` 也编译——窄缝 [`Rr3ByteStream`]（bytestream）
+//! 与帧缓冲（buf，alloc 面）no_std 可达；std::io 半边（frame/uds/uart、Listener/
+//! Endpoint、std adapter）留门内。裸金属"接总线 = 实现两个 usize 方法"。
 //!
-//! 三个 trait 构成接缝（ADR-0007 §裁定 3 的"造一次就不再推翻"落在这里）：
-//! - [`Rr3TransportConn`]：连接侧，同步阻塞、**所有权移交**语义——`rr3_send_buf` 消费整个
-//!   [`Rr3FrameBuf`](crate::transport::buf::Rr3FrameBuf)（幂等 seal 后单次提交），`rr3_recv_buf`
-//!   返回新分配的所有权缓冲（原 shm 计划位的"拷贝降为 grant"设想随 L-32 摘面一并撤销）；
-//!   tcp（预留，标准端口 6060）同。
-//! - [`Rr3TransportListener`]：监听侧，accept 产出连接。一次 accept 的 `Err` 只属于那一次，
-//!   监听方决定继续（rrd 的口径：accept 失败记日志不带走守护进程）。
-//! - [`Rr3TransportEndpoint`]：端点建立，清理残留 → bind（uds：删残留 socket 文件 →
-//!   `UnixListener::bind`）。
+//! 三个 trait 是接缝：`Rr3TransportConn` 所有权移交（send 消费整个帧缓冲，recv 返回
+//! 新分配缓冲；tcp 预留 6060）；`Rr3TransportListener` 一次 accept 的 Err 只属那一次；
+//! `Rr3TransportEndpoint` 清理残留→bind（uds：删残留 socket→`UnixListener::bind`）。
 //!
-//! **不引 async**（ADR-0008 裁定 1）：rrd 的并发形状是"每连接 2 线程 + 阻塞 IO"，
-//! 28+ 条线级用例钉在这个形状上；async 运行时只进模块侧（M3 定 executor）。
-//!
-//! 规划分层（ADR-0006 §5）：
-//! - `uds`：M2 唯一实现，路径取 [`RR3_UDS_PATH_DEFAULT`]，可被 [`RR3_BUS_PATH_ENV`] 覆盖
-//! - `tcp`：多机协作，预留
-//! - `uart`：跨机点对点（跨芯片对端 ↔ 宿主，0.0.7 批C），conn 面经 blanket impl 同源帧语义
-//!
-//! 反射环（1k–10kHz 电机 FOC/PID）永远不进总线，见 ADR-0007 §裁定 1。
-//! rrd 服务侧（conn.rs）在 M2 仍持有 `UnixStream` 具体类型走 socket 专有门（读超时/shutdown），
-//! 只把 bind/cleanup/accept 三处换成 trait 工厂；全量泛化评估挂 M5 里程碑（shm 第二实现
-//! 已按 L-32 裁定摘面，0.0.8 批N19——本模块自此无 shm 位）。
+//! **不引 async**：rrd 是"每连接 2 线程 + 阻塞 IO"，async 运行时只进模块侧（M3）。
+//! 分层：uds（M2 唯一实现，[`RR3_UDS_PATH_DEFAULT`] 可被 [`RR3_BUS_PATH_ENV`] 覆盖）/
+//! tcp（多机协作，预留）/ uart（跨机点对点，conn 面 blanket impl 同源帧语义）。
+//! 反射环（电机 FOC/PID）永不进总线；shm 位已按 L-32 摘面，本模块无第二实现。
 
 pub mod buf;
 pub mod bytestream;

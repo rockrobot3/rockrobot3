@@ -1,36 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 装配单装载（ADR-0012 裁定 3/5②）：boot 之前消费一次，运行期不重排。
+//! 装配单装载（ADR-0012）：boot 前消费一次，运行期不重排，fail-closed 逐条点名。
 //!
-//! `profiles/<机型>.toml` 是纯数据，八段：`[os]`（运行期不读）+ `[platform]`
-//! （tier 三档 host/rtos/bare）+ `[supplies]`（看门狗三键 + `[supplies.budget]`
-//! 内存预算）+ `[slots]`（present / device_absent）+ `[bindings]`（格位→件）+
-//! `[enabled_slots]`（模块→启用的格位）+ `[hardware]`（非引脚键）+
-//! `[[pin]]`（**引脚侧唯一真值点**，role 外键指向 `contracts/roles.toml`）。
+//! `profiles/<机型>.toml` 八段：`[os]`（运行期不读，route 无视）/ `[platform]`
+//! （host·rtos·bare）/ `[supplies]`（看门狗三键 + 内存预算）/ `[slots]`
+//! （present·device_absent）/ `[bindings]` / `[enabled_slots]` / `[hardware]` /
+//! `[[pin]]`（引脚唯一真值点，role 指向 `contracts/roles.toml`）。
 //!
-//! 本模块只做装载期的事，fail-closed：形状不合逐条点名，一条不静默放行。
-//! 1. 解析文本；`[platform]`/`[supplies]`/`[slots]` 三段必填。
-//! 2. 查册门：bindings / enabled_slots / `[slots].present` 的每个格位必须命中
-//!    [`contracts/slots.toml`](../../../contracts/slots.toml)；present 另拒基础层
-//!    （基础层恒在位，进 present 自相矛盾）。查册真值是 `rr-registry::Rr3SlotTable`，
-//!    与 CI 全集层共用，不写第二套。
-//! 3. 缺格三源合一：present 声明缺、enabled_slots 无 binding 指向（注入缺）、
-//!    探测不到（实测缺）→ 由 daemon 点名 `拒绝启动`；provides 仍计可满足性宇宙
-//!    （下游不连坐，ADR-0009 同款）。
-//! 4. 档位一致：tier=bare 而 `watchdog_present=false` 自相矛盾 → 拒 boot。
-//! 5. 装载期校验①②：`[[pin]]` 的 role 查册、per_instance/instance 规则、
-//!    requires 留空即红；缺角色后果是"降"（`role_missing` 随 boot 带出）。
-//! 6. 门 n：`[hardware]` 出现物理键即红；与 `[pins]` 并存时点名两份取值。
-//! 7. 模块名解析成 manifest 路径（`<modules-root>/modules/<名>/module.toml`），
-//!    装机布局由打包步骤保证。
-//! 8. 器件词表与接线档装载（`devices.toml` + `hardware/<形态>/wiring.toml`），
-//!    路径按装配单推导；形状与闭合面在 [`crate::wiring`] 裁。
-//! 9. 校验⑨⑩：电流预算与覆盖（门 c）+ 内存预算（[`rr3_memory_budget`]，
-//!    分子件级直加、分母 `[supplies.budget]`），超限即拒 boot。
+//! 装载期九查：三段必填；格位查册（真值 `rr-registry::Rr3SlotTable`，present 拒基础层）；
+//! 缺格三源合一（声明缺/注入缺/实测缺，只点名不连坐下游）；tier=bare 必须
+//! `watchdog_present`；`[[pin]]` role/实例/requires；`[hardware]` 禁物理键；
+//! 模块名→manifest 路径；器件与接线档装载；电流（门 c）与内存预算，超限拒 boot。
 //!
-//! 基础层格位（`net.online` / `power.battery`）恒在位：不进 bindings、不参与缺格
-//! 判定，enabled_slots 声明它们只是记账。器件缺席（如没装电池）走
-//! `[slots].device_absent` 登记格名 → 非空理由，与 present 语义正交。
-//! `[os].route` 解析时无视。
+//! 基础层格位（`net.online` / `power.battery`）恒在位，不进 bindings、不参与缺格；
+//! `device_absent` 只登记缺席格名与理由，与 present 正交。
 
 mod boot;
 mod model;

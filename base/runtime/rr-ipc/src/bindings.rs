@@ -1,34 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 板侧绑定载荷真值（批N4 件七(b) 基-24 桥上配置腿）。
+//! 板侧绑定载荷真值（桥上配置腿）：键集与取值域的唯一单点，no_std 纯 core。
 //!
-//! 桥上配置的机制/策略分离：**键集与取值域的真值单点在本模块**（no_std 纯 core，
-//! 宿主 rr-hal 下发腿与板侧 esp32-periph-base 接收腿两侧消费——板侧不依赖
-//! rr-hal/rr-bus/rrd（门 ⑨-w），宿主不依赖板侧 crate，rr-ipc 是两者共同依赖的
-//! 汇合点）；**载荷的 JSON 遍历与 method 分发留在两侧各自消费面**（本 crate 不引
-//! serde_json——no_std 纪律，JSON 机制不是协议层语义）。载荷形状（两侧同守，
-//! 漂移即 fail-closed 点名）：
+//! 两侧共消费（宿主 rr-hal 下发 / 板侧 esp32-periph-base 接收），rr-ipc 是共同依赖；
+//! 本 crate 不引 serde_json——JSON 遍历与 method 分发留在各自消费面，载荷形状：
+//! `{"i2c_sda": "21", "uart2_tx": "18", "cred_store": "nvs:<ns>", ...}`。
 //!
-//! ```json
-//! {"i2c_sda": "21", "i2c_scl": "22", "adc_rail_pin": "34", "uart2_tx": "18", ...}
-//! ```
+//! - 走 method 面（[`RR3_METHOD_SET_BINDINGS`]，载荷在 `params.args`），不走 topic 面；
+//! - 值全字符串标量（与注入 TOML 平表同形）；
+//! - 键出域/值不认 = fail-closed 点名（板侧折 `result.error`，不静默丢弃）；
+//! - [`Rr3BoardBindings`] 的 `None` = 未注入：消费面必须拒，不回退硬编码。
 //!
-//! - method 面（不走 topic 面——门 ⑨-d topics 生成物约束）：[`RR3_METHOD_SET_BINDINGS`]，
-//!   载荷住 `params.args`（无主题语义，topic 缺省空串——宿主 `rr3.call` 形状的
-//!   method 面推广）。
-//! - 值全字符串标量（描述符同形纪律：注入文本 TOML 平表 `键 = "值"`，JSON 侧不换形）。
-//! - 键出域/值不认 = fail-closed 点名（板侧拒收折 `result.error`，不静默丢弃）。
-//! - 注入快照 [`Rr3BoardBindings`] 的 `None` = 未注入：**消费面 fail-closed 拒**
-//!   （板侧自愈路径读不到即拒，不回退任何硬编码——"板 = 数据"的桥上腿）。
-//!
-//! 键位批史：批N4 件七(b) 三键（自愈/观测面）；批N9 件五七键（板侧主驱动引脚
-//! 真值——MC-7 缺③ [hardware] 进位补齐，消费语义 = 板侧主驱动**装配对账锚**：
-//! esp-idf-hal 需具名引脚类型，驱动仍具名装配，注入值作对账真值，不齐板侧
-//! ERROR 点名＋计数）；批N17 件一 `cred_store` 键（**非 GPIO**——存储源标记
-//! `nvs:<namespace>`，全案 §3.6 凭据行；消费语义 = 板侧读数面可见，boot 读链
-//! 不消费＝批N14 架构事实注入晚于 WiFi 起栈，无装配对账语义＝非引脚不进对账
-//! 锚）。十键是 GPIO 编号（取值域共用 [`rr3_gpio_num_parse`]），cred_store
-//! 取值域独立裁决 [`rr3_cred_store_parse`]（同在本模块——键集与取值域真值单点
-//! 纪律不变）。
+//! 十个 GPIO 键共用 [`rr3_gpio_num_parse`]；`cred_store` 取值域独立
+//! [`rr3_cred_store_parse`]（非引脚，不参与装配对账）。
 
 // no_std + alloc（crate 根已 extern crate alloc）：String/format 走 alloc 面
 //（std 目标上与 std::string::String 同一实现，零行为差——lib.rs G1 注记同径）。
