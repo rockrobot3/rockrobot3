@@ -10,7 +10,6 @@
 //! 扩展幅度；`read(buf, portMAX_DELAY)` 复用主面常量。
 //!
 //! 冒烟判据：双通道均有幅度（非全零/非饱和）、拍手可见峰值抬升、左右非全等。
-//!
 //! 上行：`AUDIO ON` 后攒满 [`AUDIO_CHUNK_FRAMES`] 帧即组 Event（逐通道减本片 DC →
 //! 24bit 截 16bit → s16le → b64 → JSON 体）→ 有界 audio_q → 控制面 `drain_audio`
 //! 整帧写 UART2（1.5M）；`OFF` 只出统计。
