@@ -1,21 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-//! servo 原子件 · 机制核（批N23 件一，MC-7 缺② 收编原子模块形态）。
+//! servo 原子件 · 机制核（MC-7 缺② 收编原子模块形态）。
 //!
 //! **格位对齐申报**：本件服务 `act.servo` 格位（esp32-mini 装配单格主 = rr3-act
-//! 宿主件，板侧经桥执行——宿主申报面在 modules/rr3-act/atoms/servo，板侧执行面
-//! **不冒领格主**、不立 atom.toml：`provides` 恰一格与板无关断言是格主面法则，
-//! 见批N23 计划册 §2「三不三立」）。
+//! 宿主件，板侧经桥执行）；板侧执行面**不冒领格主**、不立 atom.toml——`provides`
+//! 恰一格与板无关断言是格主面法则。
 //!
-//! **机制与策略分离**（文件级，收编落点）：本文件零策略字面量——行程/中位读
-//! 生成表（真值点 hardware/esp32-mini/axis/*.toml，批N3 门 g），duty 锚点
-//! （`DUTY_MIN`/`DUTY_MAX`，SG90 脉宽 × LEDC 档位换算）由调用方
-//! （[`crate::board`] 策略面）**按参传入**；换板/换舵机只动 board.rs，本文件
-//! 零板名。行程生成物自本件引入（include! 路径相对本文件）；策略面经
-//! `use crate::servo::RR3_AXIS_*` 取中位锚——策略→机制单向依赖。
+//! **机制与策略分离**：本文件零策略字面量——行程/中位读生成表（真值点
+//! hardware/esp32-mini/axis/*.toml），duty 锚点（`DUTY_MIN`/`DUTY_MAX`）由调用方
+//! （[`crate::board`] 策略面）**按参传入**；换板/换舵机只动 board.rs，本文件零板名。
+//! 行程生成物自本件引入（include! 路径相对本文件）；策略面经 `use
+//! crate::servo::RR3_AXIS_*` 取中位锚——策略→机制单向依赖。
 //!
 //! 轴行程**点名拒收**（fail-closed：静默钳到边界会让调用方误以为按给值生效），
-//! 与控制面/帧面/运行面三处调用方共用同一判据同一文案（"一处真值、多个检查点
-//! 复用同一判定"，杜绝控制/运行口径漂移）。
+//! 三处调用方共用同一判据同一文案，杜绝控制/运行口径漂移。
 
 // 板侧行程常量表生成物（RR3_AXIS_<INSTANCE> 三元组 + rr3_axis_travel 查表）——
 // 真值点 hardware/esp32-mini/axis/*.toml、生成器 tools/rr3-codegen（批N3 件五
