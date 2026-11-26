@@ -1,19 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-//! ESP32-UART 板面音频源后端：板面双麦流 → 宿主环形缓冲 →
-//! [`Rr3AudioSource`](crate::Rr3AudioSource)（esp32 档）。
+//! ESP32-UART 板面音频源后端：板面双麦流 → 宿主环形缓冲 → [`Rr3AudioSource`](crate::Rr3AudioSource)。
 //!
-//! 链路：板 `mic` 分片（16kHz 双声道 s16le，128ms/8192B）→ UART2（env 覆盖，缺省与
-//! 固件共用 `RR3_BRIDGE_BAUD`）→ 开口 → `audio_session::handshake` → 读线程裸读 →
-//! [`FrameAssembler`](rr_ipc::FrameAssembler) 拆帧 → 四道门 → 环形缓冲（~1s，溢丢
-//! 最旧整帧并计数）→ `read()` 整声道出样。
+//! 链路：板 `mic` 分片（16kHz 双声道 s16le，128ms/8192B）→ UART2（缺省 `RR3_BRIDGE_BAUD`）
+//! → `audio_session::handshake` → 读线程裸读 → [`FrameAssembler`](rr_ipc::FrameAssembler)
+//! 拆帧 → 四道门 → 环形缓冲（~1s，溢丢最旧整帧并计数）→ `read()` 整声道出样。
 //!
-//! 纪律：flock 单消费者（第二 opener fail-closed）；下行命令走旁路有界队列、读线程
-//! 单写者逐帧写出，fire-and-forget，队列满丢最旧并计数；`read()` 非阻塞，无数据回 0；
-//! 断流重连**永不放弃**（零读 1.6s 即重开口 + 重握手；源是常驻件，与工具侧 exit(4)
-//! 的差异是刻意的）；板-宿主时钟 ~2% 滑移属稳态损耗（首溢点名，此后计数）。
+//! 纪律：flock 单消费者（第二 opener fail-closed）；下行命令走旁路有界队列、读线程单写者
+//! 逐帧写出，fire-and-forget，队列满丢最旧并计数；`read()` 非阻塞，无数据回 0；断流重连
+//! **永不放弃**（零读 1.6s 即重开口 + 重握手；源是常驻件）；板-宿主时钟 ~2% 滑移属稳态损耗。
 //!
-//! 四道门（dst / payload 类型 / topic / 字段+b64）与 `rr3-audio-rec` 同值锚定
-//! （rr-ipc 零第三方依赖，双侧测试兜底防分叉）。
+//! 四道门（dst / payload 类型 / topic / 字段+b64）与 `rr3-audio-rec` 同值锚定（双侧测试防分叉）。
 //!
 //! cfg 门 `any(linux, macos)`：Pi 侧桥消费件，espidf 档不载，其余平台编译即错。
 

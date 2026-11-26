@@ -1,21 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 //! linux（chardev UAPI）GPIO 数字输出后端：LED / 继电器。
 //!
-//! 编译门单重 `target_os = "linux"`，无 feature；libc 仅取 `ioctl`/`close` 的 extern
-//! （musl 静态零额外 C 库）。主机 CI 不编译本文件；验证 = aarch64 musl 交叉 check +
-//! 板上 `cargo test`（ioctl 面不可假树模拟，单测只做常量/布局断言与 temp 树普通文件
-//! 的错误传播，不触真件）。
+//! 编译门单重 `target_os = "linux"`，无 feature；libc 仅取 `ioctl`/`close` extern。
+//! 主机 CI 不编译；验证 = aarch64 musl 交叉 check + 板上 `cargo test`（不触真件）。
 //!
-//! 接口：GPIO chardev UAPI v1（`/dev/gpiochipN`）——sysfs gpio 已在新内核弃用，不采用。
-//! `GPIO_GET_LINEHANDLE_IOCTL` 取 OUTPUT 句柄（v1 句柄独占 line），
-//! `GPIOHANDLE_SET/GET_LINE_VALUES_IOCTL` 写/读电平。芯片 `RR3_HAL_GPIO_CHIP`（缺省 0），
-//! 线偏移 `RR3_HAL_GPIO_LED_LINE` / `RR3_HAL_GPIO_RELAY_LINE`（缺省 4 / 17，真件改脚位
-//! 走 env，代码缺省不动）。
+//! 接口：GPIO chardev UAPI v1（`/dev/gpiochipN`，sysfs 已弃用）：`GPIO_GET_LINEHANDLE_IOCTL`
+//! 取 OUTPUT 句柄，`GPIOHANDLE_SET/GET_LINE_VALUES_IOCTL` 写/读电平。芯片/线偏移由描述符
+//! 或 `RR3_HAL_GPIO_*` 给（缺省 chip0 / line 4 / 17），真件改脚位走 env，代码缺省不动。
 //!
-//! boot 语义：显式 `RR3_HAL_BACKEND=linux` 后探活首次 ensure——chip 不在位、line 被占用
-//! （EBUSY）即显式报错，模块 exit(1)，不静默退化。请求 OUTPUT 句柄落初值 0（与 sim
-//! "初始 false"同语义，避免沿用上一进程遗留电平）；Drop close 句柄即释放 line，回落
-//! 由硬件上下拉定，不在此约定。
+//! boot：显式 `RR3_HAL_BACKEND=linux` 后首次 ensure——chip 不在位、line 被占（EBUSY）即
+//! 显式报错，模块 exit(1)；请求 OUTPUT 句柄落初值 0，Drop close 即释放 line。
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

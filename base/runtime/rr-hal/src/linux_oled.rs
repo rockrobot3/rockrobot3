@@ -1,21 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Linux（I2C）SSD1306 OLED 显示后端：128x64 单色屏。
 //!
-//! 编译门单重 `target_os = "linux"`：只取 `ioctl`/`write`/`close` extern（musl 静态
-//! 零额外 C 库）。宿主验证 = aarch64 musl 交叉 check + 板上 `cargo test -p rr-hal`
-//! （帧缓冲/init 纯函数与普通文件错误传播，不触真硬件）。
+//! 编译门单重 `target_os = "linux"`：只取 `ioctl`/`write`/`close` extern。验证 = aarch64
+//! musl 交叉 check + 板上 `cargo test -p rr-hal`（纯函数与错误传播，不触真硬件）。
 //!
-//! 接口：i2c-dev UAPI（`/dev/i2c-N`），`I2C_SLAVE` 定从地址；控制字节 0x00 走命令、
-//! 0x40 走显存。水平寻址 + 列/页窗口（0x21/0x22）限定整帧写 0..127 × 0..7，指针自增。
+//! 接口：i2c-dev UAPI（`/dev/i2c-N`），`I2C_SLAVE` 定从地址；0x00 走命令、0x40 走显存。
+//! 水平寻址 + 列/页窗口（0x21/0x22）限定整帧写 0..127 × 0..7，指针跨事务自增。
 //!
-//! 帧面：`Rr3FaceFrame` 8x8 行主序、bit7 最左，按 8 倍最近邻放大成 64x64 水平居中（左右各留 [`RR3_OLED_X0`] 列）；表情语义归模块侧，HAL 只如实铺帧。
+//! 帧面：`Rr3FaceFrame` 8x8 行主序、bit7 最左，8 倍放大成 64x64 居中（左右各留 [`RR3_OLED_X0`] 列）；HAL 只铺帧。
 //!
-//! 写事务按 [`RR3_OLED_CHUNK`] 数据字节 + 1 控制字节分块（i2c-dev 单次 write 上限随
-//! 适配器而异）。init 按 datasheet：关显示 → 时钟/复用/电荷泵/寻址 → 开显示；对比度
-//! 取 [`RR3_SSD1306_CONTRAST_DEFAULT`]，不留 env 旋钮（旋钮只给物理绑定）。
+//! 写事务按 [`RR3_OLED_CHUNK`] 分块；init：关显示 → 时钟/复用/电荷泵/寻址 → 开显示，对比度取缺省。
 //!
-//! boot：构造只存根/总线/地址，打开总线与 init 延迟到首次 trait 调用（ensure）。设备
-//! 不在位/无应答/权限不足显式报错，不静默退化；`frame()` 读回由 `last` 快照承载。
+//! boot：构造只存根/总线/地址，打开与 init 延迟到首次 trait 调用（ensure）；设备不在位/无应答/权限不足显式报错。
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

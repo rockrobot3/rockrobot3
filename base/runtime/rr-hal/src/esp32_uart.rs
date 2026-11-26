@@ -1,21 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-//! ESP32 外设桥后端：舵机/显示两能力面的 UART 能力帧承载（路线二：板上外设不进城）。
+//! ESP32 外设桥后端：舵机/显示两能力面的 UART 能力帧承载（板上外设不进城）。
 //!
-//! 帧面仍走 JSON-RPC（`method=rr3.call`，主题在 `params.topic`），复用在册
-//! `rr3-act/servo/command` 与 `rr3-interact/face/expression`，payload 与模块应答体
-//! 同源——topics.toml / rrd / 桥三面零改动。
+//! 帧面仍走 JSON-RPC（`method=rr3.call`，主题在 `params.topic`），复用在册 `rr3-act/
+//! servo/command` 与 `rr3-interact/face/expression`，payload 与模块应答体同源——三面零改动。
 //!
-//! 连接模型是长连接：`open_with_baud` 经 rr-ipc 排他开口（flock），第二个 opener
-//! 当场拒（fail-closed，不静默截流），open 自带 TCIFLUSH。macOS CP2102 的 DTR/RTS
-//! 翻转会复位板子，open 后须等 [`RR3_OPEN_SETTLE_MS`] 再发首帧。io 失败即 drop（close
-//! + 退账），下次调用重开。读侧带应答窗口 [`RR3_REPLY_WAIT_DS`]：板死/断线/复位时窗口
-//! 耗尽回 Closed，调用方报废重开——缺省阻塞读会让 HAL/面板线程永久挂死。
+//! 连接模型是长连接：`open_with_baud` 经 rr-ipc 排他开口（flock），第二个 opener 当场拒
+//! （fail-closed）。open 自带 TCIFLUSH；macOS CP2102 的 DTR/RTS 翻转会复位板子，open 后须
+//! 等 [`RR3_OPEN_SETTLE_MS`] 再发首帧。读侧带应答窗口 [`RR3_REPLY_WAIT_DS`]，耗尽回
+//! Closed——缺省阻塞读会让 HAL/面板线程永久挂死。
 //!
-//! 帧头位形：下行 `src=1`（rrd）、`dst=2`（[`RR3_PERIPH_TASK`]）；应答 `src=2/dst=1`
-//! 且 `trace_id` 原样回带，本侧按 `dst==1` 门 + id 回显校验。位形/主题/信封真值单点在
-//! `rr-periph-proto`（ADR-0024，固件双向复用），本模块 re-export 保持路径不变。
-//!
-//! 慢速事件级（ADR-0007）：set_angle/draw 一次 round-trip ~26ms（115200/300B），远低于 100Hz 事务上限。
+//! 帧头位形：下行 `src=1`/`dst=2`（[`RR3_PERIPH_TASK`]）；应答 `src=2/dst=1`、`trace_id`
+//! 原样回带。位形/主题/信封真值单点在 `rr-periph-proto`。慢速事件级：set_angle/draw 一次
+//! round-trip ~26ms（115200/300B），远低于 100Hz 事务上限。
 
 use std::path::PathBuf;
 use std::sync::Mutex;

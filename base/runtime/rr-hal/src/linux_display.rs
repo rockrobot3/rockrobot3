@@ -1,21 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Linux（spidev UAPI）MAX7219 LED 点阵显示后端：真件档。
 //!
-//! 编译门单重 `target_os = "linux"`：只取 `ioctl` extern（musl 静态零额外 C 库）。
-//! 验证 = aarch64 musl 交叉 check + 板上真件；单测只覆盖 ioctl 号/包组装与错误传播。
+//! 编译门单重 `target_os = "linux"`：只取 `ioctl` extern（musl 静态）；验证 = aarch64 musl 交叉 check + 板上真件。
 //!
-//! 接口：spidev（`/dev/spidevB.C`，模式 0 / MSB first / 8 bit / 1 MHz 飞线保守速率），
-//! CS 包络由内核驱动管理：一次 `write()` 内 CS 保持低、结束拉高 = 16-bit 包锁存语义。
+//! 接口：spidev（模式 0 / MSB first / 8 bit / 1 MHz），一次 `write()` 内 CS 低→高 = 16-bit 包锁存语义。
 //!
-//! 级联形状：参考机双位模块（两片级联，`RR3_MAX7219_CHIPS = 2`），同帧双片同显；
-//! 换单位模块只改片数常量并重测，帧面契约（[`Rr3FaceFrame`] 8x8 行主序、bit7 最左）不动。
+//! 级联：参考机双位模块（`RR3_MAX7219_CHIPS = 2`）同帧双片同显；换单位只改片数常量，帧面契约不动。
 //!
-//! **级联锁存纪律（真板实证）**：一次 CS 包络里每片只锁存移位流的最后 16 位——一次
-//! write 多包会让更早的包全部被吞。故 init 逐条 write、整帧逐行 write，包形状统一走
-//! [`rr3_max7219_cmd`]；init 序 DISPLAYTEST=off → SCANLIMIT=7 → DECODE=off → INTENSITY → SHUTDOWN=normal。
+//! **级联锁存纪律（真板实证）**：一次 CS 包络每片只锁存最后 16 位——init 逐条 write、整帧
+//! 逐行 write，包形状统一走 [`rr3_max7219_cmd`]；init 序 DISPLAYTEST → SCANLIMIT → DECODE →
+//! INTENSITY → SHUTDOWN。
 //!
-//! boot：构造只存路径，打开 + ioctl 配置 + init 延迟到首次 trait 调用（ensure）；
-//! 设备不在位/权限不足/非字符设备显式报错，不静默退化。
+//! boot：构造只存路径，打开 + ioctl 配置 + init 延迟到首次 trait 调用（ensure）；设备不在位显式报错。
 
 use std::path::PathBuf;
 use std::sync::Mutex;
