@@ -1,32 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-//! linux（I2C）电池读数后端：INA219 总线电压（R18 扩围，0.0.6 方案 §5.4/
-//! 判据 12，BOM #5 定案在前——INA219@0x40，"电阻分压 + ADS1115"为存档备选）。
+//! linux（I2C）电池读数后端：INA219 总线电压 / 电流（BOM #5，0x40）。
 //!
-//! 编译门是单重的：`target_os = "linux"`——依赖 libc 仅取 `ioctl`/`read`/`write`
-//! /`close` 的 extern 声明（纯 Rust 壳，musl 静态零额外 C 库依赖，R13），无
-//! feature 门。主机 CI（macOS）不编译本文件；宿主侧验证路径 = aarch64 musl
-//! 交叉 check（R13）+ 板上 `cargo test -p rr-hal`（真 linux 目标跑单测：换算
-//! 纯函数 + temp 树假设备错误传播路径，不触真硬件）。真件档验收（判据 12：
-//! `i2cget` 原始值与万用表实测两点标定、偏差 ≤2%；0x00 读回与分流校准后的
-//! 电流符号实录）留外设到位随批F5a 真件档。
+//! 编译门单重 `target_os = "linux"`，无 feature；libc 仅取 ioctl/read/write/close
+//! 的 extern 声明（musl 静态零额外 C 库）。主机 CI 不编译本文件；验证 = aarch64
+//! musl 交叉 check + 板上 `cargo test`（换算纯函数与假设备错误路径，不触真件）。
 //!
-//! 接口面：I2C chardev UAPI（`/dev/i2c-N`，i2c-dev.h）——`I2C_SLAVE` 定从地址，
-//! 原生寄存器读 = 写 1 字节寄存器号 + 读 2 字节（INA219 原生大端序，高字节
-//! 在前；注意与 `i2cget w` 的 SMBus 小端序字不同，对拍时先 `i2cget` 字节交换）。
-//! INA219 寄存器：0x00 = 配置（上电复位值 0x399F，即
-//! `contracts/devices.toml` 的 `id_reg.expect` 判据源）；0x02 = 总线电压
-//! （bits[15:3] 有效 13-bit，LSB 4mV，量程 0–32V）；0x04 = 电流（i16，符号 =
-//! 方向）；0x05 = 校准（写 16-bit CAL 后电流寄存器才有物理意义）。打开总线
-//! 后先读 0x00 校验器件，不符点名拒（应答了但不是该器件/已被重配）；装配侧
-//! 给了分流参数（[`Rr3InaCal`]）才算 CAL 并写 0x05，**校准写入成功前 charging
-//! 恒 false**——不把"没校过"冒充"没在充"，与"设备只报数、策略不在这里"同条。
+//! 接口：I2C chardev UAPI（`/dev/i2c-N`）——`I2C_SLAVE` 定址，原生寄存器读 =
+//! 写 1 字节寄存器号 + 读 2 字节（大端，与 `i2cget w` 的小端字不同，对拍先交换）。
+//! INA219：0x00 配置（复位值 0x399F，即 `contracts/devices.toml` 的 `id_reg.expect`）、
+//! 0x02 总线电压（bits[15:3]，LSB 4mV）、0x04 电流（i16，符号=方向）、0x05 校准。
+//! 打开总线先读 0x00 校验，不符点名拒；给了分流参数 [`Rr3InaCal`] 才算 CAL 并写
+//! 0x05，**写成功前 charging 恒 false**——不把"没校过"冒充"没在充"。
 //!
-//! percent 是派生面：单芯锂电池（TP4056 充电管理，接线 5）OCV 线性近似
-//! 3200–4200mV ↔ 0–100%，与 sim 后端电压曲线同一条线（两后端观测对称，R11
-//! 判据精神）；`voltage_mv` 永远原样报真读数（判据 12 只对电压字段），percent
-//! 越界 clamp 不越权。boot 语义（R11）：显式 `RR3_HAL_BACKEND=linux` 后，
-//! rr3-power 开机探活 `battery()`——bus 不在位/地址无应答在此显式回错，
-//! exit(1)，不静默退化。
+//! percent 是派生面：OCV 线性近似 3200–4200mV ↔ 0–100%，越界 clamp 不越权，
+//! `voltage_mv` 永远原样报真读数；boot 显式 `RR3_HAL_BACKEND=linux` 后 bus 不在位/
+//! 地址无应答即显式回错 exit(1)，不静默退化。
 
 use std::os::fd::{AsRawFd, IntoRawFd};
 use std::path::{Path, PathBuf};

@@ -1,28 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-//! # rr3mod —— 模块公共骨架（0.0.8 W-A 批0，ADR-0017 裁定 1）
+//! # rr3mod —— 模块公共骨架（ADR-0017 裁定 1）：只编排，不重写。
 //!
-//! 五模块（批1–批5 收敛）与 brain 迁移件（ADR-0016）共用的**同构启动序列编排**：
-//! [`bootstrap`]（读 manifest → 连总线 → 读 config → 解析）+ [`serve`]（死亡探针 →
-//! 分帧 → RPC/订阅分发 → 节拍）+ [`Dispatcher`]（模块机制层注册面）。只编排不重写
-//! ——全部语义真值在 rr-bus-api / rr-core / rr-ipc，本 crate 不给任何既有语义立
-//! 第二份实现。
+//! 五模块与 brain 迁移件共用同构启动序列：[`bootstrap`]（manifest → 总线 → config →
+//! 解析）+ [`serve`]（死亡探针 → 分帧 → RPC/订阅分发 → 节拍）+ [`Dispatcher`]。
+//! 语义真值全在 rr-bus-api / rr-core / rr-ipc，本 crate 不立第二份实现。
 //!
-//! # 定形要点
+//! 定形要点：
+//! - `on_rpc` 返 `Err` = 业务性失败，serve 折 `{"error": …}` 应答；`on_event`/`on_tick`
+//!   返 `Err` = 传输/设备级失败，上抛致命（main `exit(1)` 交 supervisor）。
+//! - HAL 选择与探活归各模块 boot.rs（接入层），`Unsupported` 即 `Err`；
+//!   SURFACE 启动自述留 main（ADR-0017 裁定 3）。
+//! - 刻意不提供 subscribe：线上无订阅注册帧（全量扇出 + 本地过滤），订阅过滤是
+//!   `on_event` 的本地职责。
+//! - 六消费方同批改：本 crate API 修订须五模块 + brain 迁移件同批改，不许骨架单方漂移。
 //!
-//! - **Dispatcher 错误语义两档**（方案 §2.3）：[`Dispatcher::on_rpc`] 返 `Err` =
-//!   业务性失败，serve 折 `{"error": …}` 应答回话；`on_event` / `on_tick` 返 `Err` =
-//!   传输性/设备级失败，上抛致命（main `exit(1)` 交 supervisor）——与现行五模块
-//!   逐字同款，本 crate 不发明新语义。
-//! - **HAL 选择 + 探活不进 bootstrap**（方案 §2.4）：后端选择函数各模块不同，探活
-//!   句柄强耦合模块语义——归各模块 boot.rs（接入层），`Unsupported` 即 `Err`。
-//! - **SURFACE 启动自述不进 bootstrap**（ADR-0017 裁定 3）：自述留 main（装配面）。
-//! - **刻意不提供 subscribe**（方案 §2.2）：线上无订阅注册帧（全量扇出 + 本地过滤），
-//!   给"注册"形状即假 API；订阅过滤是 `on_event` 的本地职责。
-//! - **六消费方同批改**（方案 §5 批0 附加纪律）：本 crate API 此后修订须五模块 +
-//!   brain 迁移件同批改，不许骨架单方漂移。
-//!
-//! `#[cfg(unix)]` 门随 rr-bus-api 同形状（承载是平台事，UDS 承载只对 unix 目标
-//! 在册；非 unix 目标本 crate 只余 [`RR3_MANIFEST_ENV`] 常量）。
+//! `#[cfg(unix)]` 门与 rr-bus-api 同形状；非 unix 目标只余 [`RR3_MANIFEST_ENV`]。
 
 /// rrd spawn 注入的 manifest 绝对路径（supervisor.rs 契约环境变量）。
 /// 现五模块各自本地定义（rr3-act / rr3-sense / rr3-connect / rr3-power /

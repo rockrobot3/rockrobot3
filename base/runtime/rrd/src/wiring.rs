@@ -1,32 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 装机接线档 `hardware/<形态>/wiring.toml`（增补轮六 §4.3）：机器可查、人照它插线。
+//! 装机接线档 `hardware/<形态>/wiring.toml`：机器可查、人照它插线。
 //!
-//! 接线档把接线变成**可检查的数据**：面板出图、出厂自检逐条点名、`rated_a` 与
-//! 件 `demands.peak_ma` 互校的载体。它拦不住人插错线（坑 10 的直接原因是物理的）——
-//! 诚实边界，但每条线组从此有判据可点。九字段 = `connector`/`hdr_pin`/`signal`/
-//! `net`/`feeds`/`mate`/`keyed`/`rated_a`/`gnd_common`，全键必填（§5 缺失语义列 +
-//! "合法不适用显式写"的全仓范式）：`feeds` 无下游线组显式写 `[]`；`mate`/`net`/
-//! `gnd_common` 的合法不适值是 `"none"`；`keyed`/`rated_a` 无不适值可言，缺即红。
+//! 接线是**可检查的数据**（面板出图、自检点名、`rated_a` 与件 `demands.peak_ma` 互校）。
+//! 它拦不住插错线（物理原因），但每条线组有判据可点。九字段全必填：`connector`/
+//! `hdr_pin`/`signal`/`net`/`feeds`/`mate`/`keyed`/`rated_a`/`gnd_common`；
+//! "合法不适用显式写"——`feeds` 无下游写 `[]`，`mate`/`net`/`gnd_common` 不适用写
+//! `"none"`；`keyed`/`rated_a` 缺即红。
 //!
-//! 校验⑦（§5，后果 = 拒）的装载侧判据：
-//! - ⑦-a `wire.signal ⊆ pin_id ∪ {vcc, gnd}`（F-3：signal 除供电/地外一律写
-//!   `[pins]` 的 pin_id，不各造语法）
-//! - ⑦-b `wire.net ⊆ domains`（`"none"` = 纯信号/地线组、不承载电力网络导体的
-//!   合法显式值，非 none 逐一查域在册——F-5）
-//! - ⑦-d `wire.mate ∈ devices.toml 的 mate 集`（§4.1b 门 o 的对账面）
-//! - 闭合面：`feeds` 指向同文件其他线组的 `connector`（位号在本档内闭合、不得
-//!   自环）——位号一连接器一组线，重复声明即红
-//! - **⑦-c 装载期不预支**（额定加总两位，§22 实-4 拆分：⑦-c1 器件侧——判据对象
-//!   是 `devices.toml` 的 `peak_ma`——其自检时点判已随 assembly.rs 额定加总族先行，
-//!   批N5 件五；⑦-c2 件侧的判据对象是件 demands 申报，批N2 落数据面后同链判。
-//!   feeds 一般环的装载期拒绝仍随其批，自检时点已由额定加总族兜住）
+//! 装载期判据（后果=拒）：⑦-a `signal ⊆ pin_id ∪ {vcc,gnd}`（除供电/地一律写
+//! `[pins]` 的 pin_id）；⑦-b `net ⊆ domains`（`"none"` = 纯信号/地）；⑦-d `mate ∈
+//! devices.toml`；闭合面：`feeds` 指向同档其他线组的 `connector`，位号闭合、不得自环、
+//! 重复声明即红。⑦-c 额定加总不在装载期预支（器件侧与件侧各自随链）。
 //!
-//! `hdr_pin` 与 `signal` 按位序对应（`hdr_pin[k] ↔ signal[k]`，丝印序即信号序）；
-//! 同一逻辑信号占多个导体（如 I2C 的 SDA/SCL 同属一个 pin_id）按导体数重复写。
-//!
-//! 接线路径推导（[`rr3_wiring_path`])与 modules-root 同一条布局纪律：
-//! `<root>/profiles/<机>.toml` 的上两级即 modules-root，接线档在
-//! `<root>/hardware/<机>/wiring.toml`——daemon 由 `--profile` 推导，单点真值。
+//! `hdr_pin[k] ↔ signal[k]` 按位序对应（丝印序即信号序）；同一 pin_id 占多导体
+//! （如 I2C SDA/SCL）按导体数重复写。路径推导 [`rr3_wiring_path`]：由
+//! `--profile` 上两级得 modules-root，接线档在 `<root>/hardware/<机>/wiring.toml`。
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
