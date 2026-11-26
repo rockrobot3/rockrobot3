@@ -1391,3 +1391,13 @@ fanout 丢帧读不到"的前提不成立：`rr3.ctl.status` 早带 `denied_publ
 为三行（体积口径与"只读数不改判据"保留）。判据——`python3 tools/ci/audit/workflows_audit.py`
 绿（并发组/超时/action 版本矩阵/权限/五芯片覆盖/发布面/制品托管七项）；本步只读输出，
 不进入任何 `if:` 判据，不改变门数与覆盖面。
+
+**2026-11-27 批63 收尾 推送后漂红审计与根因修复**：事实——收敛后首推 gate 红，注解定位到
+`cargo clippy -D warnings`（workspace 与 `tools/sim` 两处），根因是**头注释内的 markdown
+列表后直接接段落**：`rr-registry/src/assemble.rs` 两条 `- ` 项后紧接 `demands` 段落、
+`tools/sim/src/main.rs` 编号列表第 5 项后紧接"另有三个互斥模式"段——两者都触发文档续行
+类告警，注释内容本身没错、错在分隔。处置——恢复列表后空行；`assemble.rs` 的 `demands` 段
+压到三行、`main.rs` 尾两段合并，两件仍 ≤15 行。判据——全仓扫描器（列表项后紧接不缩进
+文本行）命中数 0；远端 gate / integration / platforms 三条流水线在 `258778d` 全绿；
+`platforms` 绿同时验证批66 的快照步骤（`cargo_cache=hit|partial|miss` 一行）可正常执行。
+**教训入册**：压缩行数时不许拆掉列表与段落之间的空行——那是 markdown 结构，不是排版余量。
