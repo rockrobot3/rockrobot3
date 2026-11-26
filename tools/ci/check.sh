@@ -42,6 +42,8 @@ if [ -z "$root" ] || ! cd "$root"; then
   echo "ERROR: 无法进入仓库根：'$root'，规约门拒绝执行。" >&2
   exit 1
 fi
+# 审计脚本会 import 同目录模块；禁写字节码，避免在源码树里留下 __pycache__。
+export PYTHONDONTWRITEBYTECODE=1
 
 # 装配单真值面源码集（B9 起 profile.rs 按 模型/解析/装载 三分）：定义点落在
 # 主文件或 profile/ 子模块都算单点——门禁按"内容"执法，不按文件名执法，结构
