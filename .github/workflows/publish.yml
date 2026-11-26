@@ -400,7 +400,7 @@ jobs:
           bash tools/deploy/image-esp32.sh --elf rr3-periph-base-esp32s3-full-dev.elf \
             --chip esp32s3 --flash-size 16mb --out rr3-esp32s3-full-merged.bin \
             --bootloader rr3-bootloader-esp32s3-dev.bin --partitions rr3-partitions.csv
-          sha256sum -b rr3-esp32-safe-merged.bin rr3-esp32s3-full-merged.bin \
+          sha256sum rr3-esp32-safe-merged.bin rr3-esp32s3-full-merged.bin \
             | tee -a firmware-sha256.txt
       - name: 上传 release 资产（双芯片 + 同版 bootloader + 分区表 + 烧录说明）
         uses: softprops/action-gh-release@v3

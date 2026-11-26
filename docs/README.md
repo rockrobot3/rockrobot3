@@ -84,7 +84,7 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | [`process/dev/0.0.8/0.0.8版本洛克三号模块内部分层实施方案.md`](process/dev/0.0.8/0.0.8版本洛克三号模块内部分层实施方案.md) | 验证后整理过渡版（2026-10-12 恢复独立成批；"并入 0.0.5 第 II 轮"随 ADR-0020 裁定 2 作废——`rr3mod` 从未被任何批次认领；与 R31"0.0.8 不设功能版"同向）：W-A rr3mod 骨架与五模块 boot/rpc/dispatch、W-B 形状清理（L-3/L-9/L-10）、W-C brain Python→Rust、W-D 验证返工登记位；原签名级规格与迁移映射作施工参考件保留（随 ADR-0019 修订 1 定性：四面是视图不拆四份文件，§2 签名是 **std 驱动器形状**而非跨 OS 接口） |
 | [`process/dev/0.0.8/0.0.8版本真件装配与标定手册.md`](process/dev/0.0.8/0.0.8版本真件装配与标定手册.md) | 真件到货做验收、装配与标定时照单执行（批W5 每件四件套 + 到货差异登记表） |
 | [`process/dev/0.0.8/0.0.8版本方案A——整板电压监测与分轴限幅立项评审.md`](process/dev/0.0.8/0.0.8版本方案A——整板电压监测与分轴限幅立项评审.md) | 用户新需求（整板电压监测 + 分轴限幅 + 低电压串行降级）的立项评审——**已裁定** Q1–Q6（§8）+ 真板验收实测（§9），施工待契约评审 |
-| [`process/dev/README.md`](process/dev/README.md) | **dev 档案卷首索引**：版本轴（0.0.1–0.0.8）、各版本状态、0.0.8 内部结构与阅读顺序；目录组织规矩（版本目录 + 统一命名）也登记在这里 | 版本口径唯一真源是仓根 `VERSION`；旧高号 tag 已归档，下次发布从 `v0.0.9` 起重用（[conventions §7](process/conventions.md)） |
+| [`process/dev/README.md`](process/dev/README.md) | **dev 档案卷首索引**：版本轴（0.0.1–0.0.8）、各版本状态、0.0.8 内部结构与阅读顺序；目录组织规矩（版本目录 + 统一命名）也登记在这里 | 版本口径唯一真源是仓根 `VERSION`；旧高号 tag 已归档，`v0.0.8` 为治理后首个发布点（2026-11-26），下一次从 `v0.0.9` 起（[conventions §7](process/conventions.md)） |
 | [`process/legacy-digest.md`](process/legacy-digest.md) | legacy（ESP32 冻结区）逐组件消化到哪了（已归档：0.0.4 退役批整树删除，待融合清零） |
 | [`openitems.toml`](openitems.toml) | 开放项数据结构（ADR-0022 裁定 6.3，批N4 件九立）：归因登记表 `{条目, 分类, 工单号, 证据路径, 状态}`——门 d 差集"为什么红、谁负责"的结构化落点；机器真值仍在 `check.sh` 步 ⑩，status.md 敞口表的生成关系随它建立 |
 | [`evidence/README.md`](evidence/README.md) | 真板对拍/实测证据文件容器（brain B-15，批N4 件一立）：`<形态>/<编号>.md` 编号规则与 frontmatter 六键见 [`process/conventions.md`](process/conventions.md) §6.1，校验器唯一实现住 `rr-ipc::evidence`；证据产出随 0.0.6/0.0.7 验证窗 |
