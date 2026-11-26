@@ -135,6 +135,38 @@ esp-toolchain 的 `targets` 允许逗号（espup 语法），归一必须在 act
 （逗号→短横），不得让调用方各自清洗。组合档键为
 `esp-Linux-esp32-esp32s3-v0.17.1-idf5.2.2`；单 target 键字面不变、既有缓存不失效。
 
+**时长基线（2026-11-27 立，只作评审基线、不成门）**：run 墙钟是"变慢"最早可见的信号；
+job 日志匿名不可读（403），故只记 run 级时长，**不宣称缓存命中率**。取证快照
+（2026-11-27，`dev/hubs-01`）：
+
+| 工作流 | 档 | 墙钟 | 取证 head |
+|---|---|---|---|
+| gate | 全量 | 3.9–4.0 min | `f253cd7a` / `b5f85c6` |
+| integration | 全量 | 4.4–4.5 min | `f3ca761d` / `6745648` |
+| platforms | 十腿 | 12.9–15.1 min | `f3ca761d` / `6745648` |
+| buildroot | 日常 dtb 腿 | 0.6–1.1 min | `8ef6a518` 等五次 |
+| buildroot | 全量镜像腿（tag/dispatch/`[buildroot-full]`） | 86.9 min | `a76eac4e`（`v0.0.8`） |
+| publish | 发布 | 9.9 min | `v0.0.8` |
+
+读法：越过区间上沿 50% 先在评审里问"腿数变了还是缓存失效了"，不先改判据；buildroot
+日常 1 分钟级是**dtb 腿**的时长，全量镜像腿受 `if:` 门控，两者不可互相冒充。复跑取数
+（匿名 REST，只读）：
+
+```bash
+python3 - <<'PY'
+import json,urllib.request
+from datetime import datetime
+h={'Accept':'application/vnd.github+json'}
+u="https://api.github.com/repos/rockrobot3/rockrobot3/actions/workflows"
+for wf in ['gate.yml','integration.yml','platforms.yml','buildroot.yml','publish.yml']:
+    r=json.load(urllib.request.urlopen(urllib.request.Request(f"{u}/{wf}/runs?branch=dev%2Fhubs-01&per_page=5",headers=h)))
+    for w in r['workflow_runs']:
+        c=datetime.fromisoformat(w['created_at'].replace('Z','+00:00'))
+        e=datetime.fromisoformat(w['updated_at'].replace('Z','+00:00'))
+        print(wf, w['head_sha'][:8], w['conclusion'], f"{(e-c).total_seconds()/60:.1f}min")
+PY
+```
+
 **运行时基线（2026-11-24 弃用面巡检）**：GitHub 已强制 Node 24 运行 action，
 Node 20 档引用会在 annotations 里持续告警并将于后续移除。现行矩阵（真源 =
 `tools/ci/audit/workflow_rules.py` 的 `ACTION_MATRIX`）：`actions/cache@v5`、

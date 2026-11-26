@@ -1352,3 +1352,12 @@ GPIO41/42 @1.5M）；`dc7a40c` 在重锚后不可解析；四份文件行数 75/
 订正带可复跑命令：`grep -c '^\[\[topic\]\]' contracts/topics.toml`=44、`grep -c '^step '
 tools/ci/check.sh`=25、六 workflow 的 `jobs:` 二级键=29、`grep -rn '#\[test\]'
 --include='*.rs' | wc -l`=1467、两份 baseline 尾行=0/83；⑤ 门绿。
+
+**2026-11-27 批62 流水线时长基线归档（只作评审基线，不成门）**：事实——"流水线变慢"没有
+可比基线：publish/buildroot 的 release 腿很少跑，gate/integration/platforms 的墙钟从未记录；
+job 日志匿名不可读（403 已实证），缓存命中率拿不到。处置——`docs/process/ci-workflows.md`
+增"时长基线"节：六行（gate 3.9–4.0min、integration 4.4–4.5min、platforms 12.9–15.1min、
+buildroot 日常 dtb 0.6–1.1min、buildroot 全量镜像 v0.0.8=86.9min、publish v0.0.8=9.9min），
+每行带取证 head；附一段匿名只读取数脚本与读法（越上沿 50% 先问腿数/缓存，先不判据）；
+明确"日常 1 分钟是 dtb 腿、全量镜像腿受 `if:` 门控，两者不可互相冒充"。判据——⑤ 门绿；
+未新增任何门禁脚本；表内每个数可由随附脚本复跑。
