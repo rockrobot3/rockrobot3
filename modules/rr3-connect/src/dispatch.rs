@@ -1,19 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-//! rr3-connect 机制层注册面（0.0.8 W-A 批2 拆分，ADR-0017 五层表机制层）。
+//! rr3-connect 机制层注册面（ADR-0017 五层表机制层）。
 //!
 //! [`Rr3ConnectDispatcher`] 实现 rr3mod [`Dispatcher`]（serve 骨架回调）：
-//! `on_rpc` = 五臂点名分发（四 handler 在 [`crate::rpc`]＋ops/list 快照臂——
-//! 现行五臂照顺序保留，方案快照「四 RPC match」漏记 ops/list 臂，批N27 件一
-//! 笔2 落档）；`on_tick` = 链路拍（每拍读一次 HAL——翻转（`Rr3LinkEdge`）立即
-//! 发 net/link 不等周期，同态到点才发（周期保底，流是摘要不是逐拍镜像），事件
-//! 体带 mode 字段随流发布）；`on_event` = 订阅面为空是**设计**（module.toml
-//! 同条注：本模块没有可订阅的命令流），广播只排空。
+//! `on_rpc` = 五臂点名分发（四 handler 在 [`crate::rpc`] ＋ ops/list 快照臂）；
+//! `on_tick` = 链路拍（每拍读一次 HAL——翻转 `Rr3LinkEdge` 立即发 net/link 不等周期，
+//! 同态到点才发，事件体带 mode 字段随流发布）；`on_event` = 订阅面为空是设计
+//! （本模块没有可订阅的命令流），广播只排空。
 //!
 //! 失败语义与 sense/interact/act/power 同一口径（rr3mod 两档）：on_rpc 返 Err =
-//! 业务性失败折 `{"error": …}` 应答（请求-应答语义，不当致命错误；HAL 读数失败
-//! 也按业务性折 error——会话/配网本来就是问"现在能不能"）；on_tick 返 Err =
-//! 传输性/设备级失败上抛致命（与 power 的电池读数同口径），模块不装"活着"，
-//! 死交给 supervisor 按 restart_policy=always 重启。
+//! 业务性失败折 `{"error": …}` 应答（HAL 读数失败也按业务性折 error——会话/配网本来
+//! 就是问"现在能不能"）；on_tick 返 Err = 传输性/设备级失败上抛致命，模块不装
+//! "活着"，死交给 supervisor 按 restart_policy=always 重启。
 
 use std::time::{Duration, Instant};
 

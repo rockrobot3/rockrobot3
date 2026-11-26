@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-//! rr3-act 机制层注册面（0.0.8 W-A 批5 拆分，ADR-0017 五层表机制层）。
+//! rr3-act 机制层注册面（ADR-0017 五层表机制层）。
 //!
 //! [`Rr3ActDispatcher`] 实现 rr3mod [`Dispatcher`]（serve 骨架回调）：`on_rpc` =
-//! 四臂点名分发（servo/command → led/effect → relay/set → ops/list → 兜底点名
-//! ——现行四臂照顺序保留，方案快照「三点名」漏记 ops/list 臂，批N30 计划册
-//! 取证笔4 落档）＋ servo/state 限速发布与 relay/state 变化即发在返回前经 bus
-//! 完成（发布 → 应答的现行顺序不变）；`on_event` = 两臂（system/power 低电闸门
-//! 臂先行＋intent 臂——两道归属门在 intent.rs 原位，本层只做 topic 过滤＋
-//! actions 分派＋outcome 发布与日志，方案快照漏记 power 臂，取证笔5 落档）；
-//! `on_tick` = led 节拍。原主循环 led tick 在死亡探针前、帧前；serve 骨架 on_tick
-//! 在帧后——250ms 量级节拍一圈内毫秒级挪移不可观测，等价性由 SURFACE diff＋
-//! 48 测＋chain 两跑承担（批N30 计划册取证笔6）。
-//!
+//! 四臂点名分发（servo/command → led/effect → relay/set → ops/list → 兜底点名）＋
+//! servo/state 限速发布与 relay/state 变化即发在返回前经 bus 完成（发布 → 应答的
+//! 顺序不变）；`on_event` = 两臂（system/power 低电闸门臂先行＋intent 臂——两道归属
+//! 门在 intent.rs 原位，本层只做 topic 过滤＋actions 分派＋outcome 发布与日志）；
+//! `on_tick` = led 节拍。serve 骨架 on_tick 在帧后，较原主循环（死亡探针前、帧前）
+//! 有 250ms 量级节拍内的毫秒级挪移，不可观测，等价性由 SURFACE diff＋48 测＋chain
+//! 两跑承担。
 //! 失败语义与其余模块同一口径（rr3mod 两档）：on_rpc 返 Err = 业务性失败折
 //! `{"error": …}` 应答（状态流发布失败同面——serve `?` 上抛致命，死亡探针兜底）；
 //! on_event / on_tick 返 Err = 传输性上抛致命，模块不装"活着"，死交 supervisor

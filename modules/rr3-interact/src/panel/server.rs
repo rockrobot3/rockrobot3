@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 面板 HTTP 服务（D3/Q3 裁定落地）：std 手写 HTTP/1.1 子集，**零新 crates.io
-//! 依赖**——GET/POST + Content-Length + JSON body 就是全部，不做 keep-alive、
+//! 面板 HTTP 服务（ADR-0006 裁定 3）：std 手写 HTTP/1.1 子集，零新 crates.io
+//! 依赖——GET/POST + Content-Length + JSON body 就是全部，不做 keep-alive、
 //! 不做 chunked、不做 TLS（局域网可信面声明落 README，不承诺公网暴露）。
 //!
-//! 架构边界（ADR-0006 裁定 3 的面板条款）：
-//! - **面板不当发布者**——硬件控制只走 `rr3.call` RPC 归属门。类型面即证据：
-//!   [`Rr3PanelDispatch`] 没有 Publish 变体，路由器想越权也造不出发布动作。
-//! - **ctl 查询走短连**——`rr3.ctl.*` 只对未注册连接开放（ADR-0010），面板在本
-//!   进程内另开一条裸 UDS 一问一答即断，与外部运维探针同权同拒。
-//! - **beep/face 不出进程**——播放面与表情机归主循环所有，面板经动作通道
-//!   （mpsc）请求主循环代执行，串行无锁，与 TTS 点名天然互斥。
-//!
+//! 架构边界：面板不当发布者——硬件控制只走 `rr3.call` RPC 归属门，类型面即证据
+//! （[`Rr3PanelDispatch`] 没有 Publish 变体，路由器想越权也造不出发布动作）；
+//! ctl 查询走短连——`rr3.ctl.*` 只对未注册连接开放（ADR-0010），面板在进程内另开
+//! 一条裸 UDS 一问一答即断，与外部运维探针同权同拒；beep/face 不出进程——播放面与
+//! 表情机归主循环所有，面板经动作通道（mpsc）请求主循环代执行，串行无锁。
 //! 端点全集与 covers/applies 申报以 [`RR3_PANEL_ROUTES`] 为真值：`GET /`、
 //! `GET /api/status|data|logs`、`POST /api/relay|beep|face|selftest|reboot`、
 //! `GET /api/wifi/scan` + `POST /api/wifi/connect|forget`（BusCall 透传 connect

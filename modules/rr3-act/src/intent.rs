@@ -1,21 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-//! intent/result 订阅执行面（0.0.3 T3，方案 Q1 裁定）：brain 产出结构化
-//! `actions`（元素 `{topic, args}`，contracts/events/brain-intent-result.schema.json），
-//! 本模块广播认领——**两道归属门**后才执行：
+//! intent/result 订阅执行面：brain 产出结构化 `actions`（元素 `{topic, args}`，
+//! contracts/events/brain-intent-result.schema.json），本模块广播认领——两道归属门后
+//! 才执行：
 //!
-//! ① 归属门：topic ∈ 本模块 exposes（不越权——发布侧 `rr3_reg_pub_check`
-//!    四道门的精神在订阅执行面的对偶：别人的主题一个不碰）；
-//! ② 开放门：topic ∈ 意图执行面**开放集**——该集由 config `[rr3-act.intent]
-//!    open_topics` 注入、组合件读入透传（0.0.5 批M MC-10 A-9："某形态不开某令"
-//!    = 改数据不改码）。开放集外的**已归属**主题（led/effect）到此拒执行；开放
-//!    集只认本模块**有执行臂**的在册主题（relay/set、servo/command），boot 时已
-//!    fail-closed 校验（越界值拒 boot）。
-//!
-//! 执行失败（参数裁决拒 / HAL 写失败）是**业务性失败**，逐条折日志继续收下一帧
-//! （事件语义无应答回路）；传输性失败（发布 relay/state、servo/state 写不出去）
-//! 由调用方按 `exit(1)` 口径收口（组合件主循环的发布 `?`）。
-//!
-//! 归属：本文件是总线接入编排面（两道门 + 执行编排），**留组合件**；裁决与执行机制在 servo/led/relay 原子件。
+//! ① 归属门：topic ∈ 本模块 exposes（发布侧 `rr3_reg_pub_check` 四道门在订阅执行面的
+//!    对偶：别人的主题一个不碰）；
+//! ② 开放门：topic ∈ 意图执行面开放集——该集由 config `[rr3-act.intent] open_topics`
+//!    注入、组合件读入透传（"某形态不开某令" = 改数据不改码）。开放集外的已归属主题
+//!    （led/effect）到此拒执行；开放集只认本模块有执行臂的在册主题（relay/set、
+//!    servo/command），boot 时已 fail-closed 校验（越界值拒 boot）。
+//! 执行失败（参数裁决拒 / HAL 写失败）是业务性失败，逐条折日志继续收下一帧（事件
+//! 语义无应答回路）；传输性失败（发布 relay/state、servo/state 写不出去）按 exit(1)
+//! 口径收口。本文件是总线接入编排面（两道门 + 执行编排），留组合件；裁决与执行机制
+//! 在 servo/led/relay 原子件。
 
 use serde_json::Value;
 

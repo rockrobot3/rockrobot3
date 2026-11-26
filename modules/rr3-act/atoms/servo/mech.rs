@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 //! servo 原子件机制主体：行程/时限值域判定与 `Rr3RateGate` 复用。
 //!
-//! servo/command 的 Value 下钻已上移承载层（ADR-0019 修订 4）：行程
-//! （[`rr3_servo_travel`]）与时限（[`rr3_servo_timeout`]，缺 move_ms 回落 config
-//! 上限）的值域判定留件，文案契约由编排层渲染、逐字保持。servo/state 限速门：
-//! 状态变化必发布，两次发布至少隔 min_interval——被限掉的这一次不缓存不补发，
-//! 流是摘要不是逐拍镜像。
+//! servo/command 的 Value 下钻在承载层（ADR-0019 修订 4）：行程 [`rr3_servo_travel`]
+//! 与时限 [`rr3_servo_timeout`]（缺 move_ms 回落 config 上限）的值域判定留件，文案
+//! 契约由编排层渲染、逐字保持。servo/state 限速门：状态变化必发布，两次发布至少隔
+//! min_interval——被限掉的这一次不缓存不补发，流是摘要不是逐拍镜像。
 //!
 //! `Rr3RateGate` 真值在 rr-core `control`（机制核纯函数 + 注入时钟）——本文件
 //! re-export 保既有路径，时钟由调用方给 ms。
 //!
-//! 错误面零堆化：行程/时限失败交 [`Rr3ServoTravelError`]/[`Rr3ServoTimeoutError`]
-//! 零堆枚举（动态数据进枚举字段，不落 `String` 堆），人读文案由编排层渲染
+//! 错误面零堆化：行程/时限失败交 `Rr3ServoTravelError`/`Rr3ServoTimeoutError` 零堆
+//! 枚举（动态数据进枚举字段，不落 `String` 堆），人读文案由编排层渲染
 //! （`src/composite.rs` 的 `rr3_servo_parse_args`，与改前逐字一致）。
 
 use super::Rr3ServoCfg;

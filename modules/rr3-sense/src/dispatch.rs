@@ -1,20 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-//! rr3-sense 机制层注册面（0.0.8 W-A 批3 拆分，ADR-0017 五层表机制层）。
+//! rr3-sense 机制层注册面（ADR-0017 五层表机制层）。
 //!
 //! [`Rr3SenseDispatcher`] 实现 rr3mod [`Dispatcher`]（serve 骨架回调）三入口：
-//! `on_tick`＝采集循环体函数化（自原 composite.rs 主循环逐字迁；自 pacing 归一，
-//! 0.0.8 方案 §2.6——read→判向窗积累→下混→publish→VAD 边沿→余量睡眠全在 tick
-//! 内，poll_wait=ZERO 时序行为不变）；`on_event`＝播放期门控喂帧（B批 b2 订阅面，
-//! tts_pcm 流帧；其余订阅帧与本件无关径直忽略）；`on_rpc`＝dump/ops/list/兜底
-//! 三臂点名应答（兜底 Err 点名，serve 折 `{"error": …}` wire 等价）。
+//! `on_tick`＝采集循环体函数化（read→判向窗积累→下混→publish→VAD 边沿→余量睡眠全在
+//! tick 内，poll_wait=ZERO 时序行为不变）；`on_event`＝播放期门控喂帧（tts_pcm 流帧；
+//! 其余订阅帧与本件无关径直忽略）；`on_rpc`＝dump/ops/list/兜底三臂点名应答（兜底 Err
+//! 点名，serve 折 `{"error": …}` wire 等价）。
 //!
-//! 门控/判向窗两个纯机制切片已各自成件（[`crate::tts_gate`]/[`crate::doa_ring`]，
-//! 批D1 迁出），本层只留反射环与编排：反射环吃 onset 判向换算 pan 目标（裁定①：
-//! 快环落 sense，唯一持音频 conn 者）；门控吃 tts_pcm 帧流外推静音窗（裁定②：
-//! 订阅既有主题零新契约）；判向窗 ring 是双麦链路的 TDOA 积累器（b3b：onset 时
-//! 整窗回看交 capture::rr3_doa_fix）。策略量全在 config（Rr3ReflexConfig 等），
-//! 此处只有判定与算术。
-//!
+//! 门控/判向窗两个纯机制切片已各自成件（[`crate::tts_gate`]/[`crate::doa_ring`]），
+//! 本层只留反射环与编排：反射环吃 onset 判向换算 pan 目标（快环落 sense，唯一持音频
+//! conn 者）；门控吃 tts_pcm 帧流外推静音窗（订阅既有主题零新契约）；判向窗 ring 是
+//! 双麦链路的 TDOA 积累器（onset 时整窗回看交 capture::rr3_doa_fix）。策略量全在
+//! config（Rr3ReflexConfig 等），此处只有判定与算术。
 //! 发布/读帧失败 Err 上抛致命：模块不装"活着"，死交 supervisor 按 restart_policy=always 重启。
 
 mod nod;

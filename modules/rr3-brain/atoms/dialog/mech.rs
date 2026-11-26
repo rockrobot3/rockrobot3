@@ -1,19 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 //! dialog 原子件机制主体：utterance 边界（onset 起轮 / offset 判停 / 时长上限判停）。
 //! 纯逻辑不碰总线不碰网络不碰 JSON——机制核（ADR-0017 五层表机制层；件面零
-//! std/serde 直引），事件体字段适配与编排消费面上移组合件 [`crate::dispatch`]。
+//! std/serde 直引），事件体字段适配与编排消费面在组合件 [`crate::dispatch`]。
 //!
-//! 状态机只管"一轮 utterance 的边界"：
-//! - **onset** 边沿起一轮，此后到达的 pcm 帧持续积累（s16le 小端字节）；
-//! - **offset** 边沿判停（sense 的 VAD 已按 silence_tail_ms 判静默——brain 不重复计时）；
-//! - **时长上限** max_utterance_ms 到点同样判停：连续语音无 offset 时也要有界；
-//! - 上限之内的 pcm 帧在无 utterance 时丢弃（不开轮不积累）。
-//!
-//! 判停后交出的 PCM = **onset 前的预滚**（至多 [`RR3_PREROLL_MS`]）+ onset 起到
-//! 判停帧为止的全部字节。sense 的 onset 要凑满 `min_speech_ms`（config 200ms）
-//! 才发出——这段判据语音本体在 onset 事件之前就已流过总线；无预滚则短句削头
-//! 200ms+，云端 ASR 对过短音频回空文本（真板实测健康流成因）。
-//!
+//! 状态机只管一轮 utterance 的边界：onset 边沿起一轮，此后 pcm 帧持续积累（s16le
+//! 小端字节）；offset 边沿判停（sense 的 VAD 已按 silence_tail_ms 判静默，brain 不
+//! 重复计时）；时长上限 max_utterance_ms 到点同样判停——连续语音无 offset 时也要
+//! 有界；上限之内的 pcm 帧在无 utterance 时丢弃（不开轮不积累）。
+//! 判停后交出的 PCM = onset 前的预滚（至多 [`RR3_PREROLL_MS`]）+ onset 起到判停帧
+//! 为止的全部字节。sense 的 onset 要凑满 `min_speech_ms`（config 200ms）才发出——
+//! 这段判据语音本体在 onset 事件之前就已流过总线；无预滚则短句削头 200ms+，云端
+//! ASR 对过短音频回空文本（真板实测健康流成因）。
 //! 时钟纪律：状态机不持时钟，`now_ms` 由调用方注入（Dispatcher 的单调时基
 //! [`rr_bus_api::Rr3TimeBase`]）——合成时钟逐拍注入，单测不真等墙钟。
 

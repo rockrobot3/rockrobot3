@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-//! rr3-power 机制层注册面（0.0.8 W-A 批1 拆分，ADR-0017 五层表机制层）。
+//! rr3-power 机制层注册面（ADR-0017 五层表机制层）。
 //!
 //! [`Rr3PowerDispatcher`] 实现 rr3mod [`Dispatcher`]（serve 骨架回调）：
-//! `on_tick` = battery/charger/rail 三节拍＋低电两沿（批N2 件五起三拍，方案 §4.1
-//! 「双节拍」为快照过时表述，批N26 件一订正）；`on_rpc` = `rr3-power/ops/list`
-//! 快照应答（批N4 件九二，真事务面——非方案快照所称"无 exposes 纯防御"）；
-//! `on_event` = 订阅面为空是**设计**（module.toml 同条注：低压关断是本地决策，
-//! 不依赖总线可达），广播只排空。载荷组装面（`*_body`，0.0.5 批I P-7 上移承载层）
-//! 与轨压判定核切片（批N2 件五 P-9 归属搬家）随 composite.rs 消解迁本文件，
-//! 机制不动、线上字节逐字不变。
+//! `on_tick` = battery/charger/rail 三节拍＋低电两沿；`on_rpc` = `rr3-power/ops/list`
+//! 快照应答（真事务面）；`on_event` = 订阅面为空是设计（低压关断是本地决策，不依赖
+//! 总线可达），广播只排空。载荷组装面（`*_body`）与轨压判定核切片随 composite.rs 消解
+//! 迁本文件，机制不动、线上字节逐字不变。
 //!
 //! 错误语义两档（rr3mod 同款）：on_rpc 返 Err = 业务性失败折 `{"error": …}` 应答；
 //! on_tick 返 Err = 传输性/设备级失败上抛致命——HAL 读数失败先 counter 后退出，

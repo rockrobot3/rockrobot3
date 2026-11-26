@@ -2,20 +2,17 @@
 //! player 原子件机制主体：件面只搬运，不做合成。
 //!
 //! brain 的 TTS 引擎经 `rr3-brain/audio/tts_pcm` 流下发真 PCM（s16le/16k/mono），
-//! 件面只做**搬运**——20ms（320 样点）分块写 sink，块边界不改造样本。写块粒度与
-//! 采集侧（rr3-sense）的 frame_ms 同拍：sim 后端 write 即时返回（无时钟），实时
-//! 后端（ALSA）write 本身就耗一个节拍——两种后端同一形状。
+//! 件面只做搬运——20ms（320 样点）分块写 sink，块边界不改造样本。写块粒度与采集侧
+//! （rr3-sense）的 frame_ms 同拍：sim 后端 write 即时返回（无时钟），实时后端（ALSA）
+//! write 本身就耗一个节拍——两种后端同一形状。
 //!
-//! 载荷组装、流收缓冲与点名下钻在承载层 `src/composite.rs`；件面只交播放机制，线上字节归承载层。
-//!
+//! 载荷组装、流收缓冲与点名下钻在承载层 `src/composite.rs`；件面只交播放机制。
 //! ⑧-b：机制主体不 `use std`、不分配——`&[i16]` 借用进、`u64` 毫秒出。
-//!
-//! 错误面零堆化：`rr3_tts_play` 返回 [`Rr3TtsPlayError`] 零堆枚举（写腿失败携
+//! 错误面零堆化：`rr3_tts_play` 返回 `Rr3TtsPlayError` 零堆枚举（写腿失败携
 //! `Rr3HalError` 原样随行），人读文案由编排层渲染（`rr3_tts_err_text`）；HAL 句柄
 //! 入参泛型化（`S: Rr3AudioSink + ?Sized`），调用点单态化不改行为。
-//!
 //! clippy `result_large_err` 模块级豁免：`Rr3ErrText` 内联 128B 是 no_std 面定长
-//! 契约（无堆可 Box），缩容会破坏零堆契约，不属可清的临时债。
+//! 契约（无堆可 Box），缩容会破坏零堆契约。
 
 #![allow(clippy::result_large_err)]
 

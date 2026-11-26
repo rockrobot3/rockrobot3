@@ -6,13 +6,10 @@
 //! （白名单/类型域 → live 生效不落盘 → 按组重建 asr/tts/llm 客户端，dialog 组就地改参）；
 //! `model/list|set|test`（落盘 + llm 组重建 / 单次探测）。未知 topic 返 Err，由 serve 折
 //! `{"error": …}`。
-//!
 //! `on_event` 两臂：pcm → [`dialog::Rr3Dialog`] 积累/预滚；vad_start → onset 起轮 /
 //! offset 判停触发整轮（[`Rr3BrainDispatcher::rr3_finish_turn`]：ASR → LLM → TTS →
 //! 分帧发布 tts_pcm → interact 播放点名 → intent 发布）。`on_tick` 一臂：
-//! utterance_expired 时长判停（与 offset 共用同一 finish_turn）；订阅面外事件本地
-//! 过滤静默。
-//!
+//! utterance_expired 时长判停（与 offset 共用同一 finish_turn）；订阅面外事件静默过滤。
 //! 错误语义两档（rr3mod 同款）：`on_rpc` 返 Err = 业务失败折错误应答；`on_event`/
 //! `on_tick` 返 Err = 传输/设备级失败上抛致命（云端 4xx/5xx/空文本/被调方超时臂内
 //! 弃轮返 Ok；发布/应答写不出去上抛，模块不装"活着"，死交 supervisor）。
