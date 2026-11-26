@@ -1361,3 +1361,33 @@ buildroot 日常 dtb 0.6–1.1min、buildroot 全量镜像 v0.0.8=86.9min、publ
 每行带取证 head；附一段匿名只读取数脚本与读法（越上沿 50% 先问腿数/缓存，先不判据）；
 明确"日常 1 分钟是 dtb 腿、全量镜像腿受 `if:` 门控，两者不可互相冒充"。判据——⑤ 门绿；
 未新增任何门禁脚本；表内每个数可由随附脚本复跑。
+
+**2026-11-27 批63 文件头收敛（15–18 行档 75 件，5 批提交）**：事实——`git ls-files '*.rs'`
+按"首段连续 `//` 行数"分档统计，15–18 行档 75 个；内容普遍夹带批次沿革（"批N23 件三"、
+"Task 11b"、"方案快照漏记"）与真板订正过程叙述，与"文件头精简"直接冲突。处置——按
+base/runtime（21 件）、rrd（13 件）、modules（12 件）、tools/esp32*（15 件）、tools 其余
+（13 件）五批收敛：**保留** SPDX 首行、职责一句、边界与不变量、违反即出错的纪律、失败
+语义分档、接线与平台事实；**删除**批号/轮次/任务号沿革、"此前如何/为什么改"的过程叙述与
+重复解释；段落空行合并压行，代码零改动。第 4 批清单原 16 件，其中 `mic.rs` 本就在 15 行
+档，未动即达标。判据——复核脚本按"首段连续 `//` 行数"逐件重算，五个提交后全 75 件 ≤15；
+⑤ 文档门（空文档/断链/导航漏链/散落面）绿、⑬ 仓面卫生门（无本机绝对路径、无未入册
+源码件、提交信息无本机标识）绿、⑯ 源文件行数门绿；移除的 intra-doc 链接全部改为普通
+反引号，保留的链接（`SETTLE`/`rr3_store_perm`/`rr3_assemble_parse`/`rr3_role_group` 等）
+逐个人工核过符号仍在册。
+
+**2026-11-27 批65 卡住可查性复核（先查已有机制，结论：不改代码）**：事实——"tick 超时与
+fanout 丢帧读不到"的前提不成立：`rr3.ctl.status` 早带 `denied_publish`/`fan_dropped`/
+`fan_write_timeout`/`log_sink`/`log_sink_max_us`/`ctr_store`，`rr3.ctl.health` 带逐模块
+`since_beat_ms`/`beat_peak_ms`/`fan_dropped`/`crash_streak`/`restart_exhausted` 与运行级
+`watchdog_overruns`，`rr3-ctl status|health` 两侧渲染面也都在（`format_status`/
+`format_health`）。处置——不新增字段、不加第二个读面（同一真值立第二供给路径即债）。
+判据——`grep -n` 对齐三段实现（`rrd/src/conn/ctl.rs` 状态应答、`rrd/src/conn/ctl.rs`
+健康应答、`tools/rrctl/src/commands/mod.rs` 两渲染函数）；本批零代码改动，宁缺勿滥。
+
+**2026-11-27 批66 ESP 腿快照补缓存命中信号**：事实——两腿时长差（classic 五门 vs S3 两门，
+8.3 / 15.0 min 量级）缺少"是门数还是缓存未命中"的可读归因；快照注解只有 target 与
+`.embuild` 体积，且该段注释在历次编辑后出现整段重复。处置——注册表缓存步骤补 `id`，
+快照步骤读 `cache-hit` 三态（`hit`/`partial`/`miss`）并入同一行与注解 title；重复注释收敛
+为三行（体积口径与"只读数不改判据"保留）。判据——`python3 tools/ci/audit/workflows_audit.py`
+绿（并发组/超时/action 版本矩阵/权限/五芯片覆盖/发布面/制品托管七项）；本步只读输出，
+不进入任何 `if:` 判据，不改变门数与覆盖面。
