@@ -3,6 +3,7 @@
 // 测试是 registry 的后代模块，可触私有字段（与实现同口径）。
 use super::*;
 use crate::manifest::rr3_manifest_parse;
+use rr_ipc::Rr3Frame;
 use std::sync::mpsc;
 
 fn facts(name: &str, hb: u64, wd: u64, policy: &str) -> Rr3ManifestFacts {
@@ -30,7 +31,10 @@ watchdog_timeout_ms = {wd}
     rr3_manifest_parse(&text).expect("测试 manifest 必须可读")
 }
 
-fn chan() -> (SyncSender<Rr3FanFrame>, std::sync::mpsc::Receiver<Rr3FanFrame>) {
+fn chan() -> (
+    SyncSender<Rr3FanFrame>,
+    std::sync::mpsc::Receiver<Rr3FanFrame>,
+) {
     mpsc::sync_channel(RR3_FAN_CAP)
 }
 

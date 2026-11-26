@@ -325,7 +325,10 @@ fn rr3_finish_broadcast(
     let degraded = rr3_lock(&ctx.shared).rr3_reg_degrade(&me.name);
     for (dep, task) in degraded {
         let n = crate::registry::rr3_reg_with(&ctx.shared, |g| {
-            g.rr3_reg_fanout(rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task), task)
+            g.rr3_reg_fanout(
+                rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
+                task,
+            )
         });
         rr3_log(&format!(
             "{dep} 依赖断供 → degraded（提供者 {} 离开 Running）广播到 {n} 个连接",

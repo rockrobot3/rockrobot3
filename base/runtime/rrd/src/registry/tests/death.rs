@@ -44,7 +44,11 @@ fn fanout_but_consumer() {
         header: rr_ipc::Rr3Header::rr3_hdr_broadcast(rr_ipc::opcode::SEND, 0),
         payload: vec![],
     };
-    assert_eq!(r.rr3_reg_fanout(frame.clone(), t), 0, "发起者自己永远被排除");
+    assert_eq!(
+        r.rr3_reg_fanout(frame.clone(), t),
+        0,
+        "发起者自己永远被排除"
+    );
     assert_eq!(
         r.rr3_reg_fanout(frame.clone(), rr_bus::RR3_BROADCAST_DST_TASK),
         1,
@@ -98,7 +102,7 @@ fn expired_fanout() {
         .rr3_reg_add(&facts("rr3-simb", 100, 300, "always"), txb, 0)
         .unwrap();
     r.rr3_reg_expire(400);
-    assert_eq!(r.rr3_reg_fanout(frame.clone()_to(b), 0), 1, "只剩 sima 活着");
+    assert_eq!(r.rr3_reg_fanout(frame_to(b), 0), 1, "只剩 sima 活着");
     assert!(rxa.try_recv().is_ok());
 }
 
@@ -116,7 +120,11 @@ fn removed_entirely() {
     assert_eq!(r.rr3_reg_name_of(a), None);
     assert!(r.rr3_reg_snapshot().is_empty());
     let frame = frame_to(rr_bus::RR3_BROADCAST_DST_TASK);
-    assert_eq!(r.rr3_reg_fanout(frame.clone(), 0), 0, "已移除的连接不得再被投递");
+    assert_eq!(
+        r.rr3_reg_fanout(frame.clone(), 0),
+        0,
+        "已移除的连接不得再被投递"
+    );
     assert!(rxa.try_recv().is_err(), "死条目还留着句柄就会被塞消息");
 }
 

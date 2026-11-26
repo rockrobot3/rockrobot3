@@ -94,7 +94,7 @@ fn rr3_beat_promote(ctx: &Rr3ConnCtx, me: &Rr3Peer) {
     for (dep, task) in recovered {
         let n = crate::registry::rr3_reg_with(&ctx.shared, |g| {
             g.rr3_reg_fanout(
-                &rr3_state_frame(&dep, Rr3Phase::Running.as_str(), task),
+                rr3_state_frame(&dep, Rr3Phase::Running.as_str(), task),
                 RR3_TASK_RRD,
             )
         });

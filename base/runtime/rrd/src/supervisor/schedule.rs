@@ -108,7 +108,7 @@ fn rr3_degrade_fanout(shared: &Arc<Mutex<RrdRegistry>>, name: &str, degraded: Ve
     for (dep, task) in degraded {
         let n = crate::registry::rr3_reg_with(shared, |g| {
             g.rr3_reg_fanout(
-                &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
+                rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
                 rr_bus::RR3_TASK_RRD,
             )
         });

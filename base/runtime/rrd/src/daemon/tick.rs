@@ -189,7 +189,10 @@ fn rr3_fan_degraded(
 ) {
     for (dep, task) in degraded {
         let n = crate::registry::rr3_reg_with(shared, |g| {
-            g.rr3_reg_fanout(rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task), RR3_TASK_RRD)
+            g.rr3_reg_fanout(
+                rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
+                RR3_TASK_RRD,
+            )
         });
         rr3_log(&format!(
             "{dep} 依赖断供 → degraded（提供者 {provider} 离开 Running）广播到 {n} 个连接"

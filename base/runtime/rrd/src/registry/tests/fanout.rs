@@ -32,7 +32,11 @@ fn fanout_delivery() {
         header: rr_ipc::Rr3Header::rr3_hdr_broadcast(rr_ipc::opcode::SEND, 0),
         payload: vec![],
     };
-    assert_eq!(r.rr3_reg_fanout(frame.clone(), 0), 2, "投递行为不变：仍全量扇出");
+    assert_eq!(
+        r.rr3_reg_fanout(frame.clone(), 0),
+        2,
+        "投递行为不变：仍全量扇出"
+    );
     assert!(rxa.try_recv().is_ok());
     assert!(rxb.try_recv().is_ok());
 }

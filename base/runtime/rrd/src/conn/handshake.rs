@@ -188,7 +188,11 @@ fn rr3_hs_facts_read(
 }
 
 /// 后到者补发在册状态（跳过自己）：只保证入队次序，不构成上线次序。
-fn rr3_hs_replay(shared: &Arc<Mutex<RrdRegistry>>, tx: &SyncSender<Rr3FanFrame>, skip: &str) -> usize {
+fn rr3_hs_replay(
+    shared: &Arc<Mutex<RrdRegistry>>,
+    tx: &SyncSender<Rr3FanFrame>,
+    skip: &str,
+) -> usize {
     let snapshot = rr3_lock(shared).rr3_reg_snapshot();
     let mut replayed = 0usize;
     for (name, t, phase) in snapshot.iter().filter(|(name, _, _)| *name != skip) {
@@ -241,7 +245,10 @@ fn rr3_hs_admit(
         name: facts.name.clone(),
     };
     let n = crate::registry::rr3_reg_with(&ctx.shared, |g| {
-        g.rr3_reg_fanout(rr3_state_frame(&peer.name, "registered", peer.task), RR3_TASK_RRD)
+        g.rr3_reg_fanout(
+            rr3_state_frame(&peer.name, "registered", peer.task),
+            RR3_TASK_RRD,
+        )
     });
     rr3_log(&format!("广播 registered 到 {n} 个连接"));
     // 后到者补发在册状态：只发转移不发快照的话，后起模块看不到先起模块上线过。
