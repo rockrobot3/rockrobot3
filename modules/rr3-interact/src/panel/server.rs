@@ -1,28 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 面板 HTTP 服务（0.0.4 批C，D3/Q3 裁定落地）：std 手写 HTTP/1.1 子集，
-//! **零新 crates.io 依赖**——GET/POST + Content-Length + JSON body 就是全部，
-//! 不做 keep-alive、不做 chunked、不做 TLS（局域网可信面声明落 README，
-//! 不承诺公网暴露）。
+//! 面板 HTTP 服务（D3/Q3 裁定落地）：std 手写 HTTP/1.1 子集，**零新 crates.io
+//! 依赖**——GET/POST + Content-Length + JSON body 就是全部，不做 keep-alive、
+//! 不做 chunked、不做 TLS（局域网可信面声明落 README，不承诺公网暴露）。
 //!
 //! 架构边界（ADR-0006 裁定 3 的面板条款）：
-//! - **面板不当发布者**——硬件控制只走 `rr3.call` RPC 归属门。这不是口号而是
-//!   类型面：[`Rr3PanelDispatch`] 里根本没有 Publish 变体，路由器想越权也造不出
-//!   发布动作（"越权拒"的静态形态）。
-//! - **ctl 查询走短连**——`rr3.ctl.*` 只对未注册连接开放（ADR-0010），面板在
-//!   本进程内另开一条裸 UDS 一问一答即断，与外部运维探针同权同拒。
+//! - **面板不当发布者**——硬件控制只走 `rr3.call` RPC 归属门。类型面即证据：
+//!   [`Rr3PanelDispatch`] 没有 Publish 变体，路由器想越权也造不出发布动作。
+//! - **ctl 查询走短连**——`rr3.ctl.*` 只对未注册连接开放（ADR-0010），面板在本
+//!   进程内另开一条裸 UDS 一问一答即断，与外部运维探针同权同拒。
 //! - **beep/face 不出进程**——播放面与表情机归主循环所有，面板经动作通道
 //!   （mpsc）请求主循环代执行，串行无锁，与 TTS 点名天然互斥。
 //!
-//! 端点白名单见 [`RR3_PANEL_ROUTES`]（legacy 四页签语义搬入，"面板：状态与版本/
-//! 硬件自检/实时交互流/运行数据/重启"逐项有承接；WiFi 配网页随 0.0.4 批D 挂上）：
-//! `GET /`（静态页）、`GET /api/status`（health+link 缓存）、`GET /api/data`
-//! （counters）、`GET /api/logs`（rrd 日志环）、`POST /api/relay`（act RPC）、
-//! `POST /api/beep`（进程内）、`POST /api/face`（进程内）、`POST /api/selftest`
-//! （并列三调，各答各展示）、`POST /api/reboot`（ctl.reboot，双重门缺省拒）、
-//! `GET /api/wifi/scan` + `POST /api/wifi/connect` + `POST /api/wifi/forget`
-//! （0.0.4 批D：BusCall 透传 connect 三 RPC，参数裁决在 owner 模块）＋模型密钥面
-//! 与 brain ops 读口（0.0.6 抽象批/B-12）＋五模块 ops 读口（批N4 件九二，同一
-//! BusCall 透传范式）。端点全集与 covers/applies 申报以 [`RR3_PANEL_ROUTES`] 为真值。
+//! 端点全集与 covers/applies 申报以 [`RR3_PANEL_ROUTES`] 为真值：`GET /`、
+//! `GET /api/status`、`GET /api/data`、`GET /api/logs`、`POST /api/relay`、
+//! `POST /api/beep`、`POST /api/face`、`POST /api/selftest`、`POST /api/reboot`、
+//! `GET /api/wifi/scan` + `POST /api/wifi/connect|forget`（BusCall 透传 connect
+//! 三 RPC，参数裁决在 owner 模块）＋模型密钥面与 brain/五模块 ops 读口（同一
+//! BusCall 透传范式）。
 
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};

@@ -1,29 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Linux（spidev UAPI）MAX7219 LED 点阵显示后端：真件档。
 //!
-//! 编译门单重：`target_os = "linux"`——只取 `ioctl` 的 extern 声明（纯 Rust 壳，
-//! musl 静态链接零额外 C 库依赖），无 feature 门（与 [`crate::linux_gpio`] 同形）。
-//! 宿主侧验证 = aarch64 musl 交叉 check + 板上真件实测；SPI ioctl 面无法假树模拟，
+//! 编译门单重 `target_os = "linux"`：只取 `ioctl` extern（musl 静态零额外 C 库）。
+//! 宿主验证 = aarch64 musl 交叉 check + 板上真件实测；SPI ioctl 面无法假树模拟，
 //! 确定性单测只覆盖 ioctl 号/包组装纯函数与普通文件的错误传播。
 //!
-//! 接口：spidev（`/dev/spidevB.C`，模式 0 / MSB first / 8 bit / 1 MHz——飞线保守
-//! 速率）。CS 包络由内核驱动管理：一次 `write()` 内 CS 保持低、结束拉高，恰是
-//! MAX7219 的 16-bit 包锁存语义，HAL 无需再摸 GPIO。
+//! 接口：spidev（`/dev/spidevB.C`，模式 0 / MSB first / 8 bit / 1 MHz 飞线保守速率）。
+//! CS 包络由内核驱动管理：一次 `write()` 内 CS 保持低、结束拉高，恰是 MAX7219 的
+//! 16-bit 包锁存语义，HAL 无需再摸 GPIO。
 //!
 //! 级联形状：参考机双位模块（两片级联，`RR3_MAX7219_CHIPS = 2`），同帧双片同显；
-//! 先发的包落在链尾那片，两片同值时顺序无关。换单位模块只改片数常量并如实重测，
-//! 帧面契约（[`Rr3FaceFrame`] 8x8 行主序、bit7 最左、行寄存器直排）不动。
-//!
-//! 开机 init：DISPLAYTEST=off → SCANLIMIT=7 → DECODE=off → INTENSITY → SHUTDOWN=normal；
-//! 亮度缺省 [`RR3_MAX7219_INTENSITY_DEFAULT`]（3/31），不留 env 旋钮（旋钮只给物理绑定）。
+//! 换单位模块只改片数常量并如实重测，帧面契约（[`Rr3FaceFrame`] 8x8 行主序、
+//! bit7 最左、行寄存器直排）不动。
 //!
 //! **级联锁存纪律（真板实证）**：一次 CS 包络里每片只锁存移位流的最后 16 位——一次
 //! write 多包会让更早的包全部被吞。故 init 逐条 write、整帧逐行 write，包形状统一走
-//! [`rr3_max7219_cmd`]（单包双片同值）。
+//! [`rr3_max7219_cmd`]（单包双片同值）。init 序：DISPLAYTEST=off → SCANLIMIT=7 →
+//! DECODE=off → INTENSITY（[`RR3_MAX7219_INTENSITY_DEFAULT`]）→ SHUTDOWN=normal，
+//! 不留 env 旋钮（旋钮只给物理绑定）。
 //!
-//! boot 语义：构造只存路径，打开 + ioctl 配置 + init 延迟到首次 trait 调用（ensure），
-//! 与 gpio/pwm/alsa 后端同形；设备不在位/权限不足/非字符设备显式报错，上层按
-//! "能力缺失显式回错"处理，不静默退化。
+//! boot：构造只存路径，打开 + ioctl 配置 + init 延迟到首次 trait 调用（ensure）；
+//! 设备不在位/权限不足/非字符设备显式报错，不静默退化。
 
 use std::path::PathBuf;
 use std::sync::Mutex;
