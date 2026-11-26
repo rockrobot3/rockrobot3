@@ -1,21 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 //! 执行件档案装载器（`hardware/<形态>/axis/<instance>.toml`）：行程的真值点。
 //!
-//! 本模块只做**装载机制**——白名单、全键必填、类型派发、外键对账、错误全收集；键级
-//! 域界与自洽判据是策略，逐键写在 [`rr3_act_prof_parse`] 一处。角域 0..=180 这类器件
-//! 事实不硬编码进装载器（文档示例值不进代码）。
+//! 本模块只做装载机制——白名单、全键必填、类型派发、外键对账、错误全收集；键级域界与
+//! 自洽判据是策略，逐键写在 [`rr3_act_prof_parse`] 一处。角域 0..=180 这类器件事实不
+//! 硬编码进装载器（文档示例值不进代码）。
 //!
 //! 键真值源 = [`rr_hal_api::RR3_ACT_PROFILE_FIELDS`] 十四键词表（键名/值类型/读者三态
 //! 一张表）：白名单、缺键点名、序列化键序都从本表走，不存在第二份键名。加键 = 词表
 //! append + 装载侧同批，走契约级评审。
-//!
 //! 载体语义：host 档写入复用 [`crate::counters::rr3_atomic_store`]（tmp → fsync →
 //! rename），不出现第二条写路径；读侧 `NotFound` → `Ok(None)`（"无档案"是调用方裁决
-//! 输入，机制不代言缺省），形状错 → `Err` **且不许覆盖**（防"坏件被自愈覆盖"）。
-//!
+//! 输入，机制不代言缺省），形状错 → `Err` 且不许覆盖（防"坏件被自愈覆盖"）。
 //! 消费接线：boot 链扫 `axis/`，按 `RR3_HAL_PERIPH_AXIS` 消歧，恰一份与轴读数相等的
-//! 档案才投影 `RR3_ACT_AXIS_STATE`（文本含 lo/hi/center，空 = 模块侧保守缺省）；
-//! 标定写入面在 [`crate::axis_write`]。
+//! 档案才投影 `RR3_ACT_AXIS_STATE`（文本含 lo/hi/center，空 = 模块侧保守缺省）。
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};

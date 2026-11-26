@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 //! 装配链硬件探测面：探测 fail-closed——探测不到与探测自身故障同判 `false`（缺格），
-//! 装配链对点名模块"绝不带病起"。拿不到答案不得当作在位。boot 前消费一次，运行期
+//! 装配链对点名模块"绝不带病起"，拿不到答案不得当作在位。boot 前消费一次，运行期
 //! 不重排，不阻塞启动横幅。
 //!
-//! 后端三档：[`Rr3LinuxProbe`] 生产 linux 真值探测——sysfs PWM / GPIO line / I2C /
-//! SPI / ALSA 五面在位性 + I2C 格位器件级探测（总线在 ≠ 器件在）；探测根可注入，
-//! 生产传 `/`、单测传假根，判据主机可测。[`Rr3AbsentProbe`] 非 linux 生产面——
-//! 有硬件面的格位恒缺，无硬件面可反证者判在位。[`Rr3SimProbe`] 显式档，只在 test、
-//! `RR3_PROBE=sim` 与显式注入时用，不再当缺省构造。
+//! 后端三档：[`Rr3LinuxProbe`] 生产 linux 真值探测（sysfs PWM / GPIO line / I2C / SPI /
+//! ALSA 五面在位性 + I2C 格位器件级探测——总线在 ≠ 器件在；探测根可注入，判据主机可测）；
+//! [`Rr3AbsentProbe`] 非 linux 生产面——有硬件面的格位恒缺，无硬件面可反证者判在位；
+//! [`Rr3SimProbe`] 显式档，只在 test、`RR3_PROBE=sim` 与显式注入时用，不当缺省构造。
 //!
 //! 选择口 [`rr3_probe_default`] 与 `RR3_HAL_BACKEND` 同纪律：env 显式优先
 //! （`RR3_PROBE=sim|linux|absent`，取值不认点名后回落），否则按目标分流（test→sim；
 //! linux→真值；其余生产面→恒缺）。
-//!
 //! 格位→面映射 [`rr3_slot_probe_face`]：有硬件面按面探；`cognition.*` 软件格、
 //! `net.wifi`/`net.bt` 运行期格与基础层回"在位"——"没有反证"与"拿不到答案"不同判。
 

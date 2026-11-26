@@ -1,18 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 装配快照（批N4 件九笔4，门 d 余红四路 pin/role/domain/axis 转绿的判据源）：
-//! boot 装载链验收通过的不可变快照 + `rr3.ctl.wiring` 应答渲染 + [pins]×wiring
-//! 全交叉逐条点名（全案 §7 ⑤ 门"出厂自检必测 [pins]×wiring.toml 全交叉"）。
+//! 装配快照（门 d 四路 pin/role/domain/axis 转绿的判据源）：boot 装载链验收通过的
+//! 不可变快照 + `rr3.ctl.wiring` 应答渲染 + [pins]×wiring 全交叉逐条点名
+//! （全案 §7 ⑤ 门"出厂自检必测 [pins]×wiring.toml 全交叉"）。
 //!
-//! 为什么是"快照"而不是查询时重读：装载面（校验①—⑩）在 boot 一次性执法
-//! （fail-closed），ctl 应答必须展示**验收通过的那份**——查询时重读会拿到装载面
-//! 从未见过、甚至已被拒 boot 的中间态（boot 后文件被改）。快照 boot 时一次定格
-//! （OnceLock 单点，日志环同款进程级静态），ctl 渲染只读它。
+//! 为什么是快照而不是查询时重读：装载面（校验①—⑩）在 boot 一次性 fail-closed 执法，
+//! ctl 应答必须展示验收通过的那份——查询时重读会拿到装载面从未见过、甚至已被拒 boot
+//! 的中间态。快照 boot 时一次定格（OnceLock 单点，日志环同款进程级静态），只读它。
 //!
-//! 为什么判据在 rrd 不在面板：全交叉交叉一致性判据的真值单点放数据 owner（rrd）；
-//! 面板（rr3-interact）只取数渲染——判据写面板侧即第二真值点，与"装载期校验⑦
-//! 在 rrd、面板不写第二份"同一条纪律。数据通道走 ctl 而非新数据主题：`rr3-runtime/*`
-//! 是守护进程的纯下行广播命名空间（registry/topics_load 双层拒冒充），守护进程
-//! 自有数据的查询面就是 ADR-0010 的 `rr3.ctl.*`（面板既有 ctl 短连客户端零新通道）。
+//! 判据在 rrd 不在面板：全交叉一致性的真值单点放数据 owner，面板只取数渲染——判据
+//! 写面板侧即第二真值点。数据通道走 ctl（ADR-0010 的 `rr3.ctl.*`）而非新数据主题：
+//! `rr3-runtime/*` 是守护进程的纯下行广播命名空间，面板既有 ctl 短连客户端零新通道。
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;

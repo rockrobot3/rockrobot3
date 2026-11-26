@@ -1,19 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 //! 单连接服务：本线程 reader + 一条 writer 线程。
 //!
-//! 本文件留共享件（帧构造/应答/写出口/`Rr3Flow`/拒绝出口）、入站路由
-//! `rr3_serve_frame`、上行方法表 `rr3_serve_request`、收尾与主流程；协议分面各自成
-//! 子模块：`conn/handshake.rs`（注册）、`ctl.rs`（控制旁支）、`publish.rs`（业务发布+
-//! 低电兜底）、`beat.rs`（心跳与升级）、`route.rs`（`rr3.call` 与应答回程）、
-//! `read.rs`（读侧循环与 ADR-0025 静默上界）。
-//!
-//! 协议面：首帧必须是 `dst=RR3_TASK_RRD` 的 `rr3.register`，否则断开；`src_task` 由
-//! rrd 分配并回带，其后上行帧必须相等（用户态不得自设），伪造帧只拒该帧不断连；
-//! 注册前不收心跳、不判活，未注册连接由读超时收掉，注册后由 2× 看门狗窗口静默上界
-//! 回收（判死权归看门狗）。`Event` 过三层归属检查（命名空间冒充 → 前缀/owner 越权 →
-//! 主题未登记）后转发给除发布者外的在册连接，头改写为发布者 task + `dst=0`；
-//! `Response` 是 `rr3.call` 回程：trace_id = 调用方 task，body 原样、dst 定向回投。
-//!
+//! 本文件留共享件（帧构造/应答/写出口/`Rr3Flow`/拒绝出口）、入站路由 `rr3_serve_frame`、
+//! 上行方法表 `rr3_serve_request`、收尾与主流程；协议分面各自成子模块：`conn/handshake.rs`
+//! （注册）、`ctl.rs`（控制旁支）、`publish.rs`（业务发布+低电兜底）、`beat.rs`（心跳与
+//! 升级）、`route.rs`（`rr3.call` 与应答回程）、`read.rs`（读侧循环与 ADR-0025 静默上界）。
+//! 协议面：首帧必须是 `dst=RR3_TASK_RRD` 的 `rr3.register`，否则断开；`src_task` 由 rrd
+//! 分配并回带，其后上行帧必须相等（用户态不得自设），伪造帧只拒该帧不断连；注册前不收
+//! 心跳、不判活，未注册连接由读超时收掉，注册后由 2× 看门狗窗口静默上界回收（判死权归
+//! 看门狗）。`Event` 过三层归属检查（命名空间冒充 → 前缀/owner 越权 → 主题未登记）后转发
+//! 给除发布者外的在册连接，头改写为发布者 task + `dst=0`；`Response` 是 `rr3.call` 回程：
+//! trace_id = 调用方 task，body 原样、dst 定向回投。
 //! 写面：reader 写应答、writer 写广播，同一 socket 的 `try_clone` + 一把
 //! `Mutex<UnixStream>`；一帧一次 `write_all` → 整帧原子，但应答与广播顺序不保证。
 

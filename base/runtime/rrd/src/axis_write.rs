@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 //! 执行件档案写入面：标定档案（`hardware/<形态>/axis/<instance>.toml`）的写入编排。
 //!
-//! 机制与策略分离：装载、校验、序列化、原子落盘的机制全在 [`crate::axis`] 与
-//! [`crate::profile`]；本模块只做写入策略——谁能写（档案外键 pin ∈ 装配单
-//! [[pins]] 的 pin_id 全集，F-4 写侧）、写到哪（形态名 = 装配单文件名 stem，与
-//! [`crate::wiring::rr3_wiring_path`] 同一布局）、什么不许写（坏目标不覆盖；
+//! 机制与策略分离：装载、校验、序列化、原子落盘全在 [`crate::axis`] 与
+//! [`crate::profile`]；本模块只做写入策略——谁能写（档案外键 pin ∈ 装配单 `[[pins]]`
+//! 的 pin_id 全集）、写到哪（形态名 = 装配单文件名 stem）、什么不许写（坏目标不覆盖；
 //! 同 pin 异名副本不制造——副本会让 boot 链"恰一份合法才投影"拒注入）。
 //!
-//! 独立产线小工具而非 rrd daemon 子命令：daemon CLI 是守护进程参数面，混进一次性
-//! 写档案会让两种生命周期各说一套。本工具是 [`crate::axis::rr3_act_prof_store`]
-//! 的第一个接线位，面板动作面复用同一函数（落盘只许有一份实现，第二条即红）。
+//! 独立产线小工具而非 daemon 子命令：daemon CLI 是守护进程参数面，混进一次性写档案会
+//! 让两种生命周期各说一套。本工具是 [`crate::axis::rr3_act_prof_store`] 的第一个接线
+//! 位，面板动作面复用同一函数（落盘只许一份实现，第二条即红）。
 //!
-//! rtos 档今日无落点：`Rr3Store` 载体性质实测前 `calibrated` 只许运行期内存态，
-//! 本工具只服务 host 档，rtos 行如实写"重启即失"。标定纪律（本工具不越权）：只落盘
-//! 人工流程的产物，不驱动任何运动——拒动判据在 [`rr_hal_api::rr3_motion_allowed`]。
+//! rtos 档今日无落点：`Rr3Store` 载体性质实测前 `calibrated` 只许运行期内存态，本工具只
+//! 服务 host 档。标定纪律：只落盘人工流程产物、不驱动运动，拒动判据在
+//! [`rr_hal_api::rr3_motion_allowed`]。
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};

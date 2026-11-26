@@ -1,18 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 //! 模块 ↔ rrd 的上行 RPC：JSON-RPC 2.0（spec §5.0 + M3 的第 4 个方法）。
 //!
-//! 上行一律 `Rr3PayloadType::Request` + `dst_task = RR3_TASK_RRD`。
-//! `rr3-runtime/system/heartbeat` 与 `rr3-runtime/module/state` 是 rrd 的**下行广播**，
-//! 不是模块的上行心跳——模块要喂狗只能调 `rr3.heartbeat`。
-//! `rr3.call` 是 M3 定型的模块间请求路由：rrd 按 params.topic 查被调方的
-//! manifest `[rpc].exposes` 后定向转发，应答沿 trace_id 回路返回调用方
-//! （rrd-rpc.md"trace_id 语义"）。
-//! `rr3.ctl.*` 九方法是 F3 定型的控制查询（ADR-0010）：与模块方法同一解析器、
-//! 同一白名单口径，但只对未注册的控制连接开放（分流在 conn 握手处）；
-//! 0.0.4 批B append `rr3.ctl.counters`（运维计数读面，与 health 的心跳健康语义分开）、
-//! `rr3.ctl.reboot`（系统重启，执行面带 cfg(linux)+env 双重门，缺省恒拒）；
-//! 批N4/N5/N22 再 append `rr3.ctl.wiring` / `rr3.ctl.contracts` / `rr3.ctl.domain.set`
-//! （装配快照、契约审计、策略量写口，判据源各见变体注释）。
+//! 上行一律 `Rr3PayloadType::Request` + `dst_task = RR3_TASK_RRD`。`rr3-runtime/system/
+//! heartbeat` 与 `rr3-runtime/module/state` 是 rrd 的下行广播，不是模块上行心跳——
+//! 模块要喂狗只能调 `rr3.heartbeat`。
+//! `rr3.call` 是模块间请求路由：rrd 按 params.topic 查被调方 manifest `[rpc].exposes`
+//! 后定向转发，应答沿 trace_id 回路返回调用方。
+//! `rr3.ctl.*` 是控制查询（ADR-0010）：与模块方法同一解析器、同一白名单口径，但只对
+//! 未注册的控制连接开放（分流在 conn 握手处）。在册方法：counters（运维计数读面，
+//! 与 health 的心跳健康语义分开）、reboot（cfg(linux)+env 双门，缺省恒拒）、wiring、
+//! contracts、domain.set（装配快照、契约审计、策略量写口）。
 
 use rr_ipc::Rr3StatusCode;
 use serde_json::Value;

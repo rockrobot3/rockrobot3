@@ -1,20 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 //! 装机接线档 `hardware/<形态>/wiring.toml`：机器可查、人照它插线。
 //!
-//! 接线是**可检查的数据**（面板出图、自检点名、`rated_a` 与件 `demands.peak_ma` 互校）。
+//! 接线是可检查的数据（面板出图、自检点名、`rated_a` 与件 `demands.peak_ma` 互校）。
 //! 它拦不住插错线（物理原因），但每条线组有判据可点。九字段全必填：`connector`/
-//! `hdr_pin`/`signal`/`net`/`feeds`/`mate`/`keyed`/`rated_a`/`gnd_common`；
-//! "合法不适用显式写"——`feeds` 无下游写 `[]`，`mate`/`net`/`gnd_common` 不适用写
-//! `"none"`；`keyed`/`rated_a` 缺即红。
-//!
-//! 装载期判据（后果=拒）：⑦-a `signal ⊆ pin_id ∪ {vcc,gnd}`（除供电/地一律写
-//! `[pins]` 的 pin_id）；⑦-b `net ⊆ domains`（`"none"` = 纯信号/地）；⑦-d `mate ∈
-//! devices.toml`；闭合面：`feeds` 指向同档其他线组的 `connector`，位号闭合、不得自环、
-//! 重复声明即红。⑦-c 额定加总不在装载期预支（器件侧与件侧各自随链）。
-//!
-//! `hdr_pin[k] ↔ signal[k]` 按位序对应（丝印序即信号序）；同一 pin_id 占多导体
-//! （如 I2C SDA/SCL）按导体数重复写。路径推导 [`rr3_wiring_path`]：由
-//! `--profile` 上两级得 modules-root，接线档在 `<root>/hardware/<机>/wiring.toml`。
+//! `hdr_pin`/`signal`/`net`/`feeds`/`mate`/`keyed`/`rated_a`/`gnd_common`；合法不适用
+//! 显式写——`feeds` 无下游写 `[]`，`mate`/`net`/`gnd_common` 写 `"none"`；`keyed`/
+//! `rated_a` 缺即红。
+//! 装载期判据（后果=拒）：⑦-a `signal ⊆ pin_id ∪ {vcc,gnd}`（除供电/地一律写 `[pins]`
+//! 的 pin_id）；⑦-b `net ⊆ domains`（`"none"` = 纯信号/地）；⑦-d `mate ∈ devices.toml`；
+//! 闭合面：`feeds` 指向同档其他线组的 `connector`，位号闭合、不得自环、重复声明即红。
+//! ⑦-c 额定加总不在装载期预支（器件侧与件侧各自随链）。
+//! `hdr_pin[k] ↔ signal[k]` 按位序对应（丝印序即信号序）；同一 pin_id 占多导体（如 I2C
+//! SDA/SCL）按导体数重复写。路径推导 [`rr3_wiring_path`]：由 `--profile` 上两级得
+//! modules-root，接线档在 `<root>/hardware/<机>/wiring.toml`。
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
