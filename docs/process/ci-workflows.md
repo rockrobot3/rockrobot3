@@ -154,8 +154,9 @@ git tag v0.0.8 && git push origin v0.0.8 && git push github v0.0.8
 
 验证（匿名可读的部分）：`gh api repos/<owner>/rockrobot3/actions/runs` 看 publish /
 buildroot 两条流水线；`oras manifest fetch ghcr.io/<owner>/rockrobot3-firmware:v0.0.8`
-与 `rockrobot3-ota` / `rockrobot3-buildroot` 同标签。不带凭据时可用
-`workflow_dispatch` 输入 `edge` 只验运行镜像腿（不产 Release、不签名）。
+与 `rockrobot3-ota` / `rockrobot3-buildroot` 同标签 `v<VER>`（v0.0.8 首发时后两者
+漏 `v` 前缀、以 `0.0.8` 名留存，此后统一）。不带凭据时可用 `workflow_dispatch`
+输入 `edge` 只验运行镜像腿（不产 Release、不签名）。
 
 **权限与失败显形（2026-11-18 续轮十六）**：
 

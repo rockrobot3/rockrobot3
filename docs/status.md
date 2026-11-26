@@ -23,9 +23,13 @@
   **发布回执（2026-11-26）**：`v0.0.8` 的 publish 五作业全绿（Release 九件资产，
   抽验整片镜像 sha256 与清单一致）；buildroot `release` 腿全绿——密钥前置（64 hex）、
   组包/签名/自复验、私钥清理、ghcr 推送四段 success（run `45757282283`），
-  `RR3_OTA_SIGNING_KEY` 已生效。**ghcr 包仍为私有**（匿名 401）：开源发布需在包设置
-  把 `rockrobot3` / `rockrobot3-firmware` / `rockrobot3-ota` / `rockrobot3-buildroot`
-  改为 Public（仅包所有者可改）。
+  `RR3_OTA_SIGNING_KEY` 已生效。**ghcr 四包已公开并匿名验证通过**（token + manifest 均
+  200）：`rockrobot3:v0.0.8`（三架构 index）、`rockrobot3-firmware:v0.0.8`（9 层）、
+  `rockrobot3-ota:0.0.8`（6 件，含 `keys/8570b80b2a0f82c3.pub`——即本次密钥派生）、
+  `rockrobot3-buildroot:0.0.8`（镜像 + 双 dtb + checksums）。OTA/buildroot 的 tag 缺
+  `v` 前缀属首发疏漏，现已改为 `v<VER>`（该版制品以 `0.0.8` 名留存）。**余一项清理**：
+  运行镜像包内仍挂 v0.0.9–v0.0.23 旧版本标签（治理前产物），仅包所有者可删，建议保留
+  `v0.0.8` / `edge` / `latest`。
 - **开源门面口径（2026-11-25 批47）**：提交历史已全量治理——作者/提交者统一为中性
   身份，提交信息不写机器名、账号名与本地目录名；新提交一律带本地路径或私人标识即触
   卫生门 ⑬ 与评审红。

@@ -482,8 +482,10 @@ jobs:
         run: |
           set -euo pipefail
           owner="${GITHUB_REPOSITORY_OWNER}"
-          ota="ghcr.io/${owner}/rockrobot3-ota:${VER}"
-          build="ghcr.io/${owner}/rockrobot3-buildroot:${VER}"
+          # tag 统一 v<VER>：与运行镜像/固件同一口径（v0.0.8 首发时此处曾漏 v，
+          # 该版制品以 0.0.8 名留存；向后统一）。
+          ota="ghcr.io/${owner}/rockrobot3-ota:v${VER}"
+          build="ghcr.io/${owner}/rockrobot3-buildroot:v${VER}"
           for ref in "$ota" "$build"; do
             if out=$(oras manifest fetch "$ref" 2>&1); then
               echo "::error title=ota-immutable::已存在：$ref（拒绝覆盖）"
@@ -525,6 +527,6 @@ jobs:
             echo "- tag: ${GITHUB_REF_NAME}"
             echo "- version: ${VER:-?}"
             echo "- key_id: $(sed -n 's/^key_id=//p' /tmp/rr3-ota-bundle/bundle.txt 2>/dev/null || echo '缺')"
-            echo "- OTA: ghcr.io/${GITHUB_REPOSITORY_OWNER}/rockrobot3-ota:${VER:-?}"
-            echo "- buildroot: ghcr.io/${GITHUB_REPOSITORY_OWNER}/rockrobot3-buildroot:${VER:-?}"
+            echo "- OTA: ghcr.io/${GITHUB_REPOSITORY_OWNER}/rockrobot3-ota:v${VER:-?}"
+            echo "- buildroot: ghcr.io/${GITHUB_REPOSITORY_OWNER}/rockrobot3-buildroot:v${VER:-?}"
           } >>"$GITHUB_STEP_SUMMARY"
