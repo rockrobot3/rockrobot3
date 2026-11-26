@@ -11,13 +11,11 @@
 //! （非阻塞），快照与 fsync 全在 `rrd-ctr-store` 单线程；`Rr3CountersGate` 的
 //! `in_flight` 防重复排程，判活记账先于计数归并。
 //!
-//! 存亡可读：`ctl.status.ctr_store` 三态 `off`/`on`/`dead`——线程 panic 或起不来都记
-//! `dead`（启用过但执行面不在，不能读成"未启用"）。
+//! 存亡可读：`ctl.status.ctr_store` 三态 `off`/`on`/`dead`——线程 panic 或起不来都记 `dead`。
 //!
 //! 旋钮（env，parse-or-default）：`RR3_COUNTERS_FLUSH_MS` 合并窗口（缺省 10_000）、
 //! `RR3_COUNTERS_FLUSH_MAX` 拍数兜底（缺省 64）。路径（[`rr3_path_with`] 纯函数）：
-//! `RR3_DATA_DIR` 有值 → `$RR3_DATA_DIR/counters.json`；linux 无 env →
-//! `/data/rr3/counters.json`；其余 → `None`，启动日志一行点名，不报错。
+//! `RR3_DATA_DIR` 有值 → `$RR3_DATA_DIR/counters.json`；linux 无 env → `/data/rr3/counters.json`；其余 → `None`。
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

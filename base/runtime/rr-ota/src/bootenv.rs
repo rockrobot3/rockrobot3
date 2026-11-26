@@ -8,16 +8,14 @@
 //! 三件面：
 //! 1. [`Rr3BootEnv`]：env 体解析/渲染 + `get`/`set`/`unset`（坏 CRC、重复键、
 //!    非 UTF-8 一律 fail-closed）；
-//! 2. [`Rr3EnvDev`]：解析 `/etc/fw_env.config`（`device offset env_size
-//!    [sector_size num_sectors]`，数支持 `0x` 十六进制，`#` 行注释）；
+//! 2. [`Rr3EnvDev`]：解析 `/etc/fw_env.config`（`device offset env_size [sector num]`，
+//!    数支持 `0x` 十六进制，`#` 行注释）；
 //! 3. 回滚链状态迁移：`rr3_rollback_arm` / `rr3_rollback_ok` 落实
-//!    `docs/design/分区布局与OTA槽位.md` 标准序第 4/6 步（bootcount/bootlimit/
-//!    altbootcmd/upgrade_available 四变量）。
+//!    `docs/design/分区布局与OTA槽位.md` 标准序第 4/6 步（四变量 bootcount/bootlimit/
+//!    altbootcmd/upgrade_available）。
 //!
-//! 区读写走 `std::fs`（定位 + 读写，无 ioctl），只在 `cfg(unix)` 下编译：板上
-//! Linux 与主机 macOS 测试面同一份代码（测试用普通临时文件顶替块设备）。
-//! **明确不做**：冗余双份 env 同步写、坏块/写保护探测、fw_env.config 与实际布局
-//! 核对、`CONFIG_BOOTCOUNT_LIMIT` defconfig 确认；altbootcmd 命令文本由调用方给。
+//! 区读写走 `std::fs`（无 ioctl），只在 `cfg(unix)` 下编译：板上 Linux 与主机 macOS
+//! 测试面同一份代码。**明确不做**：冗余双份 env 同步写、坏块探测、布局核对；altbootcmd 由调用方给。
 
 use rr_ipc::protocol::header::rr3_crc32;
 

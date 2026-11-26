@@ -9,15 +9,12 @@
 //! **所有等待都是内容判据**（`rr3_wait_log` 3s / `SimPeer::rr3_wait` 5s），
 //! 唯一的时长断言在 W1，且是粗上限（抓"线程根本没跑"，不抓"机器恰好慢"）。
 //!
-//! **本文件是 4 条而不是计划里的 5 条**：W5（`watchdog_tick_from_cli_reaches_the_thread`）
-//! 与 `support` 里 `rr3_spawn_with_overlay` 末尾那句
-//! `rr3_wait_log("watchdog 启动 tick={watchdog_tick_ms}ms")` 是同一条判据——本文件的 4 条
-//! 已经把接线钉在 `20` 上，既有 19+1+5 条线级用例（`register_publish` / `socket_banner` /
-//! `e2e_sim_peer`）又把它钉在 `3600000` 上，两个互不相同的值都只能
-//! 由 CLI 传进来才对得上（线程里硬编码 200、或把 `pre_register_timeout_ms` 当 tick 传，
-//! 都会让这两批用例同时超时红）。再加一条只 `assert!(socket.exists())` 的用例不新增任何
-//! 判据（套接字存在已被"等到监听那一行"蕴含），按 Global Constraints 的"不许空转断言"
-//! 这条就不写。裁定记录见本轮实施报告。
+//! **本文件是 4 条而不是计划里的 5 条**：W5 与 `support` 里 `rr3_spawn_with_overlay`
+//! 末尾那句 `rr3_wait_log("watchdog 启动 tick={watchdog_tick_ms}ms")` 是同一条判据——
+//! 本文件的 4 条把接线钉在 `20` 上，既有 19+1+5 条线级用例又把它钉在 `3600000` 上，
+//! 两个互不相同的值都只能由 CLI 传进来才对得上（线程里硬编码 200，或把
+//! `pre_register_timeout_ms` 当 tick 传，都会让两批用例同时超时红）。再加一条只
+//! `assert!(socket.exists())` 的用例不新增判据（套接字存在已被"等到监听那一行"蕴含）。
 #![cfg(unix)]
 
 mod support;
