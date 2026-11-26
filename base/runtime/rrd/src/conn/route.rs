@@ -61,7 +61,7 @@ fn rr3_call_fwd(ctx: &Rr3ConnCtx, me: &Rr3Peer, topic: &str, body: &[u8]) -> Res
             }
             Some((name, task)) => {
                 let frame = rr3_req_frame(me, task, body);
-                let sent = g.rr3_reg_send_to(task, &frame);
+                let sent = g.rr3_reg_send_to(task, frame);
                 (name, task, sent)
             }
         }
@@ -159,7 +159,7 @@ pub(super) fn rr3_route_response(
         return Ok(Rr3Flow::Keep);
     }
     let fwd = rr3_fwd_frame(me, trace, body);
-    rr3_resp_send(out, ctx, me, trace, &fwd, body);
+    rr3_resp_send(out, ctx, me, trace, fwd, body);
     Ok(Rr3Flow::Keep)
 }
 
@@ -169,7 +169,7 @@ fn rr3_resp_send(
     ctx: &Rr3ConnCtx,
     me: &Rr3Peer,
     trace: u64,
-    fwd: &Rr3Frame,
+    fwd: Rr3Frame,
     body: &[u8],
 ) {
     // 投递结果先落局部变量：if 条件的临时 guard 会活到整个 if 体，失败分支的

@@ -15,7 +15,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::mpsc::{SyncSender, TrySendError};
 
-use rr_ipc::Rr3Frame;
 use rr_registry::Rr3TopicSet;
 
 use crate::manifest::Rr3ManifestFacts;
@@ -39,7 +38,7 @@ struct Entry {
     /// 本次入库（注册）的时刻：`rr3_reg_expire` 用它判"这一世有没有活满一整条自己的窗口"
     /// （D-2 恢复归零的基准，与判死用的 `last_beat_ms` 是两颗不同的基准，不许混用）。
     registered_at_ms: u64,
-    tx: Option<SyncSender<Rr3Frame>>,
+    tx: Option<SyncSender<Rr3FanFrame>>,
     /// 广播队列满导致的丢帧计数（满侧不摘连接，只丢帧；见 `rr3_reg_fanout`）
     fan_dropped: u64,
     /// 稳态心跳间隔峰值（续轮二十五）：只在"已在运行"的续命拍上更新——首拍间隔

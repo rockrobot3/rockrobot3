@@ -32,7 +32,7 @@ fn fanout_delivery() {
         header: rr_ipc::Rr3Header::rr3_hdr_broadcast(rr_ipc::opcode::SEND, 0),
         payload: vec![],
     };
-    assert_eq!(r.rr3_reg_fanout(&frame, 0), 2, "投递行为不变：仍全量扇出");
+    assert_eq!(r.rr3_reg_fanout(frame.clone(), 0), 2, "投递行为不变：仍全量扇出");
     assert!(rxa.try_recv().is_ok());
     assert!(rxb.try_recv().is_ok());
 }
@@ -157,7 +157,7 @@ fn send_named_conn() {
         },
         payload,
     };
-    assert!(r.rr3_reg_send_to(t, &frame));
+    assert!(r.rr3_reg_send_to(t, frame.clone()));
     assert_eq!(
         rx.recv_timeout(std::time::Duration::from_secs(1))
             .unwrap()
@@ -165,11 +165,11 @@ fn send_named_conn() {
         frame.payload
     );
     // 未知 task 与非在册号段都不投
-    assert!(!r.rr3_reg_send_to(999, &frame));
-    assert!(!r.rr3_reg_send_to(rr_bus::RR3_TASK_RRD, &frame));
+    assert!(!r.rr3_reg_send_to(999, frame.clone()));
+    assert!(!r.rr3_reg_send_to(rr_bus::RR3_TASK_RRD, frame.clone()));
     // 判死后 tx 被摘：不投
     r.rr3_reg_expire(600);
-    assert!(!r.rr3_reg_send_to(t, &frame));
+    assert!(!r.rr3_reg_send_to(t, frame.clone()));
 }
 
 /// 分配从 2 起单调递增，0/1 永不出现；快照按 task 升序

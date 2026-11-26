@@ -2,6 +2,8 @@
 //! registry 的只读视图与转发面：存活/名字/事实查询、广播扇出与留痕闸、
 //! 快照与健康行、点名路由的候选选择。写入路径在 lifecycle.rs。
 use super::*;
+use rr_ipc::Rr3Frame;
+use std::sync::Arc;
 
 impl RrdRegistry {
     pub fn rr3_reg_live(&self, name: &str) -> bool {
@@ -48,7 +50,12 @@ impl RrdRegistry {
         std::mem::take(&mut self.pending_logs)
     }
 
-    pub fn rr3_reg_fanout(&mut self, frame: &Rr3Frame, exclude_task: u64) -> usize {
+    /// 广播：**帧按值进、由本函数包成一份共享体**（`Rr3FanFrame`）。
+    ///
+    /// 入参取所有权而不是借用，是为了让"一份 payload 只存在一次"成立：调用方
+    /// 每次广播本就新建一帧，借进来再深拷反而多一次分配。
+    pub fn rr3_reg_fanout(&mut self, frame: Rr3Frame, exclude_task: u64) -> usize {
+        let frame = Arc::new(frame);
         let mut n = 0;
         for (name, e) in &mut self.modules {
             if e.src_task == exclude_task {
@@ -57,7 +64,7 @@ impl RrdRegistry {
             let Some(tx) = e.tx.as_ref() else {
                 continue;
             };
-            match tx.try_send(frame.clone()) {
+            match tx.try_send(Arc::clone(&frame)) {
                 Ok(()) => n += 1,
                 Err(TrySendError::Disconnected(_)) => e.tx = None,
                 Err(TrySendError::Full(_)) => {
@@ -190,7 +197,7 @@ impl RrdRegistry {
     /// 这是 `rr3_reg_fanout` 文档里"要点名请另用 Sender"的那个入口：fanout 的签名
     /// 冻结不动（它只广播），单播由本函数承担。找不到在册连接（已退场/已过期）或
     /// 对端收件人已 drop 都回 `false`，由调用方决定回什么错。
-    pub fn rr3_reg_send_to(&self, task: u64, frame: &Rr3Frame) -> bool {
+    pub fn rr3_reg_send_to(&self, task: u64, frame: Rr3Frame) -> bool {
         let Some(name) = self.by_task.get(&task) else {
             return false;
         };
@@ -200,6 +207,6 @@ impl RrdRegistry {
         let Some(tx) = entry.tx.as_ref() else {
             return false;
         };
-        tx.try_send(frame.clone()).is_ok()
+        tx.try_send(Arc::new(frame)).is_ok()
     }
 }

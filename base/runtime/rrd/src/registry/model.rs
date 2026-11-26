@@ -3,8 +3,10 @@
 //! 纯策略函数（退避档、退出码→相位）。本文件不持有状态、不碰 I/O——
 //! 状态机本体在 lifecycle.rs，查询与扇出在 view.rs。
 use super::RrdRegistry;
+use rr_ipc::Rr3Frame;
 use rr_registry::Rr3TopicSet;
 use std::fmt;
+use std::sync::Arc;
 
 /// 在册模块上限（spec §10 K3：v0.0.1 目标 5+1 模块，留余量并拒超额）
 pub const RR3_REG_MAX_MODULES: usize = 16;
@@ -14,6 +16,14 @@ pub const RR3_REG_MAX_MODULES: usize = 16;
 /// carry 本轮落地）。128 帧 × 音频片 ~11KB ≈ 1.4MB/连接最坏，×16 连接上限
 /// ≈ 22MB——Pi/RK3566 量级可承受。队列满 = 该连接判慢，断投点名（见 fanout）。
 pub const RR3_FAN_CAP: usize = 128;
+
+/// 广播收件队列里的帧：**一份帧多连接共享**。
+///
+/// 队列元素曾是 `Rr3Frame` 本体，于是每次扇出都要为每个收件连接深拷一份 payload
+/// （`Vec<u8>`）——一条 128ms 音频片约 11KB、六连接就是一帧 66KB 的复制，扇出
+/// 锁还压在这段复制上。改共享后：**一份 payload 只存在一次**，每连接只加一次
+/// 引用计数；帧在入队后不可变，读侧与写侧都是 `&Rr3Frame`，线上字节不变。
+pub type Rr3FanFrame = Arc<Rr3Frame>;
 
 /// 重启退避表（倍数 × restart_base_ms），末档封顶 60×base（spec §5.3）
 pub const RR3_RESTART_BACKOFF: [u64; 7] = [1, 2, 4, 8, 16, 32, 60];

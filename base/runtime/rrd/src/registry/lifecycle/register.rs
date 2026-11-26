@@ -15,7 +15,7 @@ impl RrdRegistry {
     pub fn rr3_reg_add(
         &mut self,
         facts: &Rr3ManifestFacts,
-        tx: SyncSender<Rr3Frame>,
+        tx: SyncSender<Rr3FanFrame>,
         now_ms: u64,
     ) -> Result<u64, Rr3RegisterError> {
         let superseded = self.rr3_add_gate(facts)?;
@@ -67,7 +67,7 @@ impl RrdRegistry {
     fn rr3_add_slot(
         &mut self,
         facts: &Rr3ManifestFacts,
-        tx: SyncSender<Rr3Frame>,
+        tx: SyncSender<Rr3FanFrame>,
         now_ms: u64,
         superseded: Option<u64>,
     ) -> u64 {

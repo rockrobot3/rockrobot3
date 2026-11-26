@@ -22,7 +22,7 @@ pub(super) fn rr3_handshake(
     reader: &mut UnixStream,
     out: &Arc<Mutex<UnixStream>>,
     ctx: &Rr3ConnCtx,
-    fan_tx: SyncSender<Rr3Frame>,
+    fan_tx: SyncSender<Rr3FanFrame>,
 ) -> Result<Rr3Peer, String> {
     let (reported_task, req) = rr3_hs_first(reader, out)?;
     // ADR-0010 裁定 3：首帧是 rr3.ctl.* → 控制旁支，不注册、一问一答即断
@@ -188,12 +188,12 @@ fn rr3_hs_facts_read(
 }
 
 /// 后到者补发在册状态（跳过自己）：只保证入队次序，不构成上线次序。
-fn rr3_hs_replay(shared: &Arc<Mutex<RrdRegistry>>, tx: &SyncSender<Rr3Frame>, skip: &str) -> usize {
+fn rr3_hs_replay(shared: &Arc<Mutex<RrdRegistry>>, tx: &SyncSender<Rr3FanFrame>, skip: &str) -> usize {
     let snapshot = rr3_lock(shared).rr3_reg_snapshot();
     let mut replayed = 0usize;
     for (name, t, phase) in snapshot.iter().filter(|(name, _, _)| *name != skip) {
         if tx
-            .try_send(rr3_state_frame(name, phase.as_str(), *t))
+            .try_send(Arc::new(rr3_state_frame(name, phase.as_str(), *t)))
             .is_ok()
         {
             replayed += 1;
@@ -206,7 +206,7 @@ fn rr3_hs_replay(shared: &Arc<Mutex<RrdRegistry>>, tx: &SyncSender<Rr3Frame>, sk
 fn rr3_hs_admit(
     ctx: &Rr3ConnCtx,
     facts: &Rr3ManifestFacts,
-    fan_tx: SyncSender<Rr3Frame>,
+    fan_tx: SyncSender<Rr3FanFrame>,
     out: &Arc<Mutex<UnixStream>>,
     reported_task: u64,
     req_id: u64,
@@ -241,10 +241,7 @@ fn rr3_hs_admit(
         name: facts.name.clone(),
     };
     let n = crate::registry::rr3_reg_with(&ctx.shared, |g| {
-        g.rr3_reg_fanout(
-            &rr3_state_frame(&peer.name, "registered", peer.task),
-            RR3_TASK_RRD,
-        )
+        g.rr3_reg_fanout(rr3_state_frame(&peer.name, "registered", peer.task), RR3_TASK_RRD)
     });
     rr3_log(&format!("广播 registered 到 {n} 个连接"));
     // 后到者补发在册状态：只发转移不发快照的话，后起模块看不到先起模块上线过。
@@ -258,7 +255,7 @@ fn rr3_hs_admit(
 fn rr3_hs_register(
     ctx: &Rr3ConnCtx,
     facts: &Rr3ManifestFacts,
-    fan_tx: SyncSender<Rr3Frame>,
+    fan_tx: SyncSender<Rr3FanFrame>,
     out: &Arc<Mutex<UnixStream>>,
     reported_task: u64,
     req_id: u64,

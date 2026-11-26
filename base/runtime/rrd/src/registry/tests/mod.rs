@@ -30,7 +30,7 @@ watchdog_timeout_ms = {wd}
     rr3_manifest_parse(&text).expect("测试 manifest 必须可读")
 }
 
-fn chan() -> (SyncSender<Rr3Frame>, std::sync::mpsc::Receiver<Rr3Frame>) {
+fn chan() -> (SyncSender<Rr3FanFrame>, std::sync::mpsc::Receiver<Rr3FanFrame>) {
     mpsc::sync_channel(RR3_FAN_CAP)
 }
 

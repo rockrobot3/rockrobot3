@@ -17,17 +17,17 @@ fn fanout_skips_peer() {
         header: rr_ipc::Rr3Header::rr3_hdr_broadcast(rr_ipc::opcode::SEND, 0),
         payload: vec![],
     };
-    assert_eq!(r.rr3_reg_fanout(&frame, ta), 1, "只发给非发起者");
+    assert_eq!(r.rr3_reg_fanout(frame.clone(), ta), 1, "只发给非发起者");
     assert!(rxa.try_recv().is_err());
     assert!(rxb.try_recv().is_ok());
     assert_eq!(
-        r.rr3_reg_fanout(&frame, rr_bus::RR3_BROADCAST_DST_TASK),
+        r.rr3_reg_fanout(frame.clone(), rr_bus::RR3_BROADCAST_DST_TASK),
         2,
         "0 不是任何模块的 task，两人都该收到"
     );
     assert!(rxa.try_recv().is_ok(), "上一行里发起者也不能被排除");
     drop(rxb);
-    assert_eq!(r.rr3_reg_fanout(&frame, ta), 0);
+    assert_eq!(r.rr3_reg_fanout(frame.clone(), ta), 0);
 }
 
 /// 有界队列满侧（0.0.8b 审计 B-5 初版；本轮审计修正）：容量用满即**丢当前帧、
@@ -36,7 +36,7 @@ fn fanout_skips_peer() {
 #[test]
 fn fanout_but_consumer() {
     let mut r = RrdRegistry::new(1000);
-    let (tx, rx) = mpsc::sync_channel::<Rr3Frame>(1);
+    let (tx, rx) = mpsc::sync_channel::<Rr3FanFrame>(1);
     let t = r
         .rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), tx, 0)
         .unwrap();
@@ -44,19 +44,19 @@ fn fanout_but_consumer() {
         header: rr_ipc::Rr3Header::rr3_hdr_broadcast(rr_ipc::opcode::SEND, 0),
         payload: vec![],
     };
-    assert_eq!(r.rr3_reg_fanout(&frame, t), 0, "发起者自己永远被排除");
+    assert_eq!(r.rr3_reg_fanout(frame.clone(), t), 0, "发起者自己永远被排除");
     assert_eq!(
-        r.rr3_reg_fanout(&frame, rr_bus::RR3_BROADCAST_DST_TASK),
+        r.rr3_reg_fanout(frame.clone(), rr_bus::RR3_BROADCAST_DST_TASK),
         1,
         "第一帧入队"
     );
     assert_eq!(
-        r.rr3_reg_fanout(&frame, rr_bus::RR3_BROADCAST_DST_TASK),
+        r.rr3_reg_fanout(frame.clone(), rr_bus::RR3_BROADCAST_DST_TASK),
         0,
         "队列满 → 丢当前帧（不阻塞、不摘连接）"
     );
     assert_eq!(
-        r.rr3_reg_fanout(&frame, rr_bus::RR3_BROADCAST_DST_TASK),
+        r.rr3_reg_fanout(frame.clone(), rr_bus::RR3_BROADCAST_DST_TASK),
         0,
         "仍满继续丢，但连接保留"
     );
@@ -80,7 +80,7 @@ fn fanout_but_consumer() {
     assert!(r.rr3_logs_take().is_empty(), "取走即清空，不得重复打印");
     assert!(rx.try_recv().is_ok(), "已入队的帧不丢");
     assert_eq!(
-        r.rr3_reg_fanout(&frame, rr_bus::RR3_BROADCAST_DST_TASK),
+        r.rr3_reg_fanout(frame.clone(), rr_bus::RR3_BROADCAST_DST_TASK),
         1,
         "队列腾空后自动续投（连接未被永久断投）"
     );
@@ -98,7 +98,7 @@ fn expired_fanout() {
         .rr3_reg_add(&facts("rr3-simb", 100, 300, "always"), txb, 0)
         .unwrap();
     r.rr3_reg_expire(400);
-    assert_eq!(r.rr3_reg_fanout(&frame_to(b), 0), 1, "只剩 sima 活着");
+    assert_eq!(r.rr3_reg_fanout(frame.clone()_to(b), 0), 1, "只剩 sima 活着");
     assert!(rxa.try_recv().is_ok());
 }
 
@@ -116,7 +116,7 @@ fn removed_entirely() {
     assert_eq!(r.rr3_reg_name_of(a), None);
     assert!(r.rr3_reg_snapshot().is_empty());
     let frame = frame_to(rr_bus::RR3_BROADCAST_DST_TASK);
-    assert_eq!(r.rr3_reg_fanout(&frame, 0), 0, "已移除的连接不得再被投递");
+    assert_eq!(r.rr3_reg_fanout(frame.clone(), 0), 0, "已移除的连接不得再被投递");
     assert!(rxa.try_recv().is_err(), "死条目还留着句柄就会被塞消息");
 }
 

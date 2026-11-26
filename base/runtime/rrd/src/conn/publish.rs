@@ -153,9 +153,11 @@ fn rr3_pub_forward(ctx: &Rr3ConnCtx, me: &Rr3Peer, body: &[u8], topic: &str) {
     };
     // 排除项是发布者自己：模块不该收到自己发出的广播（`rr3_reg_fanout` 只按 task 排除，
     // 不看帧的 dst，见该函数文档）。
+    // 帧**按值交出**：扇出把它包成一份共享体（`Rr3FanFrame`），每连接只加引用计数，
+    // 不再在 registry 锁内为每个收件人深拷 payload（音频片 11KB × 连接数）。
     // 留痕只在接收连接数变化（含首次）时落——音频 PCM 每帧一条会把日志环冲垮。
     let (n, changed) = crate::registry::rr3_reg_with(&ctx.shared, |g| {
-        let n = g.rr3_reg_fanout(&frame, me.task);
+        let n = g.rr3_reg_fanout(frame, me.task);
         // 影子统计（广播面 ADR 前哨）：只按 manifest subscribes 记账"本应过滤"的
         // 目标数，不改上面的全量投递——计数面 = rr3.ctl.counters 的 fanout_shadow*
         g.rr3_reg_shadow(topic, me.task);
@@ -232,7 +234,7 @@ fn rr3_pub_power_latch(
     }
     let n = crate::registry::rr3_reg_with(&ctx.shared, |g| {
         g.rr3_reg_fanout(
-            &crate::daemon::rr3_power_frame(reason, percent, voltage_mv),
+            crate::daemon::rr3_power_frame(reason, percent, voltage_mv),
             rr_bus::RR3_TASK_RRD,
         )
     });

@@ -32,7 +32,8 @@ use serde_json::{json, Value};
 use crate::daemon::{rr3_now_ms, rr3_now_ns, rr3_state_frame};
 use crate::manifest::{rr3_manifest_abs, rr3_manifest_parse, Rr3ManifestFacts};
 use crate::registry::{
-    rr3_phase_for_exit, Rr3Beat, Rr3Death, Rr3Phase, Rr3RestartPlan, RrdRegistry, RR3_FAN_CAP,
+    rr3_phase_for_exit, Rr3Beat, Rr3Death, Rr3FanFrame, Rr3Phase, Rr3RestartPlan, RrdRegistry,
+    RR3_FAN_CAP,
 };
 use crate::rpc::{
     rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_call_params, rr3_rpc_counters,
@@ -298,7 +299,7 @@ fn rr3_finish_broadcast(
     // supervisor 收尸那一路排的是 `crashed.src_task`。两种口径是**已知**的第三/第四种
     // 口径，归 Task 13 的 A-3 文档化，本任务不"统一"——统一成哪一种都没有判据支持。
     let n = crate::registry::rr3_reg_with(&ctx.shared, |g| {
-        g.rr3_reg_fanout(&rr3_state_frame(&me.name, phase, me.task), RR3_TASK_RRD)
+        g.rr3_reg_fanout(rr3_state_frame(&me.name, phase, me.task), RR3_TASK_RRD)
     });
     match plan {
         Some(p) => {
@@ -324,10 +325,7 @@ fn rr3_finish_broadcast(
     let degraded = rr3_lock(&ctx.shared).rr3_reg_degrade(&me.name);
     for (dep, task) in degraded {
         let n = crate::registry::rr3_reg_with(&ctx.shared, |g| {
-            g.rr3_reg_fanout(
-                &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
-                task,
-            )
+            g.rr3_reg_fanout(rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task), task)
         });
         rr3_log(&format!(
             "{dep} 依赖断供 → degraded（提供者 {} 离开 Running）广播到 {n} 个连接",
@@ -339,7 +337,7 @@ fn rr3_finish_broadcast(
 /// 广播写线程：从有界队列取帧，写失败即退出（连接回收随通道 drop 走 Disconnected）。
 fn rr3_conn_writer(
     out: &Arc<Mutex<UnixStream>>,
-    fan_rx: mpsc::Receiver<Rr3Frame>,
+    fan_rx: mpsc::Receiver<Rr3FanFrame>,
 ) -> JoinHandle<()> {
     let out = out.clone();
     thread::spawn(move || {
@@ -366,7 +364,7 @@ pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String>
         .map_err(|e| format!("set_write_timeout 失败: {e}"))?;
     // 有界收件队列（RR3_FAN_CAP）：满侧策略见 registry.rs fanout doc——僵尸订阅者
     // 的积压被封顶在"上界 × 帧大小"，不再无界吃到 rrd 被 OOM 杀。
-    let (fan_tx, fan_rx) = mpsc::sync_channel::<Rr3Frame>(RR3_FAN_CAP);
+    let (fan_tx, fan_rx) = mpsc::sync_channel::<Rr3FanFrame>(RR3_FAN_CAP);
     let writer: JoinHandle<()> = rr3_conn_writer(&out, fan_rx);
 
     // 注册前设读超时：连上却不注册的客户端不能永久占着线程（spec §5.0）

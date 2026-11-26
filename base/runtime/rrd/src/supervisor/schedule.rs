@@ -50,7 +50,7 @@ fn rr3_absorb_crash(
     // 同形）；conn 收尾那一路排的是 `RR3_TASK_RRD`（等于不排除）。两种口径是**已知**的
     // 第三/第四种口径，归 Task 13 的 A-3 文档化，此处不"统一"——统一成哪一种都无判据支持。
     let n = crate::registry::rr3_reg_with(shared, |g| {
-        g.rr3_reg_fanout(&rr3_state_frame(name, phase, src_task), src_task)
+        g.rr3_reg_fanout(rr3_state_frame(name, phase, src_task), src_task)
     });
     rr3_log(&format!(
         "{name} 子进程退出 status={status} → 广播 {phase} 到 {n} 个连接"
