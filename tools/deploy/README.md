@@ -8,6 +8,33 @@ MCU 无 A/B 分区，升级一律线下重烧。每个芯片平台独立部署�
 `ghcr.io/<owner>/rockrobot3-firmware:<tag>` 一同发布；制品由流水线构建，
 本地不编译。
 
+## 平台 × 入口 × 判据（到货即执行）
+
+每个芯片平台独立部署，没有主/副板；下表只登记**脚本入口与判据**，实板做到了哪一步的
+唯一落点是 [`docs/status.md`](../../docs/status.md)（敞口 6/10/11）。"实板状态"列里
+"结构就绪"= 脚本与文档可在仓内复跑，**未在实板执行过**。
+
+| 平台 | 承载档 | 制品 | 入口 | 验收判据 |
+|---|---|---|---|---|
+| ESP32 classic（xtensa LX6） | rtos 轻承载 | `rr3-esp32-safe-merged.bin`（4MB 整片）或 ELF + bootloader + `rr3-partitions.csv` | 整片：`esptool.py --chip esp32 write_flash 0x0 rr3-esp32-safe-merged.bin`；单件：`flash-artifact.sh <elf> --bootloader <bin>` | 串口 115200 前两行 `surface=` 与 `console=uart0@<baud> secondary=none`（采集用 `console-log.py`，先清 DTR/RTS） |
+| ESP32-S3（N16R8） | rtos 轻承载 | `rr3-esp32s3-full-merged.bin`（16MB） | 同上，`--chip esp32s3` | 同上，另有 `[spool]` 周期行；full 档缺 WiFi/API key 会显式点名 |
+| 瑞芯微 RK3566（Radxa ZERO 3）· Buildroot 保底轨 | host 全承载 | `rock3-zero3.img`（`buildroot.yml` 全量构建产出） | 按 [`flash-maskrom.md`](../../base/os/buildroot/board/radxa-zero3/flash-maskrom.md) 走 maskrom（idbloader 32K / itb 6M / boot.vfat 16M） | 串口出 shell；分区标签 `rr_a`/`rr_b`/`rr_factory`/`rr_staging`/`rr_data` 与 `genimage.cfg` 一致 |
+| 瑞芯微 RK3566 · distro 快路轨 | host 全承载 | 版本化 bundle（`pack-bundle.sh`） | `sudo bash tools/deploy/install-bundle.sh <bundle.tar.gz>` | `verify-board-config.sh` 装机面漂移门 + `rr3-ctl status` 六模块 running |
+| 英特尔 / AMD（x86_64） | host 全承载 | `ghcr.io/<owner>/rockrobot3:<tag>-amd64`（含 provenance/SBOM） | `docker run` 该镜像，或 bundle 装机 | `image-smoke.sh file` + `image-smoke.sh run`（六模块真起、零拒绝）——流水线每次发布实跑 |
+| 进迭时空（SpacemiT K1/K3，riscv64） | host 全承载 | `ghcr.io/<owner>/rockrobot3:<tag>-riscv64` | `bash tools/deploy/build-riscv-image.sh --push` | 同上两段冒烟；`platforms.yml` 的 `riscv-image` 腿每次 push 复跑 |
+| 树莓派 4B（aarch64）· 参考真板 | host 全承载 | deb / bundle | `pack-arm64.sh`（交叉）或 `build-onboard.sh`（板上原生构建音频件） | 六模块全 running、`denied_publish = 0`、整机重启自愈（0.0.6 真板已验） |
+
+**各自第一个失败点**（按这个顺序查，别从代码开始）：
+
+- **ESP32 任何档**：串口无 banner → 先查 USB 线与 DTR/RTS（裸 `cat` 会把芯片按在复位态，
+  表现为"ROM 日志后全噪声"）；能读 ROM 读不到 `surface=` → 波特率或烧录档不匹配；烧录即
+  失败 → 先确认 `rr3-partitions.csv` 含 `spool`（脚本 fail-closed 会先拒）。
+- **RK3566 maskrom**：工具认不到设备 → 查 USB OTG 口、`rkdeveloptool ld` 与板子是否真在
+  maskrom（按住 recovery 上电）；镜像写入成功但无 shell → 先对串口 1500000 8N1 与
+  `extlinux.conf` 的 console 参数。
+- **x86_64 / riscv64 镜像**：`docker run` 起不来 → 先看 `image-smoke.sh file` 是否过（装机树
+  与可执行面），再看 `run` 段（六模块注册与拒绝计数）。
+
 ## 资产
 
 | 文件 | 说明 |

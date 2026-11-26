@@ -1330,3 +1330,12 @@ docs/ 根上的非 README 散落件没有判据（批57 的参赛介绍正是人
 docs/status.md 豁免通过）；`conventions §2` ⑤ 行、`tools/ci/README` ⑤ 行、`docs/README`
 目录约定三处同步。判据——自检 9/9 PASS；真仓 `check_docs` 退出码 0；负例只在夹具里红，
 不在真仓静默放行。
+
+**2026-11-27 批61 部署面"到货即执行"对表**：事实——`tools/deploy/README.md` 只覆盖 ESP32
+烧录（资产/整片/裸 espflash/验收），RK3566 的 Buildroot 保底轨与 distro 快路轨、x86_64 /
+riscv64 的运行镜像、树莓派参考真板都不在这张入口表里，到货时得跨四份文档拼流程。处置——
+新增"平台 × 入口 × 判据"表（七个平台行：ESP32 classic、ESP32-S3、RK3566×2 轨、
+英特尔/AMD x86_64、进迭时空 riscv64、树莓派 4B），每行给制品、入口命令与验收判据；表下
+按平台列"各自第一个失败点"（DTR/RTS、maskrom 认设备、镜像两段冒烟），实板状态一律指
+`docs/status.md` 敞口 6/10/11 不在此重述。判据——⑤ 门绿（新增链接全部可解析）；未改任何
+脚本行为；`git diff --stat` 仅本 README 与回执。
