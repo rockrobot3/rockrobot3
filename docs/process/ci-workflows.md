@@ -19,7 +19,9 @@ CI 单一事实源在 GitHub Actions（R30 裁定：atomgit 无流水线功能�
   仓库根，本仓根无 `Cargo.toml`，等于空转）；凡跨多清单共写仓根
   target-dir（`/tmp/rr3-build`，见 `.cargo/config.toml`）的作业再加
   `cache-all-crates: "true"`，否则共享依赖每拍冷编。esp 工具链缓存在
-  `.github/actions/esp-toolchain` 内三处，单点维护。
+  `.github/actions/esp-toolchain` 内三处，单点维护。apt 安装（归档偶发单包
+  404/索引滞后）统一走 `.github/actions/apt-retry`（三次有界重试，末次经
+  log-digest 压注解）——workflow 只给包名、标题与日志名。
 - **矩阵并行**：跨平台按芯片/架构拆腿（cross ×3、esp 按芯片 ×2、publish
   原生架构 ×2），fail-fast: false 保证单腿红不掩盖其余腿结论；host-macos
   **合并为单腿**（workspace + 独立工程串行，续轮二十五）——托管 macOS arm64

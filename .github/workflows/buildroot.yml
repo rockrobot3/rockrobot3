@@ -44,17 +44,14 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: 安装内核 dts 构建依赖
-        run: |
-          set -o pipefail
-          if ! sudo apt-get update -qq 2>&1 | tail -3; then
-            echo "::error title=apt-update::apt-get update 失败"
-            exit 1
-          fi
-          if ! sudo apt-get install -y -qq gcc-aarch64-linux-gnu bc bison flex libssl-dev 2>&1 | tail -5; then
-            echo "::error title=apt-install::内核 dts 依赖安装失败"
-            exit 1
-          fi
-          command -v aarch64-linux-gnu-gcc
+        uses: ./.github/actions/apt-retry
+        with:
+          packages: gcc-aarch64-linux-gnu bc bison flex libssl-dev
+          title: apt-dtb
+          log: apt-dtb
+
+      - name: dts 工具链在位
+        run: command -v aarch64-linux-gnu-gcc
 
       # 内核 tarball（~140MB）按版本钉 key 缓存：dtb 门每次跑都要源码，重复
       # 下载是本 job 主要网络耗时（2026-11-17 治理）；解包+补丁每拍重做——
@@ -133,14 +130,11 @@ jobs:
           df -h /
 
       - name: 安装 Buildroot 宿主依赖
-        run: |
-          set -o pipefail
-          sudo apt-get update -qq 2>&1 | tail -3
-          if ! sudo apt-get install -y -qq build-essential git wget cpio unzip rsync bc \
-              bison flex libssl-dev libncurses-dev python3 file 2>&1 | tail -5; then
-            echo "::error title=br-deps::Buildroot 宿主依赖安装失败"
-            exit 1
-          fi
+        uses: ./.github/actions/apt-retry
+        with:
+          packages: build-essential git wget cpio unzip rsync bc bison flex libssl-dev libncurses-dev python3 file
+          title: br-deps
+          log: br-deps
 
       - uses: dtolnay/rust-toolchain@stable
         with:

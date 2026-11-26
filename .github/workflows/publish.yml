@@ -141,25 +141,15 @@ jobs:
         with:
           workspaces: base/runtime
           cache-all-crates: "true"
-      - name: 安装 riscv64 交叉工具链（3 次有界重试）
-        run: |
-          set -o pipefail
-          ok=0
-          for i in 1 2 3; do
-            sudo apt-get update -qq 2>&1 | tail -3 || true
-            if sudo apt-get install -y -qq gcc-riscv64-linux-gnu 2>&1 | tee /tmp/apt-riscv-pub.log; then
-              ok=1
-              break
-            fi
-            echo "::warning title=apt-riscv-publish::第 ${i} 次安装失败，10s 后重试"
-            sleep 10
-          done
-          if [ "$ok" -ne 1 ]; then
-            why=$(grep -iE "unable to locate|has no installation candidate|depends|conflicts|error" /tmp/apt-riscv-pub.log | tail -3 | tr '\n' ' ')
-            echo "::error title=apt-riscv-publish::${why:0:700}"
-            exit 1
-          fi
-          command -v riscv64-linux-gnu-gcc && command -v riscv64-linux-gnu-ar
+      - name: 安装 riscv64 交叉工具链
+        uses: ./.github/actions/apt-retry
+        with:
+          packages: gcc-riscv64-linux-gnu
+          title: apt-riscv-publish
+          log: apt-riscv-pub
+
+      - name: riscv64 工具链在位
+        run: command -v riscv64-linux-gnu-gcc && command -v riscv64-linux-gnu-ar
       - uses: docker/setup-qemu-action@v4
         with:
           platforms: riscv64

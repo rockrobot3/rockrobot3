@@ -1,0 +1,46 @@
+# apt-retry —— apt 安装的有界重试（镜像归档偶发单包 404 / 索引滞后）。
+#
+# 机制单点：每轮先刷新索引再装，三次仍失败才红；末次日志经 log-digest 压成一条
+# 可归因注解。调用方只给包名、标题与日志名（策略面），不复制重试骨架。
+name: apt-retry
+description: apt-get update + install，三次有界重试；末次失败压注解并判红
+inputs:
+  packages:
+    description: 空格分隔的包名列表
+    required: true
+  title:
+    description: 注解标题（失败归因锚，如 apt-riscv）
+    required: true
+  log:
+    description: 日志文件名（落 RUNNER_TEMP）
+    required: false
+    default: apt
+runs:
+  using: composite
+  steps:
+    - name: ${{ inputs.title }}
+      shell: bash
+      env:
+        APT_PACKAGES: ${{ inputs.packages }}
+        APT_TITLE: ${{ inputs.title }}
+        APT_LOG: ${{ inputs.log }}
+      run: |
+        set -o pipefail
+        log="${RUNNER_TEMP:-/tmp}/${APT_LOG}.log"
+        ok=0
+        for i in 1 2 3; do
+          sudo apt-get update -qq 2>&1 | tail -3 || \
+            echo "::warning title=${APT_TITLE}::apt-get update 失败（第 ${i} 次），继续尝试安装"
+          # shellcheck disable=SC2086
+          if sudo apt-get install -y -qq ${APT_PACKAGES} 2>&1 | tee "${log}"; then
+            ok=1
+            break
+          fi
+          echo "::warning title=${APT_TITLE}::安装失败（第 ${i} 次），10s 后重试"
+          sleep 10
+        done
+        if [ "${ok}" -ne 1 ]; then
+          bash tools/ci/lib/log-digest.sh --title "${APT_TITLE}" --log "${log}" \
+            --sig 'unable to locate|has no installation candidate|depends|conflicts|error|404' --tail 3
+          exit 1
+        fi

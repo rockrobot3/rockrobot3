@@ -82,23 +82,16 @@ jobs:
       # 2026-11-16 首跑实证：cross 镜像链路不可控（链接走宿主 cc 直接失败）。
       - name: 安装 riscv64 交叉工具链与 qemu（gnu 目标）
         if: matrix.mode == 'gnu'
+        uses: ./.github/actions/apt-retry
+        with:
+          packages: gcc-riscv64-linux-gnu qemu-user binfmt-support
+          title: apt-riscv
+          log: apt-riscv
+
+      - name: riscv64 工具链在位与 binfmt 注册
+        if: matrix.mode == 'gnu'
         run: |
           set -o pipefail
-          ok=0
-          for i in 1 2 3; do
-            sudo apt-get update -qq 2>&1 | tail -3 || true
-            if sudo apt-get install -y -qq gcc-riscv64-linux-gnu qemu-user binfmt-support 2>&1 | tee /tmp/apt.log; then
-              ok=1
-              break
-            fi
-            echo "::warning title=apt-riscv::第 ${i} 次安装失败，10s 后重试"
-            sleep 10
-          done
-          if [ "$ok" -ne 1 ]; then
-            why=$(grep -iE "unable to locate|has no installation candidate|depends|conflicts|error" /tmp/apt.log | tail -3 | tr '\n' ' ')
-            echo "::error title=apt-riscv::${why:0:700}"
-            exit 1
-          fi
           command -v riscv64-linux-gnu-gcc && command -v qemu-riscv64
           # binfmt 注册（2026-11-24）：跨架构 self-exec 用例需要宿主内核把 riscv64
           # ELF 交给 qemu；解释器用带 sysroot 的包装脚本，避免动态二进制找不到
@@ -236,25 +229,15 @@ jobs:
         with:
           workspaces: base/runtime
           cache-all-crates: "true"
-      - name: 安装 riscv64 交叉工具链（3 次有界重试）
-        run: |
-          set -o pipefail
-          ok=0
-          for i in 1 2 3; do
-            sudo apt-get update -qq 2>&1 | tail -3 || true
-            if sudo apt-get install -y -qq gcc-riscv64-linux-gnu 2>&1 | tee /tmp/apt-riscv-img.log; then
-              ok=1
-              break
-            fi
-            echo "::warning title=apt-riscv-image::第 ${i} 次安装失败，10s 后重试"
-            sleep 10
-          done
-          if [ "$ok" -ne 1 ]; then
-            why=$(grep -iE "unable to locate|has no installation candidate|depends|conflicts|error" /tmp/apt-riscv-img.log | tail -3 | tr '\n' ' ')
-            echo "::error title=apt-riscv-image::${why:0:700}"
-            exit 1
-          fi
-          command -v riscv64-linux-gnu-gcc && command -v riscv64-linux-gnu-ar
+      - name: 安装 riscv64 交叉工具链
+        uses: ./.github/actions/apt-retry
+        with:
+          packages: gcc-riscv64-linux-gnu
+          title: apt-riscv-image
+          log: apt-riscv-img
+
+      - name: riscv64 工具链在位
+        run: command -v riscv64-linux-gnu-gcc && command -v riscv64-linux-gnu-ar
       - uses: docker/setup-qemu-action@v4
         with:
           platforms: riscv64
