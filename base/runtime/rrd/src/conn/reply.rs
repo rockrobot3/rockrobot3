@@ -14,7 +14,7 @@ pub(super) fn rr3_write(out: &Arc<Mutex<UnixStream>>, frame: &Rr3Frame) -> bool 
     // 的临时 guard 会活到整个 if-let 结束，点名日志就成了**持出向锁写磁盘**
     // （续轮十九：锁内零文件 I/O）。先结束语句放锁，再落日志。
     //
-    // 这里自己走 `to_bytes + write_all + flush`（与 `rr3_frame_write` 同序）而不是
+    // 这里自己走 `头编码 + 分段 write_all + flush`（与 `rr3_frame_write` 同序、同字节）而不是
     // 直接调它：那条路径把 io::Error 折成字符串，写超时（EAGAIN）与真错分不开——
     // "对端不收"必须能单独点名与计数（续轮二十五）。
     let (res, timed_out) = {
@@ -39,18 +39,33 @@ pub(super) fn rr3_write(out: &Arc<Mutex<UnixStream>>, frame: &Rr3Frame) -> bool 
     false
 }
 
-/// 持锁写一帧（组帧 + write_all + flush），返回 `(结果, 是否写超时)`。
+/// 持锁写一帧（头 128B + payload 分段提交 + flush），返回 `(结果, 是否写超时)`。
 /// 只做字节面，不落日志/计数——分类与点名留给唯一调用方 `rr3_write`。
+///
+/// **分段而不拼整块**：`rr3_frame_to_bytes` 会为每个收件连接各拼一份头+payload
+/// （音频片约 11KB × 连接数），而广播帧在 rrd 内是共享体（`Rr3FanFrame`）——
+/// 一层深拷已在扇出处消掉，写侧不该再把整帧复制一遍。帧级原子性由出向锁保证：
+/// 同一时刻只有一个写者持锁，两次 `write_all` 之间不会插进别的帧（读侧本就按
+/// 长度字段组帧，流上分段是正常形态）。
 fn rr3_write_bytes(guard: &mut UnixStream, frame: &Rr3Frame) -> (Result<(), String>, bool) {
-    match rr_ipc::rr3_frame_to_bytes(frame) {
-        Err(e) => (Err(format!("{e:?}")), false),
-        Ok(bytes) => match guard.write_all(&bytes).and_then(|_| guard.flush()) {
-            Ok(()) => (Ok(()), false),
-            Err(e) => (
-                Err(e.to_string()),
-                matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut),
-            ),
-        },
+    if frame.header.payload_len as usize != frame.payload.len() {
+        let e = rr_ipc::Rr3FrameError::LengthMismatch {
+            declares: frame.header.payload_len,
+            actual: frame.payload.len(),
+        };
+        return (Err(format!("{e:?}")), false);
+    }
+    let hdr = rr_ipc::rr3_header_encode(&frame.header, &frame.payload);
+    match guard
+        .write_all(&hdr)
+        .and_then(|_| guard.write_all(&frame.payload))
+        .and_then(|_| guard.flush())
+    {
+        Ok(()) => (Ok(()), false),
+        Err(e) => (
+            Err(e.to_string()),
+            matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut),
+        ),
     }
 }
 
