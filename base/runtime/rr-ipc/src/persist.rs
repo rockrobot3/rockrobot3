@@ -5,12 +5,10 @@
 //! → 失败清 tmp。目录 fsync 是必需项：只 fsync 文件不 fsync 目录，rename 可能在
 //! 掉电后回旧态（POSIX 崩溃一致性）。
 //!
-//! 为什么住 rr-ipc：轴档案、域阈值、`armed`、凭据的落盘复用这一份（第二条写路径即红）；
-//! rrd 与 rr3-interact 分属独立 workspace，rr-ipc 是双方最低公共依赖层（rrd 侧 re-export）。
+//! 为什么住 rr-ipc：轴档案、域阈值、`armed`、凭据的落盘复用这一份（第二条写路径即红）；rrd 与 rr3-interact 分属独立 workspace，rr-ipc 是双方最低公共依赖层。
 //!
-//! 权限：**tmp 建时即定权**（[`rr3_store_perm`]，unix `mode` 经 `OpenOptions::mode`）
-//! ——"先 0644 建再 rename 后 chmod"在外部注入父目录下留了同机他人读 tmp 的窗口，
-//! 崩溃残留更会长期可读；敏感面 0600 不依赖父目录护城河，非敏感面沿用 0644。
+//! 权限：**tmp 建时即定权**（[`rr3_store_perm`]）——"先 0644 建再 rename 后 chmod"在
+//! 外部注入父目录下留了同机他人读 tmp 的窗口；敏感面 0600，非敏感面沿用 0644。
 //!
 //! 独占建：tmp 先清残留再 `create_new`（[`rr3_stage_excl`]）——`create+truncate`
 //! 会跟着同机攻击者预置的符号链接写穿；独占建把换链竞态变成建失败。

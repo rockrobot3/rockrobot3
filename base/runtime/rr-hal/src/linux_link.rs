@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Linux（NetworkManager）链路读数后端。编译门单重：`target_os = "linux"`。
 //!
-//! 承载选 **nmcli 子进程轮询**而非 D-Bus 直连：配网/对拍全套命令已在 nmcli 上，
-//! `std::process::Command` 零新依赖（D-Bus 要 zbus 级大库且 async 耦合）。轮询节拍
-//! 由模块侧 `link_report_period_ms` 控制；HAL 每次 `state()` 现读现报，不持 fd。
+//! 承载选 **nmcli 子进程轮询**而非 D-Bus 直连：配网/对拍命令已在 nmcli 上，`Command`
+//! 零新依赖（D-Bus 要 zbus 大库且 async 耦合）。HAL 每次 `state()` 现读现报，不持 fd。
 //!
 //! 一轮两次调用（terse `-t`，冒号分隔、值内 `:`/`\` 转义）：
 //! 1. `nmcli -t -f GENERAL.STATE,GENERAL.CONNECTION,GENERAL.TYPE dev show <if>`：
@@ -13,8 +12,7 @@
 //!    只读缓存（扫描是秒级阻塞，不许进周期拍）；缓存空/失败 → SSID 回落
 //!    CONNECTION、RSSI None，不编造。
 //!
-//! 分工与 sim 同一条：NM 承载配网与重连，模块侧只读翻转上报，HAL 只如实报数。
-//! `up=false` 时 ssid/rssi 强制 None，不许从"down 还带着 ssid"发明语义。
+//! 分工同 sim：NM 承载配网与重连，模块侧只读翻转上报；`up=false` 时 ssid/rssi 强制 None，不许从"down 还带着 ssid"发明语义。
 //!
 //! 超时：每次调用受模块 `timeout_ms` 管住——spawn 后轮询 `try_wait`，到点 kill 并
 //! 显式回错；管道读同套 deadline（`rr3_nm_read_capped`，幸存孙进程持写端不拖死）。
