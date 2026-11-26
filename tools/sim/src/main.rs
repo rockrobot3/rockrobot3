@@ -12,12 +12,10 @@
 //!    ota（恒拒随 M6，预期非 0 退出）；
 //! 5. 报告 + 收尾（`--keep` 保留现场）。
 //!
-//! 另有三个互斥模式：`--brain`（全语音对话闭环，`brain.rs`）、`--profile`
-//! （装配单驱动 boot + 全模块真进程巡检，`assemble.rs`）与 `--chain`（六真进程
-//! 全链 mock 闭环 + 总线观察者取证，`chain.rs`）。
+//! 另有三个互斥模式：`--brain`（全语音对话闭环）、`--profile`（装配单驱动 boot +
+//! 全模块真进程巡检，`assemble.rs`）与 `--chain`（六真进程全链 mock 闭环，`chain.rs`）。
 //!
-//! sim 设备源（`devices.rs`，rr-hal 的 sim 后端消费方）保留：报告里带一段
-//! 静音流的时长换算，证明"sim 与 linux 后端交出同一种流"这条不变量仍有落点。
+//! sim 设备源（`devices.rs`）保留：报告里带一段静音流的时长换算，证明"sim 与 linux 后端交出同一种流"这条不变量仍有落点。
 
 #[cfg(not(unix))]
 fn main() {

@@ -4,19 +4,17 @@
 //! 现役、零新依赖）。
 //!
 //! 写口（配网半边）：`POST /api/board/wifi` 事务性配网——读旧值 → 写 NVS → STA
-//! 重配置重连 → 有界等连 → 败即回退旧值 → 如实应答 `{ok, connected, reverted,
-//! stage}`；`connected` 只取实测等连结果，永不因请求被接受而置真。`POST
-//! /api/board/reboot` 应答先行落链再 `esp_restart`。事务全程不持 bus 锁、不碰
-//! 观测面（零回显契约的第二道墙）。
+//! 重配置重连 → 有界等连 → 败即回退旧值 → 如实应答 `{ok, connected, reverted, stage}`；
+//! `connected` 只取实测等连结果。`POST /api/board/reboot` 应答先行落链再 `esp_restart`。
+//! 事务全程不持 bus 锁、不碰观测面（零回显契约的第二道墙）。
 //!
 //! 应答送达半边物理不可达（reconnect/reboot 都会杀 TCP 会话），故客户端确认语义
 //! 以旁证为准：写口 = 板重新可达后 `GET /api/board/state` 的 `connected`；reboot =
 //! 复位后 boot 横幅"凭据源=…"点名。
 //!
-//! 分层：纯逻辑层（白名单路由表 [`RR3_BOARD_ROUTES`] + 查表 + JSON 组包/解析纯函数，
-//! 单测可钉）；unsafe 壳层 [`rr3_httpd_spawn`]（WiFi STA 起栈 + `httpd_start` +
-//! 注册 handler）。表即分派真值，无第二份。凭据读链：NVS 优先 → `option_env!`
-//! 编译期回落（板上 newlib 的 `environ` 为空）；都缺 = 配置腿缺席，boot fail-honest。
+//! 分层：纯逻辑层（白名单路由表 [`RR3_BOARD_ROUTES`] + JSON 组包/解析纯函数，单测可钉）；
+//! unsafe 壳层 [`rr3_httpd_spawn`]（WiFi STA 起栈 + `httpd_start` + 注册 handler）。
+//! 凭据读链：NVS 优先 → `option_env!` 编译期回落；都缺 = 配置腿缺席，boot fail-honest。
 //! 栈 16KB（[`HTTPD_STACK_SIZE`]）；写口瞬时缓冲 ≤512B，不新增常驻堆。
 
 use std::sync::{Arc, Mutex, OnceLock};

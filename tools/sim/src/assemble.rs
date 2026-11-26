@@ -10,14 +10,12 @@
 //! 演练 modules-root 布局 = **装机布局**（`<root>/profiles/<机>.toml` 上两级是
 //! modules-root、`modules/<name>/{module.toml,config.toml,<entry>}`）：manifest 用
 //! 仓源原文、只改 entry 一个值（rr3-pack `rr3_manifest_rewrite` 同语义同三道门）——
-//! provides 真值必须是仓源那一册，自造 manifest 等于第二份真值；entry 绝对化与
-//! deb 打包、buildroot post-build 同面。config 同目录就位用仓源（纯运行参数），
-//! brain 云端由 rrd 进程 env `RR3_BRAIN_CLOUD=mock` 压成 mock 档。
+//! provides 真值必须是仓源那一册；entry 绝对化与 deb 打包、buildroot post-build 同面。
+//! config 同目录就位用仓源；brain 云端由 rrd 进程 env `RR3_BRAIN_CLOUD=mock` 压成 mock 档。
 //!
-//! mock 注入走 rrd 进程 env（brain 继承）+ `RR3_HAL_BACKEND=sim`；HAL 面的 sim
-//! 落点：[`rr3_asm_sim_text`] 变换装配单副本（hal_backend → sim、可选真后端专面
-//! 摘除）。P0-3 起 supervisor 按装配单声明的 `RR3_HAL_BACKEND` 注入子进程，装配单
-//! 是部署真值，rrd env 只护 rrd 自己；`--manifest` 调试路径再兜一层。仅 Unix 编译。
+//! mock 注入走 rrd 进程 env（brain 继承）+ `RR3_HAL_BACKEND=sim`；HAL 面的 sim 落点：
+//! [`rr3_asm_sim_text`] 变换装配单副本。supervisor 按装配单声明注入子进程（部署真值），
+//! rrd env 只护自己；`--manifest` 调试路径再兜一层。仅 Unix 编译。
 
 mod report;
 mod spawn;
