@@ -9,7 +9,8 @@ docs/ 按**变更频率与读者动作**分四档：`architecture/` 半年一变
 
 **目录约定（2026-11-25 批46 裁定）**：docs/ 之外每个目录至多一份 md，且必须是 `README.md`
 （仓根双语 `README_zh.md` 与 `base/os/` Buildroot 外部树豁免）；专题文档一律归
-`docs/design/` 或 `docs/reference/`，不散落在代码目录根部。文档门 ⑤ 第四判据执法
+`docs/design/` 或 `docs/reference/`，不散落在代码目录根部；`docs/` 根本身只留本索引与
+`status.md` / `status-history.md`。文档门 ⑤ 第四、第五判据执法
 （`散落文档` 点名即红）。`docs/process/dev/` 按版本目录组织，规矩见
 [`process/dev/README.md`](process/dev/README.md)。
 

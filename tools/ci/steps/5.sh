@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-# ⑤ 文档门步骤体（空文档 / 相对断链 / 导航漏链 / docs/ 外散落 md；列表打空即门禁失效）。
-# 由 check.sh 在启动段 source；函数读写入口的全局 fail via run。
+# ⑤ 文档门步骤体（空文档 / 相对断链 / 导航漏链 / 散落 md：docs/ 根只留三件、docs/ 外只留 README；
+# 列表打空即门禁失效）。由 check.sh 在启动段 source；函数读写入口的全局 fail via run。
 
 check_docs() {
   local list bad nav f d l
@@ -40,8 +40,20 @@ check_docs() {
   # 第四判据（2026-11-25 批46 裁定）：docs/ 之外每目录至多一份 md 且必须是 README.md，
   # 专题文档一律归 docs/design 或 docs/reference。豁免两类：base/os/（Buildroot 外部树
   # 与板卡笔记随外树布局走）；仓根 README_zh.md（开源双语说明）。
+  # 第五判据（2026-11-27 批59）：docs/ 根只允许索引与实况三件（README/status/status-history），
+  # 其余 md 必须落在四档子目录里——第四判据只扫 docs/ 之外，根上的散落件曾是盲区（批57
+  # 的参赛介绍正是人工发现后归位的），这里把同一把尺子补到 docs/ 根。
   while IFS= read -r f; do
-    case "$f" in docs/*|base/os/*) continue ;; esac
+    case "$f" in
+      docs/*/*) continue ;;
+      docs/*)
+        case "$(basename "$f")" in
+          README.md|status.md|status-history.md) ;;
+          *) printf '散落文档  %s\n' "$f" >> "$bad" ;;
+        esac
+        continue ;;
+      base/os/*) continue ;;
+    esac
     case "$(basename "$f")" in
       README.md) ;;
       README_zh.md) [ "$(dirname "$f")" = "." ] \
@@ -57,9 +69,10 @@ rr3_step_5() {
   run check_docs
 }
 
-# 自检（2026-11-24，2026-11-25 批46 补第四判据三例）：夹具仓七例——好档通过 / 空文档红 /
-# 断链红 / 导航漏链红 / docs/ 外散落 md 红 / base/os 豁免通过 / 仓根 README_zh 豁免通过。
-# 文档门的判据（列表打空、链接归一、README 覆盖）腐化时先在这里红，而不是在
+# 自检（2026-11-24，2026-11-25 批46 补第四判据三例，2026-11-27 批59 补 docs/ 根两例）：
+# 夹具仓九例——好档通过 / 空文档红 / 断链红 / 导航漏链红 / docs/ 外散落 md 红 /
+# docs/ 根散落 md 红 / docs/status.md 豁免通过 / base/os 豁免通过 / 仓根 README_zh 豁免通过。
+# 文档门的判据（列表打空、链接归一、README 覆盖、散落面）腐化时先在这里红，而不是在
 # 真仓上静默放行。调用方见 tools/ci/platform/docs_gate_selftest.sh。
 check_docs_selftest() {
   local root td ok=1 d out rc
@@ -100,6 +113,10 @@ check_docs_selftest() {
   mk_case scatter >/dev/null && mkdir -p "$td/scatter/tools" \
     && printf '# 笔记\n' > "$td/scatter/tools/notes.md" \
     && ( cd "$td/scatter" && git add -A ) && expect "$td/scatter" 1 "散落文档" "docs/ 外散落 md 即红" || ok=0
+  mk_case droot >/dev/null && printf '# 笔记\n' > "$td/droot/docs/notes.md" \
+    && ( cd "$td/droot" && git add -A ) && expect "$td/droot" 1 "散落文档" "docs/ 根散落 md 即红" || ok=0
+  mk_case dstat >/dev/null && printf '# 实况\n' > "$td/dstat/docs/status.md" \
+    && ( cd "$td/dstat" && git add -A ) && expect "$td/dstat" 0 "" "docs/status.md 豁免通过" || ok=0
   mk_case exempt >/dev/null && mkdir -p "$td/exempt/base/os/boards" \
     && printf '# 板卡\n' > "$td/exempt/base/os/boards/pi.md" \
     && ( cd "$td/exempt" && git add -A ) && expect "$td/exempt" 0 "" "base/os 豁免通过" || ok=0
