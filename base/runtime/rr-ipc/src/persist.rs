@@ -6,21 +6,18 @@
 //! 掉电后回旧态（POSIX 崩溃一致性）。
 //!
 //! 为什么住 rr-ipc：轴档案、域阈值、`armed`、凭据的落盘**一律复用这一份**，出现
-//! 第二条写路径即红。原实现住 rrd，但凭据面在 rr3-interact（独立 workspace，不许
-//! 依赖 daemon crate）；rr-ipc 是双方最低公共依赖层，原样迁此后 rrd 侧 re-export，
-//! 既有调用点零改动。
+//! 第二条写路径即红。rrd 与 rr3-interact 分属独立 workspace，rr-ipc 是双方最低
+//! 公共依赖层，rrd 侧 re-export，既有调用点零改动。
 //!
 //! 权限：**tmp 建时即定权**（[`rr3_store_perm`]，unix `mode` 经 `OpenOptions::mode`）
-//! ——"先 0644 建再 rename 后 chmod"在外部注入父目录（如 `/data/rr3`）下留了同机他
-//! 用户读 tmp 的窗口，崩溃残留更会长期可读。敏感面 0600 不依赖父目录护城河；非敏感
-//! 面经 [`rr3_atomic_store`] 沿用 0644。
+//! ——"先 0644 建再 rename 后 chmod"在外部注入父目录下留了同机他人读 tmp 的窗口，
+//! 崩溃残留更会长期可读；敏感面 0600 不依赖父目录护城河，非敏感面沿用 0644。
 //!
 //! 独占建：tmp 先清残留再 `create_new`（[`rr3_stage_excl`]）——`create+truncate`
-//! 会跟着同机攻击者预置的符号链接写穿（root 侧写口 = 任意文件截断器）；独占建把
-//! 换链竞态变成建失败，崩溃残留也不挡下一次写。
+//! 会跟着同机攻击者预置的符号链接写穿；独占建把换链竞态变成建失败。
 //!
 //! 调用方（改动须同批过本注释）：rrd 计数账与轴档案、brain 模型行、interact 凭据
-//! （建 tmp 即 0600）、ota-ctl 的 manifest/签名/公钥写（staging 复用 [`rr3_sync_dir`]）。
+//! （建 tmp 即 0600）、ota-ctl 的 manifest/签名/公钥写。
 
 // no_std crate 的 std 显式恢复（与 evidence.rs 同径）：本模块是 std::fs 文件面，
 // 与 evidence 同门编译（linux/macos/windows；权限位在非 unix 忽略）。

@@ -1,28 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
-//! U-Boot 环境变量写侧（M6 回滚链的板侧件；解析/渲染/状态迁移主机可测）。
+//! U-Boot 环境变量写侧（回滚链板侧件；解析/渲染/状态迁移主机可测）。
 //!
 //! 载体格式是 U-Boot 标准 raw env：`[crc32: u32 LE][k=v\0]…[\0]`，CRC 覆盖其后的
-//! 全部字节（含补齐的 0 尾）。算法与 `rr_ipc::protocol::header::rr3_crc32` 同一份
-//! 实现（IEEE 802.3 反射多项式，初值/异或 0xFFFF_FFFF）——U-Boot 的 `crc32(0, …)`
-//! 即此形态，单点真值不抄第二份。
+//! 全部字节（含补齐 0 尾）。算法与 `rr_ipc::protocol::header::rr3_crc32` 同一份
+//! （IEEE 802.3 反射多项式）——U-Boot 的 `crc32(0, …)` 即此形态，单点真值。
 //!
 //! 三件面：
 //! 1. [`Rr3BootEnv`]：env 体解析/渲染 + `get`/`set`/`unset`（坏 CRC、重复键、
-//!    非 UTF-8 一律 fail-closed，不猜）；
+//!    非 UTF-8 一律 fail-closed）；
 //! 2. [`Rr3EnvDev`]：解析 `/etc/fw_env.config`（`device offset env_size
-//!    [sector_size num_sectors]`，数支持 `0x` 十六进制；`#` 行注释）；
+//!    [sector_size num_sectors]`，数支持 `0x` 十六进制，`#` 行注释）；
 //! 3. 回滚链状态迁移：`rr3_rollback_arm` / `rr3_rollback_ok` 落实
 //!    `docs/design/分区布局与OTA槽位.md` 标准序第 4/6 步（bootcount/bootlimit/
 //!    altbootcmd/upgrade_available 四变量）。
 //!
 //! 区读写走 `std::fs`（定位 + 读写，无 ioctl），只在 `cfg(unix)` 下编译：板上
-//! Linux 与主机 macOS 测试面是同一份代码（测试用普通临时文件顶替块设备，
-//! 不碰真实设备）；Windows 无部署面、不编。
-//!
-//! **明确不做**（板上核对项，见 `docs/design/分区布局与OTA槽位.md`）：冗余双份 env 的
-//! 同步写、坏块/写保护探测、fw_env.config 与实际 U-Boot 布局的核对、
-//! `CONFIG_BOOTCOUNT_LIMIT` 计数载体的 defconfig 确认。altbootcmd 的具体命令文本
-//! 由调用方给（distro boot 的备援命令随板/构建而变，契约不预造）。
+//! Linux 与主机 macOS 测试面同一份代码（测试用普通临时文件顶替块设备）。
+//! **明确不做**：冗余双份 env 同步写、坏块/写保护探测、fw_env.config 与实际布局
+//! 核对、`CONFIG_BOOTCOUNT_LIMIT` defconfig 确认；altbootcmd 命令文本由调用方给。
 
 use rr_ipc::protocol::header::rr3_crc32;
 
