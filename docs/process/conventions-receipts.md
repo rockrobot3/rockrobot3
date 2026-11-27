@@ -2196,3 +2196,10 @@ sha256 清单、tag 门、contents/packages 权限）；自检夹具补一条"�
 自检按职责拆成 local/profile/remote 三组（单函数回到 50 行内），并补两例回归钉：
 单趟往返（ssh 恰 1 次）与不可达报 2。判据——self-test 20/20 PASS（单趟用例实测 ssh=1）；
 ⑤⑬⑯ 全绿；主/自检册 354/204 行。
+
+**2026-11-27 批177 本轮收口·代码头三线全绿**：事实——代码头 `9cac785c` 上 gate #1119、
+integration #826、platforms #828 均 success；本轮四件（174 发布面加 distro 腿／175 审计
+纳入该腿／176 远端核验收成一条 ssh）全部推齐三远端。处置——本轮收口；distro 腿的 tag
+窗口实推未发生（无新 release 提交），按"结构已钉、实推待发版"记，不冒充验证。下轮首件＝
+发布面齐套巡检固化成一条只读命令（镜像/固件/distro/OTA/buildroot 五类按 tag 核对）。
+判据——三线结论与 run 页一致；audit self-test 26/26、漂移门 self-test 20/20。
