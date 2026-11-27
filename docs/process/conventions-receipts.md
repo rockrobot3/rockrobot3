@@ -1886,3 +1886,26 @@ workflow 收为一行调用。判据——`buildroot` 在 `9b582b8` success（�
 处置——零改动。已知边界：riscv64 apt 交叉包（`gcc-riscv64-linux-gnu` 等）未钉版本，
 属 runner 镜像面而非仓内配置，登记为诚实边界不冒充已钉。判据——`grep 'toolchain: "1.100.0"'`
 六表计数一致；esp 三件钉版在 action 内单点。
+
+**2026-11-27 批132 合并清单平台判据抽为可自检脚本**：事实——`publish.yml` 的 merge 步
+内嵌 21 行 python heredoc（经 `docker buildx imagetools inspect --raw` 取清单、数平台集、
+排除 attestation），判据只在 tag 发布时才跑到，仓内无法单测。处置——抽
+`tools/ci/platform/manifest-platforms.py`：`platforms()` / `check()` 纯函数、
+`--self-test` 三例（三架构+attestation 放行 / 缺架构拒 / 非 index 拒）；workflow 改为
+raw dump + 脚本调用，判据语义与错误标题（`manifest-platforms`）逐字不变。判据——
+自检三例全 PASS；实网 `v0.0.8` index（3 架构 + 3 条 attestation）判 PASS；
+`workflows_audit` PASS；gate/integration/platforms 在 `5582681` 全 success。
+
+**2026-11-27 批133 三架构 attestation 计数复核（无改动）**：事实——匿名逐条取
+`v0.0.8` 与 `edge` 的 index：各 3 条 attestation manifest；逐条取其 manifest，
+**每腿 2 层 in-toto**（provenance + SBOM，amd64/arm64/riscv64 三腿均 2）。处置——零改动，
+满足发布面"每腿 attestation ≥2"的既有判据。判据——逐腿层数与 `vnd.docker.reference.digest`
+反查的架构名对表。
+
+**2026-11-27 批134 文档门按判据拆组（函数 62→15 / 52→9）**：事实——`tools/ci/steps/5.sh`
+的 `check_docs` 62 行、`check_docs_selftest` 52 行，均超 50 行审查阈值，且一段里混装
+链接/导航/散落三组判据。处置——拆 `docs_links` / `docs_nav` / `docs_scatter` 三组
+（各 12/21/21 行）+ 15 行装配；自检拆夹具 `rr3_docs_case`、断言 `rr3_docs_expect`、
+核心六例、豁免三例、总入口五函数（最长 22 行），夹具与断言提到文件作用域共用。
+判据——真仓 `check_docs` 绿、自检九例全过、`gate_steps_audit` 29 步清单逐字一致；
+gate/integration/platforms 在 `5582681` 全 success。
