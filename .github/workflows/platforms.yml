@@ -136,6 +136,15 @@ jobs:
             echo "::error title=platform-build::${errs:0:900}"
             exit 1
           fi
+      # 部署包契约（批168）：bundle 是 rk3566 快路轨的交付件，A10 契约此前零执行——
+      # 真出包与逐项断言放在同一腿，包内容漂移在流水线就红，不用等真板（2026-11-08
+      # 事故正是包内成员版本偏斜）。
+      - name: 版本化部署包契约（pack-bundle 真出包 + A10 结构断言）
+        if: matrix.triple == 'aarch64-unknown-linux-musl'
+        run: |
+          bash tools/deploy/pack-bundle.sh "${{ matrix.triple }}" /tmp/rockrobot3-bundle.tar.gz
+          bash tools/ci/platform/bundle-contract.sh /tmp/rockrobot3-bundle.tar.gz \
+            "${{ matrix.triple }}" "${{ matrix.arch }}"
       # 判据从"没报 exec format error"升到"真打印出预期用法"：前者对 native 腿近乎
       # 恒真（跑得起来就有输出），后者要求二进制走到自己的 CLI 面。
       - name: 目标 ISA 执行冒烟（真跑产物并断言用法输出）

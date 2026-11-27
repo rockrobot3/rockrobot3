@@ -2123,3 +2123,12 @@ self-test 14/14 PASS；真仓 9 份装配单逐个干跑（空根）均 rc=1 且
 `40979b8` 得 gate／integration／platforms 三线 success（platforms 五芯片矩阵照旧）。
 处置——本轮无遗留红条；下轮任务见轮末清单（bundle 契约进流水线真跑为第一件）。
 判据——ci-status 退出码 0；⑫ 指标（重复率 0.41%、CC 均值 2.47）与 ⑤⑬⑯ 门同拍全过。
+
+**2026-11-27 批168 A10 部署包契约进流水线真跑**：事实——`pack-bundle.sh` 是 rk3566 快路轨
+的唯一交付件，A10 契约只活在脚本/文档里，六条流水线从不出包、从不验包（2026-11-08 真板
+事故正是包内成员版本偏斜）。处置——新增 `tools/ci/platform/bundle-contract.sh`（顶层名／
+BUNDLE_VERSION 与 HEAD·target·八件组件／三件 bin 执行位／五模块 binary+module.toml+config／
+装配单·契约四册·各平台册·各机型 wiring 按仓内真值全量对／八件 ELF64 与架构串），带合成包
+自检（合规过＋模块缺 config／非 ELF 件／commit 不符三红例）；platforms 的 aarch64-musl 腿在
+构建后真跑 `pack-bundle.sh` 再断言。判据——self-test 4/4 PASS；YAML 解析过；workflow 结构
+审计通；⑤⑬⑯ 与 ⑫ 指标全绿；CI 结果以 platforms 腿实测为准（后续观察）。
