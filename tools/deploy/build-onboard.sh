@@ -12,7 +12,7 @@
 # 本脚本**只覆盖**音频两件（sense / interact）的 bin——先跑 pack-arm64.sh 备好 payload，
 # 再跑本脚本把音频两件的 bin 换成板上原生构建件（动态 ELF + libasound）。
 #
-# 用法: build-onboard.sh <user@host> [out_dir] [remote_src_dir]
+# 用法: build-onboard.sh <user@host> [out_dir] [remote_src_dir] [profile]
 #   user@host       板上 SSH 目标（免密已配，如 pi@<board-ip>）
 #   out_dir         pack-arm64.sh 的同一出参目录（缺省 /tmp/rr3-arm64-deploy）
 #   remote_src_dir  板上源码根（缺省 ~/rockrobot3-src）
@@ -25,12 +25,13 @@ set -euo pipefail
 cd "$(dirname "$0")/../.." # 仓根
 
 HOST="${1:-}"
+PROFILE="${4:-}"
 OUT="${2:-/tmp/rr3-arm64-deploy}"
 RMT_SRC="${3:-~/rockrobot3-src}"
 PAY="$OUT/payload"
 
 if [ -z "$HOST" ]; then
-  echo "用法: build-onboard.sh <user@host> [out_dir] [remote_src_dir]" >&2
+  echo "用法: build-onboard.sh <user@host> [out_dir] [remote_src_dir] [profile]" >&2
   exit 2
 fi
 
@@ -128,7 +129,13 @@ echo "== ⑦ 装机面 config 漂移报告（非阻断；批N38 件二）=="
 # 在 verify-board-config.sh（sha256 逐文件），本处只作**报告**；装机完成后按 boards §10
 # 步④ 重跑同一工具，那时漂移即真问题（仓内 config 已改而板上没铺 → 静默旧档生效）。
 set +e
-bash tools/deploy/verify-board-config.sh --repo . --remote "$HOST"
+# 给了结 profile 就只比该档（避免全档模式在单档板上刷出成片 MISS 噪音）；
+# 未给仍跑全档——多档镜像自测口径。
+if [ -n "${PROFILE}" ]; then
+  bash tools/deploy/verify-board-config.sh --repo . --remote "$HOST" --profile "${PROFILE}"
+else
+  bash tools/deploy/verify-board-config.sh --repo . --remote "$HOST"
+fi
 set -e
 
 echo "payload 音频件已换成板上原生构建件: $PAY"
