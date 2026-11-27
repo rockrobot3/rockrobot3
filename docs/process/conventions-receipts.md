@@ -3042,3 +3042,12 @@ SAN/issuer 逐字在案；⑤ 文档门绿。
 处置——部署 README 制品表后补一段：归档线不随当前线发布、编号高不代表更新、选版本
 以镜像仓 tag 与 release 页为准（`release-anon` 的 `--tag auto` 同理只取镜像仓）。
 判据——⑤ 文档门绿；status 第 30 行与本段互为指针。
+
+**2026-11-28 批282 正式制品面清点（OTA/buildroot 标签口径过渡）**：事实——`release-anon`
+只覆盖 image+firmware，而正式制品还有 OTA/buildroot 两包。匿名清点：`rockrobot3-ota`
+与 `rockrobot3-buildroot` 在库只有 legacy `0.0.8`（无 v 前缀，2026-11-26 06:12 推送，
+层齐：rootfs img/manifest/sig/公钥/checksums/bundle 与 zero3 img/双 dtb/checksums），
+`v0.0.8` 不存在——buildroot.yml 的 `v<VER>` 口径修正发生在首发之后，下次发布才产生
+v 前缀。处置——不改 release-anon 类别（现在纳入会对 v0.0.8 假红），把两包现状与扩面
+条件写入 status 第 30 行；下轮发布后同批扩面。判据——registry 清单与 tags 列表逐项
+在案；⑤ 文档门绿。
