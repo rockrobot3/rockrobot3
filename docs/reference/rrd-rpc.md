@@ -86,6 +86,23 @@
 | `rr3.ctl.contracts` | `CtlContracts` | 无必填 | `{"available":<bool>, "contracts":[{"file","sha256","bytes"}], "truth_set":[{"member","sha256","bytes"}], "checks":[{"item","pass","reason"}]}`——契约完整性审计读口（批N5 件五笔4，白名单七→八 ctl）：boot 装载链验收后契约四册（topics/slots/roles/devices）sha256 记账快照＋自检时点重读对比的"齐全且 sha 对"判果一应答给出（缺册＝齐全破、sha 漂＝sha 对破），判据真值单点在 `contracts.rs` 的 `rr3_contracts_checks`；`--manifest` 调试路径（快照未在册）如实 `available:false` | `conn/ctl.rs` 的 `rr3_serve_ctl`、`contracts.rs` 的 `rr3_contracts_json` |
 | `rr3.ctl.domain.set` | `CtlDomainSet` | `target`（`"domain"` / `"axis"`）、`name`（域名或轴 instance）、`key`（白名单：domain → `armed` / `severe_mv`；axis → `current_ceil_ma`）、`value`（布尔或正整数，0 拒）、`evidence`（armed=true / severe_mv / current_ceil_ma 必填，armed=false 可省）、`confirm`（必须 true，二次确认门） | `{"ok":true,"target","name","key","old","new","evidence","effective":"boot",…}`——装配侧策略量写口（批N22 件一，白名单八→九 ctl）：门序=confirm 门→证据四道核→键白名单→文本手术→装载链全量预核→原子落盘→契约记账重记，运行态不动、下次 rrd boot 生效；domain 目标回 `contracts_relogged`，axis 目标回 `echo`（轴档产线写入面回执）；`--manifest` 调试路径无装配单记账，恒拒 `Permission` | `conn/ctl.rs` 的 `rr3_serve_ctl`、`domain_write.rs` 的 `rr3_domain_write_run` |
 
+**CLI 入口覆盖（2026-11-27 批116 对表）**：九方法的客户端入口逐条列此——CLI 白名单在
+`tools/rrctl/src/commands/mod.rs` 的 `COMMANDS`（8 条，由 `command_whitelist` 单测 pin），
+rrd 方法集在 `rpc.rs` 的 `RR3_RPC_NAMES`（9 条，由长度与 `CtlDomainSet` 下标 pin）；
+两张表**不机械互比**，交叉点就是本表：
+
+| `method` | `rr3-ctl` 子命令 | 其它入口 | 缺口与理由 |
+|---|---|---|---|
+| `rr3.ctl.status` | `status` | 面板 `POST /api/selftest`（自检内部取在册快照） | —— |
+| `rr3.ctl.health` | `health` | 面板 `GET /api/status`（状态页；`link` 字段另来自主循环订阅缓存） | —— |
+| `rr3.ctl.logs` | `logs`（`--unit <name>` 直读 per-unit 文件，不经 ctl） | 面板 `GET /api/logs` | —— |
+| `rr3.ctl.ota` | `ota`（**只渲染拒因**） | —— | **无成功渲染器**：rrd 恒拒（`Permission`，文案点 M6），成功分支今天不可达；触发条件＝M6 接入下载链时同批补 `format_ota` 并加成功/失败双渲染色例 |
+| `rr3.ctl.counters` | `counters` | 面板 `GET /api/data` | —— |
+| `rr3.ctl.reboot` | `reboot` | 面板 `POST /api/reboot`（双重门同源） | —— |
+| `rr3.ctl.wiring` | `wiring` | 面板 `GET /api/wiring`；`POST /api/selftest` 内部同源 | —— |
+| `rr3.ctl.contracts` | `contracts` | 面板 `POST /api/selftest`（内部审计面，无独立读端点） | —— |
+| `rr3.ctl.domain.set` | **无** | 面板 `POST /api/profile/domain`（唯一入口） | 写口按安全链评审单列，不进只读 CLI 面；触发条件＝安全链评审通过后立 `rr3-ctl domain`（须带 `confirm` 与 `evidence` 旗标，语义直接透传不走本地策略） |
+
 连接语义与模块四方法不同：ctl 连接**不注册、不进在册表、不受 watchdog 管**，
 一问一答即断（rrd 应答后直接收掉这条连接，握手旁支在 `rr3_handshake` 第 6 步**之前**分流，
 `conn/handshake.rs` 的 `rr3_handshake`）；应答按对端**自报**的 `src_task` 回（与注册期拒答同口径）。已注册模块
