@@ -9,9 +9,10 @@
 # unit 拉起 rrd，再以真 unit 跑 bundle 换树与坏包回滚。
 #
 # 部署真值零改：仓内 profiles/distro.toml 是 hal_backend=linux（真板语义），CI 机
-# 没有硬件面。装配单是部署数据，本脚本只改**装机副本**与**bundle 解包副本**（与
-# distro-smoke ⑥、tools/sim::assemble 同一纪律），仓源一行不动；探测档与云端同由
-# systemd drop-in 显式注入：RR3_PROBE=sim、RR3_BRAIN_CLOUD=mock。
+# 没有硬件面。装配单是部署数据，本脚本只在 /etc 铺一份 sim 部署副本、以 unit
+# drop-in 把 --profile 指过去（与 distro-smoke ⑥、tools/sim::assemble 同一纪律）；
+# 仓源与 bundle 逐字节不动，换树后才能用 verify-board-config 以**真包**判装机面
+# 一致。探测档与云端同由 drop-in 显式注入：RR3_PROBE=sim、RR3_BRAIN_CLOUD=mock。
 #
 # 用法：bash tools/ci/platform/install-smoke.sh
 # 前置：Linux + 运行中的 systemd + 免密 sudo + dpkg-deb + Rust 工具链。
@@ -122,15 +123,30 @@ install_deb() {
   as_root systemctl daemon-reload
 }
 
-# 装机副本 sim 变换 + 探测档注入（仓源零改；语义见文件头）。
+# 部署环境注入（仓源与 bundle 都不改）：在 /etc 铺一份与装机同形的 sim 部署副本
+# （profiles/<档>.toml + hardware/<档>/wiring.toml——rrd 按装配单两级父目录推导
+# hardware-root，副本必须同形）；unit 用 drop-in 重写 ExecStart 的 --profile 指向
+# 这份副本，其余命令行逐字取自已装 unit（unit 改形时自动跟随）。探测档同由
+# drop-in 注入。
 sim_deploy() {
-  local prof="$ROOT/profiles/distro.toml" drop=/etc/systemd/system/rrd.service.d
-  grep -q '^hal_backend = "linux"' "$prof" \
+  local src="$ROOT/profiles/distro.toml" etc=/etc/rockrobot3
+  local drop=/etc/systemd/system/rrd.service.d line override
+  grep -q '^hal_backend = "linux"' "$src" \
     || die "装机装配单缺 hal_backend=linux（deb 面漂移）"
-  as_root sed -i 's/^hal_backend = "linux"/hal_backend = "sim"/' "$prof"
-  as_root mkdir -p "$drop"
-  printf '[Service]\nEnvironment=RR3_PROBE=sim\nEnvironment=RR3_BRAIN_CLOUD=mock\n' \
-    | as_root tee "$drop/50-ci-sim.conf" >/dev/null
+  as_root mkdir -p "$etc/profiles" "$etc/hardware/distro" "$drop"
+  as_root install -m644 "$src" "$etc/profiles/distro.toml"
+  as_root install -m644 "$ROOT/hardware/distro/wiring.toml" \
+    "$etc/hardware/distro/wiring.toml"
+  as_root sed -i 's/^hal_backend = "linux"/hal_backend = "sim"/' \
+    "$etc/profiles/distro.toml"
+  grep -q '^hal_backend = "sim"' "$etc/profiles/distro.toml" \
+    || die "部署副本 profiles/distro.toml 的 sim 变换未生效"
+  line=$(systemctl cat rrd | sed -n 's/^ExecStart=//p' | tail -1)
+  override=$(sed "s|--profile [^ ]*|--profile $etc/profiles/distro.toml|" <<<"$line")
+  grep -q -- "--profile $etc/profiles/distro.toml" <<<"$override" \
+    || die "unit ExecStart 无 --profile 装机位（对表 base/os/distro/units/rrd.service）"
+  printf '[Service]\nEnvironment=RR3_PROBE=sim\nEnvironment=RR3_BRAIN_CLOUD=mock\nExecStart=\nExecStart=%s\n' \
+    "$override" | as_root tee "$drop/50-ci-sim.conf" >/dev/null
   as_root systemctl daemon-reload
 }
 
@@ -163,21 +179,12 @@ start_unit() {
   echo "::notice title=install-smoke-systemd::deb 装机 + systemd unit 拉起成立，六模块 running"
 }
 
-# 版本化 bundle：真出包 → 解包副本 profile 改 sim → 重打包（BUNDLE_VERSION 原样，
-# 顶层名不变，A10 契约仍由 bundle-contract.sh 复核）。
+# 版本化 bundle：真出包（仓内 profile 原样 linux，不做任何改写）+ A10 契约复核。
+# 部署面差异全在 /etc 与 unit drop-in，换树载荷必须是发布面那一份。
 make_bundle() {
-  local bundle="$WORK/good.tar.gz" tmp top
-  bash tools/deploy/pack-bundle.sh "$TRIPLE" "$bundle"
-  tmp=$(mktemp -d "$WORK/unpack.XXXXXX")
-  tar -xzf "$bundle" -C "$tmp"
-  top=$(basename "$(find "$tmp" -mindepth 1 -maxdepth 1 -type d)")
-  sed -i 's/^hal_backend = "linux"/hal_backend = "sim"/' \
-    "$tmp/$top/profiles/distro.toml"
-  grep -q '^hal_backend = "sim"' "$tmp/$top/profiles/distro.toml" \
-    || die "bundle 副本 sim 变换未生效"
-  tar -C "$tmp" -czf "$WORK/sim.tar.gz" "$top"
-  bash tools/ci/platform/bundle-contract.sh "$WORK/sim.tar.gz" "$TRIPLE" "$ARCH"
-  echo "     $WORK/sim.tar.gz（profile=sim，BUNDLE_VERSION 原样）"
+  bash tools/deploy/pack-bundle.sh "$TRIPLE" "$WORK/bundle.tar.gz"
+  bash tools/ci/platform/bundle-contract.sh "$WORK/bundle.tar.gz" "$TRIPLE" "$ARCH"
+  echo "     $WORK/bundle.tar.gz（真包：仓内 profile/契约/模块逐字节原样）"
 }
 
 # 正例第二段：真 unit 下换树。install-bundle 自己会停 rrd、换树、起 rrd、逐模块
@@ -185,7 +192,7 @@ make_bundle() {
 install_bundle() {
   local out commit
   commit=$(git rev-parse --short=12 HEAD)
-  if ! out=$(as_root bash tools/deploy/install-bundle.sh "$WORK/sim.tar.gz" 2>&1); then
+  if ! out=$(as_root bash tools/deploy/install-bundle.sh "$WORK/bundle.tar.gz" 2>&1); then
     printf '%s\n' "$out" >&2
     die "install-bundle 正例失败（失败现场见上）"
   fi
@@ -198,13 +205,27 @@ install_bundle() {
   echo "::notice title=install-smoke-bundle::换树成功 commit=${commit}，六模块 running"
 }
 
+# 装机面漂移门正例：真包换树后，仓与装机应逐字节相等。判据体复用
+# tools/deploy/verify-board-config.sh（此前只有 20 条自检与真板远端，没有一次
+# "刚装完的机器"本地正例）；这里只决定跑法与断言，不复制比对逻辑。
+verify_install() {
+  local out
+  out=$(bash tools/deploy/verify-board-config.sh --repo "$PWD" --local "$ROOT" \
+    --unit-dir /usr/lib/systemd/system --profile distro) \
+    || { printf '%s\n' "$out" >&2; die "装机面漂移门判红（真包换树后不应有漂移/缺件）"; }
+  printf '%s\n' "$out" | tail -3
+  grep -q '结论：装机面.*与仓内一致' <<<"$out" \
+    || die "装机面漂移门未给出「与仓内一致」结论"
+  echo "::notice title=install-smoke-drift::真包换树后装机面漂移门判一致（仓/装机逐字节）"
+}
+
 # 回滚例：坏 rrd（非 ELF）能通过解包前检查，但起不来——install-bundle 必须回滚。
 # 判据：非 0 退出 + 点名回滚 + 装机树仍是上一版 + rrd 恢复 running。
 rollback_case() {
   local bad="$WORK/bad.tar.gz" tmp top out rc=0 commit
   commit=$(git rev-parse --short=12 HEAD)
   tmp=$(mktemp -d "$WORK/bad.XXXXXX")
-  tar -xzf "$WORK/sim.tar.gz" -C "$tmp"
+  tar -xzf "$WORK/bundle.tar.gz" -C "$tmp"
   top=$(basename "$(find "$tmp" -mindepth 1 -maxdepth 1 -type d)")
   printf 'not-an-elf\n' >"$tmp/$top/bin/rrd"
   tar -C "$tmp" -czf "$bad" "$top"
@@ -235,8 +256,9 @@ main() {
   start_unit
   make_bundle
   install_bundle
+  verify_install
   rollback_case
-  echo "PASS  装机器正例：deb→systemd 六模块 running；bundle 换树成功；坏包回滚成功"
+  echo "PASS  装机器正例：deb→systemd 六模块 running；真包换树成功且装机面无漂移；坏包回滚成功"
 }
 
 main "$@"

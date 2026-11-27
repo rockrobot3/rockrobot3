@@ -64,10 +64,12 @@ MCU 无 A/B 分区，升级一律线下重烧。每个芯片平台独立部署�
 先走 deb（unit 随 deb 落位）；bundle-only 干净机上漂移门报 unit `MISS` 是如实提示，
 不是误报。
 
-**装机正例（2026-11-27 批217）**：成功换树与失败回滚两条路径由集成面 `install-smoke`
+**装机正例（2026-11-27 批217/218）**：成功换树与失败回滚两条路径由集成面 `install-smoke`
 作业每拍执行——带 systemd 的 runner 上真装 deb、由 unit 拉起 rrd（sim 探测档），再以
-真 unit 跑 `install-bundle.sh` 正例（六模块 running）与坏 `rrd` 包的回滚例；判据体在
-[`tools/ci/platform/install-smoke.sh`](../ci/platform/install-smoke.sh)。
+真 unit 跑 `install-bundle.sh` 正例（六模块 running）、换树后跑
+`verify-board-config.sh --local` 判装机面与仓内逐字节一致（bundle 零改写），最后以坏
+`rrd` 包验回滚。判据体在 [`tools/ci/platform/install-smoke.sh`](../ci/platform/install-smoke.sh)；
+`/etc` 部署副本与 unit drop-in 只承担 CI 的 sim 环境，不进包、不改仓。
 
 **发布面（2026-11-27 批174）**：打 `v*` 标签时 `publish.yml` 的 `distro-bundle` 腿用同一
 `pack-bundle.sh` 出包、过 `tools/ci/platform/bundle-contract.sh` 的 A10 断言，随 release
