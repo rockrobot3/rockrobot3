@@ -24,9 +24,7 @@ fn rr3_ctl_arms() -> Rr3CtlTable {
     [
         (Rr3RpcMethod::CtlStatus, |ctx, _| rr3_ctl_status(ctx)),
         (Rr3RpcMethod::CtlHealth, |ctx, _| rr3_ctl_health(ctx)),
-        (Rr3RpcMethod::CtlLogs, |_, p| {
-            rr3_log_args(p).map(|(prefix, tail)| json!({"lines": rr3_log_query(&prefix, tail)}))
-        }),
+        (Rr3RpcMethod::CtlLogs, |_, p| rr3_ctl_logs(p)),
         // 运维计数读面（0.0.4 批B，Q1 裁定）：与 CtlHealth 分开——health 是心跳健康
         // 语义（watchdog 判活的输入），counters 是业务运维账（"机器慢先看数字"）。
         // 键 = `模块名/键`（模块自报归并）或 rrd 自有键（`boots` / `conn_refused`）；
@@ -181,6 +179,28 @@ fn rr3_ctl_health(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
         "watchdog_overruns": crate::daemon::rr3_wd_overruns(),
         "degraded": crate::rr3_degrade_get(),
     }))
+}
+
+/// ctl.logs 的应答臂：查询 + **单帧上限检查**。
+///
+/// 读侧有 1MiB 载荷帽（`RR3_FRAMING_PLEN_CAP_DEFAULT`），写侧原先不检查——而环容量
+/// 是装配单数据（`[runtime].log_ring_cap` 可调大），`tail=0`（不限）时一次查询就可能
+/// 拼出超帽应答：客户端只看到"帧太长"，查不出是该缩小范围。这里在产侧当场拒并点名
+/// 两条缩小手段，口径与参数坏形一致（fail-closed + 说清怎么做）。
+fn rr3_ctl_logs(params: &Value) -> Result<Value, (Rr3StatusCode, String)> {
+    let (prefix, tail) = rr3_log_args(params)?;
+    let v = json!({ "lines": rr3_log_query(&prefix, tail) });
+    let limit = rr_ipc::RR3_FRAMING_PLEN_CAP_DEFAULT - rr_ipc::RR3_BODY_TYPE_PREFIX_LEN;
+    let bytes = v.to_string().len();
+    if bytes > limit {
+        return Err((
+            Rr3StatusCode::Invalid,
+            format!(
+                "ctl.logs 应答 {bytes}B 超出单帧上限（{limit}B）：用 tail=<n> 或 prefix=<子串> 缩小范围"
+            ),
+        ));
+    }
+    Ok(v)
 }
 
 /// ctl.logs 参数（均可选）：`prefix` 子串过滤（空 = 不过滤），`tail` 尾行数
