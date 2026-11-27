@@ -76,11 +76,11 @@ MCU 无 A/B 分区，升级一律线下重烧。每个芯片平台独立部署�
 # 本机装机树 / 远端板卡二选一；--profile 只比该机型（缺省扫全部档）
 bash tools/deploy/verify-board-config.sh --repo . --local /usr/lib/rockrobot3 --profile pi4b-solo
 bash tools/deploy/verify-board-config.sh --repo . --remote <user@host> --profile pi4b-solo
-# 工具自检（gate ⑥b 同款，九例）
+# 工具自检（gate ⑥b 同款；例数与范围以 --self-test 输出为准）
 bash tools/deploy/verify-board-config.sh --self-test
 ```
 
-退出码：`0` 全等 / `1` 有漂移或缺件 / `2` 用法错 / `3` self-test 失败。
+退出码：`0` 全等 / `1` 有漂移或缺件 / `2` 用法错或档位面不自洽（装配单/芯片/平台册对不上）/ `3` self-test 失败。
 
 ## 制品 tag 与 `VERSION` 对表
 

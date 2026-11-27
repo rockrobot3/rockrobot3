@@ -68,6 +68,34 @@ rr3_deploy_manifest() {
 	rr3_manifest_hardware "$repo" "$profile"
 }
 
+# 档位 → 平台册名（[platform].chip）：派生单点。rr3_manifest_contracts 与
+# rr3_profile_guard 都从这里取值，避免两处 sed 各自漂移。
+rr3_chip_of() {
+	sed -n '/^\[platform\]/,/^\[/s/^chip[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+		"$1/profiles/$2.toml" | head -n 1
+}
+
+# 档位面自洽（2026-11-27 批166）：--profile 的装配单不存在、或不带 [platform].chip、
+# 或该芯片的平台册不在仓内时，rr3_deploy_manifest 会**静默少列**相应成员——漂移门
+# 照样打绿，而没比的正是该档最要紧的几件。这里前置判不自洽，退出码 2 与用法错误同权。
+rr3_profile_guard() {
+	local repo="$1" profile="$2" chip
+	[ -f "$repo/profiles/$profile.toml" ] || {
+		printf '档位不存在：profiles/%s.toml（--profile 拼写？）\n' "$profile" >&2
+		return 1
+	}
+	chip="$(rr3_chip_of "$repo" "$profile")"
+	[ -n "$chip" ] || {
+		printf '档位 profiles/%s.toml 无 [platform].chip——平台册无从对上\n' "$profile" >&2
+		return 1
+	}
+	[ -f "$repo/contracts/platform/$chip.toml" ] || {
+		printf '平台册缺件：contracts/platform/%s.toml（档位 %s 的 chip）\n' "$chip" "$profile" >&2
+		return 1
+	}
+	return 0
+}
+
 # 契约册与平台事实表：rr3-pack 随包装机、rrd 装载期直接读——漂了同样拒 boot。
 # 四册名单与 rrd 代码里的 RR3_CONTRACT_BOOKS 同集（真值在代码；本表是部署侧
 # 对账面，名单变化须同批改两处）。平台册按档位 [platform].chip 选一；无 --profile
@@ -80,8 +108,7 @@ rr3_manifest_contracts() {
 	done
 	[ -n "$profile" ] || return 0
 	[ -f "$repo/profiles/$profile.toml" ] || return 0
-	chip="$(sed -n '/^\[platform\]/,/^\[/s/^chip[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
-		"$repo/profiles/$profile.toml" | head -n 1)"
+	chip="$(rr3_chip_of "$repo" "$profile")"
 	[ -n "$chip" ] || return 0
 	f="$repo/contracts/platform/$chip.toml"
 	[ -f "$f" ] && printf 'contracts/platform/%s.toml|contracts/platform/%s.toml|full\n' "$chip" "$chip"
@@ -208,6 +235,9 @@ verify() {
 	local repo="$1" mode="$2" target="$3" root="$4" profile="${5:-}"
 	local drift=0 checked=0 list repo_rel inst_rel kou repo_p inst_p a b
 
+	if [ -n "$profile" ]; then
+		rr3_profile_guard "$repo" "$profile" || return 2
+	fi
 	list="$(rr3_deploy_manifest "$repo" "$profile")"
 	while IFS='|' read -r repo_rel inst_rel kou; do
 		[ -n "$repo_rel" ] || continue
@@ -261,20 +291,23 @@ st_prepare() {
 	ETC_DIR="$st_dir/inst-etc"
 	mkdir -p "$st_dir/repo/modules/rr3-a" "$st_dir/inst/modules/rr3-a" \
 		"$st_dir/repo/profiles" "$st_dir/inst/profiles" \
-		"$st_dir/repo/contracts" "$st_dir/inst/contracts" \
+		"$st_dir/repo/contracts/platform" "$st_dir/inst/contracts/platform" \
 		"$st_dir/repo/hardware/p/axis" "$st_dir/inst/hardware/p/axis" \
 		"$st_dir/repo/base/os/distro/units" "$UNIT_DIR" \
 		"$st_dir/repo/base/os/distro/boards/p/etc/systemd/system/rrd.service.d" \
 		"$st_dir/inst-etc/systemd/system/rrd.service.d"
 	printf 'rms_start = 650\n' >"$st_dir/repo/modules/rr3-a/config.toml"
 	cp "$st_dir/repo/modules/rr3-a/config.toml" "$st_dir/inst/modules/rr3-a/config.toml"
-	printf '[hardware]\nalsa_device = "plughw:CARD=Device"\n' >"$st_dir/repo/profiles/p.toml"
+	printf '[platform]\nchip = "ck"\n[hardware]\nalsa_device = "plughw:CARD=Device"\n' \
+		>"$st_dir/repo/profiles/p.toml"
 	cp "$st_dir/repo/profiles/p.toml" "$st_dir/inst/profiles/p.toml"
-	# 契约四册：装机侧与仓内逐字节一致才算过（平台册按档位 chip 另算，夹具不立）。
+	# 契约四册 + 档位平台册：装机侧与仓内逐字节一致才算过。
 	for b in topics slots roles devices; do
 		printf '# %s\n' "$b" >"$st_dir/repo/contracts/$b.toml"
 		cp "$st_dir/repo/contracts/$b.toml" "$st_dir/inst/contracts/$b.toml"
 	done
+	printf '# ck\n' >"$st_dir/repo/contracts/platform/ck.toml"
+	cp "$st_dir/repo/contracts/platform/ck.toml" "$st_dir/inst/contracts/platform/ck.toml"
 	# 装载真值集 hardware 面（wiring + axis）：与装机侧逐字节一致才算过。
 	printf '[[wire]]\nconnector = "J0"\n' >"$st_dir/repo/hardware/p/wiring.toml"
 	cp "$st_dir/repo/hardware/p/wiring.toml" "$st_dir/inst/hardware/p/wiring.toml"
@@ -291,10 +324,10 @@ st_prepare() {
 }
 
 # 单例判定：跑一次 verify，退出码对期望码。
-st_case() { # 名称 期望码
+st_case() { # 名称 期望码 [档位]
 	local rc
 	set +e
-	verify "$st_dir/repo" local "$st_dir/inst" "$st_dir/inst" "" >/dev/null 2>&1
+	verify "$st_dir/repo" local "$st_dir/inst" "$st_dir/inst" "${3:-}" >/dev/null 2>&1
 	rc=$?
 	set -e
 	if [ "$rc" -eq "$2" ]; then
@@ -312,9 +345,11 @@ st_cases() {
 	printf 'rms_start = 700\n' >"$st_dir/inst/modules/rr3-a/config.toml"
 	st_case 改一字节红 1
 	printf 'rms_start = 650\n' >"$st_dir/inst/modules/rr3-a/config.toml"
-	printf '[hardware]\nalsa_device = "plughw:CARD=sndrpigooglevoi"\n' >"$st_dir/inst/profiles/p.toml"
+	printf '[platform]\nchip = "ck"\n[hardware]\nalsa_device = "plughw:CARD=sndrpigooglevoi"\n' \
+		>"$st_dir/inst/profiles/p.toml"
 	st_case 装配单漂移红 1
-	printf '[hardware]\nalsa_device = "plughw:CARD=Device"\n' >"$st_dir/inst/profiles/p.toml"
+	# 还原取仓侧原件而非再抄一份字面量：profile 字段长了以后手抄必然漏（批166 实测）。
+	cp "$st_dir/repo/profiles/p.toml" "$st_dir/inst/profiles/p.toml"
 	printf '# drift\n' >"$st_dir/inst/contracts/topics.toml"
 	st_case 契约册漂移红 1
 	cp "$st_dir/repo/contracts/topics.toml" "$st_dir/inst/contracts/topics.toml"
@@ -330,10 +365,20 @@ st_cases() {
 	st_case unit非ExecStart行漂移红 1
 	rm "$UNIT_DIR/rrd.service"
 	st_case unit缺件红 1
+	printf '[Service]\nExecStartPre=-/usr/bin/amixer -c Device sset PCM 100%%\nExecStart=/usr/bin/rrd --profile /y\n' \
+		>"$UNIT_DIR/rrd.service"
 	printf '[Service]\nEnvironment=RR3_HAL_ALSA_DEVICE=hw:9\n' \
 		>"$ETC_DIR/systemd/system/rrd.service.d/d.conf"
 	st_case 板级资产漂移红 1
 	cp "$st_dir/repo/$BOARD_REL" "$ETC_DIR/systemd/system/rrd.service.d/d.conf"
+	# 档位面自洽（批166）：自洽过；档位名/芯片/平台册三处缺失都必须报 2 而不是静默少列。
+	# 负例装配单只建在仓侧且在全档用例之后建——否则 legacy 全档扫描会把它们算成缺件。
+	printf '# 无 [platform]\n' >"$st_dir/repo/profiles/q.toml"
+	printf '[platform]\nchip = "zz"\n' >"$st_dir/repo/profiles/r.toml"
+	st_case profile模式三类齐全 0 p
+	st_case 档位不存在报2 2 nope
+	st_case 档位无chip报2 2 q
+	st_case 平台册缺件报2 2 r
 }
 
 self_test() {

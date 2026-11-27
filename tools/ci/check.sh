@@ -222,10 +222,10 @@ step "⑥ 格格双达标·独立工程测试接线（每件 tests 真跑 ≥1�
 rr3_step_6
 
 # ⑥b 部署面配置漂移门的**工具自检**（批N38 件二；2026-11-16 扩面到装配单与 unit）。
-# 真板比对要 ssh 与装机树，CI/本机不可达；可机械判的是**判据本身**——工具用临时夹具跑
-# 六例（三类齐全／unit 口径忽略 ExecStart／config 改字节／装配单漂移／unit 非 ExecStart
-# 行漂移／unit 缺件），判据腐化即红。漂移的现场比对归板上线 runbook（boards §10 步④）
-# 与 build-onboard 报告段。
+# 真板比对要 ssh 与装机树，CI/本机不可达；可机械判的是**判据本身**——工具用临时夹具
+# 逐类跑（全等／unit 口径／模块 config、装配单、契约册、hardware、unit、板级资产的漂移
+# 与缺件／档位面自洽），例数与范围的真值在脚本 --self-test 输出，本处不抄第二份；判据
+# 腐化即红。漂移的现场比对归板上线 runbook（boards §10 步④）与 build-onboard 报告段。
 step "⑥b 部署面配置漂移门·工具自检（verify-board-config --self-test）"
 run bash tools/deploy/verify-board-config.sh --self-test
 
