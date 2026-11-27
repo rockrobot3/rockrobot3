@@ -2395,3 +2395,13 @@ timing，但数字只进 job 日志；本仓 job 日志匿名不可读（403 已
 （公开可读；未设置摘要面时只回显），文件用 trap 清理。判据——`bash -n` 过；外层单引号
 仍平衡（2 + 摘要围栏 4 + trap 2 = 8）；integration 腿下一次实跑给出真实数字与公开摘要，
 本轮不预填数值。
+
+**2026-11-27 批200 本轮收口·三线全绿**：事实——代码头 `96fe88e9` 上 gate/integration/
+platforms 均 success；integration 的 distro-smoke 作业 success，说明 timing 采集、
+临时文件挂载与 summary 追加三条路径没有运行时错误；但本机匿名抓取 job 页面两次超时、
+job summary API 需鉴权，**数字本身本轮无法取回**，不预填也不据此收紧上限。本轮一件：
+时延数字上 step summary（199）。处置——本轮收口；下轮三件：① distro 深检（从 registry
+拉 tar 过 A10 契约；bundle-contract 需增"按 tag 提交校验/跳过 HEAD 锚"的模式，先在夹具
+与无包路径验证，真包留首发）；② 从可读面（人工登录 / 后续真板）取一次 timing 数值，
+据此把 20s/5s 上限收紧到实测余量；③ 收口。判据——三线结论与 run 页一致；巡检自检
+15/15、审计自检 30/30；⑤⑬⑯ 绿。
