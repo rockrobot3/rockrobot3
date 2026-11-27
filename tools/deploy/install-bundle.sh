@@ -164,14 +164,11 @@ base_nr=${base_nr#NRestarts=}
 case $base_nr in (''|*[!0-9]*) base_nr=0 ;; esac
 systemctl start rrd || rollback
 
-# 健康探针：30s 上限内 rrd 应答 status，且 enabled_slots 的每个模块都 running；
+# 健康探针：30s 内 rrd 应答 status，且 enabled_slots 的每个模块都 running；
 # 期间 NRestarts 增量即崩溃循环，提前结束窗口（省下的 30s 是排障时间的直接收益）。
-# 0.2s 粒度 + 截止时间（批263）：1s 粒度让成功路径平均多等约 0.5s、失败路径多等约 1s；
-# 精度不支持小数 sleep 的极简系统回退 1s（语义不变，只损失粒度）。
 ok=0
 crash=""
-deadline=$((T_BOOT + 30000))
-while [ "$(now_ms)" -lt "$deadline" ]; do
+for _ in $(seq 1 30); do
   nr=$(systemctl show -p NRestarts --value rrd 2>/dev/null || echo "$base_nr")
   nr=${nr#NRestarts=}
   case $nr in (''|*[!0-9]*) nr=$base_nr ;; esac
@@ -187,7 +184,7 @@ while [ "$(now_ms)" -lt "$deadline" ]; do
     grep -q 'failed' <<<"$out" && ok=0
     [ "$ok" -eq 1 ] && break
   fi
-  sleep 0.2 2>/dev/null || sleep 1
+  sleep 1
 done
 if [ -n "$crash" ]; then
   echo "FAIL  新树 rrd 崩溃重启 ${crash} 次（启动探针 $(( $(now_ms) - T_BOOT ))ms 内即判，不等满 30s）" >&2
