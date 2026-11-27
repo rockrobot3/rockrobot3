@@ -2682,3 +2682,32 @@ image-smoke / pack-arm64 / publish 仍显式，逐项裁定"发布策略（保�
 真值（改派生）"，先出清单再动；⑤ 三线收口与再拟下轮。判据——三线 run
 `46046977868`（gate）/ `46046977876`（integration）/ `46046977799`（platforms）success；
 ⑤⑬⑯、度量与流水线审计自检绿。
+
+**2026-11-28 批241-243 窗口与外部证据登记**：事实——`release-anon` runs 仍为 0（cron 首跑
+2026-11-30 03:00 UTC 未到，今日 11-28）；v0.0.8 release 仅 9 个固件资产，无 distro bundle；
+真板坏包场景无载具。处置——三项按登记不冒充；本轮把清单单点化收尾提前（批244/245）。
+
+**2026-11-28 批244 清单单点化收尾裁定 + pack-arm64 派生**：事实——stage-image /
+image-smoke / pack-arm64 / publish 仍显式列模块，前一轮只把测试/安装门改成派生。裁定——
+发布镜像与发布清单（stage-image / image-smoke / publish）属**发布策略**，保留显式，
+由 `workflow_release.PUBLISH_MODULES` 钉住并在三处加注"勿与派生面混"；板侧部署工具
+`pack-arm64` 属**运行面真值**，改为 `rr3_modules` 派生（brain 例外显式：musl 无 C 工具链，
+manifest 先落位、bin 由板上 build-onboard 回填），与 pack-bundle 同源。判据——commit
+`30f987c7` 的 gate run `46049793002` success（hygiene/审计）；pack-arm64 不在 CI 执行，
+其证据为 bash -n、⑤⑬⑯、流水线审计与逐行评审——**如实记，不冒充执行回执**。
+
+**2026-11-28 批245 install-smoke 静默失败诊断升级 + 本轮收口**：事实——`30f987c7` 的
+integration 里 install-smoke 失败，公开注解只剩 "exit code 1"（systemd notice 之后、
+bundle notice 之前，说明是未设防的裸命令退出）。定位——该区间唯一不设防的命令是
+install-bundle 成功行的四段用时**信息提取**（`grep -o` 无命中即 1，set -e 静默退）。
+处置——信息提取改容错（`|| true`，诊断缺失不得判死安装门）；ERR trap 改为先打
+`FAIL  意外退出：${BASH_COMMAND}` 再 dump 现场，下一次再现即可点名失败命令。判据——
+commit `1581ae2e`：gate run `46050687789`、integration run `46050687975`（install-smoke
+job `140680937458` 六条 notice 齐，含四段用时与负例）、platforms run `46050687890`
+三线 success；⑤⑬⑯、度量与审计自检绿。根因未复现到逐字证据，故按"信息提取不得判死
+安装门"的机制原则修复并留点名能力，不宣称已定位原始触发条件。
+
+**2026-11-28 批246 下轮任务拟定**：① 11-30 后 release-anon 首跑归因；② distro 首发后
+`--deep` 与 B.2 实测；③ 真板坏包场景取证与 30s 探针窗口决策；④ 发布/部署面清单一致性
+巡检单点（publish 显式六件 vs stage-image/image-smoke；pack-arm64/bundle 派生集）——
+先出对拍脚本与文档，不接门；⑤ 三线收口与再拟下轮。
