@@ -133,6 +133,7 @@ main() {
   assert_tree
   assert_content
   echo "PASS  aarch64 deb 结构：$(dpkg-deb -f "$DEB" Package) $(dpkg-deb -f "$DEB" Version) ${ARCH}；三入口/六模块/四册/平台册/接线/unit/postinst 齐，九件 ELF 全 aarch64（不冒充安装）"
+  echo "::notice title=arm64-deb::$(dpkg-deb -f "$DEB" Package) $(dpkg-deb -f "$DEB" Version) ${ARCH}；六模块/四册/平台册/接线/unit/postinst 齐，九件 ELF 全 aarch64（结构门，不冒充安装）"
 }
 
 main "$@"
