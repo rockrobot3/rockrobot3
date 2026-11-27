@@ -43,7 +43,7 @@ part_marker=/tmp/rr3-part-marker-esp32
 # 前置（工具链/目标/IDF/esp-clang/镜像/venv）走公共实现：两条 esp 门共用一份，
 # 2026-11-27 批123 起不再各写复制体（复制造成的漏面见 esp-env.sh 头注）。
 . "$root/tools/ci/lib/esp-env.sh"
-rr3_esp_preflight xtensa-esp32-espidf esp32-periph-base
+rr3_esp_preflight xtensa-esp32-espidf "esp32-periph-base 门"
 
 # ⑧pre clippy 门（2026-11-21 治理；2026-11-27 批123 起走公共实现）：以固件最全
 # 特性档 autonomy,tts + all-targets 跑 -D warnings；其余档由既有五档 build/test

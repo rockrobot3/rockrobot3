@@ -47,7 +47,7 @@ part_marker=/tmp/rr3-part-marker-esp32s3
 # 前置（工具链/目标/IDF/esp-clang/镜像/venv/芯片档 MCU）走公共实现：两条 esp 门
 # 共用一份，2026-11-27 批123 起不再各写复制体。
 . "$root/tools/ci/lib/esp-env.sh"
-rr3_esp_preflight xtensa-esp32s3-espidf esp32s3-periph-base esp32s3
+rr3_esp_preflight xtensa-esp32s3-espidf "esp32s3-periph-base 门" esp32s3
 
 # ⑧pre clippy 门（2026-11-27 批123 补面）：classic 门自 2026-11-21 起就有 clippy
 # -D warnings，S3 门此前只有构建面——同一 crate 的 S3 专属 cfg 分支因此零告警覆盖。

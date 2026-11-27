@@ -26,6 +26,9 @@ cd "$root/tools/esp32-uart-echo" || { echo "ERROR: 无法进入 tools/esp32-uart
 
 export PATH="$HOME/.cargo/bin:$PATH"
 
+# 本门**不**走 tools/ci/lib/esp-env.sh 的公共前置：裸金属档不需要 build-std
+# rust-src、ESP-IDF 克隆与 esp-clang，链接面是 Xtensa esp-gcc（不是 espidf 的
+# ldproxy 注入链）——前置集不同，硬套公共实现会把"缺 rust-src"误判成整门 SKIP。
 # esp fork 工具链（rustup alias esp → esp-1.90.0.0，0.0.7 批A'）
 if ! rustup toolchain list 2>/dev/null | grep -q '^esp'; then
   rr3_skip "esp 工具链未安装（rustup toolchain list 无 'esp'）——固件编译门不执行，安装方式见 0.0.7 方案批A'"

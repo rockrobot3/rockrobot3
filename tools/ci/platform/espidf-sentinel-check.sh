@@ -32,45 +32,10 @@ cd "$root/tools/espidf-sentinel" || { echo "ERROR: 无法进入 tools/espidf-sen
 . "$root/tools/ci/lib/cargo-artifact.sh"
 . "$root/tools/ci/lib/skip.sh"
 
-# ① esp fork 工具链（rustup alias esp，0.0.7 批A'）
-if ! rustup toolchain list 2>/dev/null | grep -q '^esp'; then
-  rr3_skip "esp 工具链未安装（rustup toolchain list 无 'esp'）——espidf 哨兵门不执行"
-fi
-esp_sysroot="$(rustc +esp --print sysroot 2>/dev/null)" || {
-  rr3_skip "esp 工具链 rustc 不可用（rustc +esp 失败）——espidf 哨兵门不执行"
-}
-if [ ! -d "$esp_sysroot/lib/rustlib/src/rust" ]; then
-  rr3_skip "esp 工具链缺 rust-src 源码树（build-std 依赖）——espidf 哨兵门不执行"
-fi
-# ② ldproxy
-if ! command -v ldproxy >/dev/null 2>&1; then
-  rr3_skip "ldproxy 未安装（cargo install ldproxy）——espidf 哨兵门不执行"
-fi
-# ③ ESP-IDF 本地克隆（版本钉死登记见本目录 README.md）
-if [ ! -f "$HOME/.espressif/frameworks/esp-idf-v5.2.2/tools/idf.py" ]; then
-  rr3_skip "ESP-IDF v5.2.2 本地克隆缺位——espidf 哨兵门不执行"
-fi
-export IDF_PATH="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
-# ④ esp-clang（bindgen 需 Xtensa 后端）
-if ! rr3_esp_clang_lib >/dev/null; then
-  rr3_skip "esp-clang 缺位（~/.espup/esp-clang 无 libclang.dylib/.so）——espidf 哨兵门不执行"
-fi
-# ⑤ 镜像注入（仓库源不硬编码镜像，同 espidf-std-check.sh）
-export IDF_GITHUB_ASSETS=dl.espressif.com/github_assets
-export PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.cloud.tencent.com/pypi/simple}"
-export PIP_DEFAULT_TIMEOUT=60
-
-# ⑥ venv dist-info 兼容（espidf-std-check.sh ⑥ 同坑同兜底，README 坑 4）：pip≥24
-#    规范化 dist-info 目录名（ruamel.yaml → ruamel_yaml），py3.9 importlib.metadata
-#    按 dir stem 严格匹配点号名 → idf-component-manager 依赖检查误报 not found →
-#    CMake Python 检查退 255。venv 落本工程 .embuild 下，构建前改名兜底。
-venv_sp=".embuild/espressif/python_env/idf5.2_py3.9_env/lib/python3.9/site-packages"
-for d in "$venv_sp"/ruamel_yaml-*.dist-info; do
-  if [ -d "$d" ]; then
-    mv "$d" "${d/ruamel_yaml-/ruamel.yaml-}"
-    echo "PASS  venv dist-info 兼容改名: ${d##*/} → ruamel.yaml-*"
-  fi
-done
+# 前置（工具链/目标/IDF/esp-clang/镜像/venv）走公共实现：四条 esp 门共用一份
+# （2026-11-27 批128 收敛；安装方式见 tools/espidf-sentinel/README.md）。
+. "$root/tools/ci/lib/esp-env.sh"
+rr3_esp_preflight xtensa-esp32-espidf "espidf 哨兵门"
 
 elf="$(rr3_cargo_artifact xtensa-esp32-espidf debug espidf-sentinel)" || {
   echo "FAIL  无法解析 cargo target_directory（metadata 不可用）" >&2

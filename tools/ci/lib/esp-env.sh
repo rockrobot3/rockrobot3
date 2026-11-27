@@ -12,34 +12,45 @@
 #
 # 依赖：rr3_skip（skip.sh）、rr3_esp_clang_lib（cargo-artifact.sh）。
 
-# 前置四查：工具链 / rust-src / 目标三元组 / ldproxy / IDF 克隆 / esp-clang。
-# 任一缺位走 rr3_skip（本地 SKIP、CI 即红）——缺的是门禁覆盖，不是环境噪音。
-rr3_esp_ready() {
+# 前置四查：工具链 / rust-src / 目标三元组 / ldproxy。任一缺位走 rr3_skip
+# （本地 SKIP、CI 即红）——缺的是门禁覆盖，不是环境噪音。
+rr3_esp_toolchain() {
   local target="$1" gate="$2" sysroot
   if ! rustup toolchain list 2>/dev/null | grep -q '^esp'; then
-    rr3_skip "esp 工具链未安装（rustup toolchain list 无 'esp'）——${gate} 门不执行"
+    rr3_skip "esp 工具链未安装（rustup toolchain list 无 'esp'）——${gate}不执行"
   fi
   sysroot="$(rustc +esp --print sysroot 2>/dev/null)" || {
-    rr3_skip "esp 工具链 rustc 不可用（rustc +esp 失败）——${gate} 门不执行"
+    rr3_skip "esp 工具链 rustc 不可用（rustc +esp 失败）——${gate}不执行"
   }
   if [ ! -d "${sysroot}/lib/rustlib/src/rust" ]; then
-    rr3_skip "esp 工具链缺 rust-src 源码树（build-std 依赖）——${gate} 门不执行"
+    rr3_skip "esp 工具链缺 rust-src 源码树（build-std 依赖）——${gate}不执行"
   fi
   # 目标由 esp fork rustc 内置 target spec 提供（build-std 从 rust-src 编译，
   # 自定义工具链不会出现 lib/rustlib/<target> 目录，故查 target-list）。
   if ! rustc +esp --print target-list 2>/dev/null | grep -qx "${target}"; then
-    rr3_skip "esp 工具链不认 ${target} 目标——${gate} 门不执行"
+    rr3_skip "esp 工具链不认 ${target} 目标——${gate}不执行"
   fi
   if ! command -v ldproxy >/dev/null 2>&1; then
-    rr3_skip "ldproxy 未安装（cargo install ldproxy）——${gate} 门不执行"
+    rr3_skip "ldproxy 未安装（cargo install ldproxy）——${gate}不执行"
   fi
+}
+
+# IDF 面：本地克隆 + esp-clang（bindgen 需 Xtensa 后端）。
+rr3_esp_idf() {
+  local gate="$1"
   if [ ! -f "$HOME/.espressif/frameworks/esp-idf-v5.2.2/tools/idf.py" ]; then
-    rr3_skip "ESP-IDF v5.2.2 本地克隆缺位——${gate} 门不执行"
+    rr3_skip "ESP-IDF v5.2.2 本地克隆缺位——${gate}不执行"
   fi
   export IDF_PATH="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
   if ! rr3_esp_clang_lib >/dev/null; then
-    rr3_skip "esp-clang 缺位（~/.espup/esp-clang 无 libclang.dylib/.so）——${gate} 门不执行"
+    rr3_skip "esp-clang 缺位（~/.espup/esp-clang 无 libclang.dylib/.so）——${gate}不执行"
   fi
+}
+
+# 兼容入口：工具链 + IDF 两面都要的门（esp-idf std 档）用它。
+rr3_esp_ready() {
+  rr3_esp_toolchain "$1" "$2"
+  rr3_esp_idf "$2"
 }
 
 # 构建环境：镜像注入（仓库源不硬编码镜像）+ pip 超时 + venv dist-info 兼容

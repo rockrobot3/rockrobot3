@@ -45,45 +45,19 @@ case "${chip}" in
     ;;
 esac
 
-# ---- 工具链缺位五查（缺一 = 整门 SKIP，同 espidf-sentinel-check.sh 口径）----
-if ! rustup toolchain list 2>/dev/null | grep -q '^esp'; then
-  rr3_skip "esp 工具链未安装（rustup toolchain list 无 'esp'）——rr3-act/rr3-sense espidf 门不执行"
-fi
-esp_sysroot="$(rustc +esp --print sysroot 2>/dev/null)" || {
-  rr3_skip "esp 工具链 rustc 不可用（rustc +esp 失败）——rr3-act/rr3-sense espidf 门不执行"
-}
-if [ ! -d "$esp_sysroot/lib/rustlib/src/rust" ]; then
-  rr3_skip "esp 工具链缺 rust-src 源码树（build-std 依赖）——rr3-act/rr3-sense espidf 门不执行"
-fi
-if ! command -v ldproxy >/dev/null 2>&1; then
-  rr3_skip "ldproxy 未安装（cargo install ldproxy）——rr3-act/rr3-sense espidf 门不执行"
-fi
-if [ ! -f "$HOME/.espressif/frameworks/esp-idf-v5.2.2/tools/idf.py" ]; then
-  rr3_skip "ESP-IDF v5.2.2 本地克隆缺位——rr3-act/rr3-sense espidf 门不执行"
-fi
-export IDF_PATH="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
-if ! rr3_esp_clang_lib >/dev/null; then
-  rr3_skip "esp-clang 缺位（~/.espup/esp-clang 无 libclang.dylib/.so）——rr3-act/rr3-sense espidf 门不执行"
-fi
-# 镜像注入（仓库源不硬编码镜像，同 espidf-sentinel-check.sh）
-export IDF_GITHUB_ASSETS=dl.espressif.com/github_assets
-export PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.cloud.tencent.com/pypi/simple}"
-export PIP_DEFAULT_TIMEOUT=60
+# ---- 工具链前置（缺一 = 整门 SKIP，同 espidf-sentinel-check.sh 口径）----
+# 前置走公共实现（2026-11-27 批128 收敛）；目标按芯片档选——参数笔误已在上面拦下。
+. "$root/tools/ci/lib/esp-env.sh"
+pre_t="xtensa-esp32-espidf"
+[ "${chip}" = esp32s3 ] && pre_t="xtensa-esp32s3-espidf"
+rr3_esp_preflight "${pre_t}" "rr3-act/rr3-sense espidf 门"
 
 # 两模块逐一 venv dist-info 兜底 + 显式 --target 构建 + ELF 出树断言。
-# venv dist-info 兼容（espidf-sentinel-check.sh ⑥ 同坑同兜底）：pip≥24 规范化
-# dist-info 目录名（ruamel.yaml → ruamel_yaml），py3.9 importlib.metadata 按 dir
-# stem 严格匹配点号名 → idf-component-manager 依赖检查误报 not found → CMake
-# Python 检查退 255。venv 落各自工程 .embuild 下，构建前改名兜底。
+# venv 兼容走公共实现 rr3_esp_env（本工程自己的 .embuild 目录；pip≥24 规范化
+# dist-info 名与 py3.9 importlib.metadata 的严格匹配见 esp-env.sh 头注）。
 for mod in rr3-act rr3-sense; do
   cd "$root/modules/$mod" || { echo "ERROR: 无法进入 modules/$mod" >&2; exit 1; }
-  venv_sp=".embuild/espressif/python_env/idf5.2_py3.9_env/lib/python3.9/site-packages"
-  for d in "$venv_sp"/ruamel_yaml-*.dist-info; do
-    if [ -d "$d" ]; then
-      mv "$d" "${d/ruamel_yaml-/ruamel.yaml-}"
-      echo "PASS  $mod venv dist-info 兼容改名: ${d##*/} → ruamel.yaml-*"
-    fi
-  done
+  rr3_esp_env
   # classic 面（esp32 档）：S3 腿跳过，避免同一条腿为另一芯片付构建时间。
   if [ "${chip}" != esp32s3 ]; then
     elf="$(rr3_cargo_artifact xtensa-esp32-espidf debug "$mod")" || {
