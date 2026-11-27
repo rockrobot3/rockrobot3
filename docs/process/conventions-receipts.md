@@ -1997,3 +1997,23 @@ ADC1 GPIO1）——逐组相等。处置——零改动（README 不抄引脚是
 `checksums.txt` / `bundle.txt`，与 `ota-bundle.sh` 头注"四件 + 两清单"逐名一致；公钥包内路径
 `keys/<key_id>.pub` 与文档"安装树 `ota/keys/<key_id>.pub`"是同一物的打包/安装两态。处置——
 零改动。判据——层名与脚本产物清单逐条对上。
+
+**2026-11-27 批149 漂移门补 hardware 真值面（真缺口修复）**：事实——
+`verify-board-config.sh` 的比对清单只扫模块 config、`profiles/<name>.toml`、unit 与
+`boards/<profile>/etc/**`，**漏掉 rr3-pack 随包的 `hardware/<stem>/wiring.toml` 与
+`axis/*.toml`**——这两类文件 rrd 装载期直接消费，漂了即拒 boot，而漂移门看不见
+（"门绿而 wiring 可漂"）。处置——`rr3_deploy_manifest` 增 hardware 两条目（指定
+`--profile` 只扫该档；未指定扫全部），并按 50 行阈值把 55 行函数拆为六函数；
+自检夹具补 wiring/axis，新增两例（wiring 漂移红 / 轴档漂移红）。判据——自检 9 例全过、
+函数全 ≤50、文件 369 行；该自检在 gate ⑥b 真跑。
+
+**2026-11-27 批150 两档 S3 引脚口径同源（无改动）**：事实——`pi4b-host-esp32s3` 与
+`esp32s3-mini` 的 `[hardware]` 逐键比对：11 个 S3 引脚键值完全相同，host 档只多三枚
+宿主键（`alsa_device`/`link_ifname`/`periph_uart`）；11 值与 `board/pins_s3.rs` 锚点
+逐一对上。处置——零改动（两档共存但只有一套引脚真值，差异是"宿主面 vs 单板面"）。
+判据——tomllib 逐键 diff + 锚点常量对读。
+
+**2026-11-27 批151 部署产物名单与实际输出对表（无改动）**：事实——README 的整片名
+`rr3-esp32-safe-merged.bin` / `rr3-esp32s3-full-merged.bin` 与 `publish.yml` 的
+`--out` 名逐字一致；`image-esp32.sh` 的缺省名只在未给 `--out` 时生效，发布面显式传名；
+`fw-set.sh` 七件名与 README 一致。处置——零改动。
