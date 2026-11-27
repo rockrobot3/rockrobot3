@@ -59,7 +59,17 @@ fi
 # 口径 full = 逐字节；unit = 忽略 `ExecStart=` 行（rr3-pack 出包按 --profile 名改写
 # 该行，逐字节比必然假红——口径差异是契约，不是例外）。
 rr3_deploy_manifest() {
-	local repo="$1" profile="${2:-}" d f p u name board_root
+	local repo="$1" profile="${2:-}"
+	rr3_manifest_modules "$repo"
+	rr3_manifest_boards "$repo" "$profile"
+	rr3_manifest_profiles "$repo" "$profile"
+	rr3_manifest_units "$repo"
+	rr3_manifest_hardware "$repo" "$profile"
+}
+
+# 模块 config：每模块三份候选（默认 / esp32 档 / pi4b 档），存在即比。
+rr3_manifest_modules() {
+	local repo="$1" d f name
 	for d in "$repo"/modules/*/; do
 		[ -f "$d/config.toml" ] || continue
 		name="$(basename "$d")"
@@ -67,28 +77,66 @@ rr3_deploy_manifest() {
 			[ -f "$d$f" ] && printf 'modules/%s/%s|modules/%s/%s|full\n' "$name" "$f" "$name" "$f"
 		done
 	done
-	# 板级资产：boards/<profile>/etc/** 是装机 /etc/** 的源（仓内唯一真值）。
-	# 指定 --profile 时只扫该档；未指定（legacy/self-test）扫全部。夹具没有
-	# boards/ 时 find 打空，合法跳过。
+}
+
+# 板级资产：boards/<profile>/etc/** 是装机 /etc/** 的源（仓内唯一真值）。
+# 指定 --profile 时只扫该档；未指定（legacy/self-test）扫全部。夹具没有
+# boards/ 时 find 打空，合法跳过。
+rr3_manifest_boards() {
+	local repo="$1" profile="$2" board_root f rel
 	board_root="$repo/base/os/distro/boards"
 	[ -n "$profile" ] && board_root="$board_root/$profile"
-	if [ -d "$board_root" ]; then
-		find "$board_root" -type f -path '*/etc/*' 2>/dev/null |
-			while IFS= read -r f; do
-				rel="${f#"$repo"/base/os/distro/boards/}"
-				printf 'base/os/distro/boards/%s|%s|full\n' "$rel" "${rel#*/}"
-			done
-	fi
+	[ -d "$board_root" ] || return 0
+	find "$board_root" -type f -path '*/etc/*' 2>/dev/null |
+		while IFS= read -r f; do
+			rel="${f#"$repo"/base/os/distro/boards/}"
+			printf 'base/os/distro/boards/%s|%s|full\n' "$rel" "${rel#*/}"
+		done
+}
+
+rr3_manifest_profiles() {
+	local repo="$1" profile="$2" p
 	if [ -n "$profile" ]; then
 		p="$repo/profiles/$profile.toml"
 		[ -f "$p" ] && printf 'profiles/%s.toml|profiles/%s.toml|full\n' "$profile" "$profile"
-	else
-		for p in "$repo"/profiles/*.toml; do
-			[ -f "$p" ] && printf 'profiles/%s|profiles/%s|full\n' "$(basename "$p")" "$(basename "$p")"
-		done
+		return 0
 	fi
+	for p in "$repo"/profiles/*.toml; do
+		[ -f "$p" ] && printf 'profiles/%s|profiles/%s|full\n' "$(basename "$p")" "$(basename "$p")"
+	done
+}
+
+rr3_manifest_units() {
+	local repo="$1" u
 	for u in "$repo"/base/os/distro/units/*.service; do
 		[ -f "$u" ] && printf 'base/os/distro/units/%s|units/%s|unit\n' "$(basename "$u")" "$(basename "$u")"
+	done
+}
+
+# 装载真值集的 hardware 面（wiring + axis）：rr3-pack 随包落
+# <装机根>/hardware/<stem>/…，rrd 装载期直接消费——它漂了 boot 就拒，
+# 与模块 config 同权必须比对（2026-11-27 批149：此前漏扫，门绿而 wiring 可漂）。
+rr3_manifest_hardware() {
+	local repo="$1" profile="$2" hw name f
+	if [ -n "$profile" ]; then
+		hw="$repo/hardware/$profile"
+		rr3_manifest_hw_one "$profile" "$hw"
+		return 0
+	fi
+	for hw in "$repo"/hardware/*/; do
+		name="$(basename "$hw")"
+		rr3_manifest_hw_one "$name" "$hw"
+	done
+}
+
+# 单档 hardware 两条目：wiring.toml 与 axis/*.toml。
+rr3_manifest_hw_one() {
+	local name="$1" hw="$2" f
+	[ -f "$hw/wiring.toml" ] \
+		&& printf 'hardware/%s/wiring.toml|hardware/%s/wiring.toml|full\n' "$name" "$name"
+	for f in "$hw"/axis/*.toml; do
+		[ -f "$f" ] && printf 'hardware/%s/axis/%s|hardware/%s/axis/%s|full\n' \
+			"$name" "$(basename "$f")" "$name" "$(basename "$f")"
 	done
 }
 
@@ -192,6 +240,7 @@ st_prepare() {
 	ETC_DIR="$st_dir/inst-etc"
 	mkdir -p "$st_dir/repo/modules/rr3-a" "$st_dir/inst/modules/rr3-a" \
 		"$st_dir/repo/profiles" "$st_dir/inst/profiles" \
+		"$st_dir/repo/hardware/p/axis" "$st_dir/inst/hardware/p/axis" \
 		"$st_dir/repo/base/os/distro/units" "$UNIT_DIR" \
 		"$st_dir/repo/base/os/distro/boards/p/etc/systemd/system/rrd.service.d" \
 		"$st_dir/inst-etc/systemd/system/rrd.service.d"
@@ -199,6 +248,11 @@ st_prepare() {
 	cp "$st_dir/repo/modules/rr3-a/config.toml" "$st_dir/inst/modules/rr3-a/config.toml"
 	printf '[hardware]\nalsa_device = "plughw:CARD=Device"\n' >"$st_dir/repo/profiles/p.toml"
 	cp "$st_dir/repo/profiles/p.toml" "$st_dir/inst/profiles/p.toml"
+	# 装载真值集 hardware 面（wiring + axis）：与装机侧逐字节一致才算过。
+	printf '[[wire]]\nconnector = "J0"\n' >"$st_dir/repo/hardware/p/wiring.toml"
+	cp "$st_dir/repo/hardware/p/wiring.toml" "$st_dir/inst/hardware/p/wiring.toml"
+	printf 'schema = 1\n' >"$st_dir/repo/hardware/p/axis/pan.toml"
+	cp "$st_dir/repo/hardware/p/axis/pan.toml" "$st_dir/inst/hardware/p/axis/pan.toml"
 	# unit 口径：装机侧 ExecStart 已被 rr3-pack 改写（换 --profile），其余行必须一致。
 	printf '[Service]\nExecStartPre=-/usr/bin/amixer -c Device sset PCM 100%%\nExecStart=/usr/bin/rrd --profile /x\n' \
 		>"$st_dir/repo/base/os/distro/units/rrd.service"
@@ -234,6 +288,12 @@ st_cases() {
 	printf '[hardware]\nalsa_device = "plughw:CARD=sndrpigooglevoi"\n' >"$st_dir/inst/profiles/p.toml"
 	st_case 装配单漂移红 1
 	printf '[hardware]\nalsa_device = "plughw:CARD=Device"\n' >"$st_dir/inst/profiles/p.toml"
+	printf '[[wire]]\nconnector = "JX"\n' >"$st_dir/inst/hardware/p/wiring.toml"
+	st_case wiring漂移红 1
+	cp "$st_dir/repo/hardware/p/wiring.toml" "$st_dir/inst/hardware/p/wiring.toml"
+	printf 'schema = 2\n' >"$st_dir/inst/hardware/p/axis/pan.toml"
+	st_case 轴档漂移红 1
+	cp "$st_dir/repo/hardware/p/axis/pan.toml" "$st_dir/inst/hardware/p/axis/pan.toml"
 	printf '[Service]\nExecStartPre=-/usr/bin/amixer -c Device sset PCM 100%%\nExecStart=/usr/bin/rrd --profile /x\n' \
 		>"$UNIT_DIR/rrd.service"
 	printf '[Service]\nExecStartPre=-\nExecStart=/usr/bin/rrd --profile /y\n' >"$UNIT_DIR/rrd.service"
