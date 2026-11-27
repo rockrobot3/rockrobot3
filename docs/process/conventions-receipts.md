@@ -2723,3 +2723,17 @@ job `140680937458` 六条 notice 齐，含四段用时与负例）、platforms r
 失去 brain 例外 / 新增模块未入策略）。判据——自检 7/7 绿；真仓四面对拍 PASS（真值 6 ·
 策略 6 · 镜像同集 · 派生 5 = 真值−brain），解析结果逐文件人工核对（publish:75、
 stage-image:49/57、image-smoke:80 各命中真实循环）。本轮不接 check.sh，先随批观察。
+
+**2026-11-28 批251 窗口复核（release-anon / distro 首发）**：事实——`release-anon.yml`
+运行数 0（首跑窗口 2026-11-30 03:00 UTC 未到，今日 11-28）；最新 release 仍为 v0.0.8
+（2026-11-26T04:55:16Z），资产 9 件全为固件面（双 ELF、双 bootloader、合并 bin、
+分区表、FLASHING、sha256），**无 distro bundle**。处置——窗口未到不造夹具冒充：
+`release-verify --deep` 与 runbook B.2 仍缺真包，真板坏包场景仍无载具，两项如实留欠，
+不在门禁里写"看起来验过了"。判据——GitHub API 事实：
+`release-anon.yml/runs total_count=0`；`releases` 最新条目资产名单逐项核对为固件九件。
+
+**2026-11-28 批251 下轮任务拟定**：① 批252 把 `release_sets.py` 接门（check.sh ⑫ 块
+加自检+执法、gate `scripts` job 加同名两行、ci/README 撤"暂未接"）——已立机制不跑等于
+没有；② 批253 把 brain 例外从 `pack-bundle.sh` / `pack-arm64.sh` 两处收敛进
+`runtime-members.sh`（新增派生入口），并让 `release_sets.py` 核"板侧包走派生入口"；
+③ 批254 三线查红与回执收口，复核 11-30 窗口是否触发；④ 每步 commit+push 三远端。
