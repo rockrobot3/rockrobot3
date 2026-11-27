@@ -13,6 +13,15 @@ rv_stub() {
 	local dir="$1"
 	printf '%s\n' '#!/usr/bin/env bash' \
 		'[ "${RR3_ORAS_FAIL:-}" = 1 ] && { echo "401 Unauthorized" >&2; exit 1; }' \
+		'if [ "$1" = "pull" ]; then' \
+		'  dir=""; shift' \
+		'  while [ $# -gt 0 ]; do [ "$1" = "-o" ] && dir="$2"; shift; done' \
+		'  [ -n "$dir" ] || { echo "pull 缺 -o" >&2; exit 1; }' \
+		'  [ "${RR3_PULL_FAIL:-}" = 1 ] && { echo "pull failed" >&2; exit 1; }' \
+		'  t=rockrobot3-distro-0.0.8-aarch64.tar.gz' \
+		'  if [ "${RR3_DEEP_BAD:-}" = 1 ]; then echo bad >"$dir/$t"; else cp "$FIX/$t" "$dir/"; fi' \
+		'  exit 0' \
+		'fi' \
 		'if [ "$2" = "tags" ]; then' \
 		'  if [ "${RR3_TAGS_EMPTY:-}" = 1 ]; then echo edge; else printf "v0.0.7\nedge\nv0.0.8\nlatest\n"; fi' \
 		'  exit 0' \
@@ -189,6 +198,25 @@ rv_digest_case() {
 	return 1
 }
 
+# 深检（批201）：拉回 tar 过 A10 契约；坏包必须红，拉层失败按未定。
+rv_deep_case() { # 名称 期望码 开关 期望片段
+	local d out rc
+	d=$(mktemp -d)
+	mkdir -p "$d/bin"
+	rv_stub "$d"
+	python3 "$rv_lib/release-verify.fixture.py" "$d/fix" none >/dev/null
+	out=$(env "${3:-RR3_NOOP}=1" FIX="$d/fix" PATH="$d/bin:$PATH" \
+		bash "$rv_main" --tag v0.0.8 --classes distro --deep 2>&1)
+	rc=$?
+	rm -rf "$d"
+	if [ "$rc" -ne "$2" ] || ! printf '%s' "$out" | grep -qF "$4"; then
+		printf 'FAIL  self-test/%s（期望 %d/「%s」实得 %d）\n' "$1" "$2" "$4" "$rc"
+		return 1
+	fi
+	printf 'PASS  self-test/%s（退出码 %d）\n' "$1" "$rc"
+	return 0
+}
+
 # 用法面：非正式版 tag 必须在取数之前拒绝（退出 2）。
 rv_usage_case() {
 	local rc
@@ -218,6 +246,9 @@ rr3_rv_self_test() {
 	rv_auto_case 自动取最新tag 0 "" "tag auto → v0.0.8" || fail=1
 	rv_auto_case 无正式tag报未定 2 RR3_TAGS_EMPTY "取到正式 tag" || fail=1
 	rv_digest_case || fail=1
+	rv_deep_case 深检通过 0 "" "深检：发布包过 A10 契约" || fail=1
+	rv_deep_case 深检坏包红 1 RR3_DEEP_BAD "深检：发布包不合 A10 契约" || fail=1
+	rv_deep_case 深检拉层失败未定 2 RR3_PULL_FAIL "深检拉层" || fail=1
 	rv_usage_case || fail=1
 	[ "$fail" -eq 0 ] || return 3
 	return 0

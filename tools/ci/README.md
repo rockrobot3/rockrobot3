@@ -131,9 +131,11 @@ image/firmware/distro，buildroot 核 ota/buildroot），默认五类给操作�
 公开签名匿名可验。`--tag auto` 取 registry 上
 最新的正式 semver tag——周程用它，避免"VERSION 已 bump、tag 未推"的发布前窗口常红。
 结尾输出"制品 digest 汇总表"（逐类 ref + digest），发版回执（runbook B.2）直接引用。
-`--self-test` 用假 oras/manifest/cosign 夹具跑十五例（含类别过滤、缺件/未定分账、
-签名通过/无匹配/缺工具、auto 取 tag 与无正式 tag、digest 表、拼错即拒），在 gate 的
-scripts 步实跑；公开包可匿名回读，私有包需 ghcr 凭据（runbook B）。
+`--deep` 追加 distro 深检：从 registry 拉回 tar 再过 A10 契约（按 `any` 跳 commit 锚，
+tag 真伪由签名背书），层名对不等于内容可装。
+`--self-test` 用假 oras/manifest/cosign 夹具跑十八例（含类别过滤、缺件/未定分账、
+签名、auto 取 tag、digest 表、深检三例、拼错即拒），在 gate 的 scripts 步实跑；
+公开包可匿名回读，私有包需 ghcr 凭据（runbook B）。
 
 ## 构建失败归因入口：`log-digest.sh`
 

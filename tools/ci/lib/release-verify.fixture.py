@@ -7,16 +7,25 @@ release-verify.selftest.sh 用假 oras 喂给巡检器，判据腐化即红。
 用法：release-verify.fixture.py <输出目录> [none|distro-sha|index-riscv|fw-boot|attest]
 """
 
+import hashlib
+import io
 import json
 import os
+import pathlib
 import sys
+import tarfile
+
+REPO = pathlib.Path(__file__).resolve().parents[3]
+# e_ident 16B + e_type(2) + e_machine(2)=0xb7(AArch64, LE)；file 需报到 "ARM aarch64"。
+ELF = b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8 + b"\x02\x00\xb7\x00"
 
 VER = "0.0.8"
 TAG = f"v{VER}"
 
 
 def layer(title, media="application/octet-stream"):
-    return {"mediaType": media, "annotations": {"org.opencontainers.image.title": title}}
+    dg = "sha256:" + hashlib.sha256(title.encode()).hexdigest()
+    return {"mediaType": media, "digest": dg, "annotations": {"org.opencontainers.image.title": title}}
 
 
 def image_manifest():
@@ -93,6 +102,37 @@ def buildroot():
             "layers": [layer(t) for t in titles]}
 
 
+def add_bytes(tf, top, name, data, mode=0o644):
+    ti = tarfile.TarInfo(f"{top}/{name}")
+    ti.size = len(data)
+    ti.mode = mode
+    tf.addfile(ti, io.BytesIO(data))
+
+
+def distro_tar(path):
+    """合成 A10 合规包：仓内真值树 + ELF 头占位件；commit 用 000… 以覆盖 any 模式。"""
+    commit = "000000000000"
+    top = f"rockrobot3-{commit}"
+    modules = ("rr3-act", "rr3-connect", "rr3-interact", "rr3-power", "rr3-sense")
+    with tarfile.open(path, "w:gz") as tf:
+        for sub in ("profiles", "contracts", "hardware"):
+            for f in (REPO / sub).rglob("*"):
+                if f.is_file():
+                    add_bytes(tf, top, str(f.relative_to(REPO)), f.read_bytes())
+        for m in modules:
+            add_bytes(tf, top, f"modules/{m}/{m}", ELF, 0o755)
+            for name in ("module.toml", "config.toml"):
+                add_bytes(tf, top, f"modules/{m}/{name}", (REPO / "modules" / m / name).read_bytes())
+        for b in ("rrd", "rr3-ctl", "rr3-ota-ctl"):
+            add_bytes(tf, top, f"bin/{b}", ELF, 0o755)
+        add_bytes(
+            tf, top, "BUNDLE_VERSION",
+            f"commit={commit}\nbuilt_at=fixture\ntarget=aarch64-unknown-linux-musl\n"
+            "components=rrd,rr3-ctl,rr3-ota-ctl,rr3-act,rr3-connect,rr3-interact,"
+            "rr3-power,rr3-sense\nnatives=\n".encode(),
+        )
+
+
 def main():
     out = sys.argv[1]
     mut = sys.argv[2] if len(sys.argv) > 2 else "none"
@@ -112,6 +152,7 @@ def main():
     for name, doc in files.items():
         with open(os.path.join(out, name), "w", encoding="utf-8") as f:
             json.dump(doc, f)
+    distro_tar(os.path.join(out, f"rockrobot3-distro-{VER}-aarch64.tar.gz"))
     return 0
 
 

@@ -7,8 +7,10 @@
 # 正是包内成员版本偏斜（HEAD rrd + 旧 profile/旧模块）。本脚本把契约变成可执行断言：
 # 出包之后、上传之前逐项核对，缺一件即红，且不依赖目标架构可执行（只读 `file`）。
 #
-# 用法：bundle-contract.sh <bundle.tar.gz> <target-triple> [预期 ELF 架构串]
+# 用法：bundle-contract.sh <bundle.tar.gz> <target-triple> [预期 ELF 架构串] [期望提交|any]
 #       bundle-contract.sh --self-test
+#   期望提交缺省取仓 HEAD 的 12 位；`any` 用于校验**已发布**的包——它的提交是发布 tag
+#   当时的提交，不是当前 HEAD，tag 真实性由 cosign 签名背书（批201 深检用）。
 # 判据：0 合规 / 1 违约（逐项点名） / 2 用法错误 / 3 self-test 失败
 set -euo pipefail
 
@@ -36,8 +38,10 @@ trap cleanup EXIT
 check_manifest() {
 	local dir="$1" commit="$2" want_target="$3" f="$1/BUNDLE_VERSION" comps m
 	[ -f "$f" ] || fail "缺 BUNDLE_VERSION（非 A10 版本化包）"
-	[ "$(sed -n 's/^commit=//p' "$f")" = "$commit" ] \
-		|| fail "BUNDLE_VERSION commit ≠ 仓 HEAD（期望 ${commit}）"
+	if [ "$commit" != any ]; then
+		[ "$(sed -n 's/^commit=//p' "$f")" = "$commit" ] \
+			|| fail "BUNDLE_VERSION commit ≠ 仓 HEAD（期望 ${commit}）"
+	fi
 	[ "$(sed -n 's/^target=//p' "$f")" = "$want_target" ] \
 		|| fail "BUNDLE_VERSION target ≠ ${want_target}"
 	comps="$(sed -n 's/^components=//p' "$f")"
@@ -108,7 +112,7 @@ check_elf() {
 }
 
 main_check() {
-	local bundle="$1" want_target="$2" want_arch="${3:-}" tmp top
+	local bundle="$1" want_target="$2" want_arch="${3:-}" want_commit="${4:-}" tmp top
 	[ -f "$bundle" ] || fail "包不存在: ${bundle}"
 	tmp="$(mktemp -d)"
 	TMPROOT="$tmp"
@@ -118,7 +122,8 @@ main_check() {
 	*) fail "顶层目录不是 rockrobot3-<commit>：${top:-空}" ;;
 	esac
 	tar -xzf "$bundle" -C "$tmp"
-	check_manifest "$tmp/$top" "$(git -C "$repo" rev-parse --short=12 HEAD)" "$want_target"
+	[ -n "$want_commit" ] || want_commit="$(git -C "$repo" rev-parse --short=12 HEAD)"
+	check_manifest "$tmp/$top" "$want_commit" "$want_target"
 	check_bins "$tmp/$top"
 	check_modules "$tmp/$top"
 	check_data "$tmp/$top"
@@ -150,9 +155,9 @@ st_pack() {
 	tar -C "$(dirname "$stage")" -czf "$out" "$(basename "$stage")"
 }
 
-st_case() { # 名称 期望码
+st_case() { # 名称 期望码 [第 4 参]
 	local rc=0
-	bash "$0" "$st_bundle" aarch64-unknown-linux-musl >/dev/null 2>&1 || rc=$?
+	bash "$0" "$st_bundle" aarch64-unknown-linux-musl "" "${3:-}" >/dev/null 2>&1 || rc=$?
 	if [ "$rc" -eq "$2" ]; then
 		printf 'PASS  self-test/%s（退出码 %d）\n' "$1" "$rc"
 	else
@@ -181,6 +186,9 @@ self_test() {
 	rm -f "$tmp/rockrobot3-selftest3/BUNDLE_VERSION.bak"
 	st_pack "$tmp/rockrobot3-selftest3" "$st_bundle"
 	st_case commit不符红 1
+	# 已发布包的校验模式（批201）：提交是 tag 当时的值，`any` 跳过 commit 锚；
+	# 其余成员判据一条不松。
+	st_case 发布包any跳过commit过 0 any
 	[ "$st_fail" -eq 0 ] || return 3
 	return 0
 }
@@ -192,7 +200,7 @@ case "${1:-}" in
 	exit $?
 	;;
 "")
-	echo "用法: $0 <bundle.tar.gz> <target-triple> [预期 ELF 架构串]" >&2
+	echo "用法: $0 <bundle.tar.gz> <target-triple> [预期 ELF 架构串] [期望提交|any]" >&2
 	exit 2
 	;;
 *) main_check "$@" ;;

@@ -8,7 +8,7 @@
 # 不发任何写请求；发布面本身仍由 publish.yml / buildroot.yml 产出（机制与策略分离）。
 #
 # 用法：release-verify.sh --tag vX.Y.Z|auto [--repo owner/name] [--classes image,firmware,distro,ota,buildroot]
-#                             [--with-signature]
+#                             [--with-signature] [--deep]
 #       release-verify.sh --self-test
 # 判据：0 所选类别全齐且成员/证明面合规 / 1 有缺件或不合规（逐项点名）
 #       2 用法错误，或取数失败（凭据/网络/包不可见——"看不到"不等于"没有"，未定）
@@ -25,6 +25,7 @@ OWNER="rockrobot3"
 CLASSES="image,firmware,distro,ota,buildroot"
 # 签名身份约束与 runbook B.1 同源（只认 publish.yml 在正式 semver tag 上的 keyless 身份）。
 SIGN=0
+DEEP=0
 SIG_ID_RE='^https://github\.com/rockrobot3/rockrobot3/\.github/workflows/publish\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$'
 SIG_ISSUER='https://token.actions.githubusercontent.com'
 WORK=""
@@ -111,6 +112,18 @@ m = json.load(open(sys.argv[1], encoding="utf-8"))
 for e in m.get("manifests", []):
     if (e.get("annotations") or {}).get("vnd.docker.reference.type") == "attestation-manifest":
         print(e.get("digest", ""))
+        break
+PY
+}
+
+# 层标题 → digest（深检拉层用）。
+title_digest() { # <manifest.json> <title>
+	python3 - "$1" "$2" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1], encoding="utf-8"))
+for l in m.get("layers", []):
+    if (l.get("annotations") or {}).get("org.opencontainers.image.title") == sys.argv[2]:
+        print(l.get("digest", ""))
         break
 PY
 }
@@ -236,6 +249,39 @@ check_distro() {
 		bad "distro artifactType 不符：${t:-空}"
 	fi
 	verify_sig distro "${OWNER}/rockrobot3-distro" "$(ref_digest "$ref")"
+	deep_distro "$ref" "$d" "rockrobot3-distro-${ver}-aarch64.tar.gz"
+}
+
+# 深检（批201，--deep）：把已发布的 tar 拉回本地再过 A10 契约——层名对只证明"有这个名字"，
+# 不证明"内容还能装"。已发布包的提交是 tag 当时的，故契约按 `any` 跳 commit 锚（tag 真伪
+# 由 cosign 签名背书），其余成员判据一条不松。
+deep_distro() { # <ref> <manifest.json> <tar 层标题>
+	[ "$DEEP" -eq 1 ] || return 0
+	local dg dir tar
+	dg=$(title_digest "$2" "$3")
+	if [ -z "$dg" ]; then
+		bad "distro 深检：清单里没有 ${3} 层"
+		return 1
+	fi
+	dir="$WORK/deep-distro"
+	mkdir -p "$dir"
+	if ! oras pull "$1" -o "$dir" >/dev/null 2>"$WORK/pull.err"; then
+		FETCH_FAILS=$((FETCH_FAILS + 1))
+		printf 'FAIL  取数失败 %s（深检拉层）：%s\n' "$1" "$(head -n 1 "$WORK/pull.err")"
+		return 1
+	fi
+	tar="$dir/$3"
+	if [ ! -f "$tar" ]; then
+		bad "distro 深检：拉回缺 ${3}"
+		return 1
+	fi
+	if bash "$root/tools/ci/platform/bundle-contract.sh" "$tar" \
+		aarch64-unknown-linux-musl 'ARM aarch64' any >/dev/null 2>&1; then
+		ok "distro 深检：发布包过 A10 契约（${3}）"
+		return 0
+	fi
+	bad "distro 深检：发布包不合 A10 契约（${3}）"
+	return 1
 }
 
 # OTA：签名链与密钥必须随包（keys/*.pub 名称带 key_id，按形状判）。
@@ -307,6 +353,7 @@ while [ $# -gt 0 ]; do
 	--repo) OWNER="${2:?--repo 缺参数}"; OWNER="${OWNER%%/*}"; shift 2 ;;
 	--classes) CLASSES="${2:?--classes 缺参数}"; shift 2 ;;
 	--with-signature) SIGN=1; shift ;;
+	--deep) DEEP=1; shift ;;
 	--self-test)
 		# 自检以假 oras 喂夹具，判据腐化即红（见文件末自检段）。
 		. "$(dirname "$0")/release-verify.selftest.sh"

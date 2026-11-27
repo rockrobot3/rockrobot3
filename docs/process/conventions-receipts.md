@@ -2405,3 +2405,13 @@ job summary API 需鉴权，**数字本身本轮无法取回**，不预填也不
 与无包路径验证，真包留首发）；② 从可读面（人工登录 / 后续真板）取一次 timing 数值，
 据此把 20s/5s 上限收紧到实测余量；③ 收口。判据——三线结论与 run 页一致；巡检自检
 15/15、审计自检 30/30；⑤⑬⑯ 绿。
+
+**2026-11-27 批201 distro 深检：发布包内容过 A10 契约**：事实——齐套巡检只核 distro 的
+层名与 artifactType："有这个名字"不等于"拉下来还能装"；而 `bundle-contract` 的 commit
+锚是仓 HEAD，对已发布包（提交是 tag 当时的值）会假红，无法直接复用。处置——
+`bundle-contract.sh` 增第 4 参 `期望提交|any`（缺省 HEAD；`any` 供已发布包，tag 真伪由
+cosign 签名背书），自检加"发布包 any 跳过 commit 过"；`release-verify --deep` 对 distro
+按层标题取 digest、`oras pull` 拉回、以 `any` 跑契约：坏包退 1、拉层失败按未定退 2。
+夹具生成器按仓内真值树 + ELF 头占位件合成 A10 合规 tar（commit 用 000… 专门覆盖 any），
+假 oras 增 pull 分支，自检 18 例（含通过/坏包/拉失败）。判据——契约自检 5/5、巡检自检
+18/18；⑤⑬⑯ 绿；真包深检留 distro 首发（当前 registry 无包，不冒充）。
