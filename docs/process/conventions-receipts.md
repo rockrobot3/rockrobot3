@@ -1935,3 +1935,27 @@ buildroot 包推送标签已是 `v${VER}`（行 425/426），`VER` 来自 `relea
 同源；firmware 包用 `${{ github.ref_name }}`（正式 tag = `vX.Y.Z`）；运行镜像 tag 由
 release meta 生成。下次发布不会重演首发无 `v` 前缀的疏漏。处置——零改动，登记为发布前
 复核结论。判据——三处 tag 生成式逐行对上 `VERSION` 与 semver 正则。
+
+**2026-11-27 批140 S3 真值集消费验证（无改动）**：事实——`rr3_truth_names` 按
+`profiles/<stem>.toml` + 契约四册 + `contracts/platform/<chip>.toml` +
+`hardware/<stem>/wiring.toml` 生成成员，`dirs` 为 `hardware/<stem>/axis`；对
+`esp32s3-mini` 逐个实测八名成员全在树（批117 补的 wiring 与双轴档正是被它消费）；
+`rr3-pack` 的 profile 测试（esp32-mini 夹具：files 直落 + dirs 整目录随装 + 缺册拒包）
+3 条全绿，证明同一机制按 stem 泛化。处置——零改动。**结论**：批117 之前该档打包必
+拒（缺 wiring），补齐后真值集与打包面自动吃进，无需第二份文件清单。
+
+**2026-11-27 批141 ci-workflows 文档与流水线逐项对表（无改动）**：事实——job 数
+（gate 6 / integration 7 / platforms 7 / publish 4 / buildroot 3 / coverage 2）、
+`paths-ignore: docs/**,**.md`（integration/platforms）、publish `tags v* + branches main`、
+buildroot `branches main/dev** + paths 白名单 + tags v*`、五条流水线并发组、
+工具链统一 1.100.0、distro-smoke 无宿主工具链/无 rust-cache——逐条与文档一致。
+处置——零改动。判据——六份 YAML 逐段读回与 ci-workflows 对应段对表。
+
+**2026-11-27 批142 firmware 出口补版本门（真缺口修复）**：事实——`release-tag.sh` 已被
+publish 的 build / build-riscv64 / merge 与 buildroot release 调用，但 `firmware` job
+与 build 腿**并行**且只判 `refs/tags/v`：一个与 `VERSION` 不同源或未指向 release 提交的
+`v*` 标签会让 build 腿红、firmware 腿照推——发布面版本纪律存在绕过路径。处置——在
+firmware job 的 checkout 之后补一步调同一 `release-tag.sh`（不引第二套判据），四个出
+制品出口全覆盖；ci-workflows 执法点描述同步。判据——`release-tag.sh --self-test` 六例
+全过；`grep -c 'release-tag.sh "${...event_name}..."' publish.yml` = 4（build /
+build-riscv64 / merge / firmware）；`workflows_audit` PASS。发布面真跑归下次正式 tag。
