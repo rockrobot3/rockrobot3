@@ -26,7 +26,7 @@
 #   PASS   仓与装机 sha256 一致（unit 口径忽略 ExecStart= 行）
 #   DRIFT  两边都存在但内容不同（打印两枚 sha 供对表）
 #   MISS   装机缺件（模块开机即读同目录 config，缺件必重启环——按漂移同权）
-#   退出码: 0 全等 / 1 有漂移或缺件 / 2 用法错误 / 3 self-test 失败
+#   退出码: 0 全等 / 1 有漂移或缺件 / 2 用法错误或远端不可达（未定）/ 3 self-test 失败
 #
 # 装机根缺省 /usr/lib/rockrobot3（两轨同根：deb 与 buildroot 安装位一致的纪律），
 # unit 目录缺省 /lib/systemd/system，etc 目录缺省 /etc。
@@ -205,40 +205,59 @@ rr3_hash_local() {
 	if [ "$2" = unit ]; then sed -e '/^ExecStart=/d' "$1" | hash_stdin; else hash_stdin <"$1"; fi
 }
 
-rr3_hash_remote() {
-	local target="$1" path="$2" kou="$3" tmp rc=0
-	# -n：绝不能读 stdin——调用方在 here-doc 里逐行喂清单，ssh 吃掉剩余行会让
-	# "比对 16 件"静默变成"比对 2 件"（2026-11-16 实测，门绿而面漏）。
-	# 落临时文件再本地哈希：命令替换会吃掉尾随换行，逐字节口径必须保留原文。
-	tmp="$(mktemp)" || {
-		printf ''
-		return 0
-	}
-	if [ "$kou" = unit ]; then
-		ssh -n "$target" "sed -e '/^ExecStart=/d' '$path'" >"$tmp" 2>/dev/null || rc=$?
-	else
-		ssh -n "$target" "cat '$path'" >"$tmp" 2>/dev/null || rc=$?
-	fi
-	if [ "$rc" -ne 0 ] || [ ! -s "$tmp" ]; then
-		rm -f "$tmp"
-		printf ''
-		return 0
-	fi
-	hash_stdin <"$tmp"
-	rc=$?
-	rm -f "$tmp"
-	return "$rc"
+# 远端摘要脚本（批176）：一条 ssh 取回整份清单。此前逐件起 ssh——单档 16~19 次
+# 握手，Wi-Fi 板上每次都要重新认证，核验要等半分钟；改为一趟。摘要在远端算（与
+# 本地同一 sha 口径），只回传 `<装机路径>\t<sha>`，缺件回 `<路径>\tMISS`。
+rr3_remote_script() {
+	local root="$1" list="$2" inst_p kou
+	printf '%s\n' "h() { if command -v sha256sum >/dev/null 2>&1; then sha256sum | awk '{print \$1}'; else shasum -a 256 | awk '{print \$1}'; fi; }"
+	while IFS='|' read -r repo_rel inst_rel kou; do
+		[ -n "$repo_rel" ] || continue
+		inst_p="$(rr3_inst_path "$root" "$inst_rel")"
+		if [ "$kou" = unit ]; then
+			printf "if [ -f '%s' ]; then printf '%%s\\t%%s\\n' '%s' \"\$(sed -e '/^ExecStart=/d' '%s' | h)\"; else printf '%%s\\tMISS\\n' '%s'; fi\n" \
+				"$inst_p" "$inst_p" "$inst_p" "$inst_p"
+		else
+			printf "if [ -f '%s' ]; then printf '%%s\\t%%s\\n' '%s' \"\$(h < '%s')\"; else printf '%%s\\tMISS\\n' '%s'; fi\n" \
+				"$inst_p" "$inst_p" "$inst_p" "$inst_p"
+		fi
+	done <<EOF
+$list
+EOF
+}
+
+# 一次取回；255 = ssh 传输层失败（不可达/认证失败），调用方按"未定"处理，
+# 不把整份清单打成 MISS（那会把"网不通"读成"板上全漂"）。
+rr3_remote_fetch() {
+	local target="$1" root="$2" list="$3" out="$4" rc=0
+	rr3_remote_script "$root" "$list" | ssh "$target" 'bash -s' >"$out" 2>/dev/null || rc=$?
+	[ "$rc" -eq 0 ] && return 0
+	[ "$rc" -eq 255 ] && return 255
+	return 1
+}
+
+# 从取回表里按路径取摘要（无此行 = 远端没报，按缺件计）。
+rr3_remote_lookup() {
+	awk -F'\t' -v p="$2" '$1 == p { print $2; exit }' "$1"
 }
 
 # 逐件比对（实现单点；调用方只管结果）
 verify() {
 	local repo="$1" mode="$2" target="$3" root="$4" profile="${5:-}"
-	local drift=0 checked=0 list repo_rel inst_rel kou repo_p inst_p a b
+	local drift=0 checked=0 list repo_rel inst_rel kou repo_p inst_p a b digests=""
 
 	if [ -n "$profile" ]; then
 		rr3_profile_guard "$repo" "$profile" || return 2
 	fi
 	list="$(rr3_deploy_manifest "$repo" "$profile")"
+	if [ "$mode" = remote ]; then
+		digests="$(mktemp)" || return 2
+		if ! rr3_remote_fetch "$target" "$root" "$list" "$digests"; then
+			rm -f "$digests"
+			echo "远端不可达：${target}（ssh 传输失败）——无法判定漂移，按未定处理" >&2
+			return 2
+		fi
+	fi
 	while IFS='|' read -r repo_rel inst_rel kou; do
 		[ -n "$repo_rel" ] || continue
 		repo_p="$repo/$repo_rel"
@@ -246,11 +265,11 @@ verify() {
 		checked=$((checked + 1))
 		a="$(rr3_hash_local "$repo_p" "$kou")"
 		if [ "$mode" = remote ]; then
-			b="$(rr3_hash_remote "$target" "$inst_p" "$kou")"
+			b="$(rr3_remote_lookup "$digests" "$inst_p")"
 		else
 			if [ -f "$inst_p" ]; then b="$(rr3_hash_local "$inst_p" "$kou")"; else b=""; fi
 		fi
-		if [ -z "$b" ]; then
+		if [ -z "$b" ] || [ "$b" = MISS ]; then
 			printf 'MISS  %s  装机缺件（%s）\n' "$repo_rel" "$inst_p"
 			drift=$((drift + 1))
 		elif [ "$a" != "$b" ]; then
@@ -263,6 +282,7 @@ verify() {
 $list
 EOF
 
+	[ -n "$digests" ] && rm -f "$digests"
 	if [ "$checked" -eq 0 ]; then
 		echo "仓内未找到任何部署面文件（--repo 指错？）" >&2
 		return 2

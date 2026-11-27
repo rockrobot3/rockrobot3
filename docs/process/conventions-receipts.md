@@ -2187,3 +2187,12 @@ platforms aarch64 腿逐字同源（该腿 2026-11-27 实跑 success）；tag �
 sha256 清单、tag 门、contents/packages 权限）；自检夹具补一条"只有出包一步"的 distro
 腿作靶，断言表 25→26；`ci-workflows.md` 与 conventions 的发布面表同步。判据——
 `workflows_audit --self-test` 26/26 PASS；结构审计绿；⑤⑬⑯ 全绿。
+
+**2026-11-27 批176 漂移门远端一趟往返（装机核验流畅度）**：事实——远端模式逐件起 ssh，
+单档 16~19 次握手；Wi-Fi 板上每次都要重新认证，核验要等半分钟，且 ssh 失败会把整份
+清单打成 MISS（"网不通"读成"板上全漂"）。处置——`rr3_remote_script` 把整份清单编成
+远端脚本、一条 `ssh <host> bash -s` 取回 `<路径>\t<sha|MISS>`，摘要在远端按同一 sha
+口径计算；`rr3_remote_fetch` 把 ssh 255 区分为"不可达"→ 退出 2（未定），不冒充漂移；
+自检按职责拆成 local/profile/remote 三组（单函数回到 50 行内），并补两例回归钉：
+单趟往返（ssh 恰 1 次）与不可达报 2。判据——self-test 20/20 PASS（单趟用例实测 ssh=1）；
+⑤⑬⑯ 全绿；主/自检册 354/204 行。

@@ -53,11 +53,12 @@ st_prepare() {
 	BOARD_REL="base/os/distro/boards/p/etc/systemd/system/rrd.service.d/d.conf"
 	printf '[Service]\nEnvironment=RR3_HAL_ALSA_DEVICE=rr3\n' >"$st_dir/repo/$BOARD_REL"
 	cp "$st_dir/repo/$BOARD_REL" "$ETC_DIR/systemd/system/rrd.service.d/d.conf"
-	# 远端面自检的 ssh 桩（批170）：远端模式长年零执行，只能靠真板——桩把
-	# `ssh -n <host> "<cmd>"` 的 cmd 在本机跑，逐件哈希与 unit 口径两条分支都真走。
+	# 远端面自检的 ssh 桩（批170）：桩把 `ssh <host> "<cmd>"` 的 cmd 在本机跑；
+	# 一次调用记一行，供"单趟往返"回归钉计数（批176 把逐件 ssh 收成一条）。
+	# RR3_SSH_FAIL=1 时以 255 退出，验证"不可达按未定处理"而不是整份清单 MISS。
 	mkdir -p "$st_dir/bin"
-	printf '#!/usr/bin/env bash\nwhile [ "$1" = "-n" ]; do shift; done\nshift\nbash -c "$*"\n' \
-		>"$st_dir/bin/ssh"
+	printf '#!/usr/bin/env bash\n[ "${RR3_SSH_FAIL:-}" = 1 ] && exit 255\nwhile [ "$1" = "-n" ]; do shift; done\nshift\nprintf "%%s\\n" "$*" >>"%s/ssh-calls"\nbash -c "$*"\n' \
+		"$st_dir" >"$st_dir/bin/ssh"
 	chmod 0755 "$st_dir/bin/ssh"
 }
 
@@ -91,8 +92,8 @@ st_case() { # 名称 期望码 [档位]
 	fi
 }
 
-# 逐例：先过两例（三类齐全 / unit 口径），再逐类制造漂移并回滚。
-st_cases() {
+# legacy 全档面：全等两例 + 逐类漂移/缺件。每例改完立即还原，夹具保持干净。
+st_cases_local() {
 	st_case 三类齐全过 0
 	st_case unit口径忽略ExecStart 0
 	printf 'rms_start = 700\n' >"$st_dir/inst/modules/rr3-a/config.toml"
@@ -124,16 +125,22 @@ st_cases() {
 		>"$ETC_DIR/systemd/system/rrd.service.d/d.conf"
 	st_case 板级资产漂移红 1
 	cp "$st_dir/repo/$BOARD_REL" "$ETC_DIR/systemd/system/rrd.service.d/d.conf"
-	# 档位面自洽（批166）：自洽过；档位名/芯片/平台册三处缺失都必须报 2 而不是静默少列。
-	# 负例装配单只建在仓侧且在全档用例之后建——否则 legacy 全档扫描会把它们算成缺件。
+}
+
+# 档位面自洽（批166）：自洽过；档位名/芯片/平台册三处缺失都必须报 2 而不是静默少列。
+# 负例装配单只建在仓侧且在全档用例之后建——否则 legacy 全档扫描会把它们算成缺件。
+st_cases_profile() {
 	printf '# 无 [platform]\n' >"$st_dir/repo/profiles/q.toml"
 	printf '[platform]\nchip = "zz"\n' >"$st_dir/repo/profiles/r.toml"
 	st_case profile模式三类齐全 0 p
 	st_case 档位不存在报2 2 nope
 	st_case 档位无chip报2 2 q
 	st_case 平台册缺件报2 2 r
-	# 远端面（批170）：同一夹具经 ssh 桩走 --remote（档位 p），逐件哈希与 unit 口径同判。
-	# 用档位模式而非全档：guard 负例的 q/r 装配单只在仓侧，全档会把它们算成缺件。
+}
+
+# 远端面（批170/176）：同一夹具经 ssh 桩走 --remote（档位 p）。用档位模式而非全档：
+# guard 负例的 q/r 装配单只在仓侧，全档会把它们算成缺件。
+st_cases_remote() {
 	st_case_remote 远端全等过 0
 	printf 'rms_start = 700\n' >"$st_dir/inst/modules/rr3-a/config.toml"
 	st_case_remote 远端改一字节红 1
@@ -143,6 +150,49 @@ st_cases() {
 	st_case_remote 远端unit口径仍过 0
 	rm "$st_dir/inst/hardware/p/axis/pan.toml"
 	st_case_remote 远端缺件红 1
+	cp "$st_dir/repo/hardware/p/axis/pan.toml" "$st_dir/inst/hardware/p/axis/pan.toml"
+	st_remote_single_trip
+	st_remote_unreachable
+}
+
+# 单趟往返回归钉（批176）：整份清单只许起一次 ssh——逐件 ssh 在 Wi-Fi 板上是 16~19
+# 次握手；这条用例只在计数上判，防"批处理被悄悄改回逐件"。
+st_remote_single_trip() {
+	local rc calls
+	rm -f "$st_dir/ssh-calls"
+	set +e
+	PATH="$st_dir/bin:$PATH" verify "$st_dir/repo" remote board "$st_dir/inst" p >/dev/null 2>&1
+	rc=$?
+	set -e
+	calls=$(wc -l <"$st_dir/ssh-calls" 2>/dev/null | tr -d ' ')
+	if [ "$rc" -eq 0 ] && [ "$calls" = 1 ]; then
+		printf 'PASS  self-test/远端单趟往返（ssh %s 次）\n' "$calls"
+	else
+		printf 'FAIL  self-test/远端单趟往返（rc=%s ssh=%s，期望 0/1）\n' "$rc" "${calls:-0}"
+		st_fail=1
+	fi
+}
+
+# 不可达（批176）：ssh 255 必须报"未定"（rc 2），不能把整份清单打成 MISS 冒充漂移。
+st_remote_unreachable() {
+	local rc
+	set +e
+	RR3_SSH_FAIL=1 PATH="$st_dir/bin:$PATH" \
+		verify "$st_dir/repo" remote board "$st_dir/inst" p >/dev/null 2>&1
+	rc=$?
+	set -e
+	if [ "$rc" -eq 2 ]; then
+		printf 'PASS  self-test/远端不可达报2（退出码 2）\n'
+	else
+		printf 'FAIL  self-test/远端不可达报2（期望 2 实得 %d）\n' "$rc"
+		st_fail=1
+	fi
+}
+
+st_cases() {
+	st_cases_local
+	st_cases_profile
+	st_cases_remote
 }
 
 self_test() {
