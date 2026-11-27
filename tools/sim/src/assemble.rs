@@ -7,7 +7,7 @@
 //! 是「六模块全 running + `denied_publish = 0`」+ rr3-ctl 四命令巡检。
 //! 演练 modules-root 布局 = 装机布局（`<root>/profiles/<机>.toml` 上两级是 modules-root、
 //! `modules/<name>/{module.toml,config.toml,<entry>}`）：manifest 用仓源原文、只改 entry
-//! 一个值（与 rr3-pack `rr3_manifest_rewrite` 同语义同三道门）——provides 真值必须是仓源
+//! 一个值（与 rr3-pack `rr3_manifest_rewrite` 同语义同四道门）——provides 真值必须是仓源
 //! 那一册；config 同目录就位用仓源；brain 云端由 rrd 进程 env `RR3_BRAIN_CLOUD=mock` 压成
 //! mock 档。
 //! mock 注入走 rrd 进程 env（brain 继承）+ `RR3_HAL_BACKEND=sim`；HAL 面的 sim 落点：

@@ -36,10 +36,11 @@ pub fn rr3_manifest_ident(text: &str) -> Result<Rr3BusIdentity, String> {
     Ok(Rr3BusIdentity { name, heartbeat_ms })
 }
 
-/// 注册门禁要求 `manifest.entry` 是绝对路径（conn.rs），而在仓的 module.toml 是
-/// 契约工件、entry 由装机安装步骤写入。模块直跑（测试 / 开发）时走本助手：把
-/// entry 改写成进程自己的可执行文件路径再注册——对应"装机时写绝对 entry"的
-/// 生产路径的等价物。
+/// 注册门禁要求 `manifest.entry` 是绝对路径（conn.rs）。**本函数只造线上注册帧的
+/// wire manifest**：模块直跑（测试 / 开发 / 装机运行）都按 `current_exe` 重写 entry
+/// 再注册，不写回任何文件；它不是装机改写的第二实现——装机侧真值单点是
+/// `rrd::manifest::rr3_manifest_rewrite`（只改 entry 引号内一个值、其余字节原样，
+/// rrd spawn 取的是装机 manifest 原文，不看本函数的产物）。
 pub fn rr3_entry_absolutize(text: &str, exe: &Path) -> Result<String, String> {
     let exe = exe
         .to_str()

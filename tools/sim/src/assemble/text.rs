@@ -243,7 +243,8 @@ fn rr3_layout_module(
     Ok((module.to_string(), entry))
 }
 
-/// manifest 面：读仓源 manifest → 解析 → 入口绝对化改写（三道门）→ 落位，
+/// manifest 面：读仓源 manifest → 解析 → 入口绝对化改写（四道门：形制 / 恰一条 /
+/// 旧值对账 / 重解析复核）→ 落位，
 /// 回写入产物的绝对入口。
 fn rr3_layout_manifest(
     repo: &Path,
