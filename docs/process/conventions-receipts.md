@@ -2293,3 +2293,13 @@ platforms 均 success（distro-smoke 的 boot/status 时延上限在 `cf28e2cd` 
 齐套总账（`--with-signature`，身份约束与 runbook B.1 同源）；② VERSION 已 bump 而未
 tag 时 `release-anon` 该红还是该 SKIP——入 decisions §3 待裁（避免周程误红或静默放行）；
 ③ 发版回执模板把巡检结论列为必填项。判据——三线结论与 run 页一致；自检 9/9；⑤⑬⑯ 绿。
+
+**2026-11-27 批188 cosign 签名纳入齐套总账**：事实——runbook B.1 的验签命令只有人工
+形态；总账只看"制品在不在、成员齐不齐"，签名缺失/身份被换不会红。匿名实测确认签名面
+确实存在：运行镜像合并 digest `sha256:07d189…` 的 `sha256-07d189….sig` tag 可匿名读
+（1 层 `simplesigning.v1+json`），固件 digest 同理——但 cosign 二进制体积过大，本轮未在
+本机跑端到端 keyless 验证，不冒充。处置——巡检器增 `--with-signature`：镜像总账/固件/
+distro 按 `oras` descriptor 取 digest，调 cosign verify 并**固定**身份正则与 issuer
+（与 B.1 同源，不做可配置放宽）；缺 cosign 退 2（未定），无匹配签名退 1。自检加
+cosign 桩与三例（通过/无匹配/缺工具），共十二例。判据——self-test 12/12；签名 tag
+匿名可读的证据如上；端到端 cosign 验证待有 cosign 的环境（tag 窗口或本机安装）。

@@ -8,6 +8,7 @@
 # 不发任何写请求；发布面本身仍由 publish.yml / buildroot.yml 产出（机制与策略分离）。
 #
 # 用法：release-verify.sh --tag vX.Y.Z [--repo owner/name] [--classes image,firmware,distro,ota,buildroot]
+#                             [--with-signature]
 #       release-verify.sh --self-test
 # 判据：0 所选类别全齐且成员/证明面合规 / 1 有缺件或不合规（逐项点名）
 #       2 用法错误，或取数失败（凭据/网络/包不可见——"看不到"不等于"没有"，未定）
@@ -22,6 +23,10 @@ root=$(git rev-parse --show-toplevel 2>/dev/null) || {
 TAG=""
 OWNER="rockrobot3"
 CLASSES="image,firmware,distro,ota,buildroot"
+# 签名身份约束与 runbook B.1 同源（只认 publish.yml 在正式 semver tag 上的 keyless 身份）。
+SIGN=0
+SIG_ID_RE='^https://github\.com/rockrobot3/rockrobot3/\.github/workflows/publish\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$'
+SIG_ISSUER='https://token.actions.githubusercontent.com'
 WORK=""
 FAILS=0
 FETCH_FAILS=0
@@ -115,6 +120,32 @@ for l in m.get("layers", []):
 PY
 }
 
+# 标签指向的 digest：按 descriptor 取（authoritative），不走"本地重算哈希"。
+ref_digest() {
+	oras manifest fetch --descriptor "$1" 2>/dev/null \
+		| python3 -c 'import json,sys; print(json.load(sys.stdin).get("digest",""))' 2>/dev/null
+}
+
+# cosign keyless 验签（批188）：身份约束是安全判据，不做可配置放宽。
+# 未启用 --with-signature 时零成本跳过；启用而本机缺 cosign 由调用前 gate 拒绝。
+verify_sig() { # <标签> <仓（owner/name）> <digest>
+	[ "$SIGN" -eq 1 ] || return 0
+	local label="$1" repo="$2" dg="$3" err
+	if [ -z "$dg" ]; then
+		bad "${label} 无 digest，无法验签"
+		return 1
+	fi
+	err=$(cosign verify "ghcr.io/${repo}@${dg}" \
+		--certificate-identity-regexp "$SIG_ID_RE" \
+		--certificate-oidc-issuer "$SIG_ISSUER" 2>&1 >/dev/null)
+	if [ $? -eq 0 ]; then
+		ok "${label} 签名验证通过（keyless 身份约束）"
+		return 0
+	fi
+	bad "${label} 签名验证失败：$(printf '%s' "$err" | head -n 1)"
+	return 1
+}
+
 # 精确成员判据：required 逐个在层标题里找，缺一即 FAIL（点名缺哪件）。
 need_titles() { # <标签> <json> <标题...>
 	local label="$1" json="$2" t have miss=""
@@ -130,7 +161,7 @@ need_titles() { # <标签> <json> <标题...>
 	fi
 }
 
-# 镜像索引：三架构齐全，且每条单架构清单带 >=2 条 attestation（provenance+SBOM）。
+# 镜像索引：三架构齐全；每条单架构清单带一条 attestation，内有两枚 in-toto 谓词。
 check_image() { # <镜像仓> <tag>
 	local img="$1" tag="$2" d="$WORK/index.json" a f dg af preds miss
 	fetch "${img}:${tag}" "$d" || return 1
@@ -144,6 +175,7 @@ check_image() { # <镜像仓> <tag>
 	else
 		ok "镜像索引三架构齐（amd64/arm64/riscv64）"
 	fi
+	verify_sig 镜像总账 "${OWNER}/rockrobot3" "$(ref_digest "${img}:${tag}")"
 	for a in $want; do
 		f="$WORK/img-$a.json"
 		if ! fetch "${img}:${tag}-${a}" "$f"; then
@@ -181,6 +213,7 @@ check_firmware() {
 		rr3-bootloader-esp32-dev.bin \
 		rr3-bootloader-esp32s3-dev.bin \
 		rr3-partitions.csv FLASHING.md firmware-sha256.txt
+	verify_sig 固件 "${OWNER}/rockrobot3-firmware" "$(ref_digest "$ref")"
 }
 
 check_distro() {
@@ -193,6 +226,7 @@ check_distro() {
 	else
 		bad "distro artifactType 不符：${t:-空}"
 	fi
+	verify_sig distro "${OWNER}/rockrobot3-distro" "$(ref_digest "$ref")"
 }
 
 # OTA：签名链与密钥必须随包（keys/*.pub 名称带 key_id，按形状判）。
@@ -244,6 +278,7 @@ while [ $# -gt 0 ]; do
 	--tag) TAG="${2:?--tag 缺参数}"; shift 2 ;;
 	--repo) OWNER="${2:?--repo 缺参数}"; OWNER="${OWNER%%/*}"; shift 2 ;;
 	--classes) CLASSES="${2:?--classes 缺参数}"; shift 2 ;;
+	--with-signature) SIGN=1; shift ;;
 	--self-test)
 		# 自检以假 oras 喂夹具，判据腐化即红（见文件末自检段）。
 		. "$(dirname "$0")/release-verify.selftest.sh"
@@ -270,4 +305,10 @@ done
 printf '%s' "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$' \
 	|| { echo "FAIL  --tag 只认正式版 vX.Y.Z（实得 ${TAG}）" >&2; exit 2; }
 command -v oras >/dev/null || { echo "FAIL  本机无 oras（发布面取数依赖它）" >&2; exit 2; }
+if [ "$SIGN" -eq 1 ]; then
+	command -v cosign >/dev/null || {
+		echo "FAIL  --with-signature 需要 cosign（keyless 验签不可跳过）" >&2
+		exit 2
+	}
+fi
 rr3_run

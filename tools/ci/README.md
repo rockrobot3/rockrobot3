@@ -126,9 +126,11 @@ distro 两件与 artifactType、OTA 六件（含 `keys/*.pub`）、buildroot 四
 image/firmware/distro，buildroot 核 ota/buildroot），默认五类给操作者做发版总检。
 退出码：`0` 所选类别齐套 / `1` 缺件或不合规（远端明确 `not found` 也算缺件）/
 `2` 用法错误或取数失败（401/403/网络——"看不到"不等于"没有"，按未定处理，不与缺件
-混成同一结论）。`--self-test` 用假 oras + manifest 夹具跑九例（含类别过滤、缺件/未定
-分账、拼错即拒），在 gate 的 scripts 步实跑；公开包可匿名回读，私有包需 ghcr 凭据
-（runbook B）。
+混成同一结论）。`--with-signature` 追加 cosign keyless 验签（镜像总账/固件/distro，
+身份约束与 runbook B.1 同源，缺 cosign 即退 2，不放宽）。
+`--self-test` 用假 oras/manifest/cosign 夹具跑十二例（含类别过滤、缺件/未定分账、
+签名通过/无匹配/缺工具、拼错即拒），在 gate 的 scripts 步实跑；公开包可匿名回读，
+私有包需 ghcr 凭据（runbook B）。
 
 ## 构建失败归因入口：`log-digest.sh`
 

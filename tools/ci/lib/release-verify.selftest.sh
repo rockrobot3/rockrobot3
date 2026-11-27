@@ -13,6 +13,7 @@ rv_stub() {
 	local dir="$1"
 	printf '%s\n' '#!/usr/bin/env bash' \
 		'[ "${RR3_ORAS_FAIL:-}" = 1 ] && { echo "401 Unauthorized" >&2; exit 1; }' \
+		'if [ "$3" = "--descriptor" ]; then echo "{\"digest\":\"sha256:deadbeef\"}"; exit 0; fi' \
 		'ref="${3:-}"' \
 		'case "$ref" in' \
 		'  *rockrobot3-firmware:*) f=firmware.json ;;' \
@@ -29,6 +30,11 @@ rv_stub() {
 		'[ -f "$FIX/$f" ] || { echo "404 not found $ref" >&2; exit 1; }' \
 		'cat "$FIX/$f"' >"$dir/bin/oras"
 	chmod 0755 "$dir/bin/oras"
+	# cosign 桩（批188）：默认验签通过；RR3_COSIGN_FAIL=1 模拟无匹配签名。
+	printf '%s\n' '#!/usr/bin/env bash' \
+		'[ "${RR3_COSIGN_FAIL:-}" = 1 ] && { echo "Error: no matching signatures" >&2; exit 1; }' \
+		'echo "{\"critical\":{}}"' >"$dir/bin/cosign"
+	chmod 0755 "$dir/bin/cosign"
 }
 
 # 单例：变异夹具 → 跑巡检器 → 期望码 + 期望点名片段。
@@ -114,6 +120,32 @@ rv_fetch_fail_case() {
 	return 1
 }
 
+# 签名面（批188）：通过 / 无匹配签名 / 缺 cosign 三条。身份约束固定 canonical 仓，
+# 因此这里只验"是否真调用了 cosign 并按结果分账"，不验 cosign 自身实现。
+rv_sig_case() { # 名称 期望码 失败开关 额外参数 期望片段 [rm-cosign]
+	local d out rc
+	d=$(mktemp -d)
+	mkdir -p "$d/bin"
+	rv_stub "$d"
+	python3 "$rv_lib/release-verify.fixture.py" "$d/fix" none >/dev/null
+	[ "${6:-}" = rm-cosign ] && rm -f "$d/bin/cosign"
+	# 空开关时给一个无害变量，绕开 bash 3.2 的空数组 + set -u。
+	out=$(env "${3:-RR3_NOOP}=1" FIX="$d/fix" PATH="$d/bin:$PATH" \
+		bash "$rv_main" --tag v0.0.8 $4 2>&1)
+	rc=$?
+	rm -rf "$d"
+	if [ "$rc" -ne "$2" ]; then
+		printf 'FAIL  self-test/%s（期望 %d 实得 %d）\n' "$1" "$2" "$rc"
+		return 1
+	fi
+	if [ -n "$5" ] && ! printf '%s' "$out" | grep -qF "$5"; then
+		printf 'FAIL  self-test/%s（未点名：%s）\n' "$1" "$5"
+		return 1
+	fi
+	printf 'PASS  self-test/%s（退出码 %d）\n' "$1" "$rc"
+	return 0
+}
+
 # 用法面：非正式版 tag 必须在取数之前拒绝（退出 2）。
 rv_usage_case() {
 	local rc
@@ -137,6 +169,9 @@ rr3_rv_self_test() {
 	rv_class_case || fail=1
 	rv_missing_case || fail=1
 	rv_fetch_fail_case || fail=1
+	rv_sig_case 签名全通过 0 "" "--with-signature" "签名验证通过" || fail=1
+	rv_sig_case 无匹配签名红 1 RR3_COSIGN_FAIL "--with-signature" "签名验证失败" || fail=1
+	rv_sig_case 缺cosign未定 2 "" "--with-signature" "cosign" rm-cosign || fail=1
 	rv_usage_case || fail=1
 	[ "$fail" -eq 0 ] || return 3
 	return 0
