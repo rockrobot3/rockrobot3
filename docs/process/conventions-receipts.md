@@ -2635,3 +2635,24 @@ notice 逐字："rockrobot3 0.0.8 arm64；六模块/四册/平台册/接线/unit
 （公开数据已指向探针，改前要真板证据）；④ arm64 deb 结构门负例（改坏 control/模块成员，
 期望门红并点名）；⑤ 三线收口与再拟下轮。判据——`4d4e3765` 上 gate / integration /
 platforms 三线 success；⑤⑬⑯、度量与流水线审计自检绿。
+
+**2026-11-28 批233 arm64 deb 结构门三条负例**：事实——正例只证明"好包能过"，门能不能看见
+坏包没有证据。处置——以正例 deb 为底 `dpkg-deb -R` 解包、改坏一处、重打包，三条负例：
+control 架构改 amd64、删 `modules/rr3-brain/rr3-brain`、把 rrd 换成 x86-64 ELF；每条要求
+断言非 0 **且点名根因**（只判红不判原因等于没测）。判据——platforms run `46043732878` /
+job `140657649494` success，notice 逐字："负例 3/3 被抓：control 架构 / 模块缺件 /
+ELF 架构（门看得见）"；同提交 gate run `46043732980`、integration run `46043732987`
+success。
+
+**2026-11-28 批234 窗口复核**：事实——`release-anon` runs 仍为 0（cron 首跑 2026-11-30
+03:00 UTC 未到，今日 11-28）；GitHub releases 最新 v0.0.8 只有 9 个固件资产，仍无 distro
+bundle——`--deep` 与 B.2 无真包。处置——两项按登记不冒充，触发条件不变。
+
+**2026-11-28 批235 本轮收口**：事实——`3a400e52` 上 gate / integration / platforms 三线
+success；本轮 233 把 aarch64 deb 结构门从"正例绿"补到"正例 + 3 条负例"，234 窗口未到。
+处置——下轮五件：① 11-30 后 release-anon 首跑归因；② distro 首发后 `--deep` 与 B.2 实测；
+③ 真板坏包场景取证与 30s 探针窗口决策；④ 运行面成员清单单点化（六模块/三入口在
+install-smoke、distro-smoke、arm64-deb、publish 多处字面量，改为从 `modules/*/module.toml`
+派生，musl 五模块例外显式声明）；⑤ 三线收口与再拟下轮。判据——三线 run `46043732980`
+（gate）/ `46043732987`（integration）/ `46043732878`（platforms）success；⑤⑬⑯、度量与
+流水线审计自检绿。
