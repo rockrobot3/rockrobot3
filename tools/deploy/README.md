@@ -19,7 +19,7 @@ MCU 无 A/B 分区，升级一律线下重烧。每个芯片平台独立部署�
 | ESP32 classic（xtensa LX6） | rtos 轻承载 | `rr3-esp32-safe-merged.bin`（4MB 整片）或 ELF + bootloader + `rr3-partitions.csv` | 整片：`esptool.py --chip esp32 write_flash 0x0 rr3-esp32-safe-merged.bin`；单件：`flash-artifact.sh <elf> --bootloader <bin>` | 串口 115200 前两行 `surface=` 与 `console=uart0@<baud> secondary=none`（采集用 `console-log.py`，先清 DTR/RTS） |
 | ESP32-S3（N16R8） | rtos 轻承载 | `rr3-esp32s3-full-merged.bin`（16MB） | 同上，`--chip esp32s3` | 同上，另有 `[spool]` 周期行；full 档缺 WiFi/API key 会显式点名 |
 | 瑞芯微 RK3566（Radxa ZERO 3）· Buildroot 保底轨 | host 全承载 | `rock3-zero3.img`（`buildroot.yml` 全量构建产出） | 按 [`flash-maskrom.md`](../../base/os/buildroot/board/radxa-zero3/flash-maskrom.md) 走 maskrom（idbloader 32K / itb 6M / boot.vfat 16M） | 串口出 shell；分区标签 `rr_a`/`rr_b`/`rr_factory`/`rr_staging`/`rr_data` 与 `genimage.cfg` 一致 |
-| 瑞芯微 RK3566 · distro 快路轨 | host 全承载 | 版本化 bundle（`pack-bundle.sh`） | `sudo bash tools/deploy/install-bundle.sh <bundle.tar.gz>` | `verify-board-config.sh` 装机面漂移门 + `rr3-ctl status` 六模块 running |
+| 瑞芯微 RK3566 · distro 快路轨 | host 全承载 | 版本化 bundle：tag 时 `publish.yml` 出 `rockrobot3-distro-<ver>-aarch64.tar.gz`（release 资产 + `ghcr.io/<owner>/rockrobot3-distro:<tag>`），本机可用 `pack-bundle.sh` 现打 | `sudo bash tools/deploy/install-bundle.sh <bundle.tar.gz>` | `verify-board-config.sh` 装机面漂移门 + `rr3-ctl status` 六模块 running |
 | 英特尔 / AMD（x86_64） | host 全承载 | `ghcr.io/<owner>/rockrobot3:<tag>-amd64`（含 provenance/SBOM） | `docker run` 该镜像，或 bundle 装机 | `image-smoke.sh file` + `image-smoke.sh run`（六模块真起、零拒绝）——流水线每次发布实跑 |
 | 进迭时空（SpacemiT K1/K3，riscv64） | host 全承载 | `ghcr.io/<owner>/rockrobot3:<tag>-riscv64` | `bash tools/deploy/build-riscv-image.sh --push` | 同上两段冒烟；`platforms.yml` 的 `riscv-image` 腿每次 push 复跑 |
 | 树莓派 4B（aarch64）· 参考真板 | host 全承载 | deb / bundle | `pack-arm64.sh`（交叉）或 `build-onboard.sh`（板上原生构建音频件） | 六模块全 running、`denied_publish = 0`、整机重启自愈（0.0.6 真板已验） |
@@ -63,6 +63,12 @@ MCU 无 A/B 分区，升级一律线下重烧。每个芯片平台独立部署�
 `install-bundle.sh` 从已装 `rrd.service` 读 `--socket`/`--profile` 开关。干净机首装必须
 先走 deb（unit 随 deb 落位）；bundle-only 干净机上漂移门报 unit `MISS` 是如实提示，
 不是误报。
+
+**发布面（2026-11-27 批174）**：打 `v*` 标签时 `publish.yml` 的 `distro-bundle` 腿用同一
+`pack-bundle.sh` 出包、过 `tools/ci/platform/bundle-contract.sh` 的 A10 断言，随 release
+出 `rockrobot3-distro-<ver>-aarch64.tar.gz` 与 `distro-sha256.txt`，并以 oras 推
+`ghcr.io/<owner>/rockrobot3-distro:<tag>`（不可变标签 + keyless 签名）；日常推送由
+platforms 的 aarch64 腿跑同一条构建/断言，不回退到手工出包。
 
 ### 装机后核验：`verify-board-config.sh`
 

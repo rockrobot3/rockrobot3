@@ -2169,3 +2169,12 @@ integration success、platforms success（run #825，HTML 面核对 `WORKFLOW_RU
 实跑成立）；期间匿名 API 撞 60/h 限额，ci-status 如实报"未定"（不冒充绿），改用 actions
 页面核对。处置——本轮收口；下轮第一件＝rk3566 bundle 进发布面（publish 现只出镜像/固件/
 release 资产，bundle 不在列）。判据——`ci-status --self-test` 4/4；三线结论与 run 页一致。
+
+**2026-11-27 批174 rk3566 distro bundle 进发布面**：事实——发布面此前覆盖 x86_64/arm64/
+riscv64 镜像与 esp32 双芯片固件，唯独 RK3566 distro 快路轨的版本化 bundle 只在板上/本机
+手工出包：`publish.yml` 无此腿，正式发布集缺一块。处置——新增 `distro-bundle` 腿（只认
+tag 推送，与 firmware 同纪律）：`release-tag.sh` 版本门 → `cross-artifacts.sh` aarch64-musl
+八件全静态 → `pack-bundle.sh` 出 `rockrobot3-distro-<ver>-aarch64.tar.gz` → `bundle-contract.sh`
+A10 断言 → release 资产（含 sha256）→ oras 推 `rockrobot3-distro:<tag>`（不可变标签）→
+cosign keyless 正/负验证。判据——YAML 解析过；workflow 结构审计通过；构建/断言两步与
+platforms aarch64 腿逐字同源（该腿 2026-11-27 实跑 success）；tag 窗口实推待下次发版。

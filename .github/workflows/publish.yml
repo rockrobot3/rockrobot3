@@ -432,3 +432,100 @@ jobs:
             exit 1
           fi
           echo "PASS  cosign keyless 签名 + 正/负验证（$signed）"
+
+  # 瑞芯微 RK3566 distro 快路轨的交付件（2026-11-27 批174）：版本化 bundle 此前只由
+  # 板上/本机手工出包，发布面零交付——镜像覆盖 x86_64/arm64/riscv64，固件覆盖 esp32
+  # 双芯片，唯独 RK3566 的 distro 包不在发布集。构建与断言步骤与 platforms 的
+  # aarch64 腿同源（cross-artifacts → pack-bundle → bundle-contract），发布面只多
+  # release 资产、ghcr OCI 与 keyless 签名三件事。
+  # 只在 tag 推送出包：bundle 是发布集，手动窗口的用途是 edge 镜像（同 firmware 纪律）。
+  distro-bundle:
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      packages: write
+      # keyless 签名 distro OCI（与镜像/固件同一条 runbook B.1）。
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: 版本门 + 发布标签（tag 与 VERSION 同源且指向 release 提交）
+        id: meta
+        run: >-
+          bash tools/ci/lib/release-tag.sh "${{ github.event_name }}" "${{ github.ref }}"
+          "${{ github.ref_name }}" "${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+          targets: aarch64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+          cache-all-crates: "true"
+      - name: aarch64-musl 交叉构建（八件产物 + 全静态断言）
+        run: |
+          bash tools/ci/platform/cross-artifacts.sh aarch64-unknown-linux-musl 'ARM aarch64' static
+      - name: 出包 + A10 契约断言（判据与 platforms 腿同源）
+        run: |
+          set -euo pipefail
+          asset="rockrobot3-distro-${{ steps.meta.outputs.version }}-aarch64.tar.gz"
+          bash tools/deploy/pack-bundle.sh aarch64-unknown-linux-musl "$asset"
+          bash tools/ci/platform/bundle-contract.sh "$asset" \
+            aarch64-unknown-linux-musl 'ARM aarch64'
+          sha256sum "$asset" > distro-sha256.txt
+          cat distro-sha256.txt
+      - name: 上传 release 资产（distro bundle + sha256）
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            rockrobot3-distro-${{ steps.meta.outputs.version }}-aarch64.tar.gz
+            distro-sha256.txt
+          fail_on_unmatched_files: true
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: oras-project/setup-oras@v2
+      - name: 不可变标签检查 + 推送 distro bundle 到 ghcr
+        run: |
+          set -euo pipefail
+          ref="ghcr.io/${{ github.repository_owner }}/rockrobot3-distro:${{ github.ref_name }}"
+          if out=$(oras manifest fetch "$ref" 2>&1); then
+            echo "::error title=distro-immutable::已存在：$ref（拒绝覆盖）"
+            exit 1
+          fi
+          if ! printf '%s' "$out" | grep -qiE 'not found|404|manifest unknown'; then
+            echo "::error title=distro-immutable::读 $ref 失败且非 404：${out:0:400}"
+            exit 1
+          fi
+          asset="rockrobot3-distro-${{ steps.meta.outputs.version }}-aarch64.tar.gz"
+          oras push "$ref" \
+            --artifact-type application/vnd.rr3.distro-bundle.v1.tar+gzip \
+            "$asset:application/gzip" distro-sha256.txt:text/plain
+          oras manifest fetch "$ref" >/dev/null
+          echo "PASS  已推送 $ref（$asset + distro-sha256.txt）"
+      - uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: "v2.6.5"
+      - name: keyless 签名 distro OCI（正/负身份验证）
+        run: |
+          set -euo pipefail
+          ref="ghcr.io/${GITHUB_REPOSITORY_OWNER}/rockrobot3-distro:${GITHUB_REF_NAME}"
+          digest=$(oras manifest fetch --descriptor "$ref" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')
+          [ -n "$digest" ] || { echo "::error title=distro-digest::bundle OCI digest 为空"; exit 1; }
+          signed="ghcr.io/${GITHUB_REPOSITORY_OWNER}/rockrobot3-distro@${digest}"
+          id_re='^https://github\.com/rockrobot3/rockrobot3/\.github/workflows/publish\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$'
+          issuer='https://token.actions.githubusercontent.com'
+          cosign sign --yes "$signed"
+          cosign verify "$signed" --certificate-identity-regexp "$id_re" \
+            --certificate-oidc-issuer "$issuer" >/dev/null
+          if cosign verify "$signed" --certificate-identity-regexp '^https://example\.invalid/$' \
+               --certificate-oidc-issuer "$issuer" >/dev/null 2>&1; then
+            echo "::error title=cosign-neg-distro::错误 identity 未被拒绝"
+            exit 1
+          fi
+          echo "PASS  cosign keyless 签名 + 正/负验证（$signed）"
