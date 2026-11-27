@@ -2796,3 +2796,20 @@ release-anon 首跑归因窗口（今日 11-28 未到，不得预写结论）；
 静默通过）；新增第 8 条负例（`-eq 9` + 无关 `-eq 6` 遮蔽必须被抓）。判据——
 `--self-test` 9/9 绿（1 正例 + 8 负例）；真仓对拍 PASS；⑤ 文档门与 ⑯ 行数门绿
 （脚本 326 行）。
+
+**2026-11-28 批257 本轮收口（6 提交三线全绿）**：事实——本轮提交 `937bb3a2`（⑰ 脚本）→
+`cd294765`（窗口复核）→ `b05ea77a`（接门）→ `4cf1d121`（成对判据）→ `66260daf`
+（门表订正）→ `ee9d7bdf`（回滚早停）→ `109352fc`（回执/状态）→ `1e360c99`（阈值收紧），
+最终提交三线全绿：gate / integration / platforms（run 见各提交 check-runs，均 success）；
+中间提交的 `cancelled` 均为并发组被后续提交取代，非真红。关键实证：gate `scripts` 19s
+success（⑰ 自检 + 执法），gate `conventions` success（check.sh 全步含 ⑰）；
+install-smoke 公开回读 `rollback_ms=4513`（旧 32619ms）、`boot_systemd_ms=2137`、
+`bundle_swap_ms=2449`——回滚早停生效且成功路径零回归。判据——`release_sets --self-test`
+9/9、真仓 PASS；`gate_steps_audit` 30 步；⑤⑯ 绿；三远端同指 `1e360c99`。
+
+**2026-11-28 批257 下轮任务拟定**：① 批258 `distro-smoke` 时延公开回传——把
+`boot_spawn6_ms` / `status_rtt_ms` 以 `::notice title=distro-smoke-timing::` 打到注解面
+（与 install-smoke 同通道，日志与 job summary 匿名不可读），解除 status 第 29 行
+"数值未取回"的阻塞；② 批259 用连续两拍实测值校准 20s/5s 上限（无数据不调参，保留
+余量）；③ 批260 11-30 03:00 UTC `release-anon` 首跑归因；distro 首发后 `--deep` /
+B.2 实测与 `distro` 类纳入匿名回读的裁定；④ 批261 三线收口与再拟下轮。
