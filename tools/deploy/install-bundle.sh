@@ -155,11 +155,27 @@ BIN_MS=$(( $(now_ms) - T_BIN ))
 # too quickly）；不清账的话新树第一次 start 就被拒，健康窗口还没开始就回滚。
 T_BOOT=$(now_ms)
 systemctl reset-failed rrd >/dev/null 2>&1 || true
+# 崩溃重启计数基线（批255）：坏 rrd 起不来时 unit 在 Restart=always 下会反复拉起，
+# 而 rr3-ctl 永远不应答——旧实现要空等满 30s 才回滚（实测 rollback≈32.6s）。
+# 读 NRestarts（reset-failed 后归零）增量：涨了就是新树在崩，立即回滚并点名次数，
+# 不再用固定窗口替一个已经确定的结论计时。
+base_nr=$(systemctl show -p NRestarts --value rrd 2>/dev/null || echo 0)
+base_nr=${base_nr#NRestarts=}
+case $base_nr in (''|*[!0-9]*) base_nr=0 ;; esac
 systemctl start rrd || rollback
 
-# 健康探针：30s 内 rrd 应答 status，且 enabled_slots 的每个模块都 running
+# 健康探针：30s 内 rrd 应答 status，且 enabled_slots 的每个模块都 running；
+# 期间 NRestarts 增量即崩溃循环，提前结束窗口（省下的 30s 是排障时间的直接收益）。
 ok=0
+crash=""
 for _ in $(seq 1 30); do
+  nr=$(systemctl show -p NRestarts --value rrd 2>/dev/null || echo "$base_nr")
+  nr=${nr#NRestarts=}
+  case $nr in (''|*[!0-9]*) nr=$base_nr ;; esac
+  if [ "$nr" -gt "$base_nr" ]; then
+    crash=$((nr - base_nr))
+    break
+  fi
   if out=$("$BIN/rr3-ctl" --bus-path "$SOCK" status 2>/dev/null); then
     ok=1
     for m in $expected; do
@@ -170,6 +186,10 @@ for _ in $(seq 1 30); do
   fi
   sleep 1
 done
+if [ -n "$crash" ]; then
+  echo "FAIL  新树 rrd 崩溃重启 ${crash} 次（启动探针 $(( $(now_ms) - T_BOOT ))ms 内即判，不等满 30s）" >&2
+  rollback
+fi
 [ "$ok" -eq 1 ] || rollback
 BOOT_MS=$(( $(now_ms) - T_BOOT ))
 
