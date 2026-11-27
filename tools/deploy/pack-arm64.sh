@@ -17,6 +17,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.." # 仓根
 
+# 模块清单取仓内真值（modules/rr3-*/module.toml）；空清单即失败。
+. tools/ci/lib/runtime-members.sh
+mods=$(rr3_modules .) || {
+  echo "FAIL  仓内没有任何 modules/rr3-*/module.toml（模块清单真值缺席）" >&2
+  exit 2
+}
+
 TARGET=aarch64-unknown-linux-musl
 PROFILE="${RR3_PROFILE:-distro}"
 PROFILE_TOML="profiles/$PROFILE.toml"
@@ -38,12 +45,15 @@ export RUSTFLAGS="-C linker=rust-lld"
 cargo build -q --locked --release --manifest-path base/runtime/Cargo.toml --target "$TARGET" -p rrd
 cargo build -q --locked --release --manifest-path tools/rrctl/Cargo.toml --target "$TARGET"
 cargo build -q --locked --release --manifest-path base/ota/rr3-ota-ctl/Cargo.toml --target "$TARGET"
-# 六模块中五件走 musl 静态；**brain 不在此列**——其云端客户端用 ureq+rustls(ring)，
+# 模块全集走 musl 静态；**brain 不在此列**——其云端客户端用 ureq+rustls(ring)，
 # ring 需要 C 工具链（aarch64-linux-musl-gcc），与 alsa 同属"宿主交叉结构性不覆盖"类，
 # 归板上原生构建（build-onboard.sh，同 alsa 先例）。2026-10-31 教训：本脚本曾在
 # brain 还是 python 树时写死 cp pkg（dc9d6f4 迁移后腐化 17 天无人发现——部署链
-# 无门禁，改 module 形态必须同批扫 tools/deploy/）。
-for m in act connect interact sense power; do
+# 无门禁，改 module 形态必须同批扫 tools/deploy/）。清单本身取仓内真值，新模块默认随包。
+for m in $mods; do
+  if [ "$m" = brain ]; then
+    continue
+  fi
   cargo build -q --locked --release --manifest-path "modules/rr3-$m/Cargo.toml" --target "$TARGET"
 done
 unset RUSTFLAGS
@@ -53,16 +63,19 @@ echo "== ② 组装注入产物（两轨同源约定）=="
 rm -rf "$PAY"
 mkdir -p "$PAY/rr3-modules"
 cp "$REL/rrd" "$REL/rr3-ctl" "$REL/rr3-ota-ctl" "$PAY/"
-for m in act connect interact sense power; do
+for m in $mods; do
+  if [ "$m" = brain ]; then
+    # brain：manifest 先落位（bin 由板上构建步 ③ 填充——build-onboard 同步源码后
+    # 原生构建 brain+sense+interact 三件回填 payload）。缺 RR3_ONBOARD_HOST 时在
+    # ③ 点名退出，不允许静默出"缺 brain 的 deb"（boot 队列 cognition 四格会 degraded）。
+    mkdir -p "$PAY/rr3-modules/rr3-brain"
+    cp modules/rr3-brain/module.toml "$PAY/rr3-modules/rr3-brain/manifest.toml"
+    continue
+  fi
   mkdir -p "$PAY/rr3-modules/rr3-$m"
   cp "$REL/rr3-$m" "$PAY/rr3-modules/rr3-$m/bin"
   cp "modules/rr3-$m/module.toml" "$PAY/rr3-modules/rr3-$m/manifest.toml"
 done
-# brain：manifest 先落位（bin 由板上构建步 ③ 填充——build-onboard 同步源码后原生
-# 构建 brain+sense+interact 三件回填 payload）。缺 RR3_ONBOARD_HOST 时在此点名退出，
-# 不允许静默出"缺 brain 的 deb"（boot 队列 cognition 四格会 degraded）。
-mkdir -p "$PAY/rr3-modules/rr3-brain"
-cp modules/rr3-brain/module.toml "$PAY/rr3-modules/rr3-brain/manifest.toml"
 
 echo "== ③ 板上原生构建（brain TLS/ring + sense/interact alsa——宿主交叉不覆盖的三件）=="
 if [ -z "${RR3_ONBOARD_HOST:-}" ]; then
@@ -85,7 +98,7 @@ test -f "$STAGE/usr/lib/systemd/system/rrd.service"
 test -f "$STAGE/usr/lib/rockrobot3/profiles/$PROFILE.toml"
 test -f "$STAGE/usr/lib/rockrobot3/contracts/topics.toml"
 test -f "$STAGE/usr/lib/rockrobot3/contracts/slots.toml"
-for m in act brain connect interact sense power; do
+for m in $mods; do
   test -x "$STAGE/usr/lib/rockrobot3/modules/rr3-$m/rr3-$m"
   test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-$m/module.toml"
   test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-$m/config.toml"

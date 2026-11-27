@@ -76,6 +76,7 @@ rr3_smoke_run() {
 		ok=""
 		for _ in $(seq 1 45); do
 			n=0
+			# 镜像的模块集是发布策略（同 stage-image）；此处按镜像应含的全集断言。
 			for m in act brain connect interact sense power; do
 				grep -q "spawn rr3-$m pid=" /tmp/rrd.log && n=$((n+1))
 			done

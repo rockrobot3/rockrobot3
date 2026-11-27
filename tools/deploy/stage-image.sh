@@ -43,6 +43,9 @@ done
   echo "缺打包器 ${pack_bin}（交叉腿用 RR3_PACK_BIN 指向宿主原生 rr3-pack）" >&2
   exit 1
 }
+# 镜像模块清单显式（发布策略）：镜像包含哪些模块是发版决策，由
+# workflow_release.PUBLISH_MODULES 钉住；与 pack-bundle / pack-arm64 的
+# "仓内真值派生"分工不同，勿混。
 for m in act brain connect interact sense power; do
   [ -x "$rel/rr3-$m" ] || { echo "缺产物 $rel/rr3-${m}（先原生 cargo build --release）" >&2; exit 1; }
 done

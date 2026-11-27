@@ -65,6 +65,8 @@ jobs:
         run: >-
           bash tools/ci/lib/release-tag.sh "${{ github.event_name }}" "${{ github.ref }}"
           "${{ github.ref_name }}" "${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+      # 模块清单显式（发布策略，audit PUBLISH_MODULES 钉住六件）；部署工具的
+      # 运行面清单取仓内真值（tools/ci/lib/runtime-members.sh），两者分工不同。
       - name: 原生构建运行面（rrd / 六模块 / rr3-ctl / rr3-ota-ctl / rr3-pack）
         env:
           CARGO_TARGET_DIR: /tmp/rr3-build
