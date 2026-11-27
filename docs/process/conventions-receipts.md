@@ -2849,3 +2849,9 @@ gate/integration/platforms 全 success；文档提交 `777e4def` gate success
 首跑红则按 check-run 注解与出参定位）；③ 批263 distro 首发后 `--deep` / runbook B.2
 实测，并裁定 `distro` 类是否进匿名回读（当前纳入会对 v0.0.8 假红）；④ 批264 复核
 install-smoke 回滚新路径连续三拍稳定（4513ms 为单拍），三线收口与再拟下轮。
+
+**2026-11-28 批261 ⑰ 漂移报错自带改法**：事实——新增模块触发 ⑰ 时，原报错只说
+"策略与真值不一致：缺 X"，改哪几处仍要靠读脚本（三处字面量清单，漏一处就复发）。
+处置——`check_policy` 的失败行追加"新增模块须同批改三处：`workflow_release.PUBLISH_MODULES`、
+`stage-image.sh`、`image-smoke.sh`"，自检新增一条断言（报错必须含"同批改三处"）。
+判据——`--self-test` 10/10 绿（1 正例 / 8 负例 / 10 断言）；真仓 PASS。

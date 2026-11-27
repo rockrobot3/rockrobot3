@@ -81,7 +81,9 @@ def check_policy(policy, truth):
     if not bad:
         return []
     return ["发布策略 PUBLISH_MODULES 与仓内真值不一致：" + "；".join(bad)
-            + f"（真值 {len(truth)} 件 / 策略 {len(policy)} 件）"]
+            + f"（真值 {len(truth)} 件 / 策略 {len(policy)} 件）；新增模块须同批改三处："
+            "workflow_release.PUBLISH_MODULES、tools/deploy/stage-image.sh、"
+            "tools/deploy/image-smoke.sh"]
 
 
 def check_publish_yml(text, policy):
@@ -267,7 +269,9 @@ def selftest():
             ok &= _expect(check(root_m), needle, label)
         root_g = _fixture(pathlib.Path(base) / "new-mod",
                           ("act", "brain", "connect", "interact", "sense", "power", "guard"))
-        ok &= _expect(check(root_g), "发布策略", "新增模块未入发布策略")
+        bad_g = check(root_g)
+        ok &= _expect(bad_g, "发布策略", "新增模块未入发布策略")
+        ok &= _expect(bad_g, "同批改三处", "漂移报错自带改法")
         root_p = _copy(root, pathlib.Path(base) / "pair")
         (root_p / "modules" / "rr3-ghost").mkdir(parents=True, exist_ok=True)
         (root_p / "modules" / "rr3-ghost" / "Cargo.toml").write_text(
