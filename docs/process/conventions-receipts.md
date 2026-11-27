@@ -2570,3 +2570,33 @@ integration / platforms 三线 success；`release-anon` runs 仍为 0（cron 首
 排查，能收口到 `rr3_connect_as` 的一并收口）；⑤ 三线收口与再拟下轮。判据——三线 run
 `46031019507`（gate）/ `46031019241`（integration）/ `46031019318`（platforms）success；
 ⑤⑬⑯、度量与流水线审计自检绿。
+
+**2026-11-28 批225 被动注册统一长窗口（夹具盲区收口）**：事实——批223 只修了
+`e2e_sim_peer` 两处；"服务端注册后读静默上界 = 2×watchdog（`conn/read.rs`）"是全局
+机制，其余共享夹具仍以 100/500 注册（`register_publish::register_sima`、
+`e2e_ctl::ctl_status_setup`、`support/ctl::register_sima_task`），跨秒用例慢一拍同样
+会读到 EOF。处置——新增 `rr3_register_passive`（3_600_000/3_600_001, never）作为
+"被动注册"单点，四个共享夹具收口，`rr3_connect_as`/`rr3_connect_observer` 复用它；
+support 头注写明"窗口本身是被测对象才写短窗口"，`ctl_echoes_numbers` 因断言
+hb/wd 数值保留 200/900。断言一条未改。判据——gate run `46034271402` success
+（conventions 含 workspace 全测）；integration run `46034271535` success；本地
+rustfmt --check、⑤⑬⑯、度量与审计自检全绿。
+
+**2026-11-28 批226 装机四段用时上成功/回滚行**：事实——install-smoke 的 32~33s 回滚
+只有 CI 侧阶段数字，真板操作者看不到 install-bundle 内部慢在哪。处置——install-bundle
+记停机 / 换树 / 二进制 / 启动探针四段毫秒，PASS 行与回滚、首装失败行逐字带出；
+deploy README 的 A10 节注明"排障先读这一行"，status 敞口 29 登记为板侧载体。判据——
+integration run `46035110220` / job `140628421670` success（install-smoke 六条 notice：
+换树 3083ms、回滚 32077ms 等，说明新行格式与断言相容）；gate run `46035110266`
+success；bundle 正例/回滚断言未改仍绿。
+
+**2026-11-28 批227-228 窗口复核与本轮收口**：事实——`release-anon` runs 仍为 0（cron 首跑
+2026-11-30 03:00 UTC 未到，今日 11-28）；GitHub releases 最新 v0.0.8 仍无 distro bundle，
+`--deep` 与 B.2 无真包，按登记不冒充。处置——本轮三批（225 夹具长窗口、226 装机四段
+用时、227/228 收口）结束；下轮五件：① 11-30 后 release-anon 首跑归因；② distro 首发后
+`--deep` 深检与 B.2 验签实测；③ 回滚 32s 的取证与优化评估（install-bundle 四段用时已
+就位，先取证再定，禁止无据调参）；④ 瑞芯微 aarch64 deb 结构门（apt 交叉 gnu + brain +
+rr3-pack 出 deb，断言 control/unit/六模块/契约；不冒充安装——install-smoke 仅 x86_64、
+bundle 为 musl 五模块，aarch64 deb base 层目前只有真板证据）；⑤ 三线收口与再拟下轮。
+判据——`80cb04ee` 上 gate（run `46035110266`）/ integration（run `46035110220`）/
+platforms（run `46035110210`）三线 success；⑤⑬⑯、度量与流水线审计自检绿。
