@@ -93,8 +93,10 @@ if [ -n "$profile" ] && [ -f "$profile" ]; then
   expected=$(awk '/^\[enabled_slots\]/{f=1;next} /^\[/{f=0} f && /^[A-Za-z0-9_-]+ *=/ {sub(/ *=.*/, ""); print}' "$profile")
 fi
 
+# 回滚带归因（批270）：板侧运维通常只读最后一行"已回滚"，不带原因就还得翻整段日志。
 rollback() {
-  echo "FAIL  新树启动验证未过，回滚" >&2
+  local why="${1:-未知原因}"
+  echo "FAIL  新树启动验证未过（${why}），回滚" >&2
   systemctl stop rrd >/dev/null 2>&1 || true
   rm -f "$BIN/.rrd.new" "$BIN/.rr3-ctl.new" "$BIN/.rr3-ota-ctl.new"
   rm -rf "$ROOT"
@@ -109,9 +111,9 @@ rollback() {
     done
     systemctl reset-failed rrd >/dev/null 2>&1 || true
     systemctl start rrd >/dev/null 2>&1 || true
-    die "已回滚到上一版（该树在 ${ROOT}，二进制备份在 ${binbk}；本次尝试 $(( $(now_ms) - T_STOP ))ms）"
+    die "已回滚到上一版（原因：${why}；该树在 ${ROOT}，二进制备份在 ${binbk}；本次尝试 $(( $(now_ms) - T_STOP ))ms）"
   fi
-  die "首次安装失败且无上一版可回退（新树已删除，本次尝试 $(( $(now_ms) - T_STOP ))ms，请查 journalctl -u rrd）"
+  die "首次安装失败且无上一版可回退（原因：${why}；新树已删除，本次尝试 $(( $(now_ms) - T_STOP ))ms，请查 journalctl -u rrd）"
 }
 
 echo "安装 $top → ${ROOT}（rrd 停机窗口内整树换位）"
@@ -147,8 +149,8 @@ SWAP_MS=$(( $(now_ms) - T_SWAP ))
 # 的半更新态，正是本脚本要消灭的故障面。
 T_BIN=$(now_ms)
 for b in rrd rr3-ctl rr3-ota-ctl; do
-  install -m755 "$ROOT/bin/$b" "$BIN/.$b.new" || rollback
-  mv -f "$BIN/.$b.new" "$BIN/$b" || rollback
+  install -m755 "$ROOT/bin/$b" "$BIN/.$b.new" || rollback "二进制 ${b} 安装失败"
+  mv -f "$BIN/.$b.new" "$BIN/$b" || rollback "二进制 ${b} 换位失败"
 done
 BIN_MS=$(( $(now_ms) - T_BIN ))
 # 先前的崩溃循环会把 StartLimit 打满（Failed to start: start request repeated
@@ -162,7 +164,7 @@ systemctl reset-failed rrd >/dev/null 2>&1 || true
 base_nr=$(systemctl show -p NRestarts --value rrd 2>/dev/null || echo 0)
 base_nr=${base_nr#NRestarts=}
 case $base_nr in (''|*[!0-9]*) base_nr=0 ;; esac
-systemctl start rrd || rollback
+systemctl start rrd || rollback "systemctl start rrd 失败"
 
 # 健康探针：30s 内 rrd 应答 status，且 enabled_slots 的每个模块都 running；
 # 期间 NRestarts 增量即崩溃循环，提前结束窗口（省下的 30s 是排障时间的直接收益）。
@@ -187,10 +189,9 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 if [ -n "$crash" ]; then
-  echo "FAIL  新树 rrd 崩溃重启 ${crash} 次（启动探针 $(( $(now_ms) - T_BOOT ))ms 内即判，不等满 30s）" >&2
-  rollback
+  rollback "rrd 崩溃重启 ${crash} 次（启动探针 $(( $(now_ms) - T_BOOT ))ms 内即判）"
 fi
-[ "$ok" -eq 1 ] || rollback
+[ "$ok" -eq 1 ] || rollback "30s 内未应答 status 或模块未全 running"
 BOOT_MS=$(( $(now_ms) - T_BOOT ))
 
 echo "PASS  新树已就位：$(sed -n 's/^commit=//p' "$ROOT/BUNDLE_VERSION")（停机 ${STOP_MS}ms / 换树 ${SWAP_MS}ms / 二进制 ${BIN_MS}ms / 启动探针 ${BOOT_MS}ms）"

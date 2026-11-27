@@ -340,6 +340,9 @@ rollback_case() {
     printf '%s\n' "$out" >&2
     die "失败信息未点名回滚（rc=${rc}）"
   fi
+  # 回滚行必须自带原因（批270）：板侧常只读最后一行，没原因就得翻整段日志。
+  grep -qE '原因：(rrd 崩溃重启|systemctl start rrd 失败)' <<<"$out" \
+    || die "回滚行未点名原因（最后一行不可归因）"
   grep -qx "commit=$commit" "$ROOT/BUNDLE_VERSION" \
     || die "回滚后装机树不是上一版（BUNDLE_VERSION 漂移）"
   as_root systemctl is-active --quiet rrd || die "回滚后 rrd 未 active"
