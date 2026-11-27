@@ -646,9 +646,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: oras-project/setup-oras@v2
-      - name: 匿名齐套回读（镜像三架构 + 固件，tag 取已发布最新正式版）
+      # 签名面匿名可读（sig tag 是公开仓的普通 tag）：周程顺手把"签了没验"补上，
+      # 身份约束固定 canonical 仓（tools/ci/lib/release-verify.sh 的 SIG_ID_RE）。
+      - uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: "v2.6.5"
+      - name: 匿名齐套回读（镜像三架构 + 固件 + 签名，tag 取已发布最新正式版）
         run: |
           # --tag auto：从 registry 取最新正式 semver tag，避免"VERSION 已 bump、tag 未推"
           # 的发布前窗口把周程打红（见 tools/ci/lib/release-verify.sh 的 rr3_resolve_tag）。
-          bash tools/ci/lib/release-verify.sh --tag auto \
+          bash tools/ci/lib/release-verify.sh --tag auto --with-signature \
             --repo "${{ github.repository }}" --classes image,firmware

@@ -2337,3 +2337,11 @@ md，按 paths-ignore 未触发另两条腿，属预期。本轮三件：cosign 
 顺手订正 README 里残留的"attestation≥2"旧口径（批185 只改了 runbook/ci-workflows）。
 判据——self-test 15/15；匿名实跑 `--tag auto` 末段正确列出镜像 `sha256:07d189…` 与固件
 `sha256:39cc0f…`；⑤⑬⑯ 绿。
+
+**2026-11-27 批193 周程腿启用验签**：事实——批188 把 cosign 验签做进巡检器，但周程
+`release-anon` 没开 `--with-signature`："签了没验"在流水线里仍然成立；签名 tag 本身是
+公开仓的普通 tag（批188 已实测合并镜像与固件的 `.sig` 可匿名读），验签无需凭据。处置——
+周程腿加 `sigstore/cosign-installer@v3`（固定 v2.6.5，与 publish 同版本）并开
+`--with-signature`；身份约束仍由脚本内固定正则把关，不在工作流里放宽。判据——YAML 解析
+过；结构审计绿（ACTIONS 版本矩阵含该动作）；真实 keyless 验证结果以下一次周程/手动
+dispatch 为准，本机未装 cosign，不冒充已验。
