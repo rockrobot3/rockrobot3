@@ -2345,3 +2345,10 @@ md，按 paths-ignore 未触发另两条腿，属预期。本轮三件：cosign 
 `--with-signature`；身份约束仍由脚本内固定正则把关，不在工作流里放宽。判据——YAML 解析
 过；结构审计绿（ACTIONS 版本矩阵含该动作）；真实 keyless 验证结果以下一次周程/手动
 dispatch 为准，本机未装 cosign，不冒充已验。
+
+**2026-11-27 批194 回执签名面边界对齐（无代码改动）**：事实——B.2 第 2 项读起来像
+"五类都该有 cosign 签名"，而 OTA/buildroot 是 ADR-0028 的文件级 `.sig`，不经 cosign；
+巡检器本身只对 image/firmware/distro 调 verify_sig（代码为准），文档未写清边界，回执
+容易被误读成"OTA 未签名 = 发布不合规"。处置——B.2 明确签名面只覆盖三类、OTA/buildroot
+的 `.sig` 不在 cosign 面内；工具代码零改（边界本已正确）。判据——⑤ 文档门绿；
+`check_ota`/`check_buildroot` 无 verify_sig 调用（静态走读）。
