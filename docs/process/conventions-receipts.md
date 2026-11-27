@@ -2232,3 +2232,11 @@ oras 走本作业登录。判据——self-test 7/7（含类别过滤例）；YA
 自检夹具补空壳总账腿、断言 26→28；runbook B 执行段改为总账命令 + v0.0.8 历史例外口径，
 判据与 B.1 的签名状态订正；ci-workflows/conventions/tools-ci README 同步。判据——
 audit self-test 28/28；结构审计绿；⑤⑬⑯ 全绿。
+
+**2026-11-27 批181 本轮收口·四线全绿**：事实——代码头 `221a2b83` 上 gate/integration/
+platforms 均 success，改过 YAML 的 buildroot 在 `0ef9c4df` 也 success（其 release 作业
+只认 tag，未被分支推送误触发）。本轮三件：齐套巡检器建成（178）、接进两条发布流水线
+（179）、进发布面契约与文档（180）。处置——本轮收口；下轮首件＝把巡检器放进周程做
+匿名回读（已发布包公开，防包被删/权限回退），其次补 distro-smoke 的 boot 时延上限判据
+（流畅度基线；本机无板、匿名读不到日志，故用"步骤内计时+保守上限"而非事后取数）。
+判据——四线结论与 run 页一致；audit self-test 28/28、巡检自检 7/7。
