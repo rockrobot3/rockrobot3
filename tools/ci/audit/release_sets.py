@@ -8,7 +8,8 @@
   · 镜像面：stage-image.sh 的两处装机循环、image-smoke.sh 的起齐断言；
   · 板侧包：pack-bundle.sh / pack-arm64.sh 按真值派生、brain 例外。
 任一处偷跑，CI 仍绿而某个载体静默缺件（缺失只在真板装上才暴露）。本脚本只做
-一件事：把这些集合逐项对拍，缺/多都点名。**判据是集合相等**，不是"包含"——
+一件事：把这些集合逐项对拍，缺/多都点名；并核对真值面自身成对——模块 crate
+（Cargo.toml）漏写 module.toml 时它对所有派生的载体都不可见。**判据是集合相等**，不是"包含"——
 新增模块不入选发布集，必须显式改策略，不许默默漏。
 
 用法：
@@ -56,6 +57,21 @@ def diff(want, got):
         bad.append("缺 " + "/".join(miss))
     if extra:
         bad.append("多 " + "/".join(extra))
+    return bad
+
+
+def check_pairing(root, truth):
+    """模块目录成对：Cargo.toml 与 module.toml 必须同在（真值面自身的盲区）。
+
+    新建模块 crate 却漏写 module.toml → 真值派生的每个载体都看不见它，流水线全绿，
+    装上板才发现少一个模块；反向（只有 module.toml）则是清单指向不存在的 crate。
+    """
+    crates = sorted(p.parent.name[len("rr3-"):] for p in root.glob("modules/rr3-*/Cargo.toml"))
+    bad = []
+    for m in sorted(set(crates) - set(truth)):
+        bad.append(f"modules/rr3-{m} 有 Cargo.toml 但缺 module.toml（打包面不可见，载体静默缺件）")
+    for m in sorted(set(truth) - set(crates)):
+        bad.append(f"modules/rr3-{m} 有 module.toml 但缺 Cargo.toml（清单指向不存在的模块）")
     return bad
 
 
@@ -140,6 +156,7 @@ def check(root):
         return ["仓内没有任何 modules/rr3-*/module.toml（真值缺席，无法对拍）"]
     policy = list(PUBLISH_MODULES)
     bad = check_policy(policy, truth)
+    bad.extend(check_pairing(root, truth))
     specs = (
         (".github/workflows/publish.yml", lambda t: check_publish_yml(t, policy)),
         ("tools/deploy/stage-image.sh", lambda t: check_stage_image(t, policy)),
@@ -209,6 +226,7 @@ def _fixture(tmp, mods=("act", "brain", "connect", "interact", "sense", "power")
         d = root / "modules" / f"rr3-{m}"
         d.mkdir(parents=True, exist_ok=True)
         (d / "module.toml").write_text(f'[module]\nname = "rr3-{m}"\n', encoding="utf-8")
+        (d / "Cargo.toml").write_text(f'[package]\nname = "rr3-{m}"\n', encoding="utf-8")
     for rel, body in FIX_FILES.items():
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -248,24 +266,34 @@ def selftest():
         root_g = _fixture(pathlib.Path(base) / "new-mod",
                           ("act", "brain", "connect", "interact", "sense", "power", "guard"))
         ok &= _expect(check(root_g), "发布策略", "新增模块未入发布策略")
-    print("PASS  发布面清单自检通过（1 正例 / 6 负例）" if ok else "FAIL  发布面清单自检未通过")
+        root_p = _copy(root, pathlib.Path(base) / "pair")
+        (root_p / "modules" / "rr3-ghost").mkdir(parents=True, exist_ok=True)
+        (root_p / "modules" / "rr3-ghost" / "Cargo.toml").write_text(
+            '[package]\nname = "rr3-ghost"\n', encoding="utf-8")
+        ok &= _expect(check(root_p), "缺 module.toml", "模块 crate 漏写 module.toml")
+    print("PASS  发布面清单自检通过（1 正例 / 7 负例）" if ok else "FAIL  发布面清单自检未通过")
     return 0 if ok else 1
 
 
-def _mutate(root, dst, name, token):
-    """复制夹具并削掉目标文件里的一个模块名（模拟漂移），返回新根。"""
+def _copy(root, dst, mutate=None):
+    """复制夹具到 dst；mutate=(文件名片段, 模块名) 时削掉该名（模拟清单漂移）。"""
     for rel in FIX_FILES:
         p = dst / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         text = (root / rel).read_text(encoding="utf-8")
-        if name in rel:
-            text = re.sub(r"\b" + token + r"\b", "", text)
+        if mutate and mutate[0] in rel:
+            text = re.sub(r"\b" + mutate[1] + r"\b", "", text)
         p.write_text(text, encoding="utf-8")
-    for p in root.glob("modules/rr3-*/module.toml"):
+    for p in root.glob("modules/rr3-*/*.toml"):
         d = dst / p.parent.relative_to(root)
         d.mkdir(parents=True, exist_ok=True)
-        (d / "module.toml").write_text(p.read_text(encoding="utf-8"), encoding="utf-8")
+        (d / p.name).write_text(p.read_text(encoding="utf-8"), encoding="utf-8")
     return dst
+
+
+def _mutate(root, dst, name, token):
+    """复制夹具并削掉目标文件里的一个模块名（模拟漂移），返回新根。"""
+    return _copy(root, dst, (name, token))
 
 
 def main():

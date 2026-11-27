@@ -2746,3 +2746,12 @@ stage-image:49/57、image-smoke:80 各命中真实循环）。本轮不接 check
 对拍章节与"暂未接"表述同批订正。判据——`gate_steps_audit.py` PASS（30 步逐字同序）；
 `workflows_audit.py` PASS；`bash -n` 两脚本通过；⑰ 单步执行 PASS（真值 6 · 策略 6 ·
 镜像同集 · 派生 5）；⑤ 文档门与 ⑯ 行数门绿（752 源文件、硬线 0）。
+
+**2026-11-28 批253 真值面成对（⑰ 扩面）**：事实——模块真值 = `modules/rr3-*/module.toml`
+的 glob；新建模块 crate 却漏写 `module.toml` 时，真值、发布策略、镜像、板侧包**四处
+同时看不见它**，流水线全绿，装上板才发现少一个模块——⑰ 此前只对拍"已有清单之间"，
+未核真值面自身完整性。处置——`release_sets.py` 增成对判据（`Cargo.toml` 与
+`module.toml` 缺一即点名，双向），并入同一门 ⑰（不新增门号）；夹具补 Cargo.toml 并加
+第 7 条负例（ghost crate）。判据——`--self-test` 8/8 绿；真仓对拍 PASS（6/6/同集/派生 5）；
+真文件镜像注入 `modules/rr3-ghost/Cargo.toml` 后 ⑰ 点名"缺 module.toml"退 1；
+⑯ 行数门 PASS（脚本 318 行）。
