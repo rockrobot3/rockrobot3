@@ -1959,3 +1959,23 @@ firmware job 的 checkout 之后补一步调同一 `release-tag.sh`（不引第�
 制品出口全覆盖；ci-workflows 执法点描述同步。判据——`release-tag.sh --self-test` 六例
 全过；`grep -c 'release-tag.sh "${...event_name}..."' publish.yml` = 4（build /
 build-riscv64 / merge / firmware）；`workflows_audit` PASS。发布面真跑归下次正式 tag。
+
+**2026-11-27 批143 S3 真值集成员机械钉**：事实——批140 只做了静态对表（成员名单由
+`rr3_truth_names` 生成、八名文件在树），没有用例保证"真仓 S3 档打包时这些成员不会
+缺"。处置——`tools/rr3-pack/src/tests/profile.rs` 新增 `s3_truth_members_exist`：
+读真仓 `profiles/esp32s3-mini.toml` → `rrd::profile::rr3_profile_parse` →
+`rr3_truth_set` → 逐成员断言 `is_file` / `is_dir`（不引第二份清单）。判据——本地
+`cargo test -p rr3-pack profile` 4 条全绿；gate ④ 同测试集在 CI 真跑。
+
+**2026-11-27 批144 dispatch 手输标签旁路封堵**：事实——`release-tag.sh` 对
+`workflow_dispatch` 按非发布事件处理（手输标签原样给，不判 VERSION 同源），而
+firmware job 的 `if` 只判 `refs/tags/v`：在 tag ref 上手触 dispatch 时，版本门
+（批142 补的那步）会原样放行输入标签，firmware 仍可推——残留旁路。处置——
+`firmware.if` 增 `github.event_name == 'push'`：发布 artifact 只从 tag 推送出，
+手动窗口只服务 edge 镜像。判据——`workflows_audit` PASS；`release-tag.sh --self-test`
+六例仍全过（dispatch 语义不变，改的是 job 入口条件）。
+
+**2026-11-27 批145 deploy README 与发布集产物名对表（无改动）**：事实——
+`tools/deploy/README.md`（即随包 FLASHING.md）列出的七件与 `fw-set.sh` 产物名逐字一致
+（两只 ELF / 两只 bootloader / `rr3-partitions.csv` / `firmware-sha256.txt` / FLASHING.md），
+烧录命令与 `flash-artifact.sh` 参数对得上。处置——零改动。
