@@ -2017,3 +2017,22 @@ ADC1 GPIO1）——逐组相等。处置——零改动（README 不抄引脚是
 `rr3-esp32-safe-merged.bin` / `rr3-esp32s3-full-merged.bin` 与 `publish.yml` 的
 `--out` 名逐字一致；`image-esp32.sh` 的缺省名只在未给 `--out` 时生效，发布面显式传名；
 `fw-set.sh` 七件名与 README 一致。处置——零改动。
+
+**2026-11-27 批152 漂移门真仓 S3 树干跑（结论行补 hardware）**：事实——批149 只在夹具里
+证明 hardware 面进清单；结论行仍只列"模块 config/装配单/unit/板级资产"，运维看不出
+wiring/axis 也在比对面。处置——结论行补"hardware 真值集"；用 `cp` 搭 /tmp 装机树
+（13 件：模块 config 6 + 装配单 + unit + wiring + 双轴档）跑 `--local --profile
+esp32s3-mini`：**13 件 0 漂移**；篡改 `axis/pan.toml` 后按 `DRIFT` 退 1 并点名两枚 sha。
+判据——正例 rc=0、反例 rc=1；`--self-test` 9 例仍全过；gate ⑥b 真跑。
+
+**2026-11-27 批153 烧录/镜像脚本参数与 README 对表（无改动）**：事实——
+`flash-artifact.sh` 支持 `<elf> [--chip esp32|esp32s3] [--bootloader] [--port] [--monitor]`，
+README 三条命令用的正是这些；`image-esp32.sh` 支持 `[--release] [--elf] [--chip]
+[--flash-size] [--out] [--bootloader] [--partitions]`，publish 的 `--out/--chip/
+--flash-size/--partitions/--bootloader` 全在表内；README 的裸 espflash 段用
+`--partition-table` 属 espflash 自身参数，不是本仓脚本。处置——零改动。
+
+**2026-11-27 批154 真值集两处测试分工复核（无改动）**：事实——rrd `runtime_set_pinned`
+钉**成员名单形状**（distro 精确向量、esp32-mini 的 chip 选册成员与 dirs），
+rr3-pack `s3_truth_members_exist` 钉**真仓 S3 成员存在**（八文件 + axis 目录）；两者
+一个管"名单长什么样"、一个管"名单指的件在不在"，无重复口径也不冲突。处置——零改动。
