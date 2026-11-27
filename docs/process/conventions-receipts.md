@@ -2889,3 +2889,12 @@ diff 0 行），不做"留着也许有用"的复杂度留存。判据——insta
 ② 批266 11-30 03:00 UTC `release-anon` 首跑归因（窗口未到不预写；红按镜像/固件/签名
 分类定位，绿则首份匿名回执入册）；③ 批267 distro 首发后 `--deep` / B.2 实测与
 `distro` 类纳入匿名回读的裁定；④ 批268 三线收口与再拟下轮。
+
+**2026-11-28 批265 install-smoke 三段时延上限门**：事实——批221 起三段时延只有测量
+没有门：回滚从 32619ms 降到 ~4.4s 后，将来回涨到 30s 也无人拦（distro-smoke 有上限，
+install-smoke 没有）。处置——新增 `tt_ceiling`（超限 `die` 并打印实测/上限），三段上限
+boot 10000 / swap 10000 / rollback 15000ms（约 3-5 倍余量，只拦回涨），常量旁标注
+四拍基线（4359/4374/4453/4513 等）；notice 同步带上限，公开面直接可判。判据——
+commit `0d2e03f8`：integration success，install-smoke job `140736807175` 注解
+`boot=2118ms/上限 10000ms`、`窗口=2545ms/上限 10000ms`、`恢复=3903ms/上限 15000ms`，
+三段全在限内；distro-smoke 同拍 success。
