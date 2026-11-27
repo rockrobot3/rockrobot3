@@ -2969,3 +2969,18 @@ install-bundle 输出提取"原因：…"并入 `install-smoke-rollback` 注解�
 必含原因（缺则红），防止未来退化成无归因。判据——commit `9753f414`：install-smoke
 job `140759568395` success，公开注解逐字含"原因：rrd 崩溃重启 1 次（启动探针 2053ms
 内即判）"；本拍 boot 2091/10000、换树 2315/10000、回滚 4356/15000。
+
+**2026-11-28 批273 本轮收口（回滚原因公开可读）**：事实——回滚原因已进公开注解，
+外部回执不再需要登 runner 读日志；本拍三段 2091/2315/4356ms 均在上限内，boot_systemd
+近四拍 1651-2685ms 波动约 1.6 倍，上限 10000ms 留 3.7 倍余量，暂不收紧。窗口复核
+未变：`release-anon` runs=0（11-30 未到）、v0.0.8 无 distro。判据——`9753f414` 三线
+全绿（gate / integration / platforms 均 success），文档提交 `de6e880b` gate success；
+三远端同指 `de6e880b`。
+
+**2026-11-28 批273 下轮任务拟定**：① 批274 `install-bundle.sh` 补 ERR trap——该脚本
+无 ERR 陷阱，`set -e` 下的裸命令失败（如 chmod/install 之外的意外）只会以退出码
+结束，板侧看不到失败命令；按 install-smoke 批245 同款先打 `FAIL 意外退出：<命令>`
+再退出，并在 install-smoke 断言该能力可用（构造一次预期外失败的成本高，改为静态：
+trap 行存在且语法过）；② 批275 11-30 03:00 UTC `release-anon` 首跑归因（红按镜像/
+固件/签名三类定位，绿则首份匿名回执入册）；③ 批276 distro 首发后 `--deep` / B.2
+实测与 `distro` 类匿名回读裁定；④ 批277 三线收口与再拟下轮。
