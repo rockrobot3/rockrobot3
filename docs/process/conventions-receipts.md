@@ -2772,3 +2772,20 @@ notice 的回滚用时与失败行。② 批256 ⑰ 阈值断言收紧为 `[ "$n
 （别处 `-eq 6` 不得掩盖计数漂移）+ 负例。③ 批257 11-30 03:00 UTC release-anon 首跑
 归因；distro 首发后评估把 `distro` 类纳入匿名回读（现在纳入会对 v0.0.8 假红）。
 ④ 批258 三线收口与再拟下轮。铁律不变：每步 commit+push 三远端并查漂红。
+
+**2026-11-28 批255 坏包回滚早停（NRestarts 增量）**：事实——install-smoke 回滚用时
+32619ms 中 30s 是固定健康探针窗口：坏 rrd 起不来、`rr3-ctl` 永不应答，而 unit 在
+`Restart=always` 下已反复重启——结论早已确定，窗口只是在计时。处置——`install-bundle.sh`
+在 `reset-failed` 后记 `NRestarts` 基线，探针每秒读增量：涨了即"新树崩溃"，立即回滚并
+打印 `FAIL 新树 rrd 崩溃重启 N 次（启动探针 Xms 内即判，不等满 30s）`；成功路径不受影响
+（正常启动计数不涨）。判据——commit `ee9d7bdf`：gate `46056257563` success、integration
+`46056257566` success；install-smoke 公开 notice 实测 `rollback_ms=4513`（本次尝试
+2205ms，旧 32619ms，降 86%），同拍 `boot_systemd_ms=2137`、`bundle_swap_ms=2449`
+（停机 26 / 换树 7 / 二进制 21 / 启动探针 1773ms）——成功路径无回归，六条 notice 齐。
+status.md 第 29 行按实测值订正。
+
+**2026-11-28 批256 下轮任务拟定**：① ⑰ 阈值断言收紧为 `[ "$n" -eq N ]` 精确形状
+（别处 `-eq 6` 不得掩盖计数漂移）+ 一条"无关 -eq 6 遮蔽"负例；② 三线收口复核
+（gate/integration/platforms on `ee9d7bdf` 全绿后回执）；③ 11-30 03:00 UTC
+release-anon 首跑归因窗口（今日 11-28 未到，不得预写结论）；④ distro 首发后
+`--deep` / B.2 实测与 `distro` 类纳入匿名回读的裁定；⑤ 再拟下轮。
