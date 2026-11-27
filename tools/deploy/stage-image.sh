@@ -24,7 +24,11 @@ cd "$root"
 
 out="${1:-}"
 arch="${2:-}"
-ver="${3:-$(cat VERSION)}"
+# 版本读法与发布面同源（tools/ci/lib/release-tag.sh 的 rr3_version_value）：
+# 缺省读仓根 VERSION，格式不是 X.Y.Z 即点名退出——不在每个脚本各写一套正则。
+# shellcheck source=../ci/lib/release-tag.sh
+. tools/ci/lib/release-tag.sh
+ver="${3:-$(rr3_version_value)}"
 if [ -z "$out" ] || [ -z "$arch" ]; then
   echo "用法: $0 <stage-out> <arch> [version]" >&2
   exit 1

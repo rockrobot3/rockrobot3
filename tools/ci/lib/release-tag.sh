@@ -11,13 +11,23 @@
 #   bash tools/ci/lib/release-tag.sh <事件名> <ref> <ref 名> <手输标签>
 # 前三参取 GITHUB_EVENT_NAME / GITHUB_REF / GITHUB_REF_NAME，第四参是 workflow_dispatch
 # 的 inputs.tag（其余事件传空）。任一判据不成立即非 0 退出，不打输出。
-rr3_release_tag() {
-  local event="$1" ref="$2" ref_name="$3" dispatch_tag="${4:-}" ver tag base subject
+# 读仓根 VERSION 并校验 X.Y.Z（唯一读法：trim 后只认三段数字）。
+# 发行与部署脚本共用它，避免"某处 cat VERSION、某处另写一套正则"两套口径：
+# VERSION 一旦带后缀（rc/日期），各脚本的拼名与 tag 判定就会各说一套。
+# 用法：v="$(rr3_version_value)" || return 1
+rr3_version_value() {
+  local ver
   ver="$(tr -d '[:space:]' < VERSION)"
   if [[ ! "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     printf 'ERROR: VERSION 不是 X.Y.Z：%s\n' "$ver" >&2
     return 1
   fi
+  printf '%s\n' "$ver"
+}
+
+rr3_release_tag() {
+  local event="$1" ref="$2" ref_name="$3" dispatch_tag="${4:-}" ver tag base subject
+  ver="$(rr3_version_value)" || return 1
   if [ "$event" = "workflow_dispatch" ]; then
     tag="$dispatch_tag"
   elif [[ "$ref" == refs/tags/* ]]; then

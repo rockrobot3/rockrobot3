@@ -30,7 +30,10 @@ if [ "${1:-}" = "--push" ]; then
   shift
 fi
 tag="${1:-rr3-riscv-image:local}"
-ver="${RR3_VER:-$(cat VERSION)}"
+# 版本读法与发布面同源（见 stage-image.sh 同段注）
+# shellcheck source=../ci/lib/release-tag.sh
+. tools/ci/lib/release-tag.sh
+ver="${RR3_VER:-$(rr3_version_value)}"
 target="riscv64gc-unknown-linux-gnu"
 # 目标平台显式选择：发布腿在 amd64 runner 上拉回 riscv64-only 索引，docker pull/run
 # 不带 --platform 会按宿主平台挑清单而失败（amd64/arm64 腿宿主匹配，故只有 riscv 腿暴露）。
