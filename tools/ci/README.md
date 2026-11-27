@@ -124,8 +124,10 @@ CI 单一事实源在 [`.github/workflows/`](../../.github/workflows)（gate / p
 distro 两件与 artifactType、OTA 六件（含 `keys/*.pub`）、buildroot 四件；缺件/不合规
 逐项点名并打印 digest，不发写请求。`--classes` 供两条发布流水线分账（publish 核
 image/firmware/distro，buildroot 核 ota/buildroot），默认五类给操作者做发版总检。
-`--self-test` 用假 oras + manifest 夹具跑七例（含类别过滤与拼错即拒），在 gate 的
-scripts 步实跑；实仓回读要 ghcr 凭据，归 tag 回执窗口（runbook B）。
+退出码：`0` 所选类别齐套 / `1` 缺件或不合规 / `2` 用法错误或取数失败（凭据/网络/
+包不可见——"看不到"不等于"没有"，按未定处理，不与缺件混成同一结论）。
+`--self-test` 用假 oras + manifest 夹具跑八例（含类别过滤、取数失败报未定、拼错即拒），
+在 gate 的 scripts 步实跑；实仓回读要 ghcr 凭据，归 tag 回执窗口（runbook B）。
 
 ## 构建失败归因入口：`log-digest.sh`
 

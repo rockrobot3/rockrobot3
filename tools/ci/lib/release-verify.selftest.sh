@@ -12,6 +12,7 @@ rv_main="$rv_lib/release-verify.sh"
 rv_stub() {
 	local dir="$1"
 	printf '%s\n' '#!/usr/bin/env bash' \
+		'[ "${RR3_ORAS_FAIL:-}" = 1 ] && { echo "401 Unauthorized" >&2; exit 1; }' \
 		'ref="${3:-}"' \
 		'case "$ref" in' \
 		'  *rockrobot3-firmware:*) f=firmware.json ;;' \
@@ -74,6 +75,24 @@ rv_class_case() {
 	return 1
 }
 
+# 取数失败（批183）：401/网络错误必须报"未定"（退出 2），不能与"缺件"混成同一结论。
+rv_fetch_fail_case() {
+	local d out rc
+	d=$(mktemp -d)
+	mkdir -p "$d/bin"
+	rv_stub "$d"
+	python3 "$rv_lib/release-verify.fixture.py" "$d/fix" none >/dev/null
+	out=$(RR3_ORAS_FAIL=1 FIX="$d/fix" PATH="$d/bin:$PATH" bash "$rv_main" --tag v0.0.8 2>&1)
+	rc=$?
+	rm -rf "$d"
+	if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q '取数失败'; then
+		printf 'PASS  self-test/取数失败报未定（退出码 2）\n'
+		return 0
+	fi
+	printf 'FAIL  self-test/取数失败报未定（期望 2/取数失败 实得 %d）\n' "$rc"
+	return 1
+}
+
 # 用法面：非正式版 tag 必须在取数之前拒绝（退出 2）。
 rv_usage_case() {
 	local rc
@@ -95,6 +114,7 @@ rr3_rv_self_test() {
 	rv_case 固件缺引导红 1 fw-boot "固件 缺层：rr3-bootloader-esp32-dev.bin" || fail=1
 	rv_case 证明面不足红 1 attest "attestation=1" || fail=1
 	rv_class_case || fail=1
+	rv_fetch_fail_case || fail=1
 	rv_usage_case || fail=1
 	[ "$fail" -eq 0 ] || return 3
 	return 0

@@ -9,7 +9,8 @@
 #
 # 用法：release-verify.sh --tag vX.Y.Z [--repo owner/name] [--classes image,firmware,distro,ota,buildroot]
 #       release-verify.sh --self-test
-# 判据：0 五类全齐且成员/证明面合规 / 1 有缺件或不合规（逐项点名） / 2 用法错误
+# 判据：0 所选类别全齐且成员/证明面合规 / 1 有缺件或不合规（逐项点名）
+#       2 用法错误，或取数失败（凭据/网络/包不可见——"看不到"不等于"没有"，未定）
 # 依赖：oras（按 docker 登录凭据读私有包）、python3；本脚本不登录、不推送。
 set -uo pipefail
 
@@ -23,6 +24,7 @@ OWNER="rockrobot3"
 CLASSES="image,firmware,distro,ota,buildroot"
 WORK=""
 FAILS=0
+FETCH_FAILS=0
 
 # 类别过滤：publish 与 buildroot 两条流水线各自只产一半，tag 窗口不能用"全齐"卡
 # 对方的产物（buildroot 是小时级，晚于 publish）。默认五类，操作者用全量口径。
@@ -53,7 +55,8 @@ fetch() { # <ref> <out>
 		ok "取回 ${ref}"
 		return 0
 	fi
-	bad "取数失败 ${ref}：$(printf '%s' "$err" | head -n 1)"
+	FETCH_FAILS=$((FETCH_FAILS + 1))
+	printf 'FAIL  取数失败 %s：%s\n' "$ref" "$(printf '%s' "$err" | head -n 1)"
 	return 1
 }
 
@@ -191,6 +194,12 @@ rr3_run() {
 	has_class ota && check_ota
 	has_class buildroot && check_buildroot
 	printf '\n'
+	# "看不到"与"没有"必须分开：鉴权/网络失败时打"不齐"会把操作者引去查制品，
+	# 而真正要修的是凭据。取数失败只要有一处，整份结论就是未定（退出 2）。
+	if [ "$FETCH_FAILS" -ne 0 ]; then
+		echo "结论：取数失败 ${FETCH_FAILS} 处（凭据/网络/包不可见），另有不合规 ${FAILS} 处——未定（tag=${TAG}）"
+		return 2
+	fi
 	if [ "$FAILS" -ne 0 ]; then
 		echo "结论：发布面不齐/不合规 ${FAILS} 处（tag=${TAG}）"
 		return 1
