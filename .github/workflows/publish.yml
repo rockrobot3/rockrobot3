@@ -277,6 +277,12 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v7
+      # 版本门（2026-11-27 批142 补齐）：本 job 与 build 腿并行且只判 refs/tags/v，
+      # 若不在这里调版本门，一个与 VERSION 不同源/未指向 release 提交的 v* 标签
+      # 会让 build 腿红、firmware 腿照推——发布面版本纪律被绕开。同一单点
+      # release-tag.sh，四个出制品出口（build/build-riscv/merge/firmware）全覆盖。
+      - name: 版本门（tag 与 VERSION 同源且指向 release 提交）
+        run: bash tools/ci/lib/release-tag.sh "${{ github.event_name }}" "${{ github.ref }}"
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.100.0"
