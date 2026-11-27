@@ -61,16 +61,6 @@ name = "spidev0"
 kind = "spi"
 channels = 1
 
-[construction]
-# 具名构造表（W4/P0-C 回填，批N43）：键 = (controller, role, instance) 三元串
-# （⑧-a 定形；非 per_instance 角色第三段留空）。值 = 板侧具名构造路径。
-# Pi-as-board 只有双轴舵机一条构造：pwmchip0 的 channel 0/1（见 profiles/
-# pi4b-board.toml [[pin]]），板侧由 tools/pi-periph-base 的 Linux sysfs PWM
-# 端口实现（"sysfs-pwm" = rr-hal linux_pwm 同形路径：period 20ms、先 export
-# 再 enable；构造名不是 rr-hal 符号，rtos 档不经宿主派生、不混淆两档）。
-"pwm0:act.axis.pwm:pan" = "sysfs-pwm"
-"pwm0:act.axis.pwm:tilt" = "sysfs-pwm"
-
 [capabilities]
 # 本芯片无片上 ADC，模拟测点须外挂（实测 0008.md：模拟测点候选 ADS1115@0x48
 # 在 i2c1 上无应答，属缺件；§4.6 裁定②"空集须显式"）。
@@ -83,6 +73,16 @@ input_only_pins = []
 no_open_drain = []
 # 取值规则集不写枚举（§4.6）；platform.rs 只认在册规则名。
 output_capable_pins = "complement(input_only_pins)"
+
+[construction]
+# 具名构造表（W4/P0-C 回填，批N43）：键 = (controller, role, instance) 三元串
+# （⑧-a 定形；非 per_instance 角色第三段留空）。值 = 板侧具名构造路径。
+# Pi-as-board 只有双轴舵机一条构造：pwmchip0 的 channel 0/1（见 profiles/
+# pi4b-board.toml [[pin]]），板侧由 tools/pi-periph-base 的 Linux sysfs PWM
+# 端口实现（"sysfs-pwm" = rr-hal linux_pwm 同形路径：period 20ms、先 export
+# 再 enable；构造名不是 rr-hal 符号，rtos 档不经宿主派生、不混淆两档）。
+"pwm0:act.axis.pwm:pan" = "sysfs-pwm"
+"pwm0:act.axis.pwm:tilt" = "sysfs-pwm"
 
 [controller_wordform]
 # host 词形派生表（实-6 (a)，批N4 件七）：键 = 词形派生物理键（封闭四值），
