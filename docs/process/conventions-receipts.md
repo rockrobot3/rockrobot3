@@ -2498,3 +2498,27 @@ integration run `46017650574` / job `140568786079` success，注解三条逐字�
 systemd unit 拉起成立，六模块 running"、"换树成功 commit=b88542d88256，六模块 running"、
 "坏包回滚成立 rc=1（树与二进制已回上一版，六模块 running）"；同提交 gate 六 job success；
 ⑤⑬⑯、度量与流水线审计自检全绿；仓源零改（sim 变换只在装机副本与 bundle 解包副本）。
+
+**2026-11-27 批218 装机正例保真化与漂移门正例**：事实——批217 的换树载荷是解包副本（profile
+改 sim 后重打包），验的不是发布面那一份；且 `verify-board-config` 只有自检与真板远端，从无
+"刚装完的机器"本地正例。处置——sim 环境整体移到部署面：`/etc/rockrobot3` 下铺同形副本
+（profiles/distro.toml 改 sim、hardware/distro/wiring.toml 拷贝、modules/contracts 链回装机树），
+unit 用 drop-in 重写 ExecStart 的 `--profile` 指向副本并注入 RR3_PROBE=sim / RR3_BRAIN_CLOUD=mock；
+bundle 走 pack-bundle 原样出包、原样换树，换树后跑 `verify-board-config.sh --local` 判一致。
+审计修两处：① 部署副本一度只拷 profile——rrd 由装配单两级父目录推导 modules-root，缺
+modules/contracts 直接拒 boot（首跑 `rrd 未 active`），补链并把 journal 根因收进 die 文案
+（`unit_reason`），故障不再只剩一行"未 active"；② `die` 走 exit 不经 ERR trap，现场没被打出来
+——die 现在先 dump 再退。判据——integration run `46022059197` / job `140583907566` success
+（2m14s），四条 notice 逐字："deb 装机 + systemd unit 拉起成立，六模块 running"、"换树成功
+commit=b964890b16d6，六模块 running"、"真包换树后装机面漂移门判一致（仓/装机逐字节）"、"坏包
+回滚成立 rc=1（树与二进制已回上一版，六模块 running）"；同提交 gate success；bash -n、⑤⑬⑯、
+度量与流水线审计自检绿。
+
+**2026-11-27 批219-220 窗口复核与本轮收口**：事实——`release-anon` 工作流 active 但 runs 总数 0
+（cron 首跑 2026-11-30 03:00 UTC 未到，今日 2026-11-27）；GitHub releases 最新仍 v0.0.8，资产仅
+ESP32 固件七件，无 distro bundle——`--deep` 深检与 B.2 签名实测均无真包可验，按登记不冒充。
+处置——本轮交付 install-smoke 两批（217 正例/回滚 + 218 真包/漂移门）收口；下轮四件：①
+install-smoke 时延回传（systemd 拉起与换树窗口的 boot→六模块用时、回滚恢复用时，给敞口 29
+补第二载体）；② 11-30 后 release-anon 首跑归因；③ distro 首发后 `--deep` 与 B.2 实测；④
+装机面漂移门负例（真装机树上改一件 config 期望 DRIFT，验完还原）与三线收口。判据——三线在
+`b964890b` 上 gate / integration / platforms 三线 success；⑤⑬⑯、度量与流水线审计自检绿。
