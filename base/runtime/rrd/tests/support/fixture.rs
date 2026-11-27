@@ -122,22 +122,30 @@ pub fn rr3_module_manifest_text(name: &str, bin: &Path) -> String {
     rendered
 }
 
+/// 旁观连接注册（命名单点）：测试端注册后**不喂狗**，服务端读静默上界 = 2 ×
+/// watchdog_ms（`conn/read.rs`）——100/500 的窗口会在 1s 后把整条连接回收，跨秒
+/// 等待外部进程的用例慢一拍就在 `rr3_read_state` 读到 EOF（2026-11-27 gate 的
+/// `killed_eof_skipped` 偶发红即此）。所有"只旁观、不喂狗"的测试端都走这里，
+/// 窗口放大到用例寿命之外（hb < wd 是校验硬规）。
+fn rr3_register_observer(rrd: &RrdTest, name: &str) -> (RrdClient, Value) {
+    let mut c = rrd.rr3_connect();
+    rr3_send(
+        &mut c,
+        &rr3_register_frame(&rr3_manifest(name, 3_600_000, 3_600_001, "never"), name),
+    );
+    let v = rr3_read_rpc(&mut c);
+    (c, v)
+}
+
+/// 旁观连接：注册一个命名的测试端并消费注册回执，返回可直接读广播的客户端。
+pub fn rr3_connect_as(rrd: &RrdTest, name: &str) -> RrdClient {
+    rr3_register_observer(rrd, name).0
+}
+
 /// 旁观连接：注册一个最小模块身份，专收广播与转发（sim_peer 用例的同一口径）。
 /// 返回 (客户端, 本旁观者分配的 task 号)。
 pub fn rr3_connect_observer(rrd: &mut RrdTest) -> (RrdClient, u64) {
-    let mut obs = rrd.rr3_connect();
-    // 裸测试客户端**不喂狗**（没有心跳线程），而本用例的 rrd 以 E2E_TICK_MS=20ms 扫表：
-    // 默认 100/500ms 的观察者注册后 ~0.5s 就被 watchdog 判死摘册——之后 pcm 广播不再投它、
-    // rr3.call 以"调用方已不在册"被拒，症状是"恰收到 1 帧 registered 通知后永久静默"。
-    // 心跳/看门狗窗口放大到用例寿命之外（hb < wd 是校验硬规），判据是"别在用例中途死"。
-    rr3_send(
-        &mut obs,
-        &rr3_register_frame(
-            &rr3_manifest("rr3-obs", 3_600_000, 3_600_001, "never"),
-            "rr3-obs",
-        ),
-    );
-    let v = rr3_read_rpc(&mut obs);
+    let (obs, v) = rr3_register_observer(rrd, "rr3-obs");
     let task = v["result"]["src_task"]
         .as_u64()
         .unwrap_or_else(|| panic!("注册应答缺 src_task: {v}"));

@@ -15,15 +15,11 @@ use rr_ipc::{rr3_body_split, Rr3PayloadType};
 use std::time::Duration;
 use support::*;
 
-/// simb 旁观连接上线（两处同款）：注册旁观者并消费注册回执
+/// simb 旁观连接上线（两处同款）：注册旁观者并消费注册回执。
+/// 走 `rr3_connect_as` 的长窗口——旁观端不喂狗，500ms 窗口会在 1s 后把连接
+/// 回收（服务端静默上界 2×watchdog），外部 peer 启动慢一点就会误红。
 fn connect_simb(rrd: &RrdTest) -> RrdClient {
-    let mut b = rrd.rr3_connect();
-    rr3_send(
-        &mut b,
-        &rr3_register_frame(&rr3_manifest("rr3-simb", 100, 500, "always"), "rr3-simb"),
-    );
-    rr3_read_rpc(&mut b);
-    b
+    rr3_connect_as(rrd, "rr3-simb")
 }
 
 /// 真进程完成握手、task 取自 rrd 的应答（不是自设），心跳被连续接受
@@ -93,13 +89,8 @@ fn sim_peer_pub_conn() {
 fn sim_exit_restart() {
     let mut rrd = RrdTest::rr3_start("e2e-clean");
 
-    // 同上：收广播的连接必须在夹具退场之前就已在册
-    let mut b = rrd.rr3_connect();
-    rr3_send(
-        &mut b,
-        &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
-    );
-    rr3_read_rpc(&mut b);
+    // 同上：收广播的连接必须在夹具退场之前就已在册（长窗口，不喂狗也不会被回收）
+    let mut b = rr3_connect_as(&rrd, "rr3-sima");
 
     let manifest = rr3_fixture_manifest("clean", "simb"); // never 策略
     let mut peer = SimPeer::rr3_start(&rrd.socket, &manifest, "exit_clean");
