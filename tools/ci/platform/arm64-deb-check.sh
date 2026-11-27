@@ -71,19 +71,19 @@ pack_deb() {
 
 # control 三字段：包名、架构、版本。
 assert_control() {
-  local got
-  got=$(dpkg-deb -f "$DEB" Package) || die "dpkg-deb 读 control 失败"
+  local deb="$1" got
+  got=$(dpkg-deb -f "$deb" Package) || die "dpkg-deb 读 control 失败"
   [ "$got" = rockrobot3 ] || die "Package=${got}（期望 rockrobot3）"
-  got=$(dpkg-deb -f "$DEB" Architecture)
+  got=$(dpkg-deb -f "$deb" Architecture)
   [ "$got" = "$ARCH" ] || die "Architecture=${got}（期望 ${ARCH}）"
-  got=$(dpkg-deb -f "$DEB" Version)
+  got=$(dpkg-deb -f "$deb" Version)
   [ "$got" = "$(cat VERSION)" ] || die "Version=${got}（期望 $(cat VERSION)）"
 }
 
 # 包内清单：三入口、unit、四册、平台册、接线档、六模块各三件（逐件点名）。
 assert_tree() {
-  local list b m f
-  list=$(dpkg-deb -c "$DEB") || die "dpkg-deb -c 失败"
+  local deb="$1" list b m f
+  list=$(dpkg-deb -c "$deb") || die "dpkg-deb -c 失败"
   for b in usr/bin/rrd usr/bin/rr3-ctl usr/bin/rr3-ota-ctl \
     usr/lib/systemd/system/rrd.service; do
     grep -q " ./$b\$" <<<"$list" || die "deb 缺 $b"
@@ -103,11 +103,11 @@ assert_tree() {
 
 # 解包后断言：unit 的 --profile 指向装机位、postinst 可执行、九件二进制全 aarch64。
 assert_content() {
-  local tmp m b line
+  local deb="$1" tmp m b line
   tmp="$WORK/x"
   rm -rf "$tmp" "$WORK/ctl"
-  dpkg-deb -x "$DEB" "$tmp" || die "dpkg-deb -x 失败"
-  dpkg-deb -e "$DEB" "$WORK/ctl" || die "dpkg-deb -e 失败"
+  dpkg-deb -x "$deb" "$tmp" || die "dpkg-deb -x 失败"
+  dpkg-deb -e "$deb" "$WORK/ctl" || die "dpkg-deb -e 失败"
   [ -x "$WORK/ctl/postinst" ] || die "postinst 缺可执行位"
   grep -q '^ExecStart=.*--profile /usr/lib/rockrobot3/profiles/distro.toml' \
     "$tmp/usr/lib/systemd/system/rrd.service" \
@@ -123,17 +123,55 @@ assert_content() {
   done
 }
 
+# 负例夹具：以正例 deb 为底解包、改坏一处、重打包（不是产品路径，只验门的判据）。
+# $1 = 名称，$2 = 改坏函数（收一个树参数）；打印坏包路径。
+make_bad() {
+  local name="$1" fn="$2" tree="$WORK/bad-$1" out="$WORK/bad-$1.deb"
+  rm -rf "$tree" "$out"
+  dpkg-deb -R "$DEB" "$tree" || die "dpkg-deb -R 失败（负例 ${name}）"
+  "$fn" "$tree" || die "负例 ${name} 的改坏步骤失败"
+  dpkg-deb --root-owner-group --build "$tree" "$out" >/dev/null \
+    || die "负例 ${name} 出包失败"
+  printf '%s\n' "$out"
+}
+
+# 负例判据：断言必须非 0，且文案点名根因（只判"红"不判"为什么红"等于没测）。
+expect_fail() {
+  local what="$1" needle="$2" deb="$3" fn="$4" out rc=0
+  out=$("$fn" "$deb" 2>&1) || rc=$?
+  [ "$rc" -ne 0 ] || die "负例未被抓：${what}（${fn} 仍判过）"
+  grep -qF "$needle" <<<"$out" || die "负例被抓但未点名 ${needle}：${out}"
+  echo "     负例被抓：${what}（点名 ${needle}）"
+}
+
+bad_arch() { sed -i 's/^Architecture: .*/Architecture: amd64/' "$1/DEBIAN/control"; }
+bad_member() { rm -f "$1/usr/lib/rockrobot3/modules/rr3-brain/rr3-brain"; }
+bad_elf() { cp /bin/true "$1/usr/bin/rrd"; }
+
+# 三条负例：control 架构、模块成员缺件、ELF 架构。任一条漏抓即红。
+negative_cases() {
+  local d
+  d=$(make_bad arch bad_arch)
+  expect_fail "control 架构改错" "Architecture=amd64" "$d" assert_control
+  d=$(make_bad member bad_member)
+  expect_fail "模块成员缺件" "modules/rr3-brain/rr3-brain" "$d" assert_tree
+  d=$(make_bad elf bad_elf)
+  expect_fail "ELF 架构不符" "usr/bin/rrd 非 aarch64 ELF" "$d" assert_content
+  echo "::notice title=arm64-deb-neg::负例 3/3 被抓：control 架构 / 模块缺件 / ELF 架构（门看得见）"
+}
+
 main() {
   preflight
   mkdir -p "$WORK"
   build_all
   make_payload
   pack_deb
-  assert_control
-  assert_tree
-  assert_content
-  echo "PASS  aarch64 deb 结构：$(dpkg-deb -f "$DEB" Package) $(dpkg-deb -f "$DEB" Version) ${ARCH}；三入口/六模块/四册/平台册/接线/unit/postinst 齐，九件 ELF 全 aarch64（不冒充安装）"
-  echo "::notice title=arm64-deb::$(dpkg-deb -f "$DEB" Package) $(dpkg-deb -f "$DEB" Version) ${ARCH}；六模块/四册/平台册/接线/unit/postinst 齐，九件 ELF 全 aarch64（结构门，不冒充安装）"
+  assert_control "$DEB"
+  assert_tree "$DEB"
+  assert_content "$DEB"
+  negative_cases
+  echo "PASS  aarch64 deb 结构：$(dpkg-deb -f "$DEB" Package) $(dpkg-deb -f "$DEB" Version) ${ARCH}；三入口/六模块/四册/平台册/接线/unit/postinst 齐，九件 ELF 全 aarch64；负例 3/3 被抓（不冒充安装）"
+  echo "::notice title=arm64-deb::$(dpkg-deb -f "$DEB" Package) $(dpkg-deb -f "$DEB" Version) ${ARCH}；六模块/四册/平台册/接线/unit/postinst 齐，九件 ELF 全 aarch64；负例 3/3 被抓（结构门，不冒充安装）"
 }
 
 main "$@"
