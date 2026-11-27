@@ -1481,3 +1481,33 @@ connect 缺"心跳自报计数"节。处置——brain 该节改名"总线面"�
 `spurious network error/502/504` 退避重试两次），命令与判据不变。判据——重推后
 gate / integration 在 `3c1c22d` 全绿（distro-smoke 通过），落定为**容器侧瞬态**而非
 代码缺陷；此后该腿失败会自带根因行，不再只剩退出码。
+
+**2026-11-27 批75–76 写面收口审计与"每帧复制账"**：事实——全仓还有三处整帧拼装：
+① ESP32 语音上行的 `audio_chunk_to_frame`（整帧字节**就是**有界队列的单元，不可拆）；
+② `rr3_frame_write` 的三处生产使用者（rrctl、sim、sim_peer）全是低频单写者；
+③ 测试夹具。热路径（rrd 广播）没有第二处。**每帧复制账**（一条 11KB 音频 Event）：
+JSON 解析 1 次整树复制（要 topic 必须解析，换借用式需引入 serde 依赖或第二套解析器，
+两者都比它省下的 44KB/s 更贵，**不做**）+ `rr3_body_encode` 1 次（2 字节类型前缀
+必须拼入）+ 扇出 0 次（批69）+ 写面 0 次（批72）；余下的可削项只有"每连接重算一次
+载荷 CRC"，实测量级 <1ms/s，收益不抵破坏 `rr3_header_encode` 这层安全网的风险，保留。
+处置——把三档写法的选择依据钉进 `rr3_frame_write` 的文档（整帧单写 / 广播 writev /
+所有权移交 `rr3_send_buf`），避免下次又在热路径复用它。判据——rr-ipc 测试绿、
+`cargo fmt --check` 绿；gate / integration 在 `6c2230a` 绿。
+
+**2026-11-27 批77 三篇 reference 与代码对表**：事实——按"引用须与代码逐字一致"抽检：
+`USAGE` 全文、八个开关的默认值（1000/3000/200 等）、横幅格式串、§3 十一条错误文案、
+`Rr3RpcMethod` 13 个方法与文档 13 行、`Rr3Phase` 四态、`RR3_RESTART_BACKOFF` 七档与
+"连续 5 次"上限、counters 两个环境旋钮（10_000 / 64）**全部一致**；发现一处漂移：
+`rr3.ctl.logs` 的"512 行环形"——自批N5 件二 F-30 起容量由装配单
+`[runtime].log_ring_cap` 定格，512 只是兜底（`rr3_log_ring_cap_set`）。处置——
+`rrd-rpc.md` 与 `status.md` 改口径；ADR-0010 裁定 5 正文保留、加修订注（ADR 不改写
+历史），后果段同步。判据——⑤ 文档门绿；抽检的每一条都能在 `cli.rs` / `rpc.rs` /
+`registry/model.rs` / `counters.rs` / `log/mod.rs` 的字面量里逐字对上。
+
+**2026-11-27 批78 清理面巡检（不删有效物）**：事实——生产代码 `allow(dead_code)`
+共 11 处，逐处查过：sense 三处是 `cfg` 条件面上的 Windows/macOS 分支、interact 两处是
+门禁 awk 消费的词表常量（Rust 侧确实无调用点、注释已写明）、connect `bt` 五处是
+"事件面登记后接线"的占位件（带触发条件）、brain 一处是"只记不读"的对话历史载体
+（面板回看待接线）。**没有未登记的遗留**；`rr3_frame_to_bytes` 仍有真实消费者
+（rrctl/sim/夹具），不退役。处置——本批零代码改动，结论入册（宁缺勿滥）。判据——
+`grep -rn 'allow(dead_code)'` 逐条有理由；`cargo check` 无新增告警。
