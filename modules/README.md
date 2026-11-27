@@ -29,7 +29,7 @@ rr3-interact / rr3-power / rr3-connect / rr3-brain（批N32 件四起 rr3-brain 
 
 | 类别 | 件 | 说明 |
 |---|---|---|
-| 固定件（六模块全有） | `README.md` · `Cargo.toml` · `Cargo.lock` · `module.toml` · `composite.toml` · `config.toml` · `src/` · `atoms/` | `composite.toml` 是 ⊗ 装配清单；`atoms/<名>/` 为原子件五件套（`atom.toml` + 入口 + `mech.rs` + `assemble.toml` + `private.rs`） |
+| 固定件（六模块全有） | `README.md` · `Cargo.toml` · `Cargo.lock` · `module.toml` · `composite.toml` · `config.toml` · `src/` · `atoms/` | `composite.toml` 是 ⊗ 装配清单；`atoms/<名>/` 为原子件五件套（`atom.toml` + 入口 + `mech.rs` + `assemble.toml` + `private.rs`）——2026-11-27 批87 十件七处逐件对表，17/17 齐全；机制件撞 500 行线时按 `mech.rs` + `mech/<子域>.rs` 拆（`rr3-interact/atoms/face` 是唯一先例，子目录只放机制子域、不放件入口与装配清单） |
 | 可选件（按承载形态） | `.cargo/config.toml` · `build.rs` + `sdkconfig.defaults` · `config-<板>.toml` | xtensa 交叉链接配置；espidf 形态构建钩子；装机板变体档（如 rr3-sense 的 `config-esp32.toml`/`config-pi4b.toml`） |
 
 根目录**不放**其它文档与构建现场（espidf 的 `.embuild`/`sdkconfig*` 由仓根
