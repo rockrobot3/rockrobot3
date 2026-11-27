@@ -16,7 +16,11 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.." # 仓根
 
 IMAGE="rust:bookworm"
-docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
+# 时延数字要能被人看到（批199）：日志匿名读不到，step summary 是公开面。宿主编排：
+# 容器把 timing 行写进挂载的小文件，结束后再落到 GITHUB_STEP_SUMMARY（未设置则只刷 stdout）。
+SUM_FILE=$(mktemp "${TMPDIR:-/tmp}/rr3-distro-timing.XXXXXX")
+trap 'rm -f "$SUM_FILE"' EXIT
+docker run --rm -v "$(pwd)":/work -w /work -v "$SUM_FILE:/tmp/rr3-timing" "$IMAGE" bash -euo pipefail -c '
   # 产物统一落 /tmp：容器以 root 跑，不往挂载的仓里写 target/（避免本地残根属主文件）
   export CARGO_TARGET_DIR=/tmp/rr3-target
   REL=$CARGO_TARGET_DIR/release
@@ -154,6 +158,7 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   fi
   BOOT_CEIL_MS=20000
   echo "timing boot_spawn6_ms=${READY_MS} ceiling=${BOOT_CEIL_MS}"
+  echo "boot_spawn6_ms=${READY_MS} ceiling_ms=${BOOT_CEIL_MS}" >>/tmp/rr3-timing
   if [ "$READY_MS" -gt "$BOOT_CEIL_MS" ]; then
     echo "FAIL ⑧: boot 就绪 ${READY_MS}ms 超过上限 ${BOOT_CEIL_MS}ms（流畅度回归）"
     cat /tmp/rrd-smoke.log
@@ -170,6 +175,7 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   echo "$STATUS_OUT" | grep -q "denied_publish = 0"
   STATUS_CEIL_MS=5000
   echo "timing status_rtt_ms=${RTT_MS} ceiling=${STATUS_CEIL_MS}"
+  echo "status_rtt_ms=${RTT_MS} ceiling_ms=${STATUS_CEIL_MS}" >>/tmp/rr3-timing
   if [ "$RTT_MS" -gt "$STATUS_CEIL_MS" ]; then
     echo "FAIL ⑧: status 往返 ${RTT_MS}ms 超过上限 ${STATUS_CEIL_MS}ms（总线/守护卡顿）"
     exit 1
@@ -182,3 +188,18 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
 
   echo "distro-smoke 绿：deb 装机 → rrd 正门起六 Rust 模块（sim 面冒烟，部署真值零改），counters 回写落盘"
 '
+
+# timing 回显 + 公开面（无 GITHUB_STEP_SUMMARY 时只回显）。
+if [ -s "$SUM_FILE" ]; then
+  echo "== 时延（发版回执可引用）=="
+  cat "$SUM_FILE"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    {
+      echo ""
+      echo "### distro-smoke timing"
+      echo '```'
+      cat "$SUM_FILE"
+      echo '```'
+    } >>"$GITHUB_STEP_SUMMARY"
+  fi
+fi
