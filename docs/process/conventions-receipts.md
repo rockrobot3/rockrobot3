@@ -2711,3 +2711,15 @@ job `140680937458` 六条 notice 齐，含四段用时与负例）、platforms r
 `--deep` 与 B.2 实测；③ 真板坏包场景取证与 30s 探针窗口决策；④ 发布/部署面清单一致性
 巡检单点（publish 显式六件 vs stage-image/image-smoke；pack-arm64/bundle 派生集）——
 先出对拍脚本与文档，不接门；⑤ 三线收口与再拟下轮。
+
+**2026-11-28 批250 发布/部署面清单对拍单点**：事实——模块清单在四处独立写法
+（`workflow_release.PUBLISH_MODULES`、`publish.yml` 构建循环、`stage-image.sh` 两处装机
+循环、`image-smoke.sh` 起齐循环与 `-eq` 阈值），板侧 `pack-bundle.sh` / `pack-arm64.sh`
+另按真值派生并留 brain 例外；新增模块时漏改任一处，流水线仍绿而某载体静默缺件。
+处置——立 [release_sets.py](../../tools/ci/audit/release_sets.py)：真值取
+`modules/rr3-*/module.toml`，判据是**集合相等**（策略必须等于真值；镜像三处必须等于
+策略；派生脚本必须 source 单点、保留 brain 例外、且不得出现字面量循环），缺/多逐项
+点名；`--self-test` 1 正例 + 6 负例（发布循环漏件 / 装机漏件 / 起齐漏件 / 两个派生脚
+失去 brain 例外 / 新增模块未入策略）。判据——自检 7/7 绿；真仓四面对拍 PASS（真值 6 ·
+策略 6 · 镜像同集 · 派生 5 = 真值−brain），解析结果逐文件人工核对（publish:75、
+stage-image:49/57、image-smoke:80 各命中真实循环）。本轮不接 check.sh，先随批观察。

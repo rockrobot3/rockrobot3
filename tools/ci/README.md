@@ -207,6 +207,18 @@ firmware 必须带 `packages: write`、推 `rockrobot3-firmware`，且 S3 目标
 登录 ghcr、带 `packages: write`，并以 oras 推 `rockrobot3-ota` 与
 `rockrobot3-buildroot`——正式制品只发 release asset 不算托管完成。
 
+## 发布/部署面清单对拍：`release_sets.py`
+
+[release_sets.py](audit/release_sets.py)（2026-11-28 批250 立）只核一件事：模块清单
+在四处写法里是否同一集合——仓内真值 `modules/rr3-*/module.toml`
+（[runtime-members.sh](lib/runtime-members.sh) 派生）、发布策略
+（`workflow_release.PUBLISH_MODULES` 与 `publish.yml` 构建循环）、镜像面
+（`stage-image.sh` 两处装机循环、`image-smoke.sh` 起齐循环与计数阈值）、板侧包
+（`pack-bundle.sh` / `pack-arm64.sh` 必须派生并保留 brain 例外，出现字面量清单即红）。
+判据是**集合相等**而非包含：新增模块不入选发布集必须显式改策略，不许默默漏件。
+`python3 tools/ci/audit/release_sets.py [--root DIR]`；`--self-test` 给 1 正例 + 6 负例。
+**暂未接 check.sh**（先随批观察，门位另行裁定）。
+
 ## 平台覆盖矩阵（2026-11-17 首立，按 workflow 事实源抄录）
 
 "每个芯片平台都在流水线里验证"的对照表（**结构真源** =
