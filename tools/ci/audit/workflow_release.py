@@ -185,7 +185,7 @@ REQUIRED_JOBS = {
         "buildroot-assembly", "sim-assemble", "sim-chain", "matrix",
     ),
     "platforms.yml": (
-        "cross-artifacts", "riscv-image", "esp32-gates", "autonomy-face",
+        "cross-artifacts", "riscv-image", "arm64-deb", "esp32-gates", "autonomy-face",
         "ipct003", "host-windows", "host-macos",
     ),
     "publish.yml": (

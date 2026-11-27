@@ -283,6 +283,36 @@ jobs:
             exit 1
           fi
 
+  # 瑞芯微 aarch64 deb 结构门（2026-11-28 批230）：install-smoke 只在 x86_64 真装，
+  # distro bundle 是 aarch64-musl 五模块（brain 需 C 工具链，不在 musl 交叉面）；
+  # aarch64 glibc deb（六模块含 brain）此前只有真板证据。这里复用 cross-artifacts
+  # （gnu + with-brain）交叉构建，rr3-pack 出 deb，只验包结构与 ELF 架构——不冒充
+  # 安装：systemd 跑不进 qemu-user，真装仍归 install-smoke 与真板。
+  arm64-deb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+          targets: aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+          cache-all-crates: "true"
+      - name: 安装 aarch64 交叉工具链
+        uses: ./.github/actions/apt-retry
+        with:
+          packages: gcc-aarch64-linux-gnu
+          title: apt-aarch64-deb
+          log: apt-aarch64-deb
+      - name: aarch64 deb 结构门（交叉构建 + rr3-pack + 结构断言）
+        uses: ./.github/actions/guarded-run
+        with:
+          title: arm64-deb
+          command: bash tools/ci/platform/arm64-deb-check.sh
+
   # 重工具链 ESP 构建档（A 任务构建面）：espup 钉版 v0.17.1 + ESP-IDF v5.2.2 克隆 +
   # 乐鑫 esp-clang + ldproxy——冷跑 20 分钟量级，靠 action 内三处 cache 压到分钟级。
   # 安装面与"失败压注解"模板分别收在 .github/actions/{esp-toolchain,guarded-run}
