@@ -1323,7 +1323,8 @@ pub trait Rr3ByteStream {                     // 4. 传输实现（§12.8 接缝
 配套三条硬约束，否则接口写出来也接不上：**①** `rr-core::runtime` 与 `rr-core::control` 的**调用方**
 （今天的 `rr-bus` client 心跳线程、`rr3-act` 的 `rr3_now_ms`）必须改为从 `Rr3TimeBase` 取时基——
 这一改顺带结掉"墙钟当单调时基"的债（`rr-bus/src/client.rs` 的 `rr3_now_ms` 注释把 `SystemTime`
-称作"ADR-0018 裁定 3 的单调时基"，那是错的：墙钟会回拨，回拨时长内心跳停摆）。**②** 板侧的
+称作"ADR-0018 裁定 3 的单调时基"，那是错的：墙钟会回拨，回拨时长内心跳停摆；该文件
+2026-11-27 现址＝`base/runtime/rr-bus-api/src/client/`，批N9 件一迁入承载契约面 crate）。**②** 板侧的
 `Rr3ByteStream` 实现必须能在 `target_os = "none"` 编译（前置是解除 `rr-ipc` transport 层的
 `cfg(not(target_os = "none"))` 门，ADR-0018 修订 3 ①）。**③** 三 trait 的**存在与可编译**是点验矩阵
 第③列（供给自证）的机械内容，不再是自由文本表。实施落点：批J（批K 的矩阵②③⑦列以其为前提）。

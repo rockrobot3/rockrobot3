@@ -19,7 +19,7 @@ use crate::host_call::rr3_bridge_call;
 pub enum Rr3PeriphCmd {
     /// 舵机 pan 轴绝对角 → `rr3-act/servo/command`，args
     /// `{"angle_deg":N,"axis":"pan"}`（payload 形状事实源
-    /// contracts/events/act-servo_command.schema.json）。板侧行程收窄
+    /// contracts/events/act-servo-command.schema.json）。板侧行程收窄
     /// fail-closed：越界拒收点名，宿主侧不猜行程不预钳。
     ServoPan(u16),
     /// 舵机 tilt 轴绝对角 → 同主题 args `{"angle_deg":N,"axis":"tilt"}`

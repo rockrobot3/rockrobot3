@@ -30,11 +30,11 @@ pub const RR3_MAGIC_FIRST: u8 = rr_ipc::RR3_MAGIC_LE[0];
 pub const RR3_BRIDGE_BAUD: u32 = 1_500_000;
 
 /// 舵机点名主题（在册 request L1；payload 形状事实源
-/// contracts/events/act-servo_command.schema.json）。
+/// contracts/events/act-servo-command.schema.json）。
 pub const RR3_SERVO_TOPIC: &str = "rr3-act/servo/command";
 
 /// 表情点名主题（在册 request L1；payload 形状事实源
-/// contracts/events/interact-face_expression.schema.json）。
+/// contracts/events/interact-face-expression.schema.json）。
 pub const RR3_FACE_TOPIC: &str = "rr3-interact/face/expression";
 
 /// ESP32 档设备路径 env 键（宿主侧应急覆盖口径）。

@@ -139,7 +139,9 @@ run sh -c 'cd base/runtime && cargo check --locked --all-targets --workspace'
 step "①b workspace 全量测试（含未被点名的守护用例）"
 run_tests sh -c 'cd base/runtime && cargo test --locked --workspace'
 
-# ①c/①d 与 CI lint job 同源（.github/workflows/ci.yml lint）。此前本地门禁缺
+# ①c/①d 与 CI 门禁 workflow 的 conventions job 同源（2026-11-27 订正：
+# 原文写 .github/workflows/ci.yml lint job，ci.yml 已按职责拆六条流水线）。
+# 此前本地门禁缺
 # fmt/clippy 两步，手工折行与 clippy 告警一路入库（e1a93eb 收 ⑱ 文件漂移、
 # eae280e 收 too_many_arguments 即实证）——"CI 绿本地红"的两套逻辑由此补齐。
 # fmt 不编译，对 esp 条件工程照跑（CI lint 同口径）；clippy 宿主 stable 对

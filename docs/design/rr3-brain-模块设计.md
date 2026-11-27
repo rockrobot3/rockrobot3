@@ -213,6 +213,10 @@
 
 #### §14.1 增量对表（2026-10-12，代码基线 `78625ae`；全仓总表见 [索引 §13.4](模块设计索引.md)）
 
+**2026-11-27 订正（批114）**：本节各行是结项时点快照——`brain-unittest` job 已随批N32
+Python 树退役，`.github/workflows/ci.yml` 已拆为六条流水线（[ci-workflows](../process/ci-workflows.md)），
+`composite.py` 等 Python 文件已删除；当前实现位置读 [status.md](../status.md) 的 `rr3-brain` 行。
+
 | 项 | 复验实况（符号） | 判定 / 新落点 |
 |---|---|---|
 | B-4 Python 测试进门禁 | `.github/workflows/ci.yml` 的 `brain-unittest` job（`setup-python 3.12` + `python3 -m unittest discover -s tests`），八 job 首跑全绿已随 0.0.7 批H 落档 | **结**（本机仍无载体：Windows `python` 坏——按"远端执行 / 本地无载体"分档，不折算成本机绿） |

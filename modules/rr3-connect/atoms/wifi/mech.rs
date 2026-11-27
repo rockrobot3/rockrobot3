@@ -11,7 +11,7 @@
 //! （linux = NetworkManager 连接配置，经 `Rr3WifiStore` 注入），件内不自写文件、不出现
 //! 落盘路径字面量。scan 回 sim 模拟列表（`backend:"sim"` 诚实标注），板上换 NetworkManager。
 //! 载荷组装与参数下钻面（ADR-0019 修订 4）：`rr3_link_body`、三枚 `*_result` 与三枚
-//! `*_parse_args` 的 json!/Value 下钻在承载层（src/composite.rs），件面 serde_json 清零。
+//! `*_parse_args` 的 json!/Value 下钻在承载层（src/rpc.rs），件面 serde_json 清零。
 
 use rr_hal_api::Rr3SsidText;
 

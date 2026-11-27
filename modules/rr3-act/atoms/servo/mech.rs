@@ -11,7 +11,7 @@
 //!
 //! 错误面零堆化：行程/时限失败交 `Rr3ServoTravelError`/`Rr3ServoTimeoutError` 零堆
 //! 枚举（动态数据进枚举字段，不落 `String` 堆），人读文案由编排层渲染
-//! （`src/composite.rs` 的 `rr3_servo_parse_args`，与改前逐字一致）。
+//! （`src/rpc.rs` 的 `rr3_servo_parse_args`，与改前逐字一致）。
 
 use super::Rr3ServoCfg;
 use rr_hal_api::Rr3ActMotion;

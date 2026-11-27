@@ -2116,6 +2116,12 @@ Rust workspace 里，①b/②b/④ 覆盖不到它，只有这一步跑（**批N
 本句为 CI 建立时点历史陈述）。四真进程 e2e 仍属本地实跑
 环节（同下节平台条件脚本的理由）。
 
+**2026-11-27 订正（批114）**：上段是单条 `ci.yml` 时代的口径——2026-11-17 结构
+治理后按职责拆**六条流水线**（gate / platforms / integration / publish / buildroot /
+coverage，job 总表与归域见 [ci-workflows.md](ci-workflows.md)）；`lint` 不再单列 job，
+判据体只在 `check.sh` ①c/①d/④b，由 gate 的 `conventions` job 跑全步承载。`ci.yml`
+路径已不存在，引用旧路径的句子一律按本条改读。
+
 **十步之外的平台条件脚本**：`bash tools/ci/platform/ipct003.sh [--strict]`（IPC-T-003 跨架构对拍，
 ADR-0006 后果项）**不在十步门内**——它依赖平台条件（Docker / aarch64 交叉目标），
 塞进门禁等于让无容器环境的机器永远红。它做四件事：①宿主跑 `rr-ipc` 的

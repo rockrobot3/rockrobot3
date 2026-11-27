@@ -1,5 +1,10 @@
 # rr3-sense 模块设计（框架 v1.3）
 
+> **2026-11-27 结构订正（批114）**：W-A 内部分层（ADR-0017，批N25–N30）后 `src/` 为
+> `main.rs`（≤80 行装配，`RR3_POLL_WAIT` 在此）＋`boot.rs`（接入）＋`rpc.rs`（协议与载荷组装）
+> ＋`dispatch.rs`（机制）＋`doa_ring.rs`/`tts_gate.rs`（领域）；本文引用的 `src/composite.rs`
+> 已不存在，按此对应。总线客户端已迁 `base/runtime/rr-bus-api/src/client/`，能力面 trait 自 `rr-hal-api` 取用。
+
 ## §0 单元身份证
 
 | 项 | 值 | 来源 |

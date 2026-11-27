@@ -11,7 +11,7 @@
 //! 注入门（`assemble.toml` ops 槽），启动日志显式标注"声明未生效"，不装"已实现"。
 //!
 //! 载荷组装（`*_body` 的 json!）已上移承载层（0.0.5 批I P-7，ADR-0019 修订 4）：
-//! 件面只交 `Rr3LowEdge` 判定，组装归 `src/composite.rs`，线上字节逐字不变。
+//! 件面只交 `Rr3LowEdge` 判定，组装归 `src/dispatch.rs`，线上字节逐字不变。
 
 pub use rr_core::control::Rr3LowEdge;
 

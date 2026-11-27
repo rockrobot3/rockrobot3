@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "rr3-act/servo/command",
   "schema_version": 1,
-  "description": "舵机逐度转向指令（request L1；本仓首个 request 类负载 schema——顶层钉请求 args 形状，应答 result 形状钉在 $defs.response/$defs.response_error）。双面承载：模块面 modules/rr3-act/src/composite.rs 的 rr3_servo_parse_args + servo 应答体（json!({angle_deg, move_ms})），与板侧帧执行面 tools/esp32-periph-base/src/main.rs 的 frame_handle_servo（0.0.5 增补轮五 批C 路线二：板上不进城，宿主 rr-hal::esp32_uart 桥后端经 rr3.call 帧 direct 点名）共用同形状——schema 是两实现的共同 pin。axis 是板侧帧面扩展键（宿主单轴 Rr3PwmServo trait ↔ 板上双轴云台的映射面；模块面无此键）。业务性失败两实现同款折 result.error 点名。",
+  "description": "舵机逐度转向指令（request L1；本仓首个 request 类负载 schema——顶层钉请求 args 形状，应答 result 形状钉在 $defs.response/$defs.response_error）。双面承载：模块面 modules/rr3-act/src/rpc.rs 的 rr3_servo_parse_args + servo 应答体（json!({angle_deg, move_ms})），与板侧帧执行面 tools/esp32-periph-base/src/main.rs 的 frame_handle_servo（0.0.5 增补轮五 批C 路线二：板上不进城，宿主 rr-hal::esp32_uart 桥后端经 rr3.call 帧 direct 点名）共用同形状——schema 是两实现的共同 pin。axis 是板侧帧面扩展键（宿主单轴 Rr3PwmServo trait ↔ 板上双轴云台的映射面；模块面无此键）。业务性失败两实现同款折 result.error 点名。",
   "type": "object",
   "oneOf": [
     { "$ref": "#/$defs/write" },

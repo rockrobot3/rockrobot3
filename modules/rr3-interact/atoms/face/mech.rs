@@ -8,7 +8,7 @@
 //!
 //! 载荷组装（`rr3_face_result` 的 json!）与点名下钻（`rr3_face_parse_args`）
 //! 已上移承载层（0.0.5 批I I-8，ADR-0019 修订 4）：件面只交状态机
-//! （结构体 + 判定），组装归 `src/composite.rs`，线上字节逐字不变。
+//! （结构体 + 判定），组装归 `src/rpc.rs`，线上字节逐字不变。
 
 #[path = "mech/frames_core.rs"]
 mod frames_core;

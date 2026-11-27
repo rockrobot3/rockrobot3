@@ -2,12 +2,12 @@
 //! relay 原子件机制主体（五件套③）：通断应用 + 变化判定 + 运维计数键。
 //!
 //! 参数裁决（只认真布尔）与载荷组装（result/state_body 的 json!）在承载层
-//! （ADR-0019 修订 4）：件面只交判定与应用，组装归 `src/composite.rs`，线上字节
+//! （ADR-0019 修订 4）：件面只交判定与应用，组装归 `src/rpc.rs`，线上字节
 //! 逐字不变。
 //!
 //! 错误面零堆化（L-3 形状）：`rr3_relay_apply` 返回 `Rr3RelayApplyError` 零堆枚举
 //! （机制层交结构化变体，不落 `String` 堆），人读文案由编排层渲染
-//! （`src/composite.rs` 的 `rr3_relay_apply_error_text`，与改前逐字一致——act 册 §9
+//! （`src/rpc.rs` 的 `rr3_relay_err_text`，与改前逐字一致——act 册 §9
 //! 契约字面量，面板与 legacy 依赖字面）；HAL 句柄入参泛型
 //! （`G: Rr3GpioOut + ?Sized`，调用点单态化不改行为）。
 //!

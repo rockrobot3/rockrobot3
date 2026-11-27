@@ -6,7 +6,7 @@
 //! （rr3-sense）的 frame_ms 同拍：sim 后端 write 即时返回（无时钟），实时后端（ALSA）
 //! write 本身就耗一个节拍——两种后端同一形状。
 //!
-//! 载荷组装、流收缓冲与点名下钻在承载层 `src/composite.rs`；件面只交播放机制。
+//! 载荷组装、流收缓冲与点名下钻在承载层 `src/rpc.rs`；件面只交播放机制。
 //! ⑧-b：机制主体不 `use std`、不分配——`&[i16]` 借用进、`u64` 毫秒出。
 //! 错误面零堆化：`rr3_tts_play` 返回 `Rr3TtsPlayError` 零堆枚举（写腿失败携
 //! `Rr3HalError` 原样随行），人读文案由编排层渲染（`rr3_tts_err_text`）；HAL 句柄
