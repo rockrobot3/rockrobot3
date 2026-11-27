@@ -2600,3 +2600,38 @@ rr3-pack 出 deb，断言 control/unit/六模块/契约；不冒充安装——i
 bundle 为 musl 五模块，aarch64 deb base 层目前只有真板证据）；⑤ 三线收口与再拟下轮。
 判据——`80cb04ee` 上 gate（run `46035110266`）/ integration（run `46035110220`）/
 platforms（run `46035110210`）三线 success；⑤⑬⑯、度量与流水线审计自检绿。
+
+**2026-11-28 批229 四段用时并进公开 notice（回滚 32s 归因取证）**：事实——install-smoke 的
+32.5s 回滚此前只有总时长；install-bundle 批226 已自报四段，但 job 日志匿名不可读。处置——
+install-smoke 解析 install-bundle 成功行的四段与回滚行的"本次尝试"，并进公开 notice。
+判据——integration run `46039090742` / job `140641911825` success，notice 逐字：正例
+"停机 22ms / 换树 6ms / 二进制 276ms / 启动探针 1042ms"，坏包"本次尝试 30278ms"；同提交
+gate run `46039090687` success。结论：回滚 32.5s 由 30s 健康探针窗口主导，停机/换树/二进制
+合计 <1s；据此不做无据调参，优化决策留待真板坏包场景取证。
+
+**2026-11-28 批230 瑞芯微 aarch64 deb 结构门**：事实——install-smoke 只覆盖 x86_64 真装；
+distro bundle 是 aarch64-musl 五模块（brain 不在 musl 交叉面）；aarch64 glibc deb（六模块含
+brain）此前只有真板证据。处置——新增 platforms `arm64-deb` 作业与
+`tools/ci/platform/arm64-deb-check.sh`：复用 `cross-artifacts`（gnu + with-brain）交叉构建
+十件，`rr3-pack` 出 arm64 deb，断言 control 三字段、包内三入口/unit/四册/平台册/接线/
+六模块各三件、unit 的 `--profile` 装机位、postinst 可执行位、九件 ELF 全 aarch64；
+**不冒充安装**（systemd 不能跑在 qemu-user 里）。覆盖契约与缓存纪律同批更新
+（REQUIRED_JOBS / JOB_STEPS / CACHE_ALL_JOBS）。判据——platforms run `46039828675` 的
+`arm64-deb` job `140644548064` success（该 run 的 platforms 整体随后被批231 取代，作业本身
+已结）；同提交 gate run `46039828646`、integration run `46039828659` success。
+
+**2026-11-28 批231 结构门结果公开回传**：事实——门绿只在不可读日志里，公开面无法复核
+aarch64 deb 的成员与架构。处置——`arm64-deb-check.sh` 末尾发一条 notice（包名/版本/架构 +
+成员面 + 九件 ELF 结论）。判据——platforms run `46040658922` / job `140647369395` success，
+notice 逐字："rockrobot3 0.0.8 arm64；六模块/四册/平台册/接线/unit/postinst 齐，九件 ELF
+全 aarch64（结构门，不冒充安装）"；同提交 gate run `46040659819`、integration run
+`46040658896` success，platforms run `46040658922` 整体 success。
+
+**2026-11-28 批232 窗口复核与本轮收口**：事实——`release-anon` runs 仍为 0（cron 首跑
+2026-11-30 03:00 UTC 未到，今日 11-28）；GitHub releases 最新 v0.0.8 仍无 distro bundle，
+`--deep` 与 B.2 无真包，按登记不冒充。处置——本轮四批（229 回滚归因回传、230 aarch64 deb
+结构门、231 公开回传、232 收口）结束；下轮五件：① 11-30 后 release-anon 首跑归因；
+② distro 首发后 `--deep` 深检与 B.2 验签实测；③ 真板坏包场景取证与 30s 探针窗口决策
+（公开数据已指向探针，改前要真板证据）；④ arm64 deb 结构门负例（改坏 control/模块成员，
+期望门红并点名）；⑤ 三线收口与再拟下轮。判据——`4d4e3765` 上 gate / integration /
+platforms 三线 success；⑤⑬⑯、度量与流水线审计自检绿。
