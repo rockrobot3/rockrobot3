@@ -1820,3 +1820,38 @@ README 两处仍写 1:1——运维读到的分压比是假数，标定时会按
 判据不变）；③改写头注去列表前缀，本地复跑 `cargo clippy --workspace -D warnings` 零告警后
 推送。判据——`gate`/`integration`/`platforms` 在 `67fe2f0` 全 success（platforms 含
 esp32/esp32s3 双芯片固件编译，验证 boot.rs 打印改动在两目标可编）；⑤ 文档门绿。
+
+**2026-11-27 批123 esp 门前置收敛 + S3 补 clippy 面**：事实——classic 与 S3 两条 esp 门
+各有约 65 行前置复制体（工具链/目标/IDF/esp-clang/镜像/venv），且复制造成真实漏面：
+S3 门没有 classic 自 2026-11-21 就有的 clippy `-D warnings` 腿——同一 crate 的
+`cfg(feature = "esp32s3")` 分支此前零告警覆盖。处置——新增 `tools/ci/lib/esp-env.sh`
+（`rr3_esp_ready` / `rr3_esp_env` / `rr3_esp_preflight` / `rr3_esp_clippy` 四个函数，
+各 ≤50 行），两门只保留各自构建腿；S3 门补 clippy（`esp32s3,autonomy,tts` all-targets，
+同一门体不是新门）。判据——`platforms` 在 `361118d` 上 `esp32-gates / ESP32（classic）` 与
+`esp32-gates / ESP32-S3` 双 success（S3 clippy 首跑即过）；`bash -n` 三门全过。
+
+**2026-11-27 批124 流水线 job 表对账（无改动）**：事实——`workflow_release.py` 的
+`REQUIRED_JOBS`（gate 6 / integration 7 / platforms 7 / publish 4 / buildroot 3 /
+coverage 2，共 29 名）与六份 YAML 的实际 job 名逐名相等，无漏登记、无死条目。
+处置——零改动。判据——`python3 tools/ci/audit/workflows_audit.py` PASS。
+
+**2026-11-27 批125 ghcr 四包匿名复核**：事实——运行镜像 10 个 tag（`latest`、`edge` 四枚、
+`v0.0.8` 三架构、`v0.0.8`、一条 `.sig`）与 `VERSION=0.0.8` 同源；firmware 包 `v0.0.8` 在册，
+但仍留 v0.0.17–v0.0.23 共 11 个治理前旧 tag；OTA/buildroot 各只 1 个 `0.0.8`（首发命名，
+status 正文已述）。处置——事实写进 status 发布段；旧 firmware tag 清理需 ghcr 写权限
+（PAT/包设置），登记为凭证窗口项，不冒充已清。判据——匿名 token + tags/list 200，四包
+响应落回执。
+
+**2026-11-27 批126 五芯片覆盖复核（无改动）**：事实——`cross-artifacts` 三腿（x86_64 原生
+覆盖英特尔/AMD、aarch64-musl 覆盖瑞芯微、riscv64-gnu+qemu 覆盖进迭时空）＋`esp32-gates`
+双芯片腿；每腿三件事同口径（产物构建 + 目标 ISA 真执行 + 产物上传），`CHIP_MATRIX` 由
+流水线审计钉住删除/改名。处置——零改动；Intel/AMD 共用 x86_64 ISA 腿的边界已在
+ci-workflows 明写（厂商级差异不在 CI 可判面）。判据——`platforms` 三腿 + 双芯片腿在
+`361118d` 全 success。
+
+**2026-11-27 批127 macOS 腿依赖预取有界重试**：事实——`361118d` 的 platforms 唯一红是
+`host-macos`：注解原文 `Could not resolve host: index.crates.io`（cargo 自带 retry 不覆盖
+解析失败），同拍 esp32 双芯片与其余八腿全绿——网络瞬态而非代码失败。处置——新增
+`tools/ci/lib/fetch.sh`（`cargo fetch --locked` 三次退避重试，末次失败才点名退出），
+workspace 与独立工程两段都先预取；ci-workflows 缓存面口径补记。判据——`platforms` 在
+`10bc4e7` 全 success（macOS 腿转绿），gate/integration 同头亦 success。
