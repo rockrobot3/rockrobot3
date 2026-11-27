@@ -221,7 +221,7 @@ EOF
 		echo "结论：装机面与仓内不一致——重装包（dpkg -i）或重新铺镜像后再跑本工具确认"
 		return 1
 	fi
-	echo "结论：装机面（模块 config / 装配单 / systemd unit / 板级资产）与仓内一致"
+	echo "结论：装机面（模块 config / 装配单 / systemd unit / 板级资产 / hardware 真值集）与仓内一致"
 	return 0
 }
 
