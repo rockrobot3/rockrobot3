@@ -205,12 +205,24 @@ def self_test():
             encoding="utf-8",
         )
         bad3 = audit(root)
+        # 周程触发负例（批287）：删 schedule 只剩手动，必须点名（runs 永远 0 的隐蔽失效）。
+        (wf / "release-anon.yml").write_text(
+            "name: release-anon\non:\n  workflow_dispatch:\n"
+            "permissions:\n  contents: read\nconcurrency:\n  group: a\n"
+            "  cancel-in-progress: true\njobs:\n"
+            "  anon:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    steps:\n      - run: bash tools/ci/lib/release-verify.sh --tag auto "
+            "--with-signature --classes image,firmware\n",
+            encoding="utf-8",
+        )
+        bad4 = audit(root)
 
     cases = _cases(bad)
     cases.append(("制品标签漏 v 被抓", any("标签必须 v<VER>" in b for b in bad2)))
     cases.append(("匿名回读丢签名被抓", any("缺 --with-signature" in b for b in bad3)))
     cases.append(("匿名回读类别被削被抓", any("类别必须 image,firmware" in b for b in bad3)))
     cases.append(("匿名回读固定 tag 被抓", any("必须 --tag auto" in b for b in bad3)))
+    cases.append(("匿名回读缺周程被抓", any("缺 schedule" in b for b in bad4)))
     for name, ok in cases:
         print(("PASS  " if ok else "FAIL  ") + name)
     return 0 if all(ok for _, ok in cases) else 1

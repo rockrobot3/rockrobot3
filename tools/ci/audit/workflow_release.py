@@ -219,6 +219,11 @@ def anon_problems(text, rel):
         bad.append(f"{rel} 类别必须 image,firmware（正式制品面被削）")
     if "--tag auto" not in text:
         bad.append(f"{rel} 必须 --tag auto（固定 tag 会随版本推进失真）")
+    # 周程触发被删只剩手动：workflow 仍 active、runs 永远 0，最隐蔽的失效形态。
+    if not re.search(r"^  schedule:\s*$", text, re.M):
+        bad.append(f"{rel} 缺 schedule（周程失效只剩手动，公开面无人周期核）")
+    elif not re.search(r"^\s*-\s*cron:\s*[\"'][^\"']+[\"']", text, re.M):
+        bad.append(f"{rel} schedule 缺合法 cron 行")
     return bad
 
 

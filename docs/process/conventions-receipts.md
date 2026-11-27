@@ -3094,3 +3094,9 @@ status 第 30 行）；② 批287 下次 `v*` 发布后把 OTA/buildroot 纳入�
 release-verify.sh / `--with-signature` / `--classes image,firmware` / `--tag auto`），
 自检增三条负例（丢签名 / 砍类别 / 固定 tag）。判据——`workflows_audit.py --self-test`
 34/34 绿；真仓审计 PASS（现行命令四条全中）；⑤ 文档门绿。
+
+**2026-11-28 批287 匿名回读周程触发入审计**：事实——`schedule:` 被删只剩
+`workflow_dispatch` 时，workflow 仍 active、runs 永远 0，是"周程巡检静默消失"的最隐蔽
+形态（正是首跑前最需要防的）。处置——`anon_problems` 增两条：必须有 `schedule` 段、
+且段内有合法 `cron` 行；自检增负例（删 schedule 只剩手动必须点名）。判据——
+`--self-test` 35/35 绿；真仓 PASS；⑤ 文档门绿。
