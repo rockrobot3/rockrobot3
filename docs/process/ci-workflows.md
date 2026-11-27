@@ -108,7 +108,9 @@ integration / platforms / publish / buildroot / **coverage** 的 job 名按 `REQ
 | ESP32-S3（N16R8，xtensa LX7） | `esp32s3` 工具链（同上） | `esp32-gates` 该腿 | `publish` / `firmware`：S3 `full`（`esp32s3,autonomy,tts`）+ 同版 bootloader | 同 classic 五门（腿内 `chip=esp32s3`）+ 整片 16MB 装配；另上传 `esp32s3-solo-firmware`（release/debug 两档）；实板回执见证据 0018/0019/0021/0022 |
 
 两条口径写明，免得矩阵被读成"六芯片"：**英特尔与 AMD 同属 `x86_64`**，一条腿覆盖两家，
-不造两条同 target 的重复腿；**Windows/macOS 腿是宿主等价面**（`host-windows` /
+不造两条同 target 的重复腿——但**如实记边界**：该腿跑在 GitHub 的 `ubuntu-latest`（x86_64 宿主），
+AMD 没有独立的 runner 回执，"AMD 上能跑"今天的证据只到"instruction set 与内核 ABI 相同"这一档；
+**Windows/macOS 腿是宿主等价面**（`host-windows` /
 `host-macos`），证明"同一份代码换个宿主仍成立"，不计入芯片覆盖。
 
 另有两腿不按芯片归属、但构成芯片证据：`ipct003`（x86_64 + QEMU arm64/riscv64 +
