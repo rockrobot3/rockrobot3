@@ -283,8 +283,8 @@ fn pi4b_solo_boot_drill() {
     solo_hal_injected(&boot);
 }
 
-/// ESP32-S3 微型形态装配演练（W1/T2 补档，2026-11-27）：`profiles/esp32s3-mini.toml`
-/// + `hardware/esp32s3-mini/wiring.toml` 走完整装载门——此前该档有装配单无接线档，
+/// ESP32-S3 微型形态装配演练（W1/T2 补档，2026-11-27）：装配单与
+/// `hardware/esp32s3-mini/wiring.toml` 走完整装载门——此前该档有装配单无接线档，
 /// 装载必缺件；本用例钉"接线档在位即可装载"、板侧十一键进注入文本、双轴档案按
 /// 缺省轴投影成 `RR3_ACT_AXIS_STATE`。
 #[test]
