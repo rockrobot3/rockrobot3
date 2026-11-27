@@ -58,7 +58,10 @@ MCU 无 A/B 分区，升级一律线下重烧。每个芯片平台独立部署�
 
 实现单点：[`pack-bundle.sh`](pack-bundle.sh) 的 BUNDLE_VERSION 段、[`install-bundle.sh`](install-bundle.sh)
 的顶层校验与 `rollback()`；改任一侧都要同批改本节。安装成功/回滚行带四段用时（停机 /
-换树 / 二进制 / 启动探针），真板排障先读这一行。
+换树 / 二进制 / 启动探针），真板排障先读这一行。包内模块集 = 仓内
+`modules/rr3-*/module.toml` 全集减 brain（musl 交叉无 C 工具链，归板上原生构建），
+出包与契约断言同源在 [`tools/ci/lib/runtime-members.sh`](../ci/lib/runtime-members.sh)，
+新增模块自动进包/进断言。
 
 **前置（base 层）**：本包是 A10 更新/重装 payload，**不含也不装 systemd unit**——
 `install-bundle.sh` 从已装 `rrd.service` 读 `--socket`/`--profile` 开关。干净机首装必须

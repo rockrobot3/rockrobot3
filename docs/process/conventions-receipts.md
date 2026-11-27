@@ -2656,3 +2656,29 @@ install-smoke、distro-smoke、arm64-deb、publish 多处字面量，改为从 `
 派生，musl 五模块例外显式声明）；⑤ 三线收口与再拟下轮。判据——三线 run `46043732980`
 （gate）/ `46043732987`（integration）/ `46043732878`（platforms）success；⑤⑬⑯、度量与
 流水线审计自检绿。
+
+**2026-11-28 批236-238 窗口与外部证据登记**：事实——`release-anon` runs 仍为 0（cron 首跑
+2026-11-30 03:00 UTC 未到，今日 11-28）；GitHub releases 最新 v0.0.8 只有 9 个固件资产，
+无 distro bundle（`--deep` 与 B.2 无真包）；真板坏包场景无载具。处置——三项按登记不冒充，
+触发条件不变（11-30 / distro 首发 / 真板）；本轮把可做的清单单点化提前（批239）。
+
+**2026-11-28 批239 运行面模块清单单点化**：事实——六模块/三入口在 cross-artifacts、
+distro-smoke、install-smoke、arm64-deb、pack-bundle、bundle-contract 各抄一份字面量；
+新增模块漏改任一处，流水线仍绿而某个载体静默缺件。处置——新增
+`tools/ci/lib/runtime-members.sh`（真值 = `modules/rr3-*/module.toml`，空清单即失败），
+六个消费方改为派生；musl bundle 的 brain 例外在两处同源显式声明（ring 需目标 C 工具链，
+归板上原生构建）；发布镜像/发布清单仍显式列六件（发布决策，由
+`workflow_release.PUBLISH_MODULES` 钉住）。审计修一处：distro-smoke 的 `$MODN` 紧跟
+全角括号被 ⑬ 抓（bash 3.2 下 unbound 风险），改 `${MODN}`。判据——gate run
+`46046977868`（含 bundle-contract 自检 5/5）、integration run `46046977876`（distro-smoke
+与 install-smoke 派生后全绿，notice "全模块 running"）、platforms run `46046977799`
+（cross ×3 与 arm64-deb 全绿，notice "全模块 … 负例 3/3"）；本地
+bundle-contract --self-test 5/5、⑤⑬⑯、度量与审计自检绿。
+
+**2026-11-28 批240 本轮收口**：事实——`332752a8` 上 gate / integration / platforms 三线
+success。处置——下轮五件：① 11-30 后 release-anon 首跑归因；② distro 首发后 `--deep`
+与 B.2 实测；③ 真板坏包场景取证与 30s 探针窗口决策；④ 清单单点化收尾——stage-image /
+image-smoke / pack-arm64 / publish 仍显式，逐项裁定"发布策略（保留显式）"还是"运行面
+真值（改派生）"，先出清单再动；⑤ 三线收口与再拟下轮。判据——三线 run
+`46046977868`（gate）/ `46046977876`（integration）/ `46046977799`（platforms）success；
+⑤⑬⑯、度量与流水线审计自检绿。
