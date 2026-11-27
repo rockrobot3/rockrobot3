@@ -28,12 +28,6 @@ unit_arg() {
 }
 SOCK=${RR3_BUS_PATH:-$(unit_arg --socket)}
 SOCK=${SOCK:-/var/run/rock3-ipc.sock}
-# base 层点名（2026-11-27 批161）：bundle 不含也不装 unit——unit 缺失时本脚本会走
-# 缺省 socket 继续换树，若在干净机上会得到"装完没有服务"的静默结果。这里如实提示
-# 而不中止：--local staging 树/chroot 场景下 systemctl 不可用是合法的。
-if [ -z "$(unit_arg --socket)" ] && [ -z "$(unit_arg --profile)" ]; then
-  echo "WARN  未找到已装 rrd.service（ExecStart 无 --socket/--profile）——bundle 不装 unit；干净机请先装 deb。本次按缺省 socket 继续" >&2
-fi
 
 die() { echo "FAIL  $*" >&2; exit 1; }
 
@@ -41,6 +35,14 @@ die() { echo "FAIL  $*" >&2; exit 1; }
 [ -f "$BUNDLE" ] || die "部署包不存在: $BUNDLE"
 [ "$(id -u)" -eq 0 ] || die "需 root（换装机树 + 重启 rrd）"
 command -v systemctl >/dev/null || die "本机无 systemctl，发行版快路轨之外不走本脚本"
+# base 层前置（2026-11-27 批161/164）：bundle 不含也不装 unit，而停机窗口、profile
+# 真值与健康探针全部锚在已装 unit 上——unit 缺失时下面的 systemctl stop 在 set -e 下
+# 以 "Unit rrd.service not loaded" 中止，既走不到换树，也说不清缺的是哪一层。故在
+# 动树之前 fail-closed，把"先装 deb"这一步点名到原因（批161 的 WARN 续行已被此取代：
+# 它承诺的"继续"从未成立）。
+if [ -z "$(unit_arg --socket)" ] && [ -z "$(unit_arg --profile)" ]; then
+  die "未找到已装 rrd.service（bundle 不装 unit）——先按 README 装机节装 deb 铺 base 层，再换树"
+fi
 
 # 包顶层目录名 = rockrobot3-<commit>；BUNDLE_VERSION 必须在顶层（A10 打包契约）。
 # 清单先落变量再匹配：`tar | grep -q` 的早退会让 tar 吃 SIGPIPE，pipefail 下整
@@ -160,5 +162,13 @@ done
 [ "$ok" -eq 1 ] || rollback
 
 echo "PASS  新树已就位：$(sed -n 's/^commit=//p' "$ROOT/BUNDLE_VERSION")"
-echo "      模块：$(printf '%s ' $expected)"
+# 诚实降级（2026-11-27 批164）：expected 取不到时旧文案打成"模块："空白，读起来像
+# "零模块也验过了"。逐模块断言是本次探针的主体，缺它就必须说清只验到了哪一层。
+if [ -n "$expected" ]; then
+  echo "      模块：$(printf '%s ' $expected)"
+elif [ -n "$profile" ]; then
+  echo "      模块：未核对（unit 的 --profile 指向 ${profile}，该文件不存在或无可读槽位）"
+else
+  echo "      模块：未核对（unit 的 ExecStart 未声明 --profile，探针只验 rrd 应答）"
+fi
 echo "      上一版保留在 ${backup}（人工回滚：停 rrd → 换回该树与 bin/ 二进制）"

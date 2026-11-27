@@ -2090,3 +2090,12 @@ unit `MISS` 是如实提示。判据——两脚本文件清单与扫描面逐�
 **2026-11-27 批163 build-onboard 用法在文档中的引用复核（无改动）**：事实——README 与
 boards 只按名引用 `build-onboard.sh`（作为"板上原生构建音频件"的入口），未抄参数表；
 批159 新增的第 4 参不产生文档漂移。处置——零改动。
+
+**2026-11-27 批164 install-bundle 缺 unit 的 WARN 与后续控制流对齐**：事实——批161 的
+WARN 承诺"按缺省 socket 继续"，但换树流程第一行 `systemctl stop rrd` 在 unit 缺失时
+返回非零，`set -e` 当场中止且不自述，承诺与行为相反；同时 `expected` 取不到时 PASS 段
+打印"模块："空白，读起来像"零模块也验过"。处置——unit 缺失改为**动树之前** fail-closed
+die（点名 bundle 不装 unit、先装 deb 铺 base 层）；PASS 段按两种成因诚实降级（unit 的
+`--profile` 指向不存在/不可读、或 ExecStart 未声明 --profile ⇒ 只验到 rrd 应答）。
+判据——`bash -n` 过；die 位于 tar 校验、换树与 `systemctl stop` 之前；README 装机节
+已写 deb 前置，文案与之一致。
