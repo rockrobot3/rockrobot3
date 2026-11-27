@@ -24,8 +24,9 @@ rv_stub() {
 		'  *rockrobot3:v0.0.8-riscv64) f=img-riscv64.json ;;' \
 		'  *@sha256:att*) f=attest.json ;;' \
 		'  *rockrobot3:v0.0.8) f=index.json ;;' \
-		'  *) echo "404 $ref" >&2; exit 1 ;;' \
+		'  *) echo "404 not found $ref" >&2; exit 1 ;;' \
 		'esac' \
+		'[ -f "$FIX/$f" ] || { echo "404 not found $ref" >&2; exit 1; }' \
 		'cat "$FIX/$f"' >"$dir/bin/oras"
 	chmod 0755 "$dir/bin/oras"
 }
@@ -76,6 +77,25 @@ rv_class_case() {
 	return 1
 }
 
+# 缺件（批186）：远端明确 not found 时结论是缺件（退出 1），不是"未定"。
+rv_missing_case() {
+	local d out rc
+	d=$(mktemp -d)
+	mkdir -p "$d/bin"
+	rv_stub "$d"
+	python3 "$rv_lib/release-verify.fixture.py" "$d/fix" none >/dev/null
+	rm -f "$d/fix/distro.json"
+	out=$(FIX="$d/fix" PATH="$d/bin:$PATH" bash "$rv_main" --tag v0.0.8 --classes distro 2>&1)
+	rc=$?
+	rm -rf "$d"
+	if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q '缺件'; then
+		printf 'PASS  self-test/远端明确不存在报缺件（退出码 1）\n'
+		return 0
+	fi
+	printf 'FAIL  self-test/远端明确不存在报缺件（期望 1/缺件 实得 %d）\n' "$rc"
+	return 1
+}
+
 # 取数失败（批183）：401/网络错误必须报"未定"（退出 2），不能与"缺件"混成同一结论。
 rv_fetch_fail_case() {
 	local d out rc
@@ -115,6 +135,7 @@ rr3_rv_self_test() {
 	rv_case 固件缺引导红 1 fw-boot "固件 缺层：rr3-bootloader-esp32-dev.bin" || fail=1
 	rv_case 证明面不足红 1 attest "证明面缺：https://spdx.dev/Document" || fail=1
 	rv_class_case || fail=1
+	rv_missing_case || fail=1
 	rv_fetch_fail_case || fail=1
 	rv_usage_case || fail=1
 	[ "$fail" -eq 0 ] || return 3

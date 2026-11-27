@@ -47,13 +47,20 @@ bad() {
 	FAILS=$((FAILS + 1))
 }
 
-# 取回 manifest 到文件；stderr 首行带进失败行（鉴权/404/网络能一眼分辨）。
+# 取回 manifest 到文件。失败再分两种（批186 实测必要）：
+#   not found / manifest unknown / 404 ⇒ **缺件**（结论明确，退 1）
+#   401/403/网络/其它                 ⇒ **未定**（凭据或可见性，退 2）
+# 混成一种会把"还没发"读成"看不到"（v0.0.8 的 OTA/buildroot 正是前者）。
 fetch() { # <ref> <out>
 	local ref="$1" out="$2" err
 	err=$(oras manifest fetch "$ref" 2>&1 >"$out")
 	if [ $? -eq 0 ] && [ -s "$out" ]; then
 		ok "取回 ${ref}"
 		return 0
+	fi
+	if printf '%s' "$err" | grep -qiE 'not found|manifest unknown|404'; then
+		bad "缺件 ${ref}"
+		return 1
 	fi
 	FETCH_FAILS=$((FETCH_FAILS + 1))
 	printf 'FAIL  取数失败 %s：%s\n' "$ref" "$(printf '%s' "$err" | head -n 1)"

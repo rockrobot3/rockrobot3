@@ -2275,3 +2275,12 @@ manifest，其内部两枚 in-toto 层分别声明 SLSA provenance 与 SPDX SBOM
 夹具同步为真实形状（attest.json 两枚谓词；负例删 SPDX）；runbook B 与 ci-workflows
 订正为"1 条 manifest、两枚 in-toto 谓词"。判据——自检 8/8 PASS；文档门绿；匿名回读
 证据即上文实测（不冒充已跑周程）。
+
+**2026-11-27 批186 巡检器实跑首证与缺件/未定分账**：事实——把 oras 1.2.3 装到 /tmp 后
+**匿名实跑**：`--tag v0.0.8 --classes image,firmware` 全 PASS（三架构 + 三腿证明面
+provenance+SBOM + 固件 9 件，与批185 的判据形状一致）；`--classes ota,buildroot` 实得
+`not found`，旧实现却报"取数失败→未定"——远端明确不存在与看不到混成一种。处置——
+`fetch` 按 stderr 再分账（not found/manifest unknown/404 ⇒ 缺件退 1；401/403/网络 ⇒ 未定
+退 2）；自检加远端明确不存在一例（九例）；runbook 的 v0.0.8 示例订正为只核两类
+（distro 当时尚未发布），README 口径同步。判据——自检 9/9；实跑 image+firmware 退 0、
+ota+buildroot 退 1 并逐件点名缺件；⑤⑬⑯ 全绿。
