@@ -25,7 +25,9 @@ CI 单一事实源在 GitHub Actions（R30 裁定：atomgit 无流水线功能�
   `cache-all-crates: "true"`，否则共享依赖每拍冷编。esp 工具链缓存在
   `.github/actions/esp-toolchain` 内三处，单点维护。apt 安装（归档偶发单包
   404/索引滞后）统一走 `.github/actions/apt-retry`（三次有界重试，末次经
-  log-digest 压注解）——workflow 只给包名、标题与日志名。
+  log-digest 压注解）——workflow 只给包名、标题与日志名。托管 macOS 腿的依赖
+  预取走 `tools/ci/lib/fetch.sh`（三次有界重试；2026-11-27 实测 runner 偶发
+  `index.crates.io` DNS 解析失败，cargo 自带 retry 不覆盖解析失败）。
 - **矩阵并行**：跨平台按芯片/架构拆腿（cross ×3、esp 按芯片 ×2、publish
   原生架构 ×2），fail-fast: false 保证单腿红不掩盖其余腿结论；host-macos
   **合并为单腿**（workspace + 独立工程串行，续轮二十五）——托管 macOS arm64

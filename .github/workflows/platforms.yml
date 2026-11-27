@@ -549,6 +549,12 @@ jobs:
           # 把共享依赖一并缓存，否则模块依赖每拍冷编。
           workspaces: base/runtime
           cache-all-crates: "true"
+      # 依赖预取走有界重试（2026-11-27 实测：macOS runner 偶发
+      # `Could not resolve host: index.crates.io`，cargo 自带 retry 不覆盖解析失败）。
+      # 判据不变，只把网络瞬态与真依赖错误分开。
+      - name: 依赖预取（有界重试，抗注册表 DNS 瞬态）
+        working-directory: base/runtime
+        run: bash ../../tools/ci/lib/fetch.sh
       - name: workspace 全量测试（macOS 宿主）
         working-directory: base/runtime
         run: |
@@ -573,6 +579,11 @@ jobs:
                      -not -path "tools/espidf-sentinel/*" -not -path "tools/esp32-periph-base/*" \
                      | sort); do
             echo "=== $m ==="
+            # 独立工程各有 lock，逐个预取（同一有界重试；DNS 瞬态不再打成测试失败）
+            if ! bash tools/ci/lib/fetch.sh --manifest-path "$m"; then
+              echo "::error title=host-macos-fetch($m)::依赖预取连续 3 次失败（网络/注册表）"
+              exit 1
+            fi
             # 失败必须点名到 crate 与断言：日志匿名不可读，注解是唯一公开取数面。
             # 与上一步同口径：test FAILED/编译错误/panic 行优先，末 12 行兜底。
             if ! cargo test --locked -q --manifest-path "$m" 2>&1 | tee /tmp/mac-one.log; then
