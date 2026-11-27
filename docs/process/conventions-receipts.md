@@ -1676,3 +1676,33 @@ actionlint 也在同 job。处置——零改动，结论入册（避免下轮�
 `>` 与 `>=` 的差别决定"准点判死"还是"多等一拍"。处置——新增 `expire_boundary_inclusive`：
 `499 放行 / 500 判死`，并断言回执的 `(elapsed, watchdog) = (500, 500)`。判据——rrd lib
 327 项全过；gate / integration 在 `1ce8432` 绿。
+
+**2026-11-27 批103 覆盖矩阵 ESP 判据列补全**：事实——矩阵里 ESP 两行的判据只写"五门构建/对拍"，
+审阅者无法知道是哪五门，也看不出"SKIP 在 CI 内即红"这条纪律在这里怎么落地。处置——两行判据
+逐条点名：`{chip}-periph-base`（外设底座编译）/ `esp-uart-echo`（板级回环夹具）/ `espidf-std`
+（构建链冒烟）/ `espidf-sentinel`（机制核真板消费者）/ `{chip}-act-sense`（执行+感知编译），
+均经 `guarded-run` 且按 `skip.sh` 口径 CI 内 SKIP 即红；整片装配的三点 magic 与尺寸断言另列；
+S3 行补 release/debug 两份固件产物。判据——⑤ 文档门绿；五门名与 `platforms.yml` 的五个
+`guarded-run` title 逐字对上。
+
+**2026-11-27 批104 `RR3_FAN_CAP` 内存账复核（无改动）**：事实——常量注释的算账
+（128 帧 × 音频片 ~11KB ≈ 1.4MB/连接；× 16 连接上限 ≈ 22MB）与代码常量一致：
+`RR3_FAN_CAP = 128`、`RR3_REG_MAX_MODULES = 16`；11KB 也站得住（2048 帧 × 2ch × 2B = 8KB
+PCM → b64 ≈ 10.9KB + 信封）。处置——零改动，结论入册（避免下轮重复核）。
+
+**2026-11-27 批105 rock3 容量注入链复核（无改动）**：事实——`genimage.cfg` 六个容量位
+（boot/rr_a/rr_b/rr_factory/rr_staging/rr_data）+ `@TARGET_DIR@` 全为占位符；`post-image.sh`
+逐个注入（白名单 `<数字>[KMG]`，非法即拒不在 sed 里揉坏值），并在产出文件上做
+`@[A-Z_]*@` 残留检查——"容量不在本层冻结"这条设计真的落地了。处置——零改动，结论入册。
+
+**2026-11-27 批106 buildroot 发布面判据复核（无改动）**：事实——`image` 腿六分区断言
+（`boot/rr_a/rr_b/rr_factory/rr_staging/data`）、debugfs 查 `/usr/bin/rrd` 与 `S99rrd`、
+`/etc/fstab` 四键、`sha256sum` 清单、`release` 腿 `refs/tags/v` 门 + `packages: write` +
+oras 推 `rockrobot3-ota` / `rockrobot3-buildroot`——与 `ci-workflows.md` 的发布面判据逐条一致。
+处置——零改动（同批另补 AMD 覆盖边界一句，见下条）。
+
+**2026-11-27 批106 附 AMD 覆盖边界如实登记**：事实——矩阵里"英特尔/AMD 同属 x86_64、一条腿
+覆盖两家"容易被读成"两家都验证过"。处置——`ci-workflows.md` 补一句边界：该腿跑在
+`ubuntu-latest`（x86_64 宿主）上，**AMD 没有独立 runner 回执**，"AMD 上能跑"今天的证据只到
+"指令集与内核 ABI 相同"这一档。判据——⑤ 文档门绿；不新增腿（同一 target 造两条重复腿没有
+判据意义）。
