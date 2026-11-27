@@ -1574,3 +1574,32 @@ S3 档没写。处置——`profiles/README.md` 增"段形状"规则（唯一可
 的资产表逐项一致；唯一不一致是**推送回执行文**只写了"双 ELF + 双 bootloader + 分区表 +
 烧录说明 + sha256"，漏掉双整片——回执与资产集不符会让审阅者以为整片没发。处置——回执行文
 补齐"双整片镜像"。判据——`workflows_audit.py` 七项全过；gate / integration 在 `34a6883` 绿。
+
+**2026-11-27 批87 十七个原子件五件套对表**：事实——六模块 `atoms/` 共 17 个原子件逐件
+清点：`atom.toml` + 入口 + `mech.rs` + `assemble.toml` + `private.rs` **17/17 齐全**；
+唯一形状差异是 `rr3-interact/atoms/face` 的机制件按 500 行线拆成 `mech.rs` + `mech/`
+五个子域文件（入口仍单文件）。处置——`modules/README.md` 把这条先例写成规则（子目录只放
+机制子域、不放件入口与装配清单），并记录本次对表结论。判据——⑤ 文档门绿；⑯ 行数门绿
+（17 件无超线）。
+
+**2026-11-27 批88 `ctl.logs` 应答的单帧上限**：事实——读侧有 1MiB 载荷帽，写侧原先不检查；
+环容量是装配单数据（`[runtime].log_ring_cap` 可调大），`tail=0`（不限）时一次查询可能拼出
+超帽应答——客户端只看到"帧太长"，查不出该改哪个参数。处置——`rr3_ctl_logs` 在产侧按帽判，
+超限即回 `Invalid` 并点名两条缩小手段（`tail=<n>` / `prefix=<子串>`），口径与参数坏形一致；
+`rrd-rpc.md` 的 `ctl.logs` 行同步。判据——rrd lib 326 项全过；clippy 干净；
+⑨ 元器件的"帧长上限"在产侧与读侧同一常量（`RR3_FRAMING_PLEN_CAP_DEFAULT`）。
+
+**2026-11-27 批89 零拷贝写帧收进协议层**：事实——模块上行（sense 音频每 128ms 一帧）走
+`rr3_publish → rr3_body_encode（复制）→ rr3_frame_write → rr3_frame_to_bytes（再复制一整帧）`：
+第三个整帧复制在协议层，且 rrd 与模块客户端各有一份零拷贝写法的雏形。处置——rr-ipc 新增
+std 面的 `rr3_frame_write_io`（头 128B 栈缓冲 + payload 两段 iovec 一次 `writev`，部分写内部
+续投，字节与 `rr3_frame_write` 逐字相同），**rrd 的出向写与模块客户端都改走它**，rrd 侧只留
+"出向锁 + 超时分类"这两件策略；`rr3_frame_write` 保留给低频单写者面并在文档写明分工与
+原子性前提。判据——rr-ipc / rr-bus-api（11 项）/ rrd（326 项）测试全过、clippy 干净；
+integration（含 sim-chain 真 socket 全链）在 `3d2ae04` 绿——线上字节未变。
+
+**2026-11-27 批90 coverage 收进覆盖契约**：事实——`REQUIRED_JOBS` 只钉了五条流水线的 job 名，
+`coverage.yml` 两块 job（`workspace` / `independent`）不在表内：它们是**非阻断**观测面，
+但两块一起消失时没有任何判据会红——"非阻断"被误读成"可以被悄悄摘掉"。处置——契约表补
+`coverage.yml` 两条；`ci-workflows.md` 同口径说明。判据——`workflows_audit.py` 七项全过
+（含 job 覆盖契约一项），gate 绿。
