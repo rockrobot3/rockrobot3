@@ -3022,3 +3022,17 @@ issuer `https://token.actions.githubusercontent.com`，与 `release-verify` 的�
 同源。处置——status 第 30 行补记该结论，首跑窗口只需确认"跑起来"，判据本身已预验。
 判据——两份证书 `Not After` 分别为 2026-11-26 05:00:30Z / 05:05:29Z（签名时刻有效），
 SAN/issuer 逐字在案；⑤ 文档门绿。
+
+**2026-11-28 批278 本轮收口（公开交付面预验）**：本轮无代码改动，交付为窗口前的
+**可证结论**：镜像与固件两类公开制品匿名可读（200）、九层资产齐、双签名存在且身份
+离线核对合规（SAN/issuer 与 release-verify 判据同源），distro 未发布（403）符合现状；
+归档线固件制品（v0.0.17-23）语义已入 status 第 30 行，防止误清理。判据——匿名 API
+逐项 HTTP 码与证书字段在案；最终文档提交 `6b0a6e37` gate success；三远端同指
+`6b0a6e37`。
+
+**2026-11-28 批278 下轮任务拟定**：① 批279 11-30 03:00 UTC `release-anon` 首跑归因
+——判据已预验，只需确认 cron 真触发（runs>0）并按注解记录 tag/类别结论；若红，按
+镜像/固件/签名三类逐项定位；② 批280 distro 首发后 `--deep` / runbook B.2 实测与
+`distro` 类匿名回读裁定；③ 批281 把"归档线 ghcr 制品"语义补进
+[tools/deploy/README.md](../../tools/deploy/README.md)（面向制品使用者，避免选错固件
+版本）；④ 批282 三线收口与再拟下轮。
