@@ -2055,3 +2055,22 @@ rr3-pack 随装面"：扫描面仍少 `contracts/{topics,slots,roles,devices}.to
 `[platform].chip` 选一，legacy 模式不猜芯片只比四册）；自检加"契约册漂移红"一例；
 结论行补「契约册」。判据——自检 10 例全过；真仓 S3 干跑 **18 件 0 漂移**（原 13 件 +
 四册 + 平台册）；gate ⑥b 真跑。
+
+**2026-11-27 批158 bundle 随装面与漂移门扫描面交叉核对**：事实——`pack-bundle.sh` 打包
+`profiles/`、`contracts/`、`hardware/` 三个整目录 + `modules/<m>/{bin,module.toml,config*.toml}`
++ `bin/`，是漂移门扫描面的**超集**（扫描面 ⊆ 随装面）；但 bundle **不含也不装 systemd
+unit**——`install-bundle.sh` 从已装 unit 读 `--socket`/`--profile`。处置——README 的
+bundle 契约补"base 层前置"：干净机首装必须先走 deb；bundle-only 干净机上漂移门报
+unit `MISS` 是如实提示。判据——两脚本文件清单与扫描面逐类对照。
+
+**2026-11-27 批159 build-onboard 漂移报告支持 --profile**：事实——第七段固定跑全档
+模式；单档板上会因"9 装配单 + 14 hardware 成员 + 契约面"刷出成片 MISS 噪音，报告
+失去可读性。处置——`build-onboard.sh` 增可选第 4 参 `profile`，给了就只比该档，未给
+保持全档（多档镜像自测口径）；用法行同步。判据——`bash -n` 过；两条分支参数与
+`verify-board-config.sh` usage 逐字对上。
+
+**2026-11-27 批160 --remote 路径对新成员的安全性复核（无改动）**：事实——所有清单行
+（含新增 contracts / hardware 成员）都经 `verify()` → `rr3_hash_remote()`，该函数两个
+口径分支**都带 `ssh -n`**（2026-11-16 的 here-doc 吃 stdin 修复对新增成员自动生效）；
+安装侧路径由 `rr3_inst_path` 默认分支拼 `$root/hardware|contracts/...`，与安装根一致。
+处置——零改动。判据——函数调用链静态走读。
