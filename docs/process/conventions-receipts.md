@@ -2855,3 +2855,12 @@ install-smoke 回滚新路径连续三拍稳定（4513ms 为单拍），三线�
 处置——`check_policy` 的失败行追加"新增模块须同批改三处：`workflow_release.PUBLISH_MODULES`、
 `stage-image.sh`、`image-smoke.sh`"，自检新增一条断言（报错必须含"同批改三处"）。
 判据——`--self-test` 10/10 绿（1 正例 / 8 负例 / 10 断言）；真仓 PASS。
+
+**2026-11-28 批262 回滚新路径三拍稳定与窗口复核**：事实——① install-smoke 回滚新路径
+连续三拍公开回读：`ee9d7bdf` 4513ms（本次尝试 2205ms）、`2d3ae48a` 4359ms（1317ms）、
+`3eb4ffbf` 4493ms（2362ms）——均 ~4.4s，旧值 32619ms，波动在探针 1s 粒度内，判稳；
+同拍 boot_systemd 1651/2092/2137ms、bundle_swap 2319/2378/2449ms，无回归趋势。
+② 窗口未变：`release-anon.yml` runs 仍为 0（首跑 11-30 03:00 UTC 未到）；最新 release
+仍 v0.0.8，资产 9 件无 distro——`--deep`/B.2 与真板坏包场景继续如实留欠。处置——不改
+判据、不预写窗口结论；三拍数字入册为回滚路径基线。判据——API 事实与 check-run 注解
+逐条在案（job 140699361128 / 140710053699 / 140712122738）。
