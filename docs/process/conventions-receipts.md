@@ -2203,3 +2203,13 @@ integration #826、platforms #828 均 success；本轮四件（174 发布面加 
 窗口实推未发生（无新 release 提交），按"结构已钉、实推待发版"记，不冒充验证。下轮首件＝
 发布面齐套巡检固化成一条只读命令（镜像/固件/distro/OTA/buildroot 五类按 tag 核对）。
 判据——三线结论与 run 页一致；audit self-test 26/26、漂移门 self-test 20/20。
+
+**2026-11-27 批178 发布面齐套巡检器建成**：事实——发版后"五类制品齐不齐"只活在
+runbook B 的手工命令里：镜像三架构/固件/distro/OTA/buildroot 逐条 curl，成员清单靠
+记忆；核对时已发现一处标签写法分歧（status 记 `rockrobot3-ota:0.0.8`，而 buildroot.yml
+实推 `v${VER}`）。处置——新增只读巡检器 `tools/ci/lib/release-verify.sh`：一张数据表
+钉五类 ref 与成员（固件 9 件、distro 2 件+artifactType、OTA 6 件含 `keys/*.pub`、
+buildroot 4 件），镜像索引判三架构、单架构判 attestation≥2；任何缺件/不合规逐项点名并
+打 digest，不发写请求。自检以假 oras + manifest 夹具跑六例（全齐/缺层/缺架构/缺引导/
+证明面不足/非 semver），纳入 gate 的 scripts 步防判据腐化。判据——self-test 6/6 PASS；
+YAML 解析过；⑤⑬⑯ 全绿；实仓取数待凭据窗口（本机无 ghcr 凭据，不冒充）。

@@ -273,6 +273,10 @@ jobs:
       # 版本纪律的执法件：tag 与 VERSION 同源 + 指向 release 提交，六例正负对照。
       - name: 发布点执法自检（同源/不同源/rc/手输/分支/非 release 提交六例）
         run: bash tools/ci/lib/release-tag.sh --self-test
+      # 发布面齐套巡检器的判据自检（批178）：假 oras + manifest 夹具，只验判据不触网。
+      # 实跑要 ghcr 凭据，归 tag 回执窗口（runbook B）；这里防"判据腐化而没人知道"。
+      - name: 发布面齐套巡检自检（全齐/缺层/缺架构/缺引导/证明面不足/非 semver 六例）
+        run: bash tools/ci/lib/release-verify.sh --self-test
       # 步骤清单是 check.sh 的显式契约：删/改/换序一个 step、或一号两门，都会被这条抓住。
       - name: 门禁步骤清单自检（一致/删除/新增/改名/换序/门号重复/子号放行/打空八例）
         run: python3 tools/ci/audit/gate_steps_audit.py --self-test

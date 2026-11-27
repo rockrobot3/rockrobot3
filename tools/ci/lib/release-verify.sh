@@ -1,0 +1,209 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# 发布面齐套巡检（只读，批178）：一个 tag 的五类制品是否都在 ghcr、成员与证明面是否合规。
+#
+# 为什么需要它：发版后"东西齐不齐"此前靠人按 runbook B 逐条 curl/imagetools，判据散在
+# 文档里、命名靠记忆（2026-11-27 核对时就发现 status 里 OTA 标签写法与 buildroot.yml
+# 实推的 `v<VER>` 不一致）。本脚本把发布集收成一张数据表，逐项只读核对并打印 digest，
+# 不发任何写请求；发布面本身仍由 publish.yml / buildroot.yml 产出（机制与策略分离）。
+#
+# 用法：release-verify.sh --tag vX.Y.Z [--repo owner/name]
+#       release-verify.sh --self-test
+# 判据：0 五类全齐且成员/证明面合规 / 1 有缺件或不合规（逐项点名） / 2 用法错误
+# 依赖：oras（按 docker 登录凭据读私有包）、python3；本脚本不登录、不推送。
+set -uo pipefail
+
+root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+	echo "FAIL  不在 git 仓库内" >&2
+	exit 2
+}
+
+TAG=""
+OWNER="rockrobot3"
+WORK=""
+FAILS=0
+
+usage() {
+	sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'
+	exit 2
+}
+
+# 计数型判据：每件只打印一行，FAILS 汇总，避免 set -e 在第一件就中断后面的核对。
+ok() { printf 'PASS  %s\n' "$*"; }
+bad() {
+	printf 'FAIL  %s\n' "$*"
+	FAILS=$((FAILS + 1))
+}
+
+# 取回 manifest 到文件；stderr 首行带进失败行（鉴权/404/网络能一眼分辨）。
+fetch() { # <ref> <out>
+	local ref="$1" out="$2" err
+	err=$(oras manifest fetch "$ref" 2>&1 >"$out")
+	if [ $? -eq 0 ] && [ -s "$out" ]; then
+		ok "取回 ${ref}"
+		return 0
+	fi
+	bad "取数失败 ${ref}：$(printf '%s' "$err" | head -n 1)"
+	return 1
+}
+
+# 层标题集合（oras push 用 org.opencontainers.image.title 记文件名）。
+titles_of() {
+	python3 - "$1" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1], encoding="utf-8"))
+for l in m.get("layers", []):
+    t = (l.get("annotations") or {}).get("org.opencontainers.image.title")
+    if t:
+        print(t)
+PY
+}
+
+archs_of() {
+	python3 - "$1" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1], encoding="utf-8"))
+for e in m.get("manifests", []):
+    a = (e.get("platform") or {}).get("architecture")
+    if a and a != "unknown":
+        print(a)
+PY
+}
+
+attest_count() {
+	python3 - "$1" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1], encoding="utf-8"))
+n = 0
+for e in m.get("manifests", []):
+    t = (e.get("annotations") or {}).get("vnd.docker.reference.type")
+    n += 1 if t == "attestation-manifest" else 0
+print(n)
+PY
+}
+
+# 精确成员判据：required 逐个在层标题里找，缺一即 FAIL（点名缺哪件）。
+need_titles() { # <标签> <json> <标题...>
+	local label="$1" json="$2" t have miss=""
+	have=$(titles_of "$json")
+	shift 2
+	for t in "$@"; do
+		printf '%s\n' "$have" | grep -qxF "$t" || miss="$miss $t"
+	done
+	if [ -n "$miss" ]; then
+		bad "${label} 缺层：${miss# }"
+	else
+		ok "${label} 成员齐（$# 件）"
+	fi
+}
+
+# 镜像索引：三架构齐全，且每条单架构清单带 >=2 条 attestation（provenance+SBOM）。
+check_image() { # <镜像仓> <tag>
+	local img="$1" tag="$2" d="$WORK/index.json" a n f
+	fetch "${img}:${tag}" "$d" || return 1
+	local archs want="amd64 arm64 riscv64" miss=""
+	archs=$(archs_of "$d")
+	for a in $want; do
+		printf '%s\n' "$archs" | grep -qx "$a" || miss="$miss $a"
+	done
+	if [ -n "$miss" ]; then
+		bad "镜像索引缺架构：${miss# }"
+	else
+		ok "镜像索引三架构齐（amd64/arm64/riscv64）"
+	fi
+	for a in $want; do
+		f="$WORK/img-$a.json"
+		if ! fetch "${img}:${tag}-${a}" "$f"; then
+			continue
+		fi
+		n=$(attest_count "$f")
+		if [ "${n:-0}" -ge 2 ]; then
+			ok "镜像 ${a} attestation=${n}（provenance+SBOM）"
+		else
+			bad "镜像 ${a} attestation=${n} < 2"
+		fi
+	done
+}
+
+# 固件与 distro：成员清单是发布合同的一部分（与 publish.yml 的资产集逐名对齐）。
+check_firmware() {
+	local ref="ghcr.io/${OWNER}/rockrobot3-firmware:${TAG}" d="$WORK/firmware.json"
+	fetch "$ref" "$d" || return 1
+	need_titles 固件 "$d" \
+		rr3-periph-base-esp32-safe-dev.elf \
+		rr3-periph-base-esp32s3-full-dev.elf \
+		rr3-esp32-safe-merged.bin \
+		rr3-esp32s3-full-merged.bin \
+		rr3-bootloader-esp32-dev.bin \
+		rr3-bootloader-esp32s3-dev.bin \
+		rr3-partitions.csv FLASHING.md firmware-sha256.txt
+}
+
+check_distro() {
+	local ref="ghcr.io/${OWNER}/rockrobot3-distro:${TAG}" d="$WORK/distro.json" ver="${TAG#v}" t
+	fetch "$ref" "$d" || return 1
+	need_titles distro "$d" "rockrobot3-distro-${ver}-aarch64.tar.gz" distro-sha256.txt
+	t=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1],encoding="utf-8")).get("artifactType",""))' "$d")
+	if [ "$t" = "application/vnd.rr3.distro-bundle.v1.tar+gzip" ]; then
+		ok "distro artifactType=${t}"
+	else
+		bad "distro artifactType 不符：${t:-空}"
+	fi
+}
+
+# OTA：签名链与密钥必须随包（keys/*.pub 名称带 key_id，按形状判）。
+check_ota() {
+	local ref="ghcr.io/${OWNER}/rockrobot3-ota:${TAG}" d="$WORK/ota.json" ver="${TAG#v}" have
+	fetch "$ref" "$d" || return 1
+	need_titles OTA "$d" "rr3-rootfs-rk3566-${ver}.img" "rr3-rootfs-rk3566-${ver}.img.manifest" \
+		"rr3-rootfs-rk3566-${ver}.img.sig" checksums.txt bundle.txt
+	have=$(titles_of "$d")
+	if printf '%s\n' "$have" | grep -qE '^keys/[^/]+\.pub$'; then
+		ok "OTA 含公钥层（keys/<id>.pub）"
+	else
+		bad "OTA 缺公钥层（keys/<id>.pub）"
+	fi
+}
+
+check_buildroot() {
+	local ref="ghcr.io/${OWNER}/rockrobot3-buildroot:${TAG}" d="$WORK/buildroot.json"
+	fetch "$ref" "$d" || return 1
+	need_titles buildroot "$d" rock3-zero3.img rk3566-radxa-zero-3w.dtb \
+		rk3566-radxa-zero-3e.dtb checksums.txt
+}
+
+rr3_run() {
+	WORK=$(mktemp -d)
+	trap 'rm -rf "$WORK"' EXIT
+	check_image "ghcr.io/${OWNER}/rockrobot3" "$TAG"
+	check_firmware
+	check_distro
+	check_ota
+	check_buildroot
+	printf '\n'
+	if [ "$FAILS" -ne 0 ]; then
+		echo "结论：发布面不齐/不合规 ${FAILS} 处（tag=${TAG}）"
+		return 1
+	fi
+	echo "结论：五类制品齐套（镜像三架构 + 固件 + distro + OTA + buildroot，tag=${TAG}）"
+	return 0
+}
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--tag) TAG="${2:?--tag 缺参数}"; shift 2 ;;
+	--repo) OWNER="${2:?--repo 缺参数}"; OWNER="${OWNER%%/*}"; shift 2 ;;
+	--self-test)
+		# 自检以假 oras 喂夹具，判据腐化即红（见文件末自检段）。
+		. "$(dirname "$0")/release-verify.selftest.sh"
+		rr3_rv_self_test
+		exit $?
+		;;
+	*) usage ;;
+	esac
+done
+[ -n "$TAG" ] || usage
+printf '%s' "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+	|| { echo "FAIL  --tag 只认正式版 vX.Y.Z（实得 ${TAG}）" >&2; exit 2; }
+command -v oras >/dev/null || { echo "FAIL  本机无 oras（发布面取数依赖它）" >&2; exit 2; }
+rr3_run
