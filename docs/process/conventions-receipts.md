@@ -2329,3 +2329,11 @@ md，按 paths-ignore 未触发另两条腿，属预期。本轮三件：cosign 
 `--with-signature`（公开签名可匿名验，把"签了没验"补上）；③ 收口前复核两条流水线的
 分账 classes 与 B.2 四项逐条对齐。判据——三线结论与 run 页一致；巡检自检 14/14、
 审计自检 29/29；⑤⑬⑯ 绿。
+
+**2026-11-27 批192 巡检器输出 digest 汇总表**：事实——B.2 要求回执列五类 digest，而巡检
+只在逐项 PASS 行里零散打印；人工抄五条长 digest 易错，且"抄哪一条"无判据。处置——
+各类取回成功后记一条 `类别 ref digest`（镜像总账/固件/distro/OTA/buildroot），结尾统一
+打印"制品 digest 汇总表"，回执直接引用；自检加一例钉住表头与 digest 出现，共十五例。
+顺手订正 README 里残留的"attestation≥2"旧口径（批185 只改了 runbook/ci-workflows）。
+判据——self-test 15/15；匿名实跑 `--tag auto` 末段正确列出镜像 `sha256:07d189…` 与固件
+`sha256:39cc0f…`；⑤⑬⑯ 绿。

@@ -30,6 +30,8 @@ SIG_ISSUER='https://token.actions.githubusercontent.com'
 WORK=""
 FAILS=0
 FETCH_FAILS=0
+# 回执用 digest 表（批192）：B.2 第 3 项要求五类 digest，人工抄五条易错；巡检时顺手记。
+DIGESTS=""
 
 # 类别过滤：publish 与 buildroot 两条流水线各自只产一半，tag 窗口不能用"全齐"卡
 # 对方的产物（buildroot 是小时级，晚于 publish）。默认五类，操作者用全量口径。
@@ -47,6 +49,10 @@ usage() {
 
 # 计数型判据：每件只打印一行，FAILS 汇总，避免 set -e 在第一件就中断后面的核对。
 ok() { printf 'PASS  %s\n' "$*"; }
+
+record_digest() { # <类别> <ref> <digest>
+	DIGESTS="${DIGESTS}$(printf '%-9s %-62s %s\n' "$1" "$2" "${3:-未取到}")"$'\n'
+}
 bad() {
 	printf 'FAIL  %s\n' "$*"
 	FAILS=$((FAILS + 1))
@@ -165,6 +171,7 @@ need_titles() { # <标签> <json> <标题...>
 check_image() { # <镜像仓> <tag>
 	local img="$1" tag="$2" d="$WORK/index.json" a f dg af preds miss
 	fetch "${img}:${tag}" "$d" || return 1
+	record_digest 镜像 "${img}:${tag}" "$(ref_digest "${img}:${tag}")"
 	local archs want="amd64 arm64 riscv64" miss=""
 	archs=$(archs_of "$d")
 	for a in $want; do
@@ -205,6 +212,7 @@ check_image() { # <镜像仓> <tag>
 check_firmware() {
 	local ref="ghcr.io/${OWNER}/rockrobot3-firmware:${TAG}" d="$WORK/firmware.json"
 	fetch "$ref" "$d" || return 1
+	record_digest 固件 "$ref" "$(ref_digest "$ref")"
 	need_titles 固件 "$d" \
 		rr3-periph-base-esp32-safe-dev.elf \
 		rr3-periph-base-esp32s3-full-dev.elf \
@@ -219,6 +227,7 @@ check_firmware() {
 check_distro() {
 	local ref="ghcr.io/${OWNER}/rockrobot3-distro:${TAG}" d="$WORK/distro.json" ver="${TAG#v}" t
 	fetch "$ref" "$d" || return 1
+	record_digest distro "$ref" "$(ref_digest "$ref")"
 	need_titles distro "$d" "rockrobot3-distro-${ver}-aarch64.tar.gz" distro-sha256.txt
 	t=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1],encoding="utf-8")).get("artifactType",""))' "$d")
 	if [ "$t" = "application/vnd.rr3.distro-bundle.v1.tar+gzip" ]; then
@@ -233,6 +242,7 @@ check_distro() {
 check_ota() {
 	local ref="ghcr.io/${OWNER}/rockrobot3-ota:${TAG}" d="$WORK/ota.json" ver="${TAG#v}" have
 	fetch "$ref" "$d" || return 1
+	record_digest OTA "$ref" "$(ref_digest "$ref")"
 	need_titles OTA "$d" "rr3-rootfs-rk3566-${ver}.img" "rr3-rootfs-rk3566-${ver}.img.manifest" \
 		"rr3-rootfs-rk3566-${ver}.img.sig" checksums.txt bundle.txt
 	have=$(titles_of "$d")
@@ -246,6 +256,7 @@ check_ota() {
 check_buildroot() {
 	local ref="ghcr.io/${OWNER}/rockrobot3-buildroot:${TAG}" d="$WORK/buildroot.json"
 	fetch "$ref" "$d" || return 1
+	record_digest buildroot "$ref" "$(ref_digest "$ref")"
 	need_titles buildroot "$d" rock3-zero3.img rk3566-radxa-zero-3w.dtb \
 		rk3566-radxa-zero-3e.dtb checksums.txt
 }
@@ -258,7 +269,7 @@ rr3_run() {
 	has_class distro && check_distro
 	has_class ota && check_ota
 	has_class buildroot && check_buildroot
-	printf '\n'
+	printf '\n== 制品 digest（回执直接引用）==\n%s\n' "$DIGESTS"
 	# "看不到"与"没有"必须分开：鉴权/网络失败时打"不齐"会把操作者引去查制品，
 	# 而真正要修的是凭据。取数失败只要有一处，整份结论就是未定（退出 2）。
 	if [ "$FETCH_FAILS" -ne 0 ]; then

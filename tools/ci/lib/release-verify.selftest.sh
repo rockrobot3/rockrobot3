@@ -170,6 +170,25 @@ rv_auto_case() { # 名称 期望码 空tag开关 期望片段
 	return 0
 }
 
+# digest 汇总表（批192）：回执直接引用，必须逐类列出并带 digest（stub 固定 deadbeef）。
+rv_digest_case() {
+	local d out rc
+	d=$(mktemp -d)
+	mkdir -p "$d/bin"
+	rv_stub "$d"
+	python3 "$rv_lib/release-verify.fixture.py" "$d/fix" none >/dev/null
+	out=$(FIX="$d/fix" PATH="$d/bin:$PATH" bash "$rv_main" --tag v0.0.8 2>&1)
+	rc=$?
+	rm -rf "$d"
+	if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q '制品 digest' \
+		&& printf '%s' "$out" | grep -q 'sha256:deadbeef'; then
+		printf 'PASS  self-test/digest汇总表（退出码 0）\n'
+		return 0
+	fi
+	printf 'FAIL  self-test/digest汇总表（期望 0/含 digest 表，实得 %d）\n' "$rc"
+	return 1
+}
+
 # 用法面：非正式版 tag 必须在取数之前拒绝（退出 2）。
 rv_usage_case() {
 	local rc
@@ -198,6 +217,7 @@ rr3_rv_self_test() {
 	rv_sig_case 缺cosign未定 2 "" "--with-signature" "cosign" rm-cosign || fail=1
 	rv_auto_case 自动取最新tag 0 "" "tag auto → v0.0.8" || fail=1
 	rv_auto_case 无正式tag报未定 2 RR3_TAGS_EMPTY "取到正式 tag" || fail=1
+	rv_digest_case || fail=1
 	rv_usage_case || fail=1
 	[ "$fail" -eq 0 ] || return 3
 	return 0

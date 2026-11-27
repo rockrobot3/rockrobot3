@@ -120,7 +120,7 @@ CI 单一事实源在 [`.github/workflows/`](../../.github/workflows)（gate / p
 ## 发布面齐套巡检入口：`lib/release-verify.sh`
 
 [release-verify.sh](lib/release-verify.sh) 是发版后的**总账**（2026-11-27 批178）：
-一条只读命令按 tag 核对五类 ghcr 制品——运行镜像三架构与 attestation≥2、固件九件、
+一条只读命令按 tag 核对五类 ghcr 制品——运行镜像三架构与 in-toto 证明面、固件九件、
 distro 两件与 artifactType、OTA 六件（含 `keys/*.pub`）、buildroot 四件；缺件/不合规
 逐项点名并打印 digest，不发写请求。`--classes` 供两条发布流水线分账（publish 核
 image/firmware/distro，buildroot 核 ota/buildroot），默认五类给操作者做发版总检。
@@ -129,9 +129,10 @@ image/firmware/distro，buildroot 核 ota/buildroot），默认五类给操作�
 混成同一结论）。`--with-signature` 追加 cosign keyless 验签（镜像总账/固件/distro，
 身份约束与 runbook B.1 同源，缺 cosign 即退 2，不放宽）。`--tag auto` 取 registry 上
 最新的正式 semver tag——周程用它，避免"VERSION 已 bump、tag 未推"的发布前窗口常红。
-`--self-test` 用假 oras/manifest/cosign 夹具跑十四例（含类别过滤、缺件/未定分账、
-签名通过/无匹配/缺工具、auto 取 tag 与无正式 tag、拼错即拒），在 gate 的 scripts 步
-实跑；公开包可匿名回读，私有包需 ghcr 凭据（runbook B）。
+结尾输出"制品 digest 汇总表"（逐类 ref + digest），发版回执（runbook B.2）直接引用。
+`--self-test` 用假 oras/manifest/cosign 夹具跑十五例（含类别过滤、缺件/未定分账、
+签名通过/无匹配/缺工具、auto 取 tag 与无正式 tag、digest 表、拼错即拒），在 gate 的
+scripts 步实跑；公开包可匿名回读，私有包需 ghcr 凭据（runbook B）。
 
 ## 构建失败归因入口：`log-digest.sh`
 
