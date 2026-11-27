@@ -122,30 +122,18 @@ pub fn rr3_module_manifest_text(name: &str, bin: &Path) -> String {
     rendered
 }
 
-/// 旁观连接注册（命名单点）：测试端注册后**不喂狗**，服务端读静默上界 = 2 ×
-/// watchdog_ms（`conn/read.rs`）——100/500 的窗口会在 1s 后把整条连接回收，跨秒
-/// 等待外部进程的用例慢一拍就在 `rr3_read_state` 读到 EOF（2026-11-27 gate 的
-/// `killed_eof_skipped` 偶发红即此）。所有"只旁观、不喂狗"的测试端都走这里，
-/// 窗口放大到用例寿命之外（hb < wd 是校验硬规）。
-fn rr3_register_observer(rrd: &RrdTest, name: &str) -> (RrdClient, Value) {
-    let mut c = rrd.rr3_connect();
-    rr3_send(
-        &mut c,
-        &rr3_register_frame(&rr3_manifest(name, 3_600_000, 3_600_001, "never"), name),
-    );
-    let v = rr3_read_rpc(&mut c);
-    (c, v)
-}
-
 /// 旁观连接：注册一个命名的测试端并消费注册回执，返回可直接读广播的客户端。
 pub fn rr3_connect_as(rrd: &RrdTest, name: &str) -> RrdClient {
-    rr3_register_observer(rrd, name).0
+    let mut c = rrd.rr3_connect();
+    let _ = rr3_register_passive(&mut c, name);
+    c
 }
 
 /// 旁观连接：注册一个最小模块身份，专收广播与转发（sim_peer 用例的同一口径）。
 /// 返回 (客户端, 本旁观者分配的 task 号)。
 pub fn rr3_connect_observer(rrd: &mut RrdTest) -> (RrdClient, u64) {
-    let (obs, v) = rr3_register_observer(rrd, "rr3-obs");
+    let mut obs = rrd.rr3_connect();
+    let v = rr3_register_passive(&mut obs, "rr3-obs");
     let task = v["result"]["src_task"]
         .as_u64()
         .unwrap_or_else(|| panic!("注册应答缺 src_task: {v}"));

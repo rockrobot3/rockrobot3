@@ -197,6 +197,20 @@ pub fn rr3_read_rpc(c: &mut RrdClient) -> Value {
     rr3_json_of(&f)
 }
 
+/// 被动测试端注册（不喂狗）：发送注册帧并消费应答，返回应答体。
+///
+/// 窗口必须放大到用例寿命之外：服务端注册后的读静默上界 = 2 × watchdog
+/// （`conn/read.rs`），100/500 的窗口会在 1s 后回收整条连接——用例若在等外部进程
+/// 或较慢的副作用，就会在随后的读法里吃到 EOF。只有"窗口本身是被测对象"的用例
+/// 才写显式短窗口（如注册校验与 `ctl.health` 的回显断言）。
+pub fn rr3_register_passive(c: &mut RrdClient, name: &str) -> Value {
+    rr3_send(
+        c,
+        &rr3_register_frame(&rr3_manifest(name, 3_600_000, 3_600_001, "never"), name),
+    );
+    rr3_read_rpc(c)
+}
+
 /// 第一条 `rr3-runtime/module/state` 广播且 module/phase 匹配，返回体
 ///
 /// **按到达序取第一帧**。要判"某一世的帧"（重启用例里同一 module/phase 会出现在

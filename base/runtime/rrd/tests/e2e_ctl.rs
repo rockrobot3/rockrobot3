@@ -17,7 +17,8 @@ mod support;
 
 use support::{
     register_sima_task, rr3_ask_ctl, rr3_assert_ctl_closed, rr3_json_of, rr3_manifest,
-    rr3_read_rpc, rr3_read_where, rr3_register_frame, rr3_rpc_frame, rr3_send, RrdClient, RrdTest,
+    rr3_read_rpc, rr3_read_where, rr3_register_frame, rr3_register_passive, rr3_rpc_frame,
+    rr3_send, RrdClient, RrdTest,
 };
 
 use rr_ipc::{rr3_body_split, Rr3PayloadType, Rr3StatusCode};
@@ -25,12 +26,8 @@ use rr_ipc::{rr3_body_split, Rr3PayloadType, Rr3StatusCode};
 fn ctl_status_setup() -> (RrdTest, RrdClient, u64) {
     let t = RrdTest::rr3_start_no_overlay("ctl-status");
     let mut a = t.rr3_connect();
-    rr3_send(
-        &mut a,
-        &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
-    );
-    let reg = rr3_read_rpc(&mut a);
-    let task = reg["result"]["src_task"]
+    let v = rr3_register_passive(&mut a, "rr3-sima");
+    let task = v["result"]["src_task"]
         .as_u64()
         .expect("注册应答带 src_task");
     (t, a, task)

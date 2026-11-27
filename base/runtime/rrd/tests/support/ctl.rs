@@ -17,14 +17,12 @@ pub fn rr3_ask_ctl(c: &mut RrdClient, method: &str, id: u64) -> serde_json::Valu
     rr3_json_of(&f)
 }
 
-/// 夹具注册：sima 以 always/100/500 上册，带回注册分到的 src_task
+/// 夹具注册：sima 以旁观窗口上册，带回注册分到的 src_task。
+/// 长窗口与 `rr3_register_passive` 同口径——本文件不喂狗，短窗口会在 1s 后回收连接。
 pub fn register_sima_task(t: &RrdTest) -> (RrdClient, u64) {
     let mut a = t.rr3_connect();
-    rr3_send(
-        &mut a,
-        &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
-    );
-    let task = rr3_read_rpc(&mut a)["result"]["src_task"]
+    let reg = rr3_register_passive(&mut a, "rr3-sima");
+    let task = reg["result"]["src_task"]
         .as_u64()
         .expect("注册应答带 src_task");
     (a, task)

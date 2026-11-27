@@ -16,11 +16,9 @@ mod register;
 
 use support::*;
 
-/// 夹具注册（两处同款）：sima 以 always/100/500 上册并消费注册回执
+/// 夹具注册（两处同款）：sima 以旁观窗口上册并消费注册回执。
+/// 窗口走 `rr3_register_passive` 的长值——测试端不喂狗，服务端静默上界 = 2×watchdog，
+/// 短窗口会让稍慢的用例在读帧前丢掉整条连接。
 fn register_sima(c: &mut RrdClient) {
-    rr3_send(
-        c,
-        &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
-    );
-    rr3_read_rpc(c);
+    let _ = rr3_register_passive(c, "rr3-sima");
 }
