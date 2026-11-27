@@ -1706,3 +1706,25 @@ oras 推 `rockrobot3-ota` / `rockrobot3-buildroot`——与 `ci-workflows.md` �
 `ubuntu-latest`（x86_64 宿主）上，**AMD 没有独立 runner 回执**，"AMD 上能跑"今天的证据只到
 "指令集与内核 ABI 相同"这一档。判据——⑤ 文档门绿；不新增腿（同一 target 造两条重复腿没有
 判据意义）。
+
+**2026-11-27 批107 补丁台账与实际位置订正**：事实——`buildroot/patches/README.md` 写
+"本目录承载补丁…现存一件"，而 `ls` 该目录只有 README：补丁体按 Buildroot 惯例在
+`board/radxa-zero3/patches/`（defconfig 的 `BR2_LINUX_KERNEL_PATCH` 指过去）。读者按台账
+去找补丁会扑空。处置——台账开头改成"**只放台账，不放本体**"并点明本体路径与 defconfig
+指向；核对清单同一句同步。判据——⑤ 文档门绿；`find -name '*.patch'` 与台账"现存一件"
+逐字对上。
+
+**2026-11-27 批108 主题契约静态对账（无改动）**：事实——把六模块 `module.toml` 的
+`[events].publishes/subscribes` 与 `contracts/topics.toml` 做全表交叉（一次性脚本，
+不新增门禁）：**零缺失**——没有任何模块申报了契约里没登记的主题。处置——零改动，
+结论入册（运行期越权发布本来就由归属门拒并计数，静态面这次先查过一遍）。
+
+**2026-11-27 批109 OTA 设计档过期说法订正**：事实——`分区布局与OTA槽位.md` 写
+"rr3-ota-ctl 已不在仓"，而 `base/ota/rr3-ota-ctl` 在仓、`publish`/`buildroot` 两条流水线
+都在构建它——同一句同时与仓内实况和流水线矛盾。处置——改为"**在仓**，缺的是板上消费
+运行态"（与 `rr3.ctl.ota` 恒拒的实况一致）。判据——⑤ 文档门绿；`ls base/ota/rr3-ota-ctl`
+可见。
+
+**2026-11-27 批110 探针集清点（无改动）**：事实——`tools/pi-periph-probe` 17 支 `.py`，
+README 逐个点名 17 支；`grep -rln 'TODO|deprecated|legacy|旧路径'` 零命中。处置——零改动
+（没有证据支持"某支已退役"就不删，删了等于毁证据链）。判据——README 与文件名逐一对上。
