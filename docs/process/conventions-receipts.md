@@ -2548,3 +2548,25 @@ integration run `46026067849` / job `140597668459` success，notice 逐字
 首跑归因；② distro 首发后 `--deep` 与 B.2 实测；③ install-smoke 回滚检测时延优化评估
 （33s 由 30s 探针窗口主导，先取证再定是否收窄，禁止无据调参）；④ 三线收口与再拟下轮。
 判据——`0a3ffd75` 上 gate（run `46026797980`）/ integration（run `46026798086`）/ platforms（run `46026797816`）三线 success；⑤⑬⑯、度量与流水线审计自检绿。
+
+**2026-11-27 批223 gate 漂红的根因修复（测试夹具静默上界）**：事实——docs 提交 `3b4af7ae`
+的 gate conventions 在 `killed_eof_skipped` 偶发红（同一代码 `0a3ffd75` 为绿；panic 落在
+`rrd/tests/support/client.rs:118`）。根因——测试端注册为 `rr3-simb`/`rr3-sima` 后不再发帧，
+而服务端注册后的读静默上界 = 2 × watchdog（`conn/read.rs`）：100/500ms 的窗口会在 1s 后
+回收整条连接；用例要等外部 peer 启动/abort，CI 负载下超过 1s 就在 `rr3_read_state` 读到
+EOF。处置——"旁观连接"收成单点 `rr3_connect_as`（3_600_000/3_600_001, never，注释写明
+2×watchdog 上界），`connect_simb` 与 `sim_exit_restart` 的观察端改用它，重复注册代码一并
+收掉；断言一条未放宽（仍要求 unregistered / 干净收尾）。判据——gate run `46031019507`
+success（conventions 含 `cargo test --workspace`）；同提交 integration run `46031019241`
+success；本地 rustfmt --check、⑤⑬⑯、度量与流水线审计自检全绿。
+
+**2026-11-27 批224 本轮收口（三线回执与窗口登记）**：事实——`971dc2c5` 上 gate /
+integration / platforms 三线 success；`release-anon` runs 仍为 0（cron 首跑 2026-11-30
+03:00 UTC 未到）；GitHub releases 最新 v0.0.8 仍无 distro bundle，`--deep` 与 B.2 无真包，
+均按登记不冒充。处置——本轮四批（221 时延回传、222 漂移门负例、223 夹具静默上界根因修复、
+224 收口）结束；下轮五件：① 11-30 后 release-anon 首跑归因；② distro 首发后 `--deep`
+深检与 B.2 验签实测；③ 回滚检测时延优化评估（33s 由 30s 探针窗口主导，先取证再定，禁止
+无据调参）；④ 测试夹具静默上界巡检（`e2e_ctl`/`register_publish` 等短窗口被动端同病灶
+排查，能收口到 `rr3_connect_as` 的一并收口）；⑤ 三线收口与再拟下轮。判据——三线 run
+`46031019507`（gate）/ `46031019241`（integration）/ `46031019318`（platforms）success；
+⑤⑬⑯、度量与流水线审计自检绿。
