@@ -1630,3 +1630,26 @@ UDS 未就绪/断链期间**不缓冲、直接丢弃并计数**（`link/stat.rs`
 `--strict` 语义不变；`ci-workflows.md` 同口径注明。判据——`bash -n` 通过；
 `skip.sh --self-test` 与 `release-tag.sh --self-test` 在 gate `scripts` job 里照常执行；
 gate / integration 在 `2152fcd` 绿。
+
+**2026-11-27 批95 日志查询按尾取**：事实——`rr3_log_filter` 在 `tail>0` 时先全量
+`cloned()` 再 `drain` 头部：环容量是装配单数据（可调大），`tail=10` 配 8192 行环会白拷
+整个环。处置——改为从环尾 `rev().take(tail)` 收再反转，只复制 tail 条；`tail=0`（不限）
+路径不变。判据——rrd lib 326 项全过（含日志环查询用例），行为逐字不变。
+
+**2026-11-27 批96 版本化部署包 A10 契约立节**：事实——`pack-bundle.sh` 与
+`install-bundle.sh` 互相引用"A10 打包契约"，而 `grep -rn A10 docs` 零命中：契约只活在
+两个脚本的注释里。处置——`tools/deploy/README.md` 立"版本化部署包契约"节，三条对齐项
+（顶层目录名 `rockrobot3-<commit>` / `BUNDLE_VERSION` 五个键必在顶层 / 安装失败回树**且**
+回二进制），并点明两侧实现单点。判据——⑤ 文档门绿；三条逐条能对上脚本行（顶层校验、
+`grep -qx .../BUNDLE_VERSION`、`rollback()` 的 binbk 段）。
+
+**2026-11-27 批97 sense 上行失败语义复核（无改动）**：事实——`rr3_pcm_pub` 的发布失败
+经 `?` 上抛到 `serve`，模块打印 `发布 <topic> 失败: …` 后 exit(1)，由 supervisor 按
+restart_policy 重启——这是 rr3mod 写明的"模块不装活着"语义，不是静默；rrd 重启窗口里
+桥侧丢帧、模块侧重连注册，两条路径各自有名点。处置——零改动，结论入册。
+
+**2026-11-27 批98 gate 自检面复核（无改动）**：事实——`tools/ci/audit/*.py` 里带
+`--self-test` 的七支（unsafe / baselines / commit_msg / gate_steps / workflows /
+metrics / lockio）与 `lib/{log-digest,skip,release-tag}.sh` 三支自检，在 `gate.yml` 的
+`scripts` job 里**全部有调用点**，无"有自检没人跑"的死件；`bash -n` 全量语法检查与
+actionlint 也在同 job。处置——零改动，结论入册（避免下轮重复排查）。
