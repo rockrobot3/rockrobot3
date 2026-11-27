@@ -2831,3 +2831,21 @@ ceiling_ms=5000`；install-smoke 同拍 success（rollback 早停无回归）。
 `3eb4ffbf` integration success，distro-smoke job `140712122709` 注解实测
 `boot_spawn6_ms=1014 ceiling_ms=10000`、`status_rtt_ms=2 ceiling_ms=1000`；install-smoke
 同拍 success。
+
+**2026-11-28 批260 二段收口（⑰ 治理 + 回滚时延 + 时延上限）**：本轮二段四件全部落地
+并各有公开实证——① ⑰ 接门后 gate `scripts` 19s、`conventions` 全步绿；
+② 真值成对判据（模块 crate 漏写 module.toml 即红）自检 9/9；③ 坏包回滚 `NRestarts`
+早停：install-smoke `rollback_ms=4513`（旧 32619ms，降 86%），成功换树 2449ms / boot
+2137ms 无回归；④ distro-smoke 时延上注解面并两拍校准：`boot_spawn6_ms=1010/1014`
+（上限 10000）、`status_rtt_ms=2/2`（上限 1000）。三线最终提交 `3eb4ffbf`
+gate/integration/platforms 全 success；文档提交 `777e4def` gate success
+（integration/platforms 按 paths-ignore 跳过）。三远端同指 `777e4def`。
+判据——各 run/job id 与注解在本段回执逐条在案；`release_sets --self-test` 9/9；
+`gate_steps_audit` 30 步；⑤⑯ 绿。
+
+**2026-11-28 批260 下轮任务拟定**：① 批261 ⑰ 处置提示——新增模块触发失败时点名
+"同批改 workflow_release.PUBLISH_MODULES / stage-image.sh / image-smoke.sh 三处"，
+让报错自带改法；② 批262 11-30 03:00 UTC `release-anon` 首跑归因（窗口未到不预写；
+首跑红则按 check-run 注解与出参定位）；③ 批263 distro 首发后 `--deep` / runbook B.2
+实测，并裁定 `distro` 类是否进匿名回读（当前纳入会对 v0.0.8 假红）；④ 批264 复核
+install-smoke 回滚新路径连续三拍稳定（4513ms 为单拍），三线收口与再拟下轮。
