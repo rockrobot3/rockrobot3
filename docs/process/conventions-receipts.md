@@ -1855,3 +1855,34 @@ ci-workflows 明写（厂商级差异不在 CI 可判面）。判据——`platf
 `tools/ci/lib/fetch.sh`（`cargo fetch --locked` 三次退避重试，末次失败才点名退出），
 workspace 与独立工程两段都先预取；ci-workflows 缓存面口径补记。判据——`platforms` 在
 `10bc4e7` 全 success（macOS 腿转绿），gate/integration 同头亦 success。
+
+**2026-11-27 批128 三条 espidf 门前置收敛**：事实——`espidf-std` / `espidf-sentinel` /
+`rr3-act-sense-espidf` 三门各带一份 40+ 行前置复制体（工具链/rust-src/ldproxy/IDF/
+esp-clang/镜像/venv），与批123 收敛的两条 periph 门同源。处置——`tools/ci/lib/esp-env.sh`
+拆出 `rr3_esp_toolchain`（工具链四查）与 `rr3_esp_idf`（IDF 克隆+esp-clang），
+`rr3_esp_ready` 保留兼容；三门改调 `rr3_esp_preflight`，act-sense 的目标按芯片档选、
+模块内 venv 兼容改调 `rr3_esp_env`。裸金属门 `esp-uart-echo` **不套**公共前置并在头注
+写明原因：它不需要 rust-src/IDF/esp-clang，链接面是 Xtensa esp-gcc，硬套会把缺件误判成
+整门 SKIP。判据——`platforms` 在 `9b582b8` 全 success（含 esp32/esp32s3 双芯片腿）；
+四门 `bash -n` 全过，SKIP 文案逐门核对无「门 门」重复；行数 93→52 / 93→58 / 132→106。
+
+**2026-11-27 批129 edge 与发布点 digest 复核（无改动）**：事实——匿名 manifests 实测：
+`latest` 与 `v0.0.8` 同指 `sha256:07d189…`（OCI index，三架构 + 3 条 attestation
+`unknown/unknown`）；`edge` 指 `sha256:39d8ee55…`（另一 index，同三架构）——edge 未与
+发布点混指，`latest` 只随正式 semver 更新。处置——零改动（status 发布段已述，本次为
+复核回执）。判据——三 tag 的 Docker-Content-Digest 与平台集合逐条对上。
+
+**2026-11-27 批130 buildroot 镜像内容断言收为脚本**：事实——`buildroot.yml` 的
+"镜像内容只读断言"是 57 行内联体（e2fsck/卷标/rootfs 内容/FIT+TPL 四组混在一段），
+超过 50 行审查阈值且只存在于 YAML 里。处置——抽 `tools/ci/platform/
+buildroot-image-check.sh`：`rr3_br_fsck` / `rr3_br_rootfs` / `rr3_br_fit` 三函数各 ≤35 行，
+错误标题（br-fs/br-fsck/br-label/br-tool/br-rootfs/br-fstab/br-fit/br-tpl）与文案逐字保留，
+workflow 收为一行调用。判据——`buildroot` 在 `9b582b8` success（真镜像上执行抽取后的
+脚本）；缺镜像路径本地实测按 `br-fs` 退 1。
+
+**2026-11-27 批131 五芯片腿版本钉对表（无改动）**：事实——六条流水线共 24 处 Rust
+工具链全部钉 `1.100.0`；esp 面 espup `v0.17.1`（含 sha 下载与三次重试）、ESP-IDF
+`v5.2.2`、espflash `4.6.0` + sha256 单点；缓存键分别按 `Cargo.lock` 与工具链版本。
+处置——零改动。已知边界：riscv64 apt 交叉包（`gcc-riscv64-linux-gnu` 等）未钉版本，
+属 runner 镜像面而非仓内配置，登记为诚实边界不冒充已钉。判据——`grep 'toolchain: "1.100.0"'`
+六表计数一致；esp 三件钉版在 action 内单点。
