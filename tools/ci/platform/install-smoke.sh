@@ -60,7 +60,9 @@ dump_state() {
     "$ROOT/BUNDLE_VERSION" 2>/dev/null >&2 || true
   as_root /usr/bin/rr3-ctl --bus-path "$SOCK" status 2>&1 | head -20 >&2 || true
 }
-trap dump_state ERR
+# 意外退出也必须可归因：set -e 下的裸命令失败不会经过 die，公开注解只会剩一句
+# "exit code 1"。ERR trap 先打一行 FAIL（带失败命令），再 dump 现场。
+trap 'echo "FAIL  意外退出：${BASH_COMMAND}" >&2; dump_state' ERR
 
 # systemd 存在性门：只看"是否有 system manager 可管理 unit"，不看全局收敛态。
 # hosted runner 的 VM 在 cloud-init 收尾前 is-system-running 会长时间停在
@@ -260,7 +262,7 @@ install_bundle() {
   as_root systemctl is-active --quiet rrd || die "换树后 rrd 未 active"
   wait_modules
   SWAP_MS=$(( $(now_ms) - t0 ))
-  phases=$(install_phases "$out")
+  phases=$(install_phases "$out" || true)
   echo "::notice title=install-smoke-bundle::换树成功 commit=${commit}，全模块 running（窗口=${SWAP_MS}ms${phases:+；$phases}）"
 }
 
@@ -326,7 +328,7 @@ rollback_case() {
   as_root systemctl is-active --quiet rrd || die "回滚后 rrd 未 active"
   wait_modules
   ROLLBACK_MS=$(( $(now_ms) - t0 ))
-  attempt=$(grep -o '本次尝试 [0-9]*ms' <<<"$out" | tail -1)
+  attempt=$(grep -o '本次尝试 [0-9]*ms' <<<"$out" | tail -1 || true)
   echo "     回滚证据：rc=${rc}，$(grep '已回滚' <<<"$out" | tail -1)"
   echo "::notice title=install-smoke-rollback::坏包回滚成立 rc=${rc}（树与二进制已回上一版，全模块 running，恢复=${ROLLBACK_MS}ms${attempt:+；$attempt}）"
 }
