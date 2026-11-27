@@ -2481,3 +2481,20 @@ runs 结论归因；② distro 首发深检与 B.2 实测；③ 文档/脚本一
 → 以真 unit 跑 `install-bundle` 正例并验六模块 running），把唯一未测的"装机成功路径"
 补上；失败即带回滚证据。判据——匿名复核退出 0；③ 三线沿用 `ea2c1b1b` 实跑回执；
 ⑤⑬⑯ 与巡检自检 18/18 绿。
+
+**2026-11-27 批217 装机器正例进流水线**：事实——distro-smoke 在容器里直跑 rrd（容器无
+systemd），platforms 的装机器只验"干净机拒绝"；install-bundle.sh 的成功换树与失败回滚
+两条路径此前没有任何流水线执行过。处置——新增 integration 作业 install-smoke（判据体
+tools/ci/platform/install-smoke.sh）：原生构建十件 → rr3-pack 出 deb → dpkg -i →
+systemd drop-in 注入 RR3_PROBE=sim / RR3_BRAIN_CLOUD=mock → unit 拉起并验六模块 running
+→ 真出 bundle（解包副本 profile 改 sim 后重打包，BUNDLE_VERSION/A10 原样）→
+install-bundle 正例换树 → 坏 rrd（非 ELF）包回滚例；失败时 ERR trap 打 journal 与装机树。
+审计发现并修两处：① `is-system-running=starting` 是 hosted runner 上 cloud-init 未收敛的
+常态（同一提交三次实跑 running 1 / starting 2，两次把可用宿主判死）——按全局收敛态判是
+错的对象，改为只判"无 system manager"（offline/unknown），功能判据交给 systemctl start
+本身；② 结果只留在匿名不可读的日志里——正例/换树/回滚各上一条 notice 注解，公开可回读。
+覆盖契约与缓存纪律同批更新（REQUIRED_JOBS / CACHE_ALL_JOBS 增 install-smoke）。判据——
+integration run `46017650574` / job `140568786079` success，注解三条逐字："deb 装机 +
+systemd unit 拉起成立，六模块 running"、"换树成功 commit=b88542d88256，六模块 running"、
+"坏包回滚成立 rc=1（树与二进制已回上一版，六模块 running）"；同提交 gate 六 job success；
+⑤⑬⑯、度量与流水线审计自检全绿；仓源零改（sim 变换只在装机副本与 bundle 解包副本）。
