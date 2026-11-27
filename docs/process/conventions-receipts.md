@@ -3072,3 +3072,17 @@ distro 类别的纳入时点；③ 批286 distro 首发后 `--deep` / B.2 实测
 `<name>:v${VER}`，否则点名"标签必须 v<VER>"；自检夹具把 ota 改成 v 口径并增第 31 条
 负例（改回 `${VER}` 必被抓）。判据——`workflows_audit.py --self-test` 31/31 绿；
 真仓审计 PASS；⑤ 文档门绿。
+
+**2026-11-28 批285 本轮收口（标签口径门落地）**：事实——制品标签口径判据已在
+gate `scripts`（自检 31/31 + 执法）与 `conventions`（check.sh）双点生效；真仓审计
+PASS，证明 buildroot.yml 当前两包引用均为 `v${VER}`；`release-anon.yml` 工作流
+state=active，cron 具备触发条件；首跑窗口仍未到（runs=0，11-30 03:00 UTC）。
+判据——commit `ae9f764d` 三线全绿（gate / integration / platforms 均 success）；
+三远端同指 `ae9f764d`。
+
+**2026-11-28 批285 下轮任务拟定**：① 批286 11-30 03:00 UTC `release-anon` 首跑归因
+（确认 runs>0，按注解记录 tag/类别结论；红按镜像/固件/签名三类定位；预检基线已在
+status 第 30 行）；② 批287 下次 `v*` 发布后把 OTA/buildroot 纳入匿名回读（v 前缀
+口径，判据已由批284 钉住），并核 buildroot 的 `release-verify --tag v${VER}` 实跑；
+③ 批288 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批289 三线收口与
+再拟下轮。
