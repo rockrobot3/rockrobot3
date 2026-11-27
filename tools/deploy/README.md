@@ -57,7 +57,8 @@ MCU 无 A/B 分区，升级一律线下重烧。每个芯片平台独立部署�
 | 安装序 | 新树落 `<parent>/.rockrobot3-new.*` → 启动自检 → 换入 → 失败按 `rollback()` 回旧树**并回旧二进制** | 只回树不回二进制会留下"旧树 + 新 `rrd`"（2026-11-09 真板实测过） |
 
 实现单点：[`pack-bundle.sh`](pack-bundle.sh) 的 BUNDLE_VERSION 段、[`install-bundle.sh`](install-bundle.sh)
-的顶层校验与 `rollback()`；改任一侧都要同批改本节。
+的顶层校验与 `rollback()`；改任一侧都要同批改本节。安装成功/回滚行带四段用时（停机 /
+换树 / 二进制 / 启动探针），真板排障先读这一行。
 
 **前置（base 层）**：本包是 A10 更新/重装 payload，**不含也不装 systemd unit**——
 `install-bundle.sh` 从已装 `rrd.service` 读 `--socket`/`--profile` 开关。干净机首装必须

@@ -31,6 +31,10 @@ SOCK=${SOCK:-/var/run/rock3-ipc.sock}
 
 die() { echo "FAIL  $*" >&2; exit 1; }
 
+# 毫秒时钟（GNU date；本脚本只在 Linux systemd 宿主跑）。四段用时随成功/回滚行打印，
+# 真板排障先看这一行：慢在停机、换树、二进制还是启动探针，不用猜。
+now_ms() { date +%s%3N; }
+
 [ -n "$BUNDLE" ] || die "用法: sudo bash install-bundle.sh <bundle.tar.gz> [安装根]"
 [ -f "$BUNDLE" ] || die "部署包不存在: $BUNDLE"
 [ "$(id -u)" -eq 0 ] || die "需 root（换装机树 + 重启 rrd）"
@@ -105,12 +109,13 @@ rollback() {
     done
     systemctl reset-failed rrd >/dev/null 2>&1 || true
     systemctl start rrd >/dev/null 2>&1 || true
-    die "已回滚到上一版（该树在 ${ROOT}，二进制备份在 ${binbk}）"
+    die "已回滚到上一版（该树在 ${ROOT}，二进制备份在 ${binbk}；本次尝试 $(( $(now_ms) - T_STOP ))ms）"
   fi
-  die "首次安装失败且无上一版可回退（新树已删除，请查 journalctl -u rrd）"
+  die "首次安装失败且无上一版可回退（新树已删除，本次尝试 $(( $(now_ms) - T_STOP ))ms，请查 journalctl -u rrd）"
 }
 
 echo "安装 $top → ${ROOT}（rrd 停机窗口内整树换位）"
+T_STOP=$(now_ms)
 systemctl stop rrd
 # Restart=always 会在超时被 SIGKILL 后自动拉起；停稳确认必须在换树之前，
 # 否则"新树已就位、旧进程还在跑"的假窗口会把健康探针引到旧进程上。
@@ -119,9 +124,11 @@ for _ in $(seq 1 40); do
   sleep 1
 done
 systemctl is-active --quiet rrd && die "rrd 40s 内未停稳，放弃安装（机树未改动）"
+STOP_MS=$(( $(now_ms) - T_STOP ))
 # mktemp 建的是 0700：换位后整棵装机树会继承该权限，非 root 工具连
 # profiles/contracts 都读不到。换位前显式归一为 0755（安装根是共享只读面）。
 chmod 0755 "$stage"
+T_SWAP=$(now_ms)
 if [ -d "$ROOT" ]; then
   rm -rf "$backup"
   mv "$ROOT" "$backup"
@@ -134,15 +141,19 @@ if ! mv "$stage" "$ROOT"; then
   die "新树换位失败（已恢复上一版树；/usr/bin 二进制未改动）"
 fi
 trap - EXIT
+SWAP_MS=$(( $(now_ms) - T_SWAP ))
 
 # 二进制替换同样在回滚保护内：这里失败若直接退出，会留下"新树 + 旧 rrd"
 # 的半更新态，正是本脚本要消灭的故障面。
+T_BIN=$(now_ms)
 for b in rrd rr3-ctl rr3-ota-ctl; do
   install -m755 "$ROOT/bin/$b" "$BIN/.$b.new" || rollback
   mv -f "$BIN/.$b.new" "$BIN/$b" || rollback
 done
+BIN_MS=$(( $(now_ms) - T_BIN ))
 # 先前的崩溃循环会把 StartLimit 打满（Failed to start: start request repeated
 # too quickly）；不清账的话新树第一次 start 就被拒，健康窗口还没开始就回滚。
+T_BOOT=$(now_ms)
 systemctl reset-failed rrd >/dev/null 2>&1 || true
 systemctl start rrd || rollback
 
@@ -160,8 +171,9 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 [ "$ok" -eq 1 ] || rollback
+BOOT_MS=$(( $(now_ms) - T_BOOT ))
 
-echo "PASS  新树已就位：$(sed -n 's/^commit=//p' "$ROOT/BUNDLE_VERSION")"
+echo "PASS  新树已就位：$(sed -n 's/^commit=//p' "$ROOT/BUNDLE_VERSION")（停机 ${STOP_MS}ms / 换树 ${SWAP_MS}ms / 二进制 ${BIN_MS}ms / 启动探针 ${BOOT_MS}ms）"
 # 诚实降级（2026-11-27 批164）：expected 取不到时旧文案打成"模块："空白，读起来像
 # "零模块也验过了"。逐模块断言是本次探针的主体，缺它就必须说清只验到了哪一层。
 if [ -n "$expected" ]; then
