@@ -48,30 +48,28 @@ dump_state() {
 }
 trap dump_state ERR
 
-# systemd 就绪等待：hosted runner 的 VM 可能刚起，is-system-running 会短暂报
-# "starting"——那是瞬态而不是"没有 systemd"（2026-11-27 批217 首跑二次实证：
-# 同一提交两次运行，一次 running 一次 starting）。按有界等待判就绪，超时才点名。
-wait_systemd() {
-  local i st
-  for i in $(seq 1 60); do
-    st=$(systemctl is-system-running 2>&1 || true)
-    case "$st" in
-      running | degraded)
-        echo "systemd: $st（就绪等待 ${i}s）"
-        return 0
-        ;;
-      starting | initializing) sleep 1 ;;
-      *) die "systemd 不可用（is-system-running=${st}）" ;;
-    esac
-  done
-  die "systemd 60s 内未就绪（is-system-running=${st}）"
-}
-
-# 宿主前置：systemd 真在跑（容器直跑会在第一步就点名，不装到一半才发现没 init）。
-preflight() {
+# systemd 存在性门：只看"是否有 system manager 可管理 unit"，不看全局收敛态。
+# hosted runner 的 VM 在 cloud-init 收尾前 is-system-running 会长时间停在
+# "starting"——那是全局目标未收敛，不是 systemctl 不能用（2026-11-27 批217 三次
+# 实跑：同一提交一次 running、两次 starting；按全局态判会把可用宿主判死）。
+# 真正的功能判据是后面的 systemctl start：起不来时 journal 带根因。
+systemd_gate() {
+  local st
   [ -d /run/systemd/system ] \
     || die "本机无运行中的 systemd（/run/systemd/system 缺席）：本检查只跑在带 systemd 的宿主/runner"
-  wait_systemd
+  command -v systemctl >/dev/null || die "缺 systemctl（systemd 宿主才有 unit 面）"
+  st=$(systemctl is-system-running 2>&1 || true)
+  case "$st" in
+    offline | unknown | "")
+      die "systemd 未在管理本机（is-system-running=${st:-空}）"
+      ;;
+  esac
+  echo "systemd: ${st}（unit 管理可用；全局收敛态不作门槛）"
+}
+
+# 宿主前置：systemd 可管理 unit + 打包器 + 构建面 + 提权面。
+preflight() {
+  systemd_gate
   command -v dpkg-deb >/dev/null || die "缺 dpkg-deb（发行版打包器出不了 deb）"
   command -v cargo >/dev/null || die "缺 cargo（本检查自建原生产物）"
   if [ "$(id -u)" -ne 0 ]; then
