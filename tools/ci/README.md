@@ -196,7 +196,9 @@ job 定义 ≤10；integration/platforms 的 push/PR 必须 `paths-ignore` 含 `
 先自检后执法。
 **作业覆盖契约**：gate / integration / platforms / publish / buildroot / coverage /
 release-anon 的 job 名全部按 `REQUIRED_JOBS` 钉住（删名即红、整文件删也红，改名须同批
-评审）；发布面完整性：`publish.yml` 必须有 build / build-riscv64 / merge / firmware /
+评审）；`release-anon` 的**命令**也按判据钉住（必须复用 `release-verify.sh`、带
+`--with-signature`、`--tag auto`、`--classes image,firmware`——只删类别或改固定 tag
+等于公开面覆盖静默消失）；发布面完整性：`publish.yml` 必须有 build / build-riscv64 / merge / firmware /
 distro-bundle 五条产出腿与 release-verify 总账腿；build 矩阵必须
 含 amd64/arm64 原生腿与 `ubuntu-24.04-arm`；build 必须走 `stage-image.sh` 与
 `image-smoke.sh file|run`（发布镜像按装机面验证）；build-riscv64 必须复用

@@ -195,9 +195,22 @@ def self_test():
             encoding="utf-8",
         )
         bad2 = audit(root)
+        # 匿名回读命令负例（批286）：丢签名、砍类别、固定 tag——三者都必须被点名。
+        (wf / "release-anon.yml").write_text(
+            "name: release-anon\non:\n  schedule:\n    - cron: \"0 3 * * 1\"\n"
+            "permissions:\n  contents: read\nconcurrency:\n  group: a\n"
+            "  cancel-in-progress: true\njobs:\n"
+            "  anon:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    steps:\n      - run: bash tools/ci/lib/release-verify.sh --tag v0.0.8 --classes image\n",
+            encoding="utf-8",
+        )
+        bad3 = audit(root)
 
     cases = _cases(bad)
     cases.append(("制品标签漏 v 被抓", any("标签必须 v<VER>" in b for b in bad2)))
+    cases.append(("匿名回读丢签名被抓", any("缺 --with-signature" in b for b in bad3)))
+    cases.append(("匿名回读类别被削被抓", any("类别必须 image,firmware" in b for b in bad3)))
+    cases.append(("匿名回读固定 tag 被抓", any("必须 --tag auto" in b for b in bad3)))
     for name, ok in cases:
         print(("PASS  " if ok else "FAIL  ") + name)
     return 0 if all(ok for _, ok in cases) else 1

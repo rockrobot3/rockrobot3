@@ -206,6 +206,22 @@ GHCR_ARTIFACTS = {
 }
 
 
+def anon_problems(text, rel):
+    """匿名回读面：周程是"公开可下载"的唯一周期判据，命令被削弱 = 覆盖静默消失。"""
+    if rel.name != "release-anon.yml":
+        return []
+    bad = []
+    if "release-verify.sh" not in text:
+        bad.append(f"{rel} 未复用 tools/ci/lib/release-verify.sh（判据分叉）")
+    if "--with-signature" not in text:
+        bad.append(f"{rel} 缺 --with-signature（签名面无人验证）")
+    if "--classes image,firmware" not in text:
+        bad.append(f"{rel} 类别必须 image,firmware（正式制品面被削）")
+    if "--tag auto" not in text:
+        bad.append(f"{rel} 必须 --tag auto（固定 tag 会随版本推进失真）")
+    return bad
+
+
 def release_artifacts_problems(text, rel):
     """正式制品托管面：OTA 与 buildroot 镜像必须由 tag 门作业推 ghcr。"""
     spec = GHCR_ARTIFACTS.get(rel.name)

@@ -25,7 +25,12 @@ import re
 
 from workflow_common import has_key, jobs_of, step_block, top_block, trigger_block
 from workflow_graph import graph_problems
-from workflow_release import REQUIRED_JOBS, release_artifacts_problems, release_problems
+from workflow_release import (
+    REQUIRED_JOBS,
+    anon_problems,
+    release_artifacts_problems,
+    release_problems,
+)
 
 # action 引用矩阵（升级 = 显式提交改本表；值 = 允许的完整引用）
 ACTION_MATRIX = {
@@ -216,6 +221,7 @@ def workflow_problems(path, root):
     bad.extend(chip_problems(text, rel))
     bad.extend(release_problems(text, rel))
     bad.extend(release_artifacts_problems(text, rel))
+    bad.extend(anon_problems(text, rel))
     if not re.search(r"^concurrency:\s*$", text, re.M):
         bad.append(f"{rel} 缺顶层 concurrency（同 ref 并发组）")
     if rel.name == "publish.yml" and not re.search(r"cancel-in-progress:\s*false", text):

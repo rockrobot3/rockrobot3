@@ -3086,3 +3086,11 @@ status 第 30 行）；② 批287 下次 `v*` 发布后把 OTA/buildroot 纳入�
 口径，判据已由批284 钉住），并核 buildroot 的 `release-verify --tag v${VER}` 实跑；
 ③ 批288 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批289 三线收口与
 再拟下轮。
+
+**2026-11-28 批286 匿名回读命令入审计**：事实——`release-anon` 此前只钉 job 名
+（`REQUIRED_JOBS`），命令内容无人核：把 `--classes image,firmware` 砍成 `image`、
+去掉 `--with-signature` 或改成固定 tag，周程仍绿而公开面覆盖静默消失（首跑未到，
+正是最该先钉住的时刻）。处置——`workflow_release.anon_problems` 增四条判据（复用
+release-verify.sh / `--with-signature` / `--classes image,firmware` / `--tag auto`），
+自检增三条负例（丢签名 / 砍类别 / 固定 tag）。判据——`workflows_audit.py --self-test`
+34/34 绿；真仓审计 PASS（现行命令四条全中）；⑤ 文档门绿。
