@@ -40,65 +40,16 @@ cd "$root/tools/esp32-periph-base" || { echo "ERROR: 无法进入 tools/esp32-pe
 part_marker=/tmp/rr3-part-marker-esp32
 : > "$part_marker"
 
-# ① esp fork 工具链（rustup alias esp，0.0.7 批A'）
-if ! rustup toolchain list 2>/dev/null | grep -q '^esp'; then
-  rr3_skip "esp 工具链未安装（rustup toolchain list 无 'esp'）——esp32-periph-base 门不执行"
-fi
-esp_sysroot="$(rustc +esp --print sysroot 2>/dev/null)" || {
-  rr3_skip "esp 工具链 rustc 不可用（rustc +esp 失败）——esp32-periph-base 门不执行"
-}
-if [ ! -d "$esp_sysroot/lib/rustlib/src/rust" ]; then
-  rr3_skip "esp 工具链缺 rust-src 源码树（build-std 依赖）——esp32-periph-base 门不执行"
-fi
-# ② ldproxy
-if ! command -v ldproxy >/dev/null 2>&1; then
-  rr3_skip "ldproxy 未安装（cargo install ldproxy）——esp32-periph-base 门不执行"
-fi
-# ③ ESP-IDF 本地克隆（版本钉死登记见 tools/espidf-std-hello/README.md）
-if [ ! -f "$HOME/.espressif/frameworks/esp-idf-v5.2.2/tools/idf.py" ]; then
-  rr3_skip "ESP-IDF v5.2.2 本地克隆缺位——esp32-periph-base 门不执行"
-fi
-export IDF_PATH="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
-# ④ esp-clang（bindgen 需 Xtensa 后端）
-if ! rr3_esp_clang_lib >/dev/null; then
-  rr3_skip "esp-clang 缺位（~/.espup/esp-clang 无 libclang.dylib/.so）——esp32-periph-base 门不执行"
-fi
-# ⑤ 镜像注入（仓库源不硬编码镜像，同 espidf-sentinel-check.sh）
-export IDF_GITHUB_ASSETS=dl.espressif.com/github_assets
-export PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.cloud.tencent.com/pypi/simple}"
-export PIP_DEFAULT_TIMEOUT=60
+# 前置（工具链/目标/IDF/esp-clang/镜像/venv）走公共实现：两条 esp 门共用一份，
+# 2026-11-27 批123 起不再各写复制体（复制造成的漏面见 esp-env.sh 头注）。
+. "$root/tools/ci/lib/esp-env.sh"
+rr3_esp_preflight xtensa-esp32-espidf esp32-periph-base
 
-# ⑥ venv dist-info 兼容（espidf-sentinel-check.sh ⑥ 同坑同兜底）：pip≥24
-#    规范化 dist-info 目录名（ruamel.yaml → ruamel_yaml），py3.9
-#    importlib.metadata 按 dir stem 严格匹配点号名 → idf-component-manager 依赖
-#    检查误报 not found → CMake Python 检查退 255。venv 落本工程 .embuild 下，
-#    构建前改名兜底。
-venv_sp=".embuild/espressif/python_env/idf5.2_py3.9_env/lib/python3.9/site-packages"
-for d in "$venv_sp"/ruamel_yaml-*.dist-info; do
-  if [ -d "$d" ]; then
-    mv "$d" "${d/ruamel_yaml-/ruamel.yaml-}"
-    echo "PASS  venv dist-info 兼容改名: ${d##*/} → ruamel.yaml-*"
-  fi
-done
-
-# ⑧pre clippy 门（2026-11-21 治理）：esp fork 工具链实测带 clippy（0.1.97），以
-# 固件最全特性档 autonomy,tts + all-targets 跑 -D warnings；其余档由既有五档
-# build/test 编译面覆盖。测试目标在 panic=abort 下必须带 -Zpanic_abort_tests
-# （与 ⑧ 单测编译同口径，否则 clippy 直接拒编测试目标）。
-esp_clippy_log=/tmp/rr3-esp32-periph-clippy.log
-esp_probe_rf="--cfg espidf_time64 -Zunstable-options -Cpanic=immediate-abort -Zpanic_abort_tests"
-if ! cargo +esp clippy --version >/tmp/rr3-esp-clippy-ver 2>&1; then
-  echo "FAIL  esp clippy 不可用（esp 工具链缺 clippy 组件）: $(tail -1 /tmp/rr3-esp-clippy-ver)" >&2
-  fail=1
-elif RUSTFLAGS="$esp_probe_rf" cargo +esp clippy --locked --all-targets --features autonomy,tts \
-     --config 'source.crates-io.replace-with="rsproxy-sparse"' \
-     --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
-     -- -D warnings >"$esp_clippy_log" 2>&1; then
-  echo "PASS  esp32-periph-base clippy -D warnings（autonomy,tts all-targets）"
-else
-  errs=$(grep -A1 -E '^error' "$esp_clippy_log" | head -12 | tr '\n' '|' | cut -c1-900)
-  echo "FAIL  esp32-periph-base clippy -D warnings: ${errs}" >&2
-  tail -3 "$esp_clippy_log" >&2
+# ⑧pre clippy 门（2026-11-21 治理；2026-11-27 批123 起走公共实现）：以固件最全
+# 特性档 autonomy,tts + all-targets 跑 -D warnings；其余档由既有五档 build/test
+# 编译面覆盖。门体在 tools/ci/lib/esp-env.sh 的 rr3_esp_clippy。
+if ! rr3_esp_clippy esp32-periph-base /tmp/rr3-esp32-periph-clippy.log \
+     --features autonomy,tts; then
   fail=1
 fi
 

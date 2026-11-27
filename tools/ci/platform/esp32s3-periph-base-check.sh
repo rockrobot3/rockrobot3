@@ -15,6 +15,8 @@ export CARGO_HTTP_LOW_SPEED_LIMIT="${CARGO_HTTP_LOW_SPEED_LIMIT:-1}"
 # 与 classic 门的差异只有三处：MCU=esp32s3、--target xtensa-esp32s3-espidf、ELF 路径；
 # 外加芯片档 feature（`--no-default-features --features esp32s3`——esp-idf-sys 的
 # rustc-cfg 不跨 crate 传播，本 crate 以 Cargo feature 表达芯片档，见 Cargo.toml）。
+# 2026-11-27 批123：前置四查与 clippy 腿已抽 `tools/ci/lib/esp-env.sh` 公共实现，
+# 两门只保留各自的构建腿；S3 门同批补齐此前漏掉的 clippy -D warnings 面。
 # 芯片专属 sdkconfig 由 esp-idf-sys 按 MCU 自动叠加 sdkconfig.defaults.esp32s3
 # （BUILD-OPTIONS.md：<path>.<mcu> 更具体者覆盖），本脚本不显式传 SDKCONFIG。
 #
@@ -42,49 +44,19 @@ cd "$root/tools/esp32-periph-base" || { echo "ERROR: 无法进入 tools/esp32-pe
 part_marker=/tmp/rr3-part-marker-esp32s3
 : > "$part_marker"
 
-# ① esp fork 工具链（rustup alias esp，0.0.7 批A'）
-if ! rustup toolchain list 2>/dev/null | grep -q '^esp'; then
-  rr3_skip "esp 工具链未安装（rustup toolchain list 无 'esp'）——esp32s3-periph-base 门不执行"
-fi
-esp_sysroot="$(rustc +esp --print sysroot 2>/dev/null)" || {
-  rr3_skip "esp 工具链 rustc 不可用（rustc +esp 失败）——esp32s3-periph-base 门不执行"
-}
-if [ ! -d "$esp_sysroot/lib/rustlib/src/rust" ]; then
-  rr3_skip "esp 工具链缺 rust-src 源码树（build-std 依赖）——esp32s3-periph-base 门不执行"
-fi
-# S3 目标由 esp fork rustc 内置 target spec 提供（build-std 从 rust-src 编译，
-# 自定义工具链不会出现 lib/rustlib/<target> 目录，故查 target-list）。
-if ! rustc +esp --print target-list 2>/dev/null | grep -qx 'xtensa-esp32s3-espidf'; then
-  rr3_skip "esp 工具链不认 xtensa-esp32s3-espidf 目标——esp32s3-periph-base 门不执行"
-fi
-# ② ldproxy
-if ! command -v ldproxy >/dev/null 2>&1; then
-  rr3_skip "ldproxy 未安装（cargo install ldproxy）——esp32s3-periph-base 门不执行"
-fi
-# ③ ESP-IDF 本地克隆（版本钉死登记见 tools/espidf-std-hello/README.md）
-if [ ! -f "$HOME/.espressif/frameworks/esp-idf-v5.2.2/tools/idf.py" ]; then
-  rr3_skip "ESP-IDF v5.2.2 本地克隆缺位——esp32s3-periph-base 门不执行"
-fi
-export IDF_PATH="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
-# ④ esp-clang（bindgen 需 Xtensa 后端）
-if ! rr3_esp_clang_lib >/dev/null; then
-  rr3_skip "esp-clang 缺位（~/.espup/esp-clang 无 libclang.dylib/.so）——esp32s3-periph-base 门不执行"
-fi
-# ⑤ 镜像注入（仓库源不硬编码镜像，同 espidf-sentinel-check.sh）
-export IDF_GITHUB_ASSETS=dl.espressif.com/github_assets
-export PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.cloud.tencent.com/pypi/simple}"
-export PIP_DEFAULT_TIMEOUT=60
-# ⑥ 芯片档：覆盖 .cargo/config.toml [env] 的 MCU=esp32（未设 force，外部优先）
-export MCU=esp32s3
+# 前置（工具链/目标/IDF/esp-clang/镜像/venv/芯片档 MCU）走公共实现：两条 esp 门
+# 共用一份，2026-11-27 批123 起不再各写复制体。
+. "$root/tools/ci/lib/esp-env.sh"
+rr3_esp_preflight xtensa-esp32s3-espidf esp32s3-periph-base esp32s3
 
-# ⑦ venv dist-info 兼容（同 classic 门 ⑥）
-venv_sp=".embuild/espressif/python_env/idf5.2_py3.9_env/lib/python3.9/site-packages"
-for d in "$venv_sp"/ruamel_yaml-*.dist-info; do
-  if [ -d "$d" ]; then
-    mv "$d" "${d/ruamel_yaml-/ruamel.yaml-}"
-    echo "PASS  venv dist-info 兼容改名: ${d##*/} → ruamel.yaml-*"
-  fi
-done
+# ⑧pre clippy 门（2026-11-27 批123 补面）：classic 门自 2026-11-21 起就有 clippy
+# -D warnings，S3 门此前只有构建面——同一 crate 的 S3 专属 cfg 分支因此零告警覆盖。
+# 以固件最全特性档（esp32s3,autonomy,tts）+ all-targets 跑同一门。
+if ! rr3_esp_clippy esp32s3-periph-base /tmp/rr3-esp32s3-periph-clippy.log \
+     --target xtensa-esp32s3-espidf \
+     --no-default-features --features esp32s3,autonomy,tts; then
+  fail=1
+fi
 
 # target-dir 由仓根 .cargo/config.toml 统一到 /tmp/rr3-build（P0-5）
 elf="$(rr3_cargo_artifact xtensa-esp32s3-espidf debug esp32-periph-base)" || {
