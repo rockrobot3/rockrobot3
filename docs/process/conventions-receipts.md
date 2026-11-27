@@ -2948,3 +2948,17 @@ v0.0.8 假红）；③ 批271 时延上限连续两拍观察（`af4a2571` 拍 bo
 崩溃重启或 start 失败），防止未来退化成无归因。判据——commit `37ff12ae`：
 install-smoke job `140751782663` success（断言通过），本拍 boot 2685/10000、换树
 1521/10000、回滚 4405/15000；conventions / scripts / distro-smoke 同拍 success。
+
+**2026-11-28 批271 本轮收口（回滚归因落地）**：事实——回滚最后一行现已带"原因：…"，
+install-smoke 回滚例断言命中崩溃重启或 start 失败；本拍三段 2685/1521/4405ms 均在
+上限内。窗口复核未变：`release-anon` runs=0（首跑 11-30 03:00 UTC 未到），最新 release
+v0.0.8 资产 9 件无 distro。判据——`37ff12ae` 三线全绿（gate / integration /
+platforms 均 success），文档提交 `926f4ac2` gate success；三远端同指 `926f4ac2`；
+install-smoke job `140751782663` success（含新断言）。
+
+**2026-11-28 批271 下轮任务拟定**：① 批272 回滚原因进公开 notice——install-smoke 从
+install-bundle 输出提取"原因：…"并入 `install-smoke-rollback` 注解，匿名面即可读到
+失败归因（现在原因只在 job 日志，403 不可读），并加一条 notice 含原因的断言；
+② 批273 11-30 03:00 UTC `release-anon` 首跑归因（窗口未到不预写；红按镜像/固件/签名
+三类定位，绿则首份匿名回执入册）；③ 批274 distro 首发后 `--deep` / B.2 实测与
+`distro` 类匿名回读裁定；④ 批275 时延上限第三拍观察 + 三线收口与再拟下轮。
