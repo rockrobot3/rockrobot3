@@ -83,15 +83,28 @@ for e in m.get("manifests", []):
 PY
 }
 
-attest_count() {
+# buildx 的证明面形状（2026-11-27 批185 匿名实测）：单架构索引里只有**一条**
+# attestation manifest，SLSA provenance 与 SPDX SBOM 是它内部的两枚 in-toto 层——
+# 不是"两条 attestation manifest"（旧文档口径与真实形状不符）。判据据此按层判。
+attest_digest() {
 	python3 - "$1" <<'PY'
 import json, sys
 m = json.load(open(sys.argv[1], encoding="utf-8"))
-n = 0
 for e in m.get("manifests", []):
-    t = (e.get("annotations") or {}).get("vnd.docker.reference.type")
-    n += 1 if t == "attestation-manifest" else 0
-print(n)
+    if (e.get("annotations") or {}).get("vnd.docker.reference.type") == "attestation-manifest":
+        print(e.get("digest", ""))
+        break
+PY
+}
+
+predicates_of() {
+	python3 - "$1" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1], encoding="utf-8"))
+for l in m.get("layers", []):
+    p = (l.get("annotations") or {}).get("in-toto.io/predicate-type")
+    if p:
+        print(p)
 PY
 }
 
@@ -112,7 +125,7 @@ need_titles() { # <标签> <json> <标题...>
 
 # 镜像索引：三架构齐全，且每条单架构清单带 >=2 条 attestation（provenance+SBOM）。
 check_image() { # <镜像仓> <tag>
-	local img="$1" tag="$2" d="$WORK/index.json" a n f
+	local img="$1" tag="$2" d="$WORK/index.json" a n f dg af preds miss
 	fetch "${img}:${tag}" "$d" || return 1
 	local archs want="amd64 arm64 riscv64" miss=""
 	archs=$(archs_of "$d")
@@ -129,11 +142,22 @@ check_image() { # <镜像仓> <tag>
 		if ! fetch "${img}:${tag}-${a}" "$f"; then
 			continue
 		fi
-		n=$(attest_count "$f")
-		if [ "${n:-0}" -ge 2 ]; then
-			ok "镜像 ${a} attestation=${n}（provenance+SBOM）"
+		dg=$(attest_digest "$f")
+		if [ -z "$dg" ]; then
+			bad "镜像 ${a} 缺 attestation manifest"
+			continue
+		fi
+		af="$WORK/att-$a.json"
+		fetch "${img}@${dg}" "$af" || continue
+		preds=$(predicates_of "$af")
+		miss=""
+		for pred in https://slsa.dev/provenance/v1 https://spdx.dev/Document; do
+			printf '%s\n' "$preds" | grep -qxF "$pred" || miss="$miss $pred"
+		done
+		if [ -n "$miss" ]; then
+			bad "镜像 ${a} 证明面缺：${miss# }"
 		else
-			bad "镜像 ${a} attestation=${n} < 2"
+			ok "镜像 ${a} 证明面=SLSA provenance + SPDX SBOM"
 		fi
 	done
 }

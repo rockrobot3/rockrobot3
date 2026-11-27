@@ -22,6 +22,7 @@ rv_stub() {
 		'  *rockrobot3:v0.0.8-amd64) f=img-amd64.json ;;' \
 		'  *rockrobot3:v0.0.8-arm64) f=img-arm64.json ;;' \
 		'  *rockrobot3:v0.0.8-riscv64) f=img-riscv64.json ;;' \
+		'  *@sha256:att*) f=attest.json ;;' \
 		'  *rockrobot3:v0.0.8) f=index.json ;;' \
 		'  *) echo "404 $ref" >&2; exit 1 ;;' \
 		'esac' \
@@ -112,7 +113,7 @@ rr3_rv_self_test() {
 	rv_case distro缺层红 1 distro-sha "distro 缺层：distro-sha256.txt" || fail=1
 	rv_case 镜像缺架构红 1 index-riscv "缺架构：riscv64" || fail=1
 	rv_case 固件缺引导红 1 fw-boot "固件 缺层：rr3-bootloader-esp32-dev.bin" || fail=1
-	rv_case 证明面不足红 1 attest "attestation=1" || fail=1
+	rv_case 证明面不足红 1 attest "证明面缺：https://spdx.dev/Document" || fail=1
 	rv_class_case || fail=1
 	rv_fetch_fail_case || fail=1
 	rv_usage_case || fail=1

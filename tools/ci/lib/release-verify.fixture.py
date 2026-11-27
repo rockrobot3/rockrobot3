@@ -34,11 +34,23 @@ def index(archs):
     return {"schemaVersion": 2, "manifests": ms}
 
 
-def with_attestations(n):
+def with_attestations():
+    # 真实形状（2026-11-27 匿名实测）：一条 attestation manifest 指向 digest，
+    # 证明面在它内部的 in-toto 层里（fixture 由 attest() 单独给出）。
     ms = [{"platform": {"architecture": "unknown", "os": "unknown"},
-           "annotations": {"vnd.docker.reference.type": "attestation-manifest"}} for _ in range(n)]
+           "annotations": {"vnd.docker.reference.type": "attestation-manifest"},
+           "digest": "sha256:att"}]
     ms.append({"platform": {"architecture": "amd64", "os": "linux"}})
     return {"schemaVersion": 2, "manifests": ms}
+
+
+def attest(mut):
+    preds = ["https://slsa.dev/provenance/v1", "https://spdx.dev/Document"]
+    if mut == "attest":
+        preds = preds[:1]
+    layers = [{"mediaType": "application/vnd.in-toto+json",
+               "annotations": {"in-toto.io/predicate-type": p}} for p in preds]
+    return {"schemaVersion": 2, "layers": layers}
 
 
 def firmware(mut):
@@ -86,12 +98,12 @@ def main():
     mut = sys.argv[2] if len(sys.argv) > 2 else "none"
     os.makedirs(out, exist_ok=True)
     archs = ["amd64", "arm64"] if mut == "index-riscv" else ["amd64", "arm64", "riscv64"]
-    n = 1 if mut == "attest" else 2
     files = {
         "index.json": index(archs),
-        "img-amd64.json": with_attestations(n),
-        "img-arm64.json": with_attestations(n),
-        "img-riscv64.json": with_attestations(n),
+        "img-amd64.json": with_attestations(),
+        "img-arm64.json": with_attestations(),
+        "img-riscv64.json": with_attestations(),
+        "attest.json": attest(mut),
         "firmware.json": firmware(mut),
         "distro.json": distro(mut),
         "ota.json": ota(),

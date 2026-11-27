@@ -2264,3 +2264,14 @@ spawn 齐"的等待上限：慢到 25s 也算绿，流畅度回归无判据，�
 `timing status_rtt_ms=…`，上限 5s。上限取保守值（远低于原等待窗），只拦病态回归，
 不把 CI 抖动写进失败面。判据——`bash -n` 过、外层单引号串仍只有 2 个（不触发 2026-11-08
 撇号截断旧病）；⑬⑯ 全绿；真实 timing 数字以 integration 腿日志为准（随后观察）。
+
+**2026-11-27 批185 证明面判据按真实形状修正（匿名实测）**：事实——用 ghcr 匿名 token
+逐条回读 v0.0.8：运行镜像 `200`（合并 index 6 入口 = 3 镜像 + 3 attestation）、固件
+`200`（9 层）；OTA `v0.0.8` 为 `404`（与 status 记的"该版以 0.0.8 名留存"一致）、distro
+尚无包（403/未发布）。**关键发现**：单架构 tag 的索引里只有 **1 条** attestation
+manifest，其内部两枚 in-toto 层分别声明 SLSA provenance 与 SPDX SBOM——批178 的
+"attestation≥2"与 runbook 旧文案都是错的，周程匿名回读（批182）一上线就会假红。
+处置——判据改为按谓词层判（`attest_digest` + `predicates_of`，缺任一枚即点名），
+夹具同步为真实形状（attest.json 两枚谓词；负例删 SPDX）；runbook B 与 ci-workflows
+订正为"1 条 manifest、两枚 in-toto 谓词"。判据——自检 8/8 PASS；文档门绿；匿名回读
+证据即上文实测（不冒充已跑周程）。

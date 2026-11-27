@@ -134,7 +134,8 @@ riscv64 发布镜像路径跑通（交叉产物 → `rr3-pack` stage → QEMU `d
 `MCU=esp32s3` 与 `esp32s3` feature——原生腿/发布路径/装机面验证/芯片档任一缩水即红。
 **证明面（2026-11-24 补）**：三条镜像腿以 `docker buildx build --push` 构建并附
 `--provenance=mode=max --sbom=true`，单架构清单各带 provenance + SBOM attestation
-（`docker build` 直推不会产生）；窗口判据见 runbook B 的 attestation 计数。
+（`docker build` 直推不会产生）；窗口判据按 attestation manifest 内的 in-toto 谓词
+（SLSA provenance + SPDX SBOM，`release-verify.sh` 内建），不数入口条数。
 **签名（2026-11-25 接入）**：`merge` 对合并 index digest、`firmware` 对固件 OCI
 digest 执行 cosign keyless 签名（`id-token: write`，cosign 固定 v2.6.5），并在同一步
 做正/负身份验证（错误 identity 必须被拒）；签名只对 `refs/tags/v*` 执行。身份约束
