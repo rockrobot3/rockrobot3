@@ -281,3 +281,75 @@ fn pi4b_solo_boot_drill() {
     solo_roles_present(&boot);
     solo_hal_injected(&boot);
 }
+
+/// ESP32-S3 微型形态装配演练（W1/T2 补档，2026-11-27）：`profiles/esp32s3-mini.toml`
+/// + `hardware/esp32s3-mini/wiring.toml` 走完整装载门——此前该档有装配单无接线档，
+/// 装载必缺件；本用例钉"接线档在位即可装载"、板侧十一键进注入文本、双轴档案按
+/// 缺省轴投影成 `RR3_ACT_AXIS_STATE`。
+#[test]
+fn esp32s3_boot_drill() {
+    let boot = s3_boot();
+    s3_sources_agree(&boot);
+    s3_hal_injected(&boot);
+    assert!(
+        !boot.axis_state.is_empty(),
+        "双轴档案合法装载后按缺省轴 pan 投影出注入文本；notes={:?}",
+        boot.axis_notes
+    );
+}
+
+fn s3_boot() -> Rr3ProfileBoot {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let p = repo.join("profiles/esp32s3-mini.toml");
+    boot_inputs(&p).expect("esp32s3-mini 装配单+接线档必须过完整装载门（rtos 档）")
+}
+
+/// 三源一致（present/bindings/enabled_slots）且 boot 队列恰两模块。
+fn s3_sources_agree(boot: &Rr3ProfileBoot) {
+    let mods: Vec<String> = boot
+        .manifests
+        .iter()
+        .map(|m| {
+            m.parent()
+                .and_then(Path::file_name)
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(mods, vec!["rr3-act", "rr3-sense"], "S3 boot 队列");
+    assert!(boot.missing.is_empty(), "三源一致: {:?}", boot.missing);
+    assert!(
+        boot.assemble_broken.is_empty(),
+        "装配段零缺口: {:?}",
+        boot.assemble_broken
+    );
+    assert!(
+        boot.role_missing.is_empty(),
+        "双轴角色绑定在位: {:?}",
+        boot.role_missing
+    );
+}
+
+/// `[hardware]` 板侧十一键原样进注入文本（rtos 档直给，经桥 `rr3.set_bindings`）。
+fn s3_hal_injected(boot: &Rr3ProfileBoot) {
+    for kv in [
+        "i2c_sda = \"8\"",
+        "i2c_scl = \"9\"",
+        "adc_rail_pin = \"1\"",
+        "uart2_tx = \"41\"",
+        "uart2_rx = \"42\"",
+        "ledc_pan = \"4\"",
+        "ledc_tilt = \"5\"",
+        "i2s_bclk = \"6\"",
+        "i2s_sd = \"15\"",
+        "i2s_ws = \"7\"",
+        "cred_store = \"nvs:rr3\"",
+    ] {
+        assert!(
+            boot.hal_bindings.contains(kv),
+            "S3 [hardware] 十一键缺 {kv}: {}",
+            boot.hal_bindings
+        );
+    }
+}

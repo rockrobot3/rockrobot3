@@ -1,0 +1,21 @@
+# esp32s3-mini 形态 tilt（俯仰）轴行程档案（W1/T2 补档，2026-11-27）。
+# 十四键 = rr-hal-api RR3_ACT_PROFILE_FIELDS 词表序；外键 pin 对账装配单
+# profiles/esp32s3-mini.toml [[pin]]（act.axis.pwm / instance=tilt，LEDC0 通道 1，
+# GPIO5）。行程值 = 板侧实锤：[80, 100]、中位 90（0009 号证据 S3 双轴全行程
+# 实测覆盖同区间，上抬 98° 在窗内）。
+# 本档是 rrd 装配注入（RR3_ACT_AXIS_STATE）与标定工具的共同输入——改行程只改
+# 这里，不许在任何一侧手写副本。
+schema = 1
+pin = "act.axis.pwm.tilt"
+center_deg = 90
+lo_deg = 80
+hi_deg = 100
+dir_sign = 1
+slew_deg_s = 100
+settle_ms = 200
+hold = "release"
+current_ceil_ma = 750
+warmup_ms = 0
+hard_stop = "yes"
+calibrated = true
+source = "manual"

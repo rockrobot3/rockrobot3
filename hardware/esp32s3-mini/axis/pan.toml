@@ -1,0 +1,21 @@
+# esp32s3-mini 形态 pan（水平）轴行程档案（W1/T2 补档，2026-11-27）。
+# 十四键 = rr-hal-api RR3_ACT_PROFILE_FIELDS 词表序；外键 pin 对账装配单
+# profiles/esp32s3-mini.toml [[pin]]（act.axis.pwm / instance=pan，LEDC0 通道 0，
+# GPIO4）。行程值 = 板侧实锤：[60, 120]、中位 90（0009 号证据 S3 双轴全行程
+# 实测覆盖同区间；与 esp32-mini 同款 SG90、同固件行程表）。
+# 本档是 rrd 装配注入（RR3_ACT_AXIS_STATE）与标定工具的共同输入——改行程只改
+# 这里，不许在任何一侧手写副本。
+schema = 1
+pin = "act.axis.pwm.pan"
+center_deg = 90
+lo_deg = 60
+hi_deg = 120
+dir_sign = 1
+slew_deg_s = 100
+settle_ms = 200
+hold = "release"
+current_ceil_ma = 750
+warmup_ms = 0
+hard_stop = "yes"
+calibrated = true
+source = "manual"

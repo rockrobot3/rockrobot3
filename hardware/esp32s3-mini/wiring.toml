@@ -1,0 +1,45 @@
+# RockRobot3 装机接线档：esp32s3-mini 机型（ESP32-S3 N16R8 微型形态，W1/T2）。
+# 与 profiles/esp32s3-mini.toml（rtos 档，rail5v 单域、pan/tilt 双轴）配套的最小
+# 接线面：电源入一条 + 舵机两条。九字段语义、校验⑦ 判据、演练实例取值说明见
+# hardware/default/wiring.toml 头注。
+#
+# 本档只在 S3 单板形态下成立：舵机/OLED/双麦都在本板线束上，UART2 是桥链路而非
+# 电源线组，故不为它立 [[wire]]。引脚真值三处同源：
+#   board/pins_s3.rs ↔ profiles/esp32s3-mini.toml [hardware]/[[pin]] ↔ 本档 signal。
+
+[[wire]]
+# J0 电源入：USB-C 5V/3A → rail5v（本形态唯一下游线组，feeds 闭合在本档内——
+# 3A 主干 ≥ 双轴 SG90 堵转 1.4A，⑦-c 额定加总判据由装载门消费）。
+connector = "J0"
+hdr_pin = [1, 2]
+signal = ["vcc", "gnd"]
+net = "rail5v"
+feeds = ["J1", "J2"]
+mate = "none"
+keyed = true
+rated_a = 3.0
+gnd_common = "star-1"
+
+[[wire]]
+# J1 pan 舵机：SG90 三线（vcc 挂 rail5v、信号线写 pin_id、gnd 共地）。
+connector = "J1"
+hdr_pin = [1, 2, 3]
+signal = ["vcc", "act.axis.pwm.pan", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "SG90-3P"
+keyed = true
+rated_a = 1.0
+gnd_common = "star-1"
+
+[[wire]]
+# J2 tilt 舵机：同 pan，信号线 GPIO5（LEDC0 通道 1）。
+connector = "J2"
+hdr_pin = [1, 2, 3]
+signal = ["vcc", "act.axis.pwm.tilt", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "SG90-3P"
+keyed = true
+rated_a = 1.0
+gnd_common = "star-1"
