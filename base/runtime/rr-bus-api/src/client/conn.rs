@@ -20,7 +20,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use rr_core::runtime::Rr3ModuleRuntime;
 use rr_core::{rr3_frame_compose, RR3_TASK_RRD, RR3_TRACE_ID_DIRECT};
 use rr_ipc::{
-    opcode, rr3_body_encode, rr3_frame_write, Rr3Frame, Rr3PayloadType, RR3_BUS_PATH_ENV,
+    opcode, rr3_body_encode, Rr3Frame, Rr3PayloadType, RR3_BUS_PATH_ENV,
     RR3_FRAMING_PLEN_CAP_DEFAULT, RR3_UDS_PATH_DEFAULT,
 };
 use serde_json::{json, Value};
@@ -130,11 +130,10 @@ impl Rr3Inner {
             ));
         }
         frame.header.payload_len = plen as u32;
-        rr3_frame_write(
-            &mut *self.sock.lock().unwrap_or_else(|p| p.into_inner()),
-            &frame,
-        )
-        .map_err(|e| format!("写帧失败: {e:?}"))
+        // 零拷贝写（头栈缓冲 + payload 切片一次 writev）：上行音频每 128 ms 一帧，
+        // 拼整帧会让每帧多一次整帧复制。帧级原子性由这把 socket 互斥保证。
+        let mut guard = self.sock.lock().unwrap_or_else(|p| p.into_inner());
+        rr_ipc::rr3_frame_write_io(&mut *guard, &frame).map_err(|e| format!("写帧失败: {e:?}"))
     }
 
     /// 运维计数自增（reader 线程满箱丢流帧时记账；业务侧仍走

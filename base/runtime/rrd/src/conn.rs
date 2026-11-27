@@ -14,7 +14,7 @@
 //! 写面：reader 写应答、writer 写广播，同一 socket 的 `try_clone` + 一把
 //! `Mutex<UnixStream>`；一帧一次 `write_all` → 整帧原子，但应答与广播顺序不保证。
 
-use std::io::{ErrorKind, Write};
+use std::io::ErrorKind;
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;

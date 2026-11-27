@@ -10,6 +10,7 @@
 
 use std::io::{Read, Write};
 // no_std 显式化（0.0.7 批B）：std prelude 不再随 `#![no_std]` 隐式注入
+use std::format;
 use std::string::ToString;
 use std::vec;
 use std::vec::Vec;
@@ -87,14 +88,49 @@ fn rr3_payload_read(r: &mut impl Read, want: usize) -> Result<Vec<u8>, Rr3FrameE
 /// **整帧拼成连续字节后一次 `write_all`**：对"一帧一次、单写者"的低频面（CLI、
 /// 安装期探针、测试夹具）这是最省心的形状——读侧任何时刻都只可能看到完整帧。
 /// 高频广播面不要走这里：每个收件连接每帧都要付一次整帧复制，rrd 的写线程因此
-/// 自走 `rr3_header_encode` + 两段 iovec（`write_vectored`），见 `rrd/src/conn/reply.rs`；
-/// 板侧需要"所有权移交、不复制"时用 [`Rr3FrameBuf`](crate::transport::Rr3FrameBuf)
-/// 的 `rr3_send_buf`（缓冲自带头区，seal 后整块交出）。
+/// 改用 [`rr3_frame_write_io`]（零拷贝、单次 `writev`）；板侧需要"所有权移交、
+/// 不复制"时用 [`Rr3FrameBuf`](crate::transport::Rr3FrameBuf) 的 `rr3_send_buf`。
 pub fn rr3_frame_write(w: &mut impl Write, f: &Rr3Frame) -> Result<(), Rr3FrameError> {
     let bytes = rr3_frame_to_bytes(f)?;
     w.write_all(&bytes)
         .map_err(|e| Rr3FrameError::Io(e.to_string()))?;
     w.flush().map_err(|e| Rr3FrameError::Io(e.to_string()))
+}
+
+/// 零拷贝写帧（std 面）：头 128B 栈缓冲 + payload 两段 iovec 一次 `write_vectored`
+/// 提交，部分写在内部续投——**不复制整帧**，字节与 [`rr3_frame_write`] 逐字相同。
+///
+/// 语义约定（与 `rr3_frame_write` 的分工）：本函数只做字节面，**帧级原子性由调用方
+/// 保证**——同一流上同一时刻只能有一个写者（rrd 用出向锁、模块客户端用 socket
+/// 互斥），否则两帧的段可能在流上交错。错误原样上抛 `std::io::Error`，让调用方
+/// 各自分类（rrd 要分"对端 5s 不收"与"通道坏了"，模块侧折成字符串）。
+#[cfg(not(target_os = "none"))]
+pub fn rr3_frame_write_io(w: &mut impl std::io::Write, f: &Rr3Frame) -> std::io::Result<()> {
+    if f.header.payload_len as usize != f.payload.len() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "头声明 payload_len={} 与实际 {} 不符",
+                f.header.payload_len,
+                f.payload.len()
+            ),
+        ));
+    }
+    let hdr = crate::protocol::header::rr3_header_encode(&f.header, &f.payload);
+    let mut bufs = [
+        std::io::IoSlice::new(&hdr),
+        std::io::IoSlice::new(&f.payload),
+    ];
+    let mut rest: &mut [std::io::IoSlice<'_>] = &mut bufs;
+    while rest.iter().any(|b| !b.is_empty()) {
+        match w.write_vectored(rest) {
+            Ok(0) => return Err(std::io::Error::from(std::io::ErrorKind::WriteZero)),
+            Ok(n) => std::io::IoSlice::advance_slices(&mut rest, n),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    w.flush()
 }
 
 #[cfg(test)]
