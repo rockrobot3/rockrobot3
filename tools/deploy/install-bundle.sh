@@ -31,6 +31,10 @@ SOCK=${SOCK:-/var/run/rock3-ipc.sock}
 
 die() { echo "FAIL  $*" >&2; exit 1; }
 
+# 意外退出必须可归因（批274）：`set -e` 下的裸命令失败不会经过 die/rollback，板侧只
+# 看到退出码；先打失败命令与所在行，再让 shell 继续退出（与 install-smoke 批245 同款）。
+trap 'echo "FAIL  意外退出：${BASH_COMMAND}（行 ${LINENO}；装机树 ${ROOT}）" >&2' ERR
+
 # 毫秒时钟（GNU date；本脚本只在 Linux systemd 宿主跑）。四段用时随成功/回滚行打印，
 # 真板排障先看这一行：慢在停机、换树、二进制还是启动探针，不用猜。
 now_ms() { date +%s%3N; }
