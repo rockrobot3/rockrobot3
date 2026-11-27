@@ -148,6 +148,7 @@ start_unit() {
   as_root systemctl is-active --quiet rrd || die "rrd 未 active"
   wait_modules
   echo "     unit active，六模块 running"
+  echo "::notice title=install-smoke-systemd::deb 装机 + systemd unit 拉起成立，六模块 running"
 }
 
 # 版本化 bundle：真出包 → 解包副本 profile 改 sim → 重打包（BUNDLE_VERSION 原样，
@@ -182,6 +183,7 @@ install_bundle() {
     || die "换树后 BUNDLE_VERSION 不是本提交（${commit}）"
   as_root systemctl is-active --quiet rrd || die "换树后 rrd 未 active"
   wait_modules
+  echo "::notice title=install-smoke-bundle::换树成功 commit=${commit}，六模块 running"
 }
 
 # 回滚例：坏 rrd（非 ELF）能通过解包前检查，但起不来——install-bundle 必须回滚。
@@ -208,6 +210,7 @@ rollback_case() {
   as_root systemctl is-active --quiet rrd || die "回滚后 rrd 未 active"
   wait_modules
   echo "     回滚证据：rc=${rc}，$(grep '已回滚' <<<"$out" | tail -1)"
+  echo "::notice title=install-smoke-rollback::坏包回滚成立 rc=${rc}（树与二进制已回上一版，六模块 running）"
 }
 
 main() {
