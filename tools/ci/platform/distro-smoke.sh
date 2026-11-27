@@ -205,6 +205,9 @@ docker run --rm -v "$(pwd)":/work -w /work -v "$SUM_FILE:/tmp/rr3-timing" "$IMAG
 if [ -s "$SUM_FILE" ]; then
   echo "== 时延（发版回执可引用）=="
   cat "$SUM_FILE"
+  # 注解面是唯一**匿名可读**通道（job 日志 403、job summary 需鉴权）：数字不落注解，
+  # status 第 29 行"上限贴合实测"就永远缺证据（批258）。与 install-smoke 同通道。
+  echo "::notice title=distro-smoke-timing::$(tr '\n' ' ' <"$SUM_FILE")"
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     {
       echo ""
