@@ -106,6 +106,21 @@ fn expired_fanout() {
     assert!(rxa.try_recv().is_ok());
 }
 
+/// 判死边界（2026-11-27 批102）：`elapsed == watchdog` **即判死**（`>=` 口径），
+/// `elapsed == watchdog - 1` 必须放行。把"≥ 还是 >"钉在用例上，而不是靠读代码——
+/// 这一毫秒的差别决定"准点扫到"与"多等一拍"两种运维现象。
+#[test]
+fn expire_boundary_inclusive() {
+    let mut r = RrdRegistry::new(1000);
+    let (txa, _rxa) = chan();
+    r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), txa, 0)
+        .unwrap();
+    assert!(r.rr3_reg_expire(499).is_empty(), "watchdog-1 必须放行");
+    let e = r.rr3_reg_expire(500);
+    assert_eq!(e.len(), 1, "恰等于 watchdog 即判死（>= 口径）");
+    assert_eq!((e[0].elapsed_ms, e[0].watchdog_ms), (500, 500));
+}
+
 /// 收件端消失（writer 线程写超时收摊 → 通道 drop）→ 该连接**当场摘出投递面**：
 /// 投递数不再计入、`tx` 置空（`rr3_reg_live` 转假），活连接不受牵连。
 /// 这是"慢消费者不拖累全局"的最后一段闭环——写侧只负责让 writer 退出，
