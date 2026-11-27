@@ -48,16 +48,30 @@ dump_state() {
 }
 trap dump_state ERR
 
+# systemd 就绪等待：hosted runner 的 VM 可能刚起，is-system-running 会短暂报
+# "starting"——那是瞬态而不是"没有 systemd"（2026-11-27 批217 首跑二次实证：
+# 同一提交两次运行，一次 running 一次 starting）。按有界等待判就绪，超时才点名。
+wait_systemd() {
+  local i st
+  for i in $(seq 1 60); do
+    st=$(systemctl is-system-running 2>&1 || true)
+    case "$st" in
+      running | degraded)
+        echo "systemd: $st（就绪等待 ${i}s）"
+        return 0
+        ;;
+      starting | initializing) sleep 1 ;;
+      *) die "systemd 不可用（is-system-running=${st}）" ;;
+    esac
+  done
+  die "systemd 60s 内未就绪（is-system-running=${st}）"
+}
+
 # 宿主前置：systemd 真在跑（容器直跑会在第一步就点名，不装到一半才发现没 init）。
 preflight() {
-  local st
   [ -d /run/systemd/system ] \
     || die "本机无运行中的 systemd（/run/systemd/system 缺席）：本检查只跑在带 systemd 的宿主/runner"
-  st=$(systemctl is-system-running 2>&1 || true)
-  case "$st" in
-    running | degraded) echo "systemd: $st" ;;
-    *) die "systemd 不可用（is-system-running=${st}）" ;;
-  esac
+  wait_systemd
   command -v dpkg-deb >/dev/null || die "缺 dpkg-deb（发行版打包器出不了 deb）"
   command -v cargo >/dev/null || die "缺 cargo（本检查自建原生产物）"
   if [ "$(id -u)" -ne 0 ]; then
