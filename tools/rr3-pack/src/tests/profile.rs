@@ -125,3 +125,21 @@ fn stage_rej_criteria() {
     assert!(e.contains("预验失败"), "{e}");
     assert!(e.contains("schema_version"), "{e}");
 }
+
+/// 真仓 S3 档真值集：八名成员文件与 axis 目录必须全在树（批140 结论的机械钉）。
+/// 打包面不自带第二份清单——本用例走 rrd 的 `rr3_truth_set` 单点，S3 档
+/// （批117 补齐接线档与双轴档）一旦缺件，`--profile esp32s3-mini` 出包即在此先红。
+#[test]
+fn s3_truth_members_exist() {
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let text = fs::read_to_string(repo.join("profiles/esp32s3-mini.toml"))
+        .expect("profiles/esp32s3-mini.toml 必须在树");
+    let p = rrd::profile::rr3_profile_parse(&text).expect("esp32s3-mini 必须可解析");
+    let t = rrd::profile::rr3_truth_set(&p, "esp32s3-mini");
+    for rel in &t.files {
+        assert!(repo.join(rel).is_file(), "真值集成员不在树: {rel}");
+    }
+    for rel in &t.dirs {
+        assert!(repo.join(rel).is_dir(), "真值集目录不在树: {rel}");
+    }
+}
