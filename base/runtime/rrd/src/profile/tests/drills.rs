@@ -370,8 +370,8 @@ fn wiring_mirror_drill() {
 }
 
 fn wiring_value(p: &Path) -> toml::Value {
-    let text = std::fs::read_to_string(p)
-        .unwrap_or_else(|e| panic!("读 {} 失败: {e}", p.display()));
+    let text =
+        std::fs::read_to_string(p).unwrap_or_else(|e| panic!("读 {} 失败: {e}", p.display()));
     text.parse()
         .unwrap_or_else(|e| panic!("{} 不是合法 TOML: {e}", p.display()))
 }
