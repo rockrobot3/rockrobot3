@@ -548,9 +548,11 @@ buildroot 轨，ADR-0013 裁定 5 两轨同源的第二面）改 `base/os/buildr
 ① manifest 不再平铺 `/usr/lib/rr3/manifest/<name>.toml`——归位
 `/usr/lib/rr3/modules/<name>/module.toml`（旧布局下模块 rr3_config_load 读 manifest 同目录
 config 必撞同名文件，且 bin 的相对 entry 解析到 manifest 所在目录必错位）；② entry 装机
-绝对化（与 rr3-pack `rr3_manifest_install_rewrite` 同语义同三道门：entry 行恰一条
-`grep -c`、值可装机 `case` 拒绝对路径 / `.` 与 `..` 段 / 含 `|` 分隔符、改写后 sed 重提
-复核）——只改引号内一个值，其余字节原样；③ config 从仓源 `modules/<name>/config.toml`
+绝对化（**2026-11-27 订正（批113）**：该实现已随两轨统一装配删除——post-build.sh 现委托
+`rr3-pack --install-root`，entry 改写真值单点＝`rrd::manifest::rr3_manifest_rewrite`；旧句
+"与 rr3-pack `rr3_manifest_install_rewrite` 同语义同三道门：entry 行恰一条 `grep -c`、值可装机
+`case` 拒绝对路径 / `.` 与 `..` 段 / 含 `|` 分隔符、改写后 sed 重提复核"是 2026-10-05 时点的
+第二份实现记录，按历史保留）——只改引号内一个值，其余字节原样；③ config 从仓源 `modules/<name>/config.toml`
 随装（env `RR3_REPO_ROOT` 可覆盖仓根，缺省按脚本位置上溯五级）；bin 改按 entry 落位
 （注入格式固定名 `bin` → entry 指向的装机相对路径）；S99rrd 的 manifest glob 同步改
 `/usr/lib/rr3/modules/*/module.toml`。**缺件口径收紧一处**：缺 bin / 缺 manifest / entry
@@ -565,9 +567,10 @@ config 必撞同名文件，且 bin 的相对 entry 解析到 manifest 所在目
 2026-10-05 D9 装配演练批（0.0.2 T6 前半——rr3-sim `--profile` 装配演练模式）：
 `tools/sim` 新增 `assemble.rs`，装配单驱动 rrd 装配链正门（`--profile` + `--contracts`，
 与 rrd.service 的 ExecStart 同形）boot 全部 face 模块，演练 modules-root 是**装机布局**——
-仓源 manifest 原文只把 entry 改写为产物绝对路径（rr3-pack `rr3_manifest_install_rewrite`
-同语义同三道门：装机值可装机 / entry 行恰一条 / 旧值与 facts 交叉核验 / 改写后重解析
-复核，"entry 在仓相对、装机绝对"的第三面）+ config 同目录就位（Rust 模块仓源 config，
+仓源 manifest 原文只把 entry 改写为产物绝对路径（**2026-11-27 订正（批113）**：真值单点迁至
+`rrd::manifest::rr3_manifest_rewrite`，rr3-pack 与 sim 演练共用；旧名
+`rr3_manifest_install_rewrite`。同语义门：装机值可装机 / entry 行恰一条 / 旧值与 facts 交叉核验 /
+改写后重解析复核，"entry 在仓相对、装机绝对"的第三面）+ config 同目录就位（Rust 模块仓源 config，
 brain 用 M4 先例 mock 演练 config）；python 模块产物 = shim（`python3 -m`，包名 = 目录名
 连字符转下划线）。配套：① rrd `Rr3ManifestFacts` 加 `lang` 字段（演练产物推导要它，
 解析真值保持一册——不逼调用方另开 TOML 读取；req_str 缺失即点名）；② `which_python3`
