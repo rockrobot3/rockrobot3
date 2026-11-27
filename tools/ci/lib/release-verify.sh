@@ -132,7 +132,7 @@ need_titles() { # <标签> <json> <标题...>
 
 # 镜像索引：三架构齐全，且每条单架构清单带 >=2 条 attestation（provenance+SBOM）。
 check_image() { # <镜像仓> <tag>
-	local img="$1" tag="$2" d="$WORK/index.json" a n f dg af preds miss
+	local img="$1" tag="$2" d="$WORK/index.json" a f dg af preds miss
 	fetch "${img}:${tag}" "$d" || return 1
 	local archs want="amd64 arm64 riscv64" miss=""
 	archs=$(archs_of "$d")

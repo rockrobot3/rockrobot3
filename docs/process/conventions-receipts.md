@@ -2284,3 +2284,12 @@ provenance+SBOM + 固件 9 件，与批185 的判据形状一致）；`--classes
 退 2）；自检加远端明确不存在一例（九例）；runbook 的 v0.0.8 示例订正为只核两类
 （distro 当时尚未发布），README 口径同步。判据——自检 9/9；实跑 image+firmware 退 0、
 ota+buildroot 退 1 并逐件点名缺件；⑤⑬⑯ 全绿。
+
+**2026-11-27 批187 本轮收口·三线全绿**：事实——代码头 `1bfaecfb` 上 gate/integration/
+platforms 均 success（distro-smoke 的 boot/status 时延上限在 `cf28e2cd` 的 integration
+腿已实跑通过）。本轮五件：匿名回读进周程（182）、缺件/未定分账（183）、distro-smoke
+时延上限（184）、证明面判据按真实形状改判（185）、巡检器匿名实跑首证并再分账（186）。
+处置——本轮收口；顺手清掉 `check_image` 的死变量 `n`。下轮三件：① cosign 签名纳入
+齐套总账（`--with-signature`，身份约束与 runbook B.1 同源）；② VERSION 已 bump 而未
+tag 时 `release-anon` 该红还是该 SKIP——入 decisions §3 待裁（避免周程误红或静默放行）；
+③ 发版回执模板把巡检结论列为必填项。判据——三线结论与 run 页一致；自检 9/9；⑤⑬⑯ 绿。
