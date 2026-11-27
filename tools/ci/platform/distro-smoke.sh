@@ -24,10 +24,14 @@ docker run --rm -v "$(pwd)":/work -w /work -v "$SUM_FILE:/tmp/rr3-timing" "$IMAG
   # 产物统一落 /tmp：容器以 root 跑，不往挂载的仓里写 target/（避免本地残根属主文件）
   export CARGO_TARGET_DIR=/tmp/rr3-target
   REL=$CARGO_TARGET_DIR/release
+  # 模块清单取仓内真值（不存在/ls 打空即失败），不再在脚本里抄六件名字。
+  . tools/ci/lib/runtime-members.sh
+  MODS=$(rr3_modules .)
+  MODN=$(printf "%s\n" "$MODS" | wc -l | tr -d " ")
 
-  echo "== ① 构建：base/runtime 工作区 + 六个 Rust 模块 + rr3-ctl + rr3-ota-ctl + rr3-pack =="
+  echo "== ① 构建：base/runtime 工作区 + 全模块（$MODN）+ rr3-ctl + rr3-ota-ctl + rr3-pack =="
   cargo build -q --locked --release --manifest-path base/runtime/Cargo.toml -p rrd
-  for m in act brain connect interact sense power; do
+  for m in $MODS; do
     cargo build -q --locked --release --manifest-path "modules/rr3-$m/Cargo.toml"
   done
   cargo build -q --locked --release --manifest-path tools/rrctl/Cargo.toml
@@ -42,7 +46,7 @@ docker run --rm -v "$(pwd)":/work -w /work -v "$SUM_FILE:/tmp/rr3-timing" "$IMAG
   rm -rf "$PAY"
   mkdir -p "$PAY/rr3-modules"
   cp "$REL/rrd" "$REL/rr3-ctl" "$REL/rr3-ota-ctl" "$PAY/"
-  for m in act brain connect interact sense power; do
+  for m in $MODS; do
     mkdir -p "$PAY/rr3-modules/rr3-$m"
     cp "$REL/rr3-$m" "$PAY/rr3-modules/rr3-$m/bin"
     cp "modules/rr3-$m/module.toml" "$PAY/rr3-modules/rr3-$m/manifest.toml"
@@ -106,7 +110,7 @@ docker run --rm -v "$(pwd)":/work -w /work -v "$SUM_FILE:/tmp/rr3-timing" "$IMAG
   # rr3_runtime_truth_set（基-25），本断言集与 rr3-pack 打包面同单对账。
   must_file /usr/lib/rockrobot3/contracts/platform/rk3566.toml
   must_file /usr/lib/rockrobot3/hardware/distro/wiring.toml
-  for m in act brain connect interact sense power; do
+  for m in $MODS; do
     must_exec "/usr/lib/rockrobot3/modules/rr3-$m/rr3-$m"
     must_file "/usr/lib/rockrobot3/modules/rr3-$m/module.toml"
     must_file "/usr/lib/rockrobot3/modules/rr3-$m/config.toml"
@@ -136,15 +140,15 @@ docker run --rm -v "$(pwd)":/work -w /work -v "$SUM_FILE:/tmp/rr3-timing" "$IMAG
   RRDPID=$!
   trap "kill $RRDPID 2>/dev/null || true" EXIT
 
-  echo "== ⑧ 冒烟断言：六模块 spawn（含 Rust brain）+ 0 拒 boot + 0 denied =="
+  echo "== ⑧ 冒烟断言：全模块 spawn（$MODN，含 Rust brain）+ 0 拒 boot + 0 denied =="
   ok=""
   READY_MS=""
   for _ in $(seq 1 30); do
     n=0
-    for m in act connect interact sense power brain; do
+    for m in $MODS; do
       grep -q "spawn rr3-$m pid=" /tmp/rrd-smoke.log && n=$((n + 1))
     done
-    if [ "$n" -eq 6 ]; then
+    if [ "$n" -eq "$MODN" ]; then
       READY_MS=$(( $(date +%s%3N) - START_MS ))
       ok=1
       break
@@ -157,6 +161,8 @@ docker run --rm -v "$(pwd)":/work -w /work -v "$SUM_FILE:/tmp/rr3-timing" "$IMAG
     exit 1
   fi
   BOOT_CEIL_MS=20000
+  # 键名 boot_spawn6_ms 是公开面稳定键（历史回执与 status 敞口 29 引用），语义 =
+  # 全模块 spawn 齐；模块数变化不影响键名，数值随 MODN 判据一起走。
   echo "timing boot_spawn6_ms=${READY_MS} ceiling=${BOOT_CEIL_MS}"
   echo "boot_spawn6_ms=${READY_MS} ceiling_ms=${BOOT_CEIL_MS}" >>/tmp/rr3-timing
   if [ "$READY_MS" -gt "$BOOT_CEIL_MS" ]; then
@@ -165,7 +171,7 @@ docker run --rm -v "$(pwd)":/work -w /work -v "$SUM_FILE:/tmp/rr3-timing" "$IMAG
     exit 1
   fi
   # 投递摘要行（批207）：规模与用时一条看全——缺它说明 boot 没走到 accept 边界。
-  grep -q "boot 队列已投递: 已投递=6 " /tmp/rrd-smoke.log || {
+  grep -q "boot 队列已投递: 已投递=${MODN} " /tmp/rrd-smoke.log || {
     echo "--- rrd 日志（缺投递摘要行）---"
     cat /tmp/rrd-smoke.log
     exit 1
@@ -192,7 +198,7 @@ docker run --rm -v "$(pwd)":/work -w /work -v "$SUM_FILE:/tmp/rr3-timing" "$IMAG
   test -f /var/lib/rockrobot3/counters.json
   grep -q "\"boots\"" /var/lib/rockrobot3/counters.json
 
-  echo "distro-smoke 绿：deb 装机 → rrd 正门起六 Rust 模块（sim 面冒烟，部署真值零改），counters 回写落盘"
+  echo "distro-smoke 绿：deb 装机 → rrd 正门起全模块（$MODN，sim 面冒烟，部署真值零改），counters 回写落盘"
 '
 
 # timing 回显 + 公开面（无 GITHUB_STEP_SUMMARY 时只回显）。

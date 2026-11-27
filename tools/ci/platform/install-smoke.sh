@@ -26,8 +26,10 @@ REL=/tmp/rr3-build/$TRIPLE/release
 WORK=/tmp/rr3-install-smoke
 ROOT=/usr/lib/rockrobot3
 SOCK=/var/run/rock3-ipc.sock
-MODULES="act brain connect interact sense power"
-UNITS="rr3-act rr3-connect rr3-interact rr3-sense rr3-power rr3-brain"
+# 模块清单取仓内真值（tools/ci/lib/runtime-members.sh）；空清单即失败，不跑空。
+. tools/ci/lib/runtime-members.sh
+MODULES=$(rr3_modules .)
+UNITS=$(rr3_module_bins . | tr '\n' ' ')
 
 # 时延观测（批221）：三段数字各记一次，只回传不判红（阈值校准归 status 敞口 29，
 # 先积累实测再收紧；日志匿名不可读，notice 与 step summary 是公开面）。
@@ -218,7 +220,7 @@ wait_modules() {
   done
   echo "--- 最近一次 rr3-ctl status ---" >&2
   printf '%s\n' "${out:-<无应答>}" >&2
-  die "30s 内六模块未全 running（${UNITS}）：$(unit_reason)"
+  die "30s 内全模块未全 running（${UNITS}）：$(unit_reason)"
 }
 
 # unit 拉起 + 六模块判据（正例第一段：deb 装机面由 systemd 真拉起）。
@@ -229,8 +231,8 @@ start_unit() {
   as_root systemctl is-active --quiet rrd || die "rrd 未 active：$(unit_reason)"
   wait_modules
   BOOT_MS=$(( $(now_ms) - t0 ))
-  echo "     unit active，六模块 running（boot ${BOOT_MS}ms）"
-  echo "::notice title=install-smoke-systemd::deb 装机 + systemd unit 拉起成立，六模块 running（boot=${BOOT_MS}ms）"
+  echo "     unit active，全模块 running（boot ${BOOT_MS}ms）"
+  echo "::notice title=install-smoke-systemd::deb 装机 + systemd unit 拉起成立，全模块 running（boot=${BOOT_MS}ms）"
 }
 
 # 版本化 bundle：真出包（仓内 profile 原样 linux，不做任何改写）+ A10 契约复核。
@@ -259,7 +261,7 @@ install_bundle() {
   wait_modules
   SWAP_MS=$(( $(now_ms) - t0 ))
   phases=$(install_phases "$out")
-  echo "::notice title=install-smoke-bundle::换树成功 commit=${commit}，六模块 running（窗口=${SWAP_MS}ms${phases:+；$phases}）"
+  echo "::notice title=install-smoke-bundle::换树成功 commit=${commit}，全模块 running（窗口=${SWAP_MS}ms${phases:+；$phases}）"
 }
 
 # 装机面漂移门的单次调用（正例与负例共用同一条命令，避免两处各写一套参数）。
@@ -326,7 +328,7 @@ rollback_case() {
   ROLLBACK_MS=$(( $(now_ms) - t0 ))
   attempt=$(grep -o '本次尝试 [0-9]*ms' <<<"$out" | tail -1)
   echo "     回滚证据：rc=${rc}，$(grep '已回滚' <<<"$out" | tail -1)"
-  echo "::notice title=install-smoke-rollback::坏包回滚成立 rc=${rc}（树与二进制已回上一版，六模块 running，恢复=${ROLLBACK_MS}ms${attempt:+；$attempt}）"
+  echo "::notice title=install-smoke-rollback::坏包回滚成立 rc=${rc}（树与二进制已回上一版，全模块 running，恢复=${ROLLBACK_MS}ms${attempt:+；$attempt}）"
 }
 
 main() {
@@ -343,7 +345,7 @@ main() {
   drift_negative
   rollback_case
   report_timing
-  echo "PASS  装机器正例：deb→systemd 六模块 running；真包换树成功且装机面无漂移；坏包回滚成功"
+  echo "PASS  装机器正例：deb→systemd 全模块 running；真包换树成功且装机面无漂移；坏包回滚成功"
 }
 
 main "$@"

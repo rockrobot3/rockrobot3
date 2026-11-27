@@ -24,6 +24,21 @@ fail() {
 	exit 1
 }
 
+# 契约期望的模块集 = 仓内模块全集减 musl 交叉例外 brain（与 pack-bundle 的例外同源：
+# ring 需目标 C 工具链，musl/rust-lld 腿不带，归板上原生构建）。新增模块自动进契约。
+. "$repo/tools/ci/lib/runtime-members.sh"
+mods=$(rr3_modules "$repo") || fail "仓内没有任何 modules/rr3-*/module.toml（模块清单真值缺席）"
+
+bundle_mods() {
+	local m
+	for m in $mods; do
+		if [ "$m" = brain ]; then
+			continue
+		fi
+		printf 'rr3-%s\n' "$m"
+	done
+}
+
 # 临时目录用全局变量 + EXIT trap：trap 在进程退出时执行，函数局部变量那时已出栈，
 # 用 local 会在 `set -u` 下报 unbound（批168 自检首跑实测）。
 TMPROOT=""
@@ -45,7 +60,7 @@ check_manifest() {
 	[ "$(sed -n 's/^target=//p' "$f")" = "$want_target" ] \
 		|| fail "BUNDLE_VERSION target ≠ ${want_target}"
 	comps="$(sed -n 's/^components=//p' "$f")"
-	for m in rrd rr3-ctl rr3-ota-ctl rr3-act rr3-connect rr3-interact rr3-power rr3-sense; do
+	for m in rrd rr3-ctl rr3-ota-ctl $(bundle_mods); do
 		case ",$comps," in
 		*",$m,"*) ;;
 		*) fail "components 缺 $m" ;;
@@ -63,7 +78,7 @@ check_bins() {
 
 check_modules() {
 	local dir="$1" m
-	for m in rr3-act rr3-connect rr3-interact rr3-power rr3-sense; do
+	for m in $(bundle_mods); do
 		[ -x "$dir/modules/$m/$m" ] || fail "缺 modules/$m/$m 或不可执行"
 		[ -f "$dir/modules/$m/module.toml" ] || fail "缺 modules/$m/module.toml"
 		[ -f "$dir/modules/$m/config.toml" ] || fail "缺 modules/$m/config.toml"
@@ -93,10 +108,11 @@ check_data() {
 
 # 八件二进制全是 ELF64（包不该装进任何脚本占位件）；给了架构串就再钉芯片。
 check_elf() {
-	local dir="$1" want="$2" b line
-	for b in bin/rrd bin/rr3-ctl bin/rr3-ota-ctl modules/rr3-act/rr3-act \
-		modules/rr3-connect/rr3-connect modules/rr3-interact/rr3-interact \
-		modules/rr3-power/rr3-power modules/rr3-sense/rr3-sense; do
+	local dir="$1" want="$2" b line m files="bin/rrd bin/rr3-ctl bin/rr3-ota-ctl"
+	for m in $(bundle_mods); do
+		files="$files modules/$m/$m"
+	done
+	for b in $files; do
 		line="$(file -b "$dir/$b")"
 		case "$line" in
 		ELF\ 64-bit*) ;;
@@ -133,21 +149,21 @@ main_check() {
 
 # 自检：合成包由仓内数据 + ELF64 头占位件组成（不编译），逐项注入违约判红。
 st_build() {
-	local stage="$1" m
+	local stage="$1" m comps="rrd,rr3-ctl,rr3-ota-ctl" files="bin/rrd bin/rr3-ctl bin/rr3-ota-ctl"
 	mkdir -p "$stage/bin" "$stage/modules"
 	cp -R "$repo/profiles" "$repo/contracts" "$repo/hardware" "$stage/"
-	for m in rr3-act rr3-connect rr3-interact rr3-power rr3-sense; do
+	for m in $(bundle_mods); do
 		mkdir -p "$stage/modules/$m"
 		cp "$repo/modules/$m/module.toml" "$repo/modules/$m/config.toml" "$stage/modules/$m/"
+		comps="$comps,$m"
+		files="$files modules/$m/$m"
 	done
-	for m in bin/rrd bin/rr3-ctl bin/rr3-ota-ctl modules/rr3-act/rr3-act \
-		modules/rr3-connect/rr3-connect modules/rr3-interact/rr3-interact \
-		modules/rr3-power/rr3-power modules/rr3-sense/rr3-sense; do
+	for m in $files; do
 		printf '\177ELF\002\001\001\000\000\000\000\000\000\000\000\000\002\000\267\000' >"$stage/$m"
 		chmod 0755 "$stage/$m"
 	done
-	printf 'commit=%s\nbuilt_at=selftest\ntarget=aarch64-unknown-linux-musl\ncomponents=rrd,rr3-ctl,rr3-ota-ctl,rr3-act,rr3-connect,rr3-interact,rr3-power,rr3-sense\nnatives=\n' \
-		"$(git -C "$repo" rev-parse --short=12 HEAD)" >"$stage/BUNDLE_VERSION"
+	printf 'commit=%s\nbuilt_at=selftest\ntarget=aarch64-unknown-linux-musl\ncomponents=%s\nnatives=\n' \
+		"$(git -C "$repo" rev-parse --short=12 HEAD)" "$comps" >"$stage/BUNDLE_VERSION"
 }
 
 st_pack() {

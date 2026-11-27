@@ -25,8 +25,12 @@ trap 'rm -rf "$STAGE"' EXIT
 
 # 产物定位共享单点（与烧录/镜像门同源）：target-dir 在源码区外，不得写死
 . "$ROOT/tools/ci/lib/cargo-artifact.sh"
+# 模块清单取仓内真值（modules/rr3-*/module.toml），不再在脚本里抄名字。
+. "$ROOT/tools/ci/lib/runtime-members.sh"
 
 die() { echo "FAIL  $*" >&2; exit 1; }
+
+mods=$(rr3_modules "$ROOT") || die "仓内没有任何 modules/rr3-*/module.toml（模块清单真值缺席）"
 
 B="$STAGE/rockrobot3-$COMMIT"
 mkdir -p "$B/bin" "$B/profiles" "$B/contracts" "$B/hardware" "$B/modules"
@@ -44,28 +48,36 @@ install -m755 "$src" "$B/bin/rr3-ota-ctl"
 
 NATIVE_DIR=${RR3_BUNDLE_NATIVE_DIR:-}
 natives=""
-for m in rr3-act rr3-connect rr3-interact rr3-power rr3-sense; do
+components="rrd,rr3-ctl,rr3-ota-ctl"
+for m in $mods; do
+  # musl 交叉例外：brain 的 ring 需目标 C 工具链，musl/rust-lld 腿不带；归板上原生
+  # 构建（与 cross-artifacts 第四参、pack-arm64 的同一分工）。新模块默认随包。
+  if [ "$m" = brain ]; then
+    continue
+  fi
+  name="rr3-$m"
   src=""
   if [ -n "$NATIVE_DIR" ]; then
-    for cand in "$NATIVE_DIR/$m/$m" "$NATIVE_DIR/$m/bin"; do
+    for cand in "$NATIVE_DIR/$name/$name" "$NATIVE_DIR/$name/bin"; do
       if [ -x "$cand" ]; then
         src=$cand
-        natives="$natives$m,"
+        natives="$natives$name,"
         break
       fi
     done
   fi
   if [ -z "$src" ]; then
-    src=$( cd "$ROOT/modules/$m" && rr3_cargo_artifact "$TARGET" release "$m" ) \
-      || die "$m 产物定位失败"
-    [ -f "$src" ] || die "$m 未构建: ${src}（先跑 bash tools/ci/platform/arm64-cross-check.sh）"
+    src=$( cd "$ROOT/modules/$name" && rr3_cargo_artifact "$TARGET" release "$name" ) \
+      || die "$name 产物定位失败"
+    [ -f "$src" ] || die "$name 未构建: ${src}（先跑 bash tools/ci/platform/arm64-cross-check.sh）"
   fi
-  mkdir -p "$B/modules/$m"
-  install -m755 "$src" "$B/modules/$m/$m"
-  cp "$ROOT/modules/$m/module.toml" "$B/modules/$m/"
-  for cfg in "$ROOT/modules/$m"/config*.toml; do
-    [ -f "$cfg" ] && cp "$cfg" "$B/modules/$m/"
+  mkdir -p "$B/modules/$name"
+  install -m755 "$src" "$B/modules/$name/$name"
+  cp "$ROOT/modules/$name/module.toml" "$B/modules/$name/"
+  for cfg in "$ROOT/modules/$name"/config*.toml; do
+    [ -f "$cfg" ] && cp "$cfg" "$B/modules/$name/"
   done
+  components="$components,$name"
 done
 
 cp -R "$ROOT/profiles/." "$B/profiles/"
@@ -76,7 +88,7 @@ cat > "$B/BUNDLE_VERSION" <<EOF
 commit=$COMMIT
 built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 target=$TARGET
-components=rrd,rr3-ctl,rr3-ota-ctl,rr3-act,rr3-connect,rr3-interact,rr3-power,rr3-sense
+components=$components
 natives=${natives%,}
 EOF
 

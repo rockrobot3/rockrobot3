@@ -21,7 +21,9 @@ REL=/tmp/rr3-build/$TARGET/release
 HOST=/tmp/rr3-build/release
 WORK=/tmp/rr3-arm64-deb
 DEB=""
-MODULES="act brain connect interact sense power"
+# 模块清单取仓内真值（不存在即失败），不抄六件名字。
+. tools/ci/lib/runtime-members.sh
+MODULES=$(rr3_modules .)
 
 die() { echo "FAIL  $*" >&2; exit 1; }
 
@@ -170,8 +172,8 @@ main() {
   assert_tree "$DEB"
   assert_content "$DEB"
   negative_cases
-  echo "PASS  aarch64 deb 结构：$(dpkg-deb -f "$DEB" Package) $(dpkg-deb -f "$DEB" Version) ${ARCH}；三入口/六模块/四册/平台册/接线/unit/postinst 齐，九件 ELF 全 aarch64；负例 3/3 被抓（不冒充安装）"
-  echo "::notice title=arm64-deb::$(dpkg-deb -f "$DEB" Package) $(dpkg-deb -f "$DEB" Version) ${ARCH}；六模块/四册/平台册/接线/unit/postinst 齐，九件 ELF 全 aarch64；负例 3/3 被抓（结构门，不冒充安装）"
+  echo "PASS  aarch64 deb 结构：$(dpkg-deb -f "$DEB" Package) $(dpkg-deb -f "$DEB" Version) ${ARCH}；三入口/全模块/四册/平台册/接线/unit/postinst 齐，九件 ELF 全 aarch64；负例 3/3 被抓（不冒充安装）"
+  echo "::notice title=arm64-deb::$(dpkg-deb -f "$DEB" Package) $(dpkg-deb -f "$DEB" Version) ${ARCH}；全模块/四册/平台册/接线/unit/postinst 齐，九件 ELF 全 aarch64；负例 3/3 被抓（结构门，不冒充安装）"
 }
 
 main "$@"

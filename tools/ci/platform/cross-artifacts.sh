@@ -9,10 +9,11 @@
 #     CC_riscv64_unknown_linux_gnu=riscv64-linux-gnu-gcc \
 #     cross-artifacts.sh riscv64gc-unknown-linux-gnu 'RISC-V' any with-brain
 #
-# 机制与目标分离：构建集合（rrd + rr3-ctl + rr3-ota-ctl + 五模块 + 协议契约探针）、
+# 机制与目标分离：构建集合（rrd + rr3-ctl + rr3-ota-ctl + 模块全集 + 协议契约探针）、
 # 产物在树断言、ELF 架构断言都只有一份；各芯片平台的差异只是数据——目标三元组、
-# `file` 的架构串、静态断言开关、是否带 brain。协议契约探针 `ipct003_dump` 不进
-# 产品清单，只供各芯片环境真跑 128B 头 golden 对拍（调用方按 native/musl/gnu 三种方式执行）。
+# `file` 的架构串、静态断言开关、是否带 brain。模块清单取仓内真值
+# （tools/ci/lib/runtime-members.sh，= modules/rr3-*/module.toml），不再在脚本里抄名字。
+# 协议契约探针 `ipct003_dump` 不进产品清单，只供各芯片环境真跑 128B 头 golden 对拍。
 # brain 只在第四参 with-brain 时构建：ureq+rustls(ring) 需目标 C 工具链（CC/AR
 # 由调用方按三元组注入）；有 C 工具链的腿（原生 x86_64、apt 交叉 riscv64）带上，
 # musl/rust-lld 腿无目标 C 工具链，保持不构建（与 pack-bundle 的 ③ / build-onboard
@@ -59,28 +60,38 @@ case "$target" in
 esac
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/rr3-build}"
 
+# 模块清单（仓内真值）与本次选择（brain 由第四参显式加入：它需要目标 C 工具链）。
+. tools/ci/lib/runtime-members.sh
+mods=$(rr3_modules .) || {
+  echo "FAIL  仓内没有任何 modules/rr3-*/module.toml（模块清单真值缺席）" >&2
+  exit 1
+}
+selected=""
+for m in $mods; do
+  if [ "$m" = brain ] && [ "$with_brain" != with-brain ]; then
+    continue
+  fi
+  selected="$selected $m"
+done
+
 cargo build -q --locked --release --target "$target" \
   --manifest-path base/runtime/Cargo.toml -p rrd
 cargo build -q --locked --release --target "$target" \
   --manifest-path tools/rrctl/Cargo.toml
-for m in act connect interact sense power; do
+for m in $selected; do
   cargo build -q --locked --release --target "$target" \
     --manifest-path "modules/rr3-$m/Cargo.toml"
 done
 cargo build -q --locked --release --target "$target" \
   --manifest-path base/ota/rr3-ota-ctl/Cargo.toml
-if [ "$with_brain" = with-brain ]; then
-  cargo build -q --locked --release --target "$target" \
-    --manifest-path modules/rr3-brain/Cargo.toml
-fi
 cargo build -q --locked --release --target "$target" \
   --manifest-path base/runtime/Cargo.toml -p rr-ipc --bin ipct003_dump
 
 rel="$CARGO_TARGET_DIR/$target/release"
-products="rrd rr3-ctl rr3-ota-ctl rr3-act rr3-connect rr3-interact rr3-sense rr3-power ipct003_dump"
-if [ "$with_brain" = with-brain ]; then
-  products="$products rr3-brain"
-fi
+products="rrd rr3-ctl rr3-ota-ctl ipct003_dump"
+for m in $selected; do
+  products="$products rr3-$m"
+done
 for b in $products; do
   if [ ! -x "$rel/$b" ]; then
     echo "FAIL  产物不在树: $rel/$b" >&2
