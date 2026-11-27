@@ -83,6 +83,13 @@ fn rr3_payload_read(r: &mut impl Read, want: usize) -> Result<Vec<u8>, Rr3FrameE
 }
 
 /// 写一帧
+///
+/// **整帧拼成连续字节后一次 `write_all`**：对"一帧一次、单写者"的低频面（CLI、
+/// 安装期探针、测试夹具）这是最省心的形状——读侧任何时刻都只可能看到完整帧。
+/// 高频广播面不要走这里：每个收件连接每帧都要付一次整帧复制，rrd 的写线程因此
+/// 自走 `rr3_header_encode` + 两段 iovec（`write_vectored`），见 `rrd/src/conn/reply.rs`；
+/// 板侧需要"所有权移交、不复制"时用 [`Rr3FrameBuf`](crate::transport::Rr3FrameBuf)
+/// 的 `rr3_send_buf`（缓冲自带头区，seal 后整块交出）。
 pub fn rr3_frame_write(w: &mut impl Write, f: &Rr3Frame) -> Result<(), Rr3FrameError> {
     let bytes = rr3_frame_to_bytes(f)?;
     w.write_all(&bytes)
