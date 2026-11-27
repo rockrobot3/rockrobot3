@@ -1810,3 +1810,13 @@ README 两处仍写 1:1——运维读到的分压比是假数，标定时会按
 镜像"，但一致性只靠人工纪律（计划 §批45 盲区②）；实测两者差异只在注释。处置——新增
 `wiring_mirror_drill`：两档 TOML 解析值必须相等，注释外任何差异即红。判据——drills 8 条
 全绿；`profile::tests::drills::wiring_mirror_drill` 在 CI gate ①b 内真跑。
+
+**2026-11-27 批122 分压比与接线档事实订正（含 gate 漂红根修）**：事实——①敞口 12 仍写
+`ADC_RAIL_DIVIDER_NUM/DEN` = 占位 1:1、三形态"没有任何机器可查的接线表"，而常量已回填
+2:1（S3 10k/10k 实测档）、三形态 wiring.toml 均已落树；②`periph-mech` 的 rail 换算注仍
+称"占位 1:1"；③批121 推送后远端 gate 红：`git push` 前 `cargo fmt --check` 的退出码被管道
+吞掉，`cargo clippy -D warnings` 抓出 `esp32s3_boot_drill` 头注第二行以 `+` 开头被 Markdown
+当列表项（doc_lazy_continuation）。处置——①②按现状订正（未做的仍是万用表 ≤2% 对拍与接闸，
+判据不变）；③改写头注去列表前缀，本地复跑 `cargo clippy --workspace -D warnings` 零告警后
+推送。判据——`gate`/`integration`/`platforms` 在 `67fe2f0` 全 success（platforms 含
+esp32/esp32s3 双芯片固件编译，验证 boot.rs 打印改动在两目标可编）；⑤ 文档门绿。
