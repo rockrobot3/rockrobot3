@@ -2132,3 +2132,10 @@ BUNDLE_VERSION 与 HEAD·target·八件组件／三件 bin 执行位／五模块
 自检（合规过＋模块缺 config／非 ELF 件／commit 不符三红例）；platforms 的 aarch64-musl 腿在
 构建后真跑 `pack-bundle.sh` 再断言。判据——self-test 4/4 PASS；YAML 解析过；workflow 结构
 审计通；⑤⑬⑯ 与 ⑫ 指标全绿；CI 结果以 platforms 腿实测为准（后续观察）。
+
+**2026-11-27 批169 装机器干净机拒绝路径上流水线实证**：事实——批164 的 fail-closed 只有
+静态判据（代码走读），没有一次真执行；而"干净机上装 bundle"正是 2026-11-08 事故的同型
+入口。处置——platforms 的 aarch64-musl 腿在出包后以 `sudo` 跑 `install-bundle.sh` 指临时
+安装根，断言 rc≠0 且输出含"未找到已装 rrd.service"；正例（真 systemd + rrd 健康窗口）留
+真板，不在流水线冒充。判据——YAML 解析过；workflow 结构审计与 ⑬ 门全绿；实跑结论以
+platforms 腿日志为准。

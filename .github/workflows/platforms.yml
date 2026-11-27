@@ -145,6 +145,30 @@ jobs:
           bash tools/deploy/pack-bundle.sh "${{ matrix.triple }}" /tmp/rockrobot3-bundle.tar.gz
           bash tools/ci/platform/bundle-contract.sh /tmp/rockrobot3-bundle.tar.gz \
             "${{ matrix.triple }}" "${{ matrix.arch }}"
+      # 装机器负例（批169）：干净机没有 rrd.service 时，install-bundle 必须在动树之前
+      # 拒绝并点名"先装 deb"——批164 前的行为是打 WARN 后静默中止。正例要真 systemd
+      # 与 rrd 运行，归真板，不在流水线冒充。
+      - name: 装机器干净机拒绝（install-bundle fail-closed 实证）
+        if: matrix.triple == 'aarch64-unknown-linux-musl'
+        run: |
+          set +e
+          out=$(sudo bash tools/deploy/install-bundle.sh /tmp/rockrobot3-bundle.tar.gz \
+                  /tmp/rr3-install-root 2>&1)
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "::error title=install-guard::干净机上 install-bundle 竟然成功（应拒绝）"
+            exit 1
+          fi
+          case "$out" in
+            *"未找到已装 rrd.service"*) ;;
+            *)
+              brief=$(printf '%s\n' "$out" | tail -3 | tr '\n' ' ')
+              echo "::error title=install-guard::拒绝原因不是缺 unit：${brief:0:600}"
+              exit 1
+              ;;
+          esac
+          echo "PASS  干净机拒绝路径成立（rc=${rc}）：$(printf '%s\n' "$out" | head -1)"
       # 判据从"没报 exec format error"升到"真打印出预期用法"：前者对 native 腿近乎
       # 恒真（跑得起来就有输出），后者要求二进制走到自己的 CLI 面。
       - name: 目标 ISA 执行冒烟（真跑产物并断言用法输出）
