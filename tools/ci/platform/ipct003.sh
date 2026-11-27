@@ -1,12 +1,5 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# crates 下载抖动兜底（本地与 CI 同口径）：esp 门的构建走镜像源，共享出口偶发
-# "transfer too slow / transferred 0 bytes"（2026-11-15 实测：一轮 20 分钟的 esp 门
-# 白跑在 winnow 的下载上）。cargo 自带重试默认 3 次、低速阈值 10B/30s 太紧，这里放宽；
-# 依赖源与锁文件都不动。
-export CARGO_NET_RETRY="${CARGO_NET_RETRY:-10}"
-export CARGO_HTTP_TIMEOUT="${CARGO_HTTP_TIMEOUT:-120}"
-export CARGO_HTTP_LOW_SPEED_LIMIT="${CARGO_HTTP_LOW_SPEED_LIMIT:-1}"
 # IPC-T-003 跨架构对拍：x86 与 aarch64 字节布局一致（ADR-0006 后果项）。
 #
 # **不在门禁步序内**（check.sh 不调它）：它依赖平台条件（Docker / aarch64 交叉目标），
@@ -41,6 +34,7 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   exit 1
 }
 cd "$root" || exit 1
+. "$root/tools/ci/lib/cargo-net.sh"
 
 manifest=base/runtime/Cargo.toml
 golden=contracts/golden/event-header-128.hex

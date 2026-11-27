@@ -1,12 +1,5 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# crates 下载抖动兜底（本地与 CI 同口径）：esp 门的构建走镜像源，共享出口偶发
-# "transfer too slow / transferred 0 bytes"（2026-11-15 实测：一轮 20 分钟的 esp 门
-# 白跑在 winnow 的下载上）。cargo 自带重试默认 3 次、低速阈值 10B/30s 太紧，这里放宽；
-# 依赖源与锁文件都不动。
-export CARGO_NET_RETRY="${CARGO_NET_RETRY:-10}"
-export CARGO_HTTP_TIMEOUT="${CARGO_HTTP_TIMEOUT:-120}"
-export CARGO_HTTP_LOW_SPEED_LIMIT="${CARGO_HTTP_LOW_SPEED_LIMIT:-1}"
 # ESP32-S3 外设底座构建门（W1/T2，批N35 件八）。与 esp32-periph-base-check.sh
 # 同款门禁形态：宿主工具链 check 必红（xtensa + build-std + esp-idf-sys），本脚本
 # 单独覆盖。SKIP 纪律同款：工具链缺位 = 本地 SKIP / CI 即红（tools/ci/lib/skip.sh）；在位但编译失败 = FAIL；
@@ -38,6 +31,7 @@ cd "$root/tools/esp32-periph-base" || { echo "ERROR: 无法进入 tools/esp32-pe
 # 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
 # crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
 . "$root/tools/ci/lib/cargo-artifact.sh"
+. "$root/tools/ci/lib/cargo-net.sh"
 . "$root/tools/ci/lib/skip.sh"
 
 # W7-b1a 分区表核验时间锚：先于本门任何构建创建（语义同 classic 门）。

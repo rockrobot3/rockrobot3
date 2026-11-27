@@ -2912,3 +2912,11 @@ platforms 均 success），install-smoke job `140736807175` 三段实测均在�
 distro 首发后 `--deep` / runbook B.2 实测，并裁定 `distro` 类是否进匿名回读（当前纳入
 会对 v0.0.8 假红）；③ 批269 时延上限门连续两拍观察，数据支持才收紧（不无据调参）；
 ④ 批270 三线收口与再拟下轮。
+
+**2026-11-28 批267 crates 重试参数收敛单点**：事实——七个平台脚本（espidf-std /
+sentinel / esp32 / esp32s3 periph-base / esp-uart-echo / rr3-act-sense / ipct003）各抄
+同一份"3 行 export + 4 行注释"，策略一变要改七处，且 metrics 只扫 `.rs`，这类重复
+无人抓。处置——立 [cargo-net.sh](../../tools/ci/lib/cargo-net.sh)（显式传值优先，
+不覆盖调用方环境），七脚本在 root 确定后 source 单点。判据——`grep -rn
+CARGO_NET_RETRY tools/` 仅 lib 一处命中；七脚本 `bash -n` 全通过；体量净减 42 行
+（7 增 49 删）；⑯ 行数门 PASS（最大 220 行）。
