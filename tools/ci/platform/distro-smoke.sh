@@ -160,7 +160,9 @@ docker run --rm -v "$(pwd)":/work -w /work -v "$SUM_FILE:/tmp/rr3-timing" "$IMAG
     cat /tmp/rrd-smoke.log
     exit 1
   fi
-  BOOT_CEIL_MS=20000
+  # 批259 校准：首拍实测 boot_spawn6_ms=1010（job 140710054135 注解），取约 10 倍
+  # 余量；旧值 20000 是"取不到数"前的保守值，只拦病态回归不拦正常抖动。
+  BOOT_CEIL_MS=10000
   # 键名 boot_spawn6_ms 是公开面稳定键（历史回执与 status 敞口 29 引用），语义 =
   # 全模块 spawn 齐；模块数变化不影响键名，数值随 MODN 判据一起走。
   echo "timing boot_spawn6_ms=${READY_MS} ceiling=${BOOT_CEIL_MS}"
@@ -185,7 +187,8 @@ docker run --rm -v "$(pwd)":/work -w /work -v "$SUM_FILE:/tmp/rr3-timing" "$IMAG
   STATUS_OUT=$(/usr/bin/rr3-ctl --bus-path "$SOCK" status)
   RTT_MS=$(( $(date +%s%3N) - T0_MS ))
   echo "$STATUS_OUT" | grep -q "denied_publish = 0"
-  STATUS_CEIL_MS=5000
+  # 批259 校准：实测 status_rtt_ms=2（同拍注解），1000ms 只拦总线卡顿/守护假死。
+  STATUS_CEIL_MS=1000
   echo "timing status_rtt_ms=${RTT_MS} ceiling=${STATUS_CEIL_MS}"
   echo "status_rtt_ms=${RTT_MS} ceiling_ms=${STATUS_CEIL_MS}" >>/tmp/rr3-timing
   if [ "$RTT_MS" -gt "$STATUS_CEIL_MS" ]; then
