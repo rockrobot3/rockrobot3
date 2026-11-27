@@ -194,6 +194,13 @@ unit_reason() {
     | grep -E '错误|失败|拒绝|拒 boot|缺件|无法' | tail -3 | tr '\n' ' '
 }
 
+# install-bundle 成功行自带的四段用时（批226）。抓到就并进公开 notice：
+# 回滚 32s 到底是探针窗口还是别处，公开面直接可判，不靠登 runner 翻日志。
+install_phases() {
+  grep -o '停机 [0-9]*ms / 换树 [0-9]*ms / 二进制 [0-9]*ms / 启动探针 [0-9]*ms' \
+    <<<"$1" | tail -1
+}
+
 # 六模块 running 判据（逐模块断言行，不拿"表里有字"冒充；denied_publish 必须为 0）。
 wait_modules() {
   local i m out ok
@@ -237,7 +244,7 @@ make_bundle() {
 # 正例第二段：真 unit 下换树。install-bundle 自己会停 rrd、换树、起 rrd、逐模块
 # 探针；这里只补外部判据（成功行、BUNDLE_VERSION 是本提交、unit active、六模块）。
 install_bundle() {
-  local out commit t0
+  local out commit t0 phases
   commit=$(git rev-parse --short=12 HEAD)
   t0=$(now_ms)
   if ! out=$(as_root bash tools/deploy/install-bundle.sh "$WORK/bundle.tar.gz" 2>&1); then
@@ -251,7 +258,8 @@ install_bundle() {
   as_root systemctl is-active --quiet rrd || die "换树后 rrd 未 active"
   wait_modules
   SWAP_MS=$(( $(now_ms) - t0 ))
-  echo "::notice title=install-smoke-bundle::换树成功 commit=${commit}，六模块 running（窗口=${SWAP_MS}ms）"
+  phases=$(install_phases "$out")
+  echo "::notice title=install-smoke-bundle::换树成功 commit=${commit}，六模块 running（窗口=${SWAP_MS}ms${phases:+；$phases}）"
 }
 
 # 装机面漂移门的单次调用（正例与负例共用同一条命令，避免两处各写一套参数）。
@@ -294,7 +302,7 @@ drift_negative() {
 # 回滚例：坏 rrd（非 ELF）能通过解包前检查，但起不来——install-bundle 必须回滚。
 # 判据：非 0 退出 + 点名回滚 + 装机树仍是上一版 + rrd 恢复 running。
 rollback_case() {
-  local bad="$WORK/bad.tar.gz" tmp top out rc=0 commit t0
+  local bad="$WORK/bad.tar.gz" tmp top out rc=0 commit t0 attempt
   commit=$(git rev-parse --short=12 HEAD)
   tmp=$(mktemp -d "$WORK/bad.XXXXXX")
   tar -xzf "$WORK/bundle.tar.gz" -C "$tmp"
@@ -316,8 +324,9 @@ rollback_case() {
   as_root systemctl is-active --quiet rrd || die "回滚后 rrd 未 active"
   wait_modules
   ROLLBACK_MS=$(( $(now_ms) - t0 ))
+  attempt=$(grep -o '本次尝试 [0-9]*ms' <<<"$out" | tail -1)
   echo "     回滚证据：rc=${rc}，$(grep '已回滚' <<<"$out" | tail -1)"
-  echo "::notice title=install-smoke-rollback::坏包回滚成立 rc=${rc}（树与二进制已回上一版，六模块 running，恢复=${ROLLBACK_MS}ms）"
+  echo "::notice title=install-smoke-rollback::坏包回滚成立 rc=${rc}（树与二进制已回上一版，六模块 running，恢复=${ROLLBACK_MS}ms${attempt:+；$attempt}）"
 }
 
 main() {
