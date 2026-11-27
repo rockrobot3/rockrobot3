@@ -123,6 +123,9 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   # ui.face、power.charger、audio.* 八格恒判缺，三个模块被"缺格"拒起、⑥ 的六
   # spawn 断言必红。探测档与 hal_backend 同为显式部署数据：容器无硬件可探，
   # 显式置 sim（probe.rs 文件头：sim 档只在 test 面与显式 env 里用）。
+  # 流畅度基线（2026-11-27 批184）：boot 就绪此前只有 30s 等待上限，慢到 25s 也算绿。
+  # 现在记下六模块 spawn 齐的时刻并按保守上限判红；数字每次打印，供发版回执对表。
+  START_MS=$(date +%s%3N)
   RR3_DATA_DIR=/var/lib/rockrobot3 RR3_BRAIN_CLOUD=mock RR3_PROBE=sim /usr/bin/rrd --socket "$SOCK" \
     --contracts /usr/lib/rockrobot3/contracts \
     --profile /usr/lib/rockrobot3/profiles/distro.toml >/tmp/rrd-smoke.log 2>&1 &
@@ -131,16 +134,28 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
 
   echo "== ⑧ 冒烟断言：六模块 spawn（含 Rust brain）+ 0 拒 boot + 0 denied =="
   ok=""
+  READY_MS=""
   for _ in $(seq 1 30); do
     n=0
     for m in act connect interact sense power brain; do
       grep -q "spawn rr3-$m pid=" /tmp/rrd-smoke.log && n=$((n + 1))
     done
-    if [ "$n" -eq 6 ]; then ok=1; break; fi
+    if [ "$n" -eq 6 ]; then
+      READY_MS=$(( $(date +%s%3N) - START_MS ))
+      ok=1
+      break
+    fi
     sleep 1
   done
   if [ -z "$ok" ]; then
     echo "--- rrd 日志（spawn 不齐）---"
+    cat /tmp/rrd-smoke.log
+    exit 1
+  fi
+  BOOT_CEIL_MS=20000
+  echo "timing boot_spawn6_ms=${READY_MS} ceiling=${BOOT_CEIL_MS}"
+  if [ "$READY_MS" -gt "$BOOT_CEIL_MS" ]; then
+    echo "FAIL ⑧: boot 就绪 ${READY_MS}ms 超过上限 ${BOOT_CEIL_MS}ms（流畅度回归）"
     cat /tmp/rrd-smoke.log
     exit 1
   fi
@@ -149,7 +164,16 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
     cat /tmp/rrd-smoke.log
     exit 1
   fi
-  /usr/bin/rr3-ctl --bus-path "$SOCK" status | grep -q "denied_publish = 0"
+  T0_MS=$(date +%s%3N)
+  STATUS_OUT=$(/usr/bin/rr3-ctl --bus-path "$SOCK" status)
+  RTT_MS=$(( $(date +%s%3N) - T0_MS ))
+  echo "$STATUS_OUT" | grep -q "denied_publish = 0"
+  STATUS_CEIL_MS=5000
+  echo "timing status_rtt_ms=${RTT_MS} ceiling=${STATUS_CEIL_MS}"
+  if [ "$RTT_MS" -gt "$STATUS_CEIL_MS" ]; then
+    echo "FAIL ⑧: status 往返 ${RTT_MS}ms 超过上限 ${STATUS_CEIL_MS}ms（总线/守护卡顿）"
+    exit 1
+  fi
 
   echo "== ⑨ counters 回写断言（0.0.6 批E-R3：持久化启用 + boots 落盘）=="
   grep -q "counters 持久化已启用: /var/lib/rockrobot3/counters.json（boots 自增已回写）" /tmp/rrd-smoke.log
