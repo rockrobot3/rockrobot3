@@ -69,7 +69,9 @@ MCU 无 A/B 分区，升级一律线下重烧。每个芯片平台独立部署�
 真 unit 跑 `install-bundle.sh` 正例（六模块 running）、换树后跑
 `verify-board-config.sh --local` 判装机面与仓内逐字节一致（bundle 零改写），最后以坏
 `rrd` 包验回滚。判据体在 [`tools/ci/platform/install-smoke.sh`](../ci/platform/install-smoke.sh)；
-`/etc` 部署副本与 unit drop-in 只承担 CI 的 sim 环境，不进包、不改仓。
+`/etc` 部署副本与 unit drop-in 只承担 CI 的 sim 环境，不进包、不改仓。三段时延（boot /
+换树窗口 / 回滚恢复）以 notice 与 step summary 回传（批221），**只记录不判红**——阈值
+待实测积累后按 [status 敞口 29](../../docs/status.md) 校准。
 
 **发布面（2026-11-27 批174）**：打 `v*` 标签时 `publish.yml` 的 `distro-bundle` 腿用同一
 `pack-bundle.sh` 出包、过 `tools/ci/platform/bundle-contract.sh` 的 A10 断言，随 release

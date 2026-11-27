@@ -29,6 +29,12 @@ SOCK=/var/run/rock3-ipc.sock
 MODULES="act brain connect interact sense power"
 UNITS="rr3-act rr3-connect rr3-interact rr3-sense rr3-power rr3-brain"
 
+# 时延观测（批221）：三段数字各记一次，只回传不判红（阈值校准归 status 敞口 29，
+# 先积累实测再收紧；日志匿名不可读，notice 与 step summary 是公开面）。
+BOOT_MS=""
+SWAP_MS=""
+ROLLBACK_MS=""
+
 die() {
   echo "FAIL  $*" >&2
   trap - ERR
@@ -161,6 +167,26 @@ sim_deploy() {
   as_root systemctl daemon-reload
 }
 
+# 毫秒时钟（GNU date；本脚本只在 Linux systemd 宿主跑，preflight 已把容器面挡住）。
+now_ms() { date +%s%3N; }
+
+# 三段时延回传：unit 拉起（boot）、换树窗口（停 rrd→换树→起→六模块）、回滚恢复。
+# 写入 step summary（公开面）并发一条 notice，便于匿名回读与发版回执引用。
+report_timing() {
+  local line="boot_systemd_ms=${BOOT_MS} bundle_swap_ms=${SWAP_MS} rollback_ms=${ROLLBACK_MS}"
+  echo "timing ${line}"
+  echo "::notice title=install-smoke-timing::${line}（unit 拉起 / 换树停机+启动 / 坏包回滚恢复）"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    {
+      echo ""
+      echo "### install-smoke timing"
+      echo '```'
+      echo "$line"
+      echo '```'
+    } >>"$GITHUB_STEP_SUMMARY"
+  fi
+}
+
 # rrd 拒 boot 的根因行（journal 里最后几条带错误词的）：die 文案因此带上现场，
 # 公开注解与本地输出都能直接看到"为什么没起来"，不用登 runner 翻 journal。
 unit_reason() {
@@ -190,11 +216,14 @@ wait_modules() {
 
 # unit 拉起 + 六模块判据（正例第一段：deb 装机面由 systemd 真拉起）。
 start_unit() {
+  local t0
+  t0=$(now_ms)
   as_root systemctl start rrd || die "systemctl start rrd 失败：$(unit_reason)"
   as_root systemctl is-active --quiet rrd || die "rrd 未 active：$(unit_reason)"
   wait_modules
-  echo "     unit active，六模块 running"
-  echo "::notice title=install-smoke-systemd::deb 装机 + systemd unit 拉起成立，六模块 running"
+  BOOT_MS=$(( $(now_ms) - t0 ))
+  echo "     unit active，六模块 running（boot ${BOOT_MS}ms）"
+  echo "::notice title=install-smoke-systemd::deb 装机 + systemd unit 拉起成立，六模块 running（boot=${BOOT_MS}ms）"
 }
 
 # 版本化 bundle：真出包（仓内 profile 原样 linux，不做任何改写）+ A10 契约复核。
@@ -208,8 +237,9 @@ make_bundle() {
 # 正例第二段：真 unit 下换树。install-bundle 自己会停 rrd、换树、起 rrd、逐模块
 # 探针；这里只补外部判据（成功行、BUNDLE_VERSION 是本提交、unit active、六模块）。
 install_bundle() {
-  local out commit
+  local out commit t0
   commit=$(git rev-parse --short=12 HEAD)
+  t0=$(now_ms)
   if ! out=$(as_root bash tools/deploy/install-bundle.sh "$WORK/bundle.tar.gz" 2>&1); then
     printf '%s\n' "$out" >&2
     die "install-bundle 正例失败（失败现场见上）"
@@ -220,7 +250,8 @@ install_bundle() {
     || die "换树后 BUNDLE_VERSION 不是本提交（${commit}）"
   as_root systemctl is-active --quiet rrd || die "换树后 rrd 未 active"
   wait_modules
-  echo "::notice title=install-smoke-bundle::换树成功 commit=${commit}，六模块 running"
+  SWAP_MS=$(( $(now_ms) - t0 ))
+  echo "::notice title=install-smoke-bundle::换树成功 commit=${commit}，六模块 running（窗口=${SWAP_MS}ms）"
 }
 
 # 装机面漂移门正例：真包换树后，仓与装机应逐字节相等。判据体复用
@@ -240,13 +271,14 @@ verify_install() {
 # 回滚例：坏 rrd（非 ELF）能通过解包前检查，但起不来——install-bundle 必须回滚。
 # 判据：非 0 退出 + 点名回滚 + 装机树仍是上一版 + rrd 恢复 running。
 rollback_case() {
-  local bad="$WORK/bad.tar.gz" tmp top out rc=0 commit
+  local bad="$WORK/bad.tar.gz" tmp top out rc=0 commit t0
   commit=$(git rev-parse --short=12 HEAD)
   tmp=$(mktemp -d "$WORK/bad.XXXXXX")
   tar -xzf "$WORK/bundle.tar.gz" -C "$tmp"
   top=$(basename "$(find "$tmp" -mindepth 1 -maxdepth 1 -type d)")
   printf 'not-an-elf\n' >"$tmp/$top/bin/rrd"
   tar -C "$tmp" -czf "$bad" "$top"
+  t0=$(now_ms)
   out=$(as_root bash tools/deploy/install-bundle.sh "$bad" 2>&1) || rc=$?
   if [ "$rc" -eq 0 ]; then
     printf '%s\n' "$out" >&2
@@ -260,8 +292,9 @@ rollback_case() {
     || die "回滚后装机树不是上一版（BUNDLE_VERSION 漂移）"
   as_root systemctl is-active --quiet rrd || die "回滚后 rrd 未 active"
   wait_modules
+  ROLLBACK_MS=$(( $(now_ms) - t0 ))
   echo "     回滚证据：rc=${rc}，$(grep '已回滚' <<<"$out" | tail -1)"
-  echo "::notice title=install-smoke-rollback::坏包回滚成立 rc=${rc}（树与二进制已回上一版，六模块 running）"
+  echo "::notice title=install-smoke-rollback::坏包回滚成立 rc=${rc}（树与二进制已回上一版，六模块 running，恢复=${ROLLBACK_MS}ms）"
 }
 
 main() {
@@ -276,6 +309,7 @@ main() {
   install_bundle
   verify_install
   rollback_case
+  report_timing
   echo "PASS  装机器正例：deb→systemd 六模块 running；真包换树成功且装机面无漂移；坏包回滚成功"
 }
 
