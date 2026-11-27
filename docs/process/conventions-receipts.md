@@ -2036,3 +2036,22 @@ README 三条命令用的正是这些；`image-esp32.sh` 支持 `[--release] [--
 钉**成员名单形状**（distro 精确向量、esp32-mini 的 chip 选册成员与 dirs），
 rr3-pack `s3_truth_members_exist` 钉**真仓 S3 成员存在**（八文件 + axis 目录）；两者
 一个管"名单长什么样"、一个管"名单指的件在不在"，无重复口径也不冲突。处置——零改动。
+
+**2026-11-27 批155 敞口 25 扫描面订正**：事实——敞口行仍写"门扫描面 16 件（模块 config 7
+＋装配单 8 ＋ unit 1）"，是 2026-11-16 快照；批149/152 后已含 hardware 面。处置——按现树
+计数订正：全档 = 模块 config 8 ＋装配单 9 ＋ unit 1 ＋板级资产 2 ＋ wiring 9 ＋ axis 5
+＝ **34 件**；`--profile` 只取该档。判据——各类文件逐目录计数，与工具跑出的"比对 N 件"
+（S3 档 18 件）对上。
+
+**2026-11-27 批156 deploy README 补漂移门使用节**：事实——README 只在平台表一行提到
+`verify-board-config.sh`，没有用法/覆盖/退出码，运维需读脚本头注。处置——在"版本化
+部署包契约"后补一节：覆盖六类、`--local`/`--remote`/`--self-test` 三条命令、退出码
+0/1/2/3。判据——三条命令与脚本 usage 逐字对照。
+
+**2026-11-27 批157 漂移门补契约册（真缺口修复）**：事实——交叉核对"工具扫描面 vs
+rr3-pack 随装面"：扫描面仍少 `contracts/{topics,slots,roles,devices}.toml` 与
+`contracts/platform/<chip>.toml`，而这五册装机后 rrd 装载直接读，漂了即拒 boot。
+处置——新增 `rr3_manifest_contracts`（四册恒比；平台册按 `--profile` 的
+`[platform].chip` 选一，legacy 模式不猜芯片只比四册）；自检加"契约册漂移红"一例；
+结论行补「契约册」。判据——自检 10 例全过；真仓 S3 干跑 **18 件 0 漂移**（原 13 件 +
+四册 + 平台册）；gate ⑥b 真跑。
