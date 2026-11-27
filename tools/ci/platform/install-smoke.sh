@@ -29,7 +29,12 @@ SOCK=/var/run/rock3-ipc.sock
 MODULES="act brain connect interact sense power"
 UNITS="rr3-act rr3-connect rr3-interact rr3-sense rr3-power rr3-brain"
 
-die() { echo "FAIL  $*" >&2; exit 1; }
+die() {
+  echo "FAIL  $*" >&2
+  trap - ERR
+  dump_state
+  exit 1
+}
 
 # root 直跑或免密 sudo 二选一：CI runner 是非 root + sudo，root 面（容器/真板）直接执行。
 as_root() {
@@ -137,6 +142,12 @@ sim_deploy() {
   as_root install -m644 "$src" "$etc/profiles/distro.toml"
   as_root install -m644 "$ROOT/hardware/distro/wiring.toml" \
     "$etc/hardware/distro/wiring.toml"
+  # modules-root 与 contracts 直接链到装机树：rrd 由装配单两级父目录推导
+  # modules-root（profile_root），副本根必须能看见模块面；链而不是拷，换树后
+  # 自动跟到新树，且不在 /etc 复制第二份二进制。先删再链：重跑时不把链建到旧链里。
+  as_root rm -rf "$etc/modules" "$etc/contracts"
+  as_root ln -s "$ROOT/modules" "$etc/modules"
+  as_root ln -s "$ROOT/contracts" "$etc/contracts"
   as_root sed -i 's/^hal_backend = "linux"/hal_backend = "sim"/' \
     "$etc/profiles/distro.toml"
   grep -q '^hal_backend = "sim"' "$etc/profiles/distro.toml" \
@@ -148,6 +159,13 @@ sim_deploy() {
   printf '[Service]\nEnvironment=RR3_PROBE=sim\nEnvironment=RR3_BRAIN_CLOUD=mock\nExecStart=\nExecStart=%s\n' \
     "$override" | as_root tee "$drop/50-ci-sim.conf" >/dev/null
   as_root systemctl daemon-reload
+}
+
+# rrd 拒 boot 的根因行（journal 里最后几条带错误词的）：die 文案因此带上现场，
+# 公开注解与本地输出都能直接看到"为什么没起来"，不用登 runner 翻 journal。
+unit_reason() {
+  as_root journalctl -u rrd --no-pager -n 40 2>/dev/null \
+    | grep -E '错误|失败|拒绝|拒 boot|缺件|无法' | tail -3 | tr '\n' ' '
 }
 
 # 六模块 running 判据（逐模块断言行，不拿"表里有字"冒充；denied_publish 必须为 0）。
@@ -167,13 +185,13 @@ wait_modules() {
   done
   echo "--- 最近一次 rr3-ctl status ---" >&2
   printf '%s\n' "${out:-<无应答>}" >&2
-  die "30s 内六模块未全 running（${UNITS}）"
+  die "30s 内六模块未全 running（${UNITS}）：$(unit_reason)"
 }
 
 # unit 拉起 + 六模块判据（正例第一段：deb 装机面由 systemd 真拉起）。
 start_unit() {
-  as_root systemctl start rrd || die "systemctl start rrd 失败"
-  as_root systemctl is-active --quiet rrd || die "rrd 未 active"
+  as_root systemctl start rrd || die "systemctl start rrd 失败：$(unit_reason)"
+  as_root systemctl is-active --quiet rrd || die "rrd 未 active：$(unit_reason)"
   wait_modules
   echo "     unit active，六模块 running"
   echo "::notice title=install-smoke-systemd::deb 装机 + systemd unit 拉起成立，六模块 running"
