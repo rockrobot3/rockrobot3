@@ -437,7 +437,7 @@ jobs:
             FLASHING.md:text/markdown \
             firmware-sha256.txt:text/plain
           oras manifest fetch "$ref" >/dev/null
-          echo "PASS  已推送 $ref（双 ELF + 双 bootloader + 分区表 + 烧录说明 + sha256）"
+          echo "PASS  已推送 $ref（双 ELF + 双整片镜像 + 双 bootloader + 分区表 + 烧录说明 + sha256）"
       - uses: sigstore/cosign-installer@v3
         with:
           cosign-release: "v2.6.5"
