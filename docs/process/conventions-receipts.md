@@ -3100,3 +3100,16 @@ release-verify.sh / `--with-signature` / `--classes image,firmware` / `--tag aut
 形态（正是首跑前最需要防的）。处置——`anon_problems` 增两条：必须有 `schedule` 段、
 且段内有合法 `cron` 行；自检增负例（删 schedule 只剩手动必须点名）。判据——
 `--self-test` 35/35 绿；真仓 PASS；⑤ 文档门绿。
+
+**2026-11-28 批288 本轮收口（匿名回读面全部钉住）**：事实——`release-anon` 的 job 名、
+命令四要素（复用判据 / `--with-signature` / `--classes image,firmware` / `--tag auto`）
+与周程触发（`schedule` + cron）现已全部入审计，任何削弱当场红；自检 35/35。窗口仍未
+到（runs=0，11-30 03:00 UTC），本轮把"首跑前能钉的先钉死"。判据——commit `b7ebf3f6`
+三线全绿（gate / integration / platforms 均 success）；gate `scripts` /
+`conventions` success；三远端同指 `b7ebf3f6`。
+
+**2026-11-28 批288 下轮任务拟定**：① 批289 11-30 03:00 UTC `release-anon` 首跑归因
+（命令/周程已钉；确认 runs>0 并按注解记录 tag 与类别结论；红按镜像/固件/签名三类
+定位）；② 批290 下次 `v*` 发布后把 OTA/buildroot 纳入匿名回读（v 前缀已由批284
+钉住）并核 buildroot 的 `release-verify --tag v${VER}` 实跑；③ 批291 distro 首发后
+`--deep` / B.2 实测与 distro 类裁定；④ 批292 三线收口与再拟下轮。
