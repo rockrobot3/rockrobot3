@@ -2153,3 +2153,12 @@ PASS；⑤⑬⑯ 与 ⑫（重复率 0.41%、CC 2.47）全绿。
 （清单是唯一说明面，漏列即"有件无据"）。处置——按真实成员改写为"14 支 .sh 与
 `Containerfile`、`console-log.py`"并补全名单。判据——`ls tools/deploy/*.sh` 14 支与行内
 名单逐名对上；⑤ 文档门绿。
+
+**2026-11-27 批172 ci-status 未定判定补盲（上一头在跑曾被读成绿）**：事实——判据只把
+**本地头**的 run 计入 pending；纯文档提交被 paths-ignore 跳过时本地头没有 run，而上一头
+的平台腿仍在跑，旧实现照样退出 0（当天实测：`251d8387` gate success + `cfd51ebb`
+platforms in_progress ⇒ 0，同一时刻平台上并无当前代码的结论）；README 又写"最近 40 次"
+而脚本 per_page=10。处置——判据抽成 `tools/ci/lib/ci_verdict.py`（机制单点），pending
+改为"任一 workflow 最新一条在跑即 2"，并加 `--self-test` 四例（全绿过／旧头仍在跑报
+未定／任一红／本地头无 run，各钉一条退出码）；README 的条数与口径同步。判据——
+self-test 4/4 PASS；同一时刻真实调用得 rc=2（旧实现 0）；⑤⑬⑯ 全绿。

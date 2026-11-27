@@ -109,11 +109,13 @@ CI 单一事实源在 [`.github/workflows/`](../../.github/workflows)（gate / p
 ## CI 漂红巡检入口：`ci-status.sh`
 
 [ci-status.sh](ci-status.sh) 把"每拍核对漂红"固化成一条只读命令：取目标分支最近
-40 次 run，按 workflow 名取最新一条，打印结论并按**本地头**判定——与本地头同提交
-的 run 有 `failure` / `timed_out` / `action_required` / `stale` 即退出 1，仍在跑
-退出 2，全 success 退出 0。`cancelled` 不算红（同 ref 新推送由并发组取消，由下一拍
-补覆盖）。匿名可读 runs 列表；job 日志需鉴权（403 已实证），脚本不碰。
-`GITHUB_TOKEN` 可选，仅用于提高 API 限额。
+10 次 run，按 workflow 名取最新一条，判据在 [lib/ci_verdict.py](lib/ci_verdict.py)
+（`--self-test` 四例不触网）：任一最新一条 `failure` / `timed_out` /
+`action_required` / `stale` 退出 1；任一最新一条仍在跑、或本地头没有任何 run 退出 2
+（未定不冒充绿——纯文档提交被 paths-ignore 跳过时，上一头的平台腿可能还在跑）；
+全 success 退出 0。`cancelled` 不算红（同 ref 新推送由并发组取消，由下一拍补覆盖）。
+匿名可读 runs 列表；job 日志需鉴权（403 已实证），脚本不碰。`GITHUB_TOKEN` 可选，
+仅用于提高 API 限额。
 
 ## 构建失败归因入口：`log-digest.sh`
 
