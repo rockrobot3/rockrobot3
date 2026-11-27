@@ -2222,3 +2222,13 @@ buildroot 同为 tag 触发、后者是小时级，不能用"五类全齐"互相
 release 作业在推完 OTA/buildroot 后核 ota+buildroot；两处同用 `--repo` 取当前仓、
 oras 走本作业登录。判据——self-test 7/7（含类别过滤例）；YAML 解析过；结构审计绿；
 ⑬⑯⑤ 全绿；实仓回读待 tag 窗口。
+
+**2026-11-27 批180 齐套总账进审计与文档**：事实——批179 新增的 `release-verify` 作业
+不在发布面契约的必列表里，删掉或把 `--classes` 改窄都不红；buildroot 的 `release` 作业
+推完不接总账也无判据；runbook B 仍写"cosign 未启用"（与 B.1 同页"已接入 2026-11-25"
+自相矛盾），执行段也只有手工 curl。处置——`workflow_release.py` 必列 job 加
+`release-verify` 并新增 `verify_problems`（复用脚本、三类在账、needs 三产出腿、packages
+权限）；`release_artifacts_problems` 对 buildroot 增"推完必须接 release-verify.sh"；
+自检夹具补空壳总账腿、断言 26→28；runbook B 执行段改为总账命令 + v0.0.8 历史例外口径，
+判据与 B.1 的签名状态订正；ci-workflows/conventions/tools-ci README 同步。判据——
+audit self-test 28/28；结构审计绿；⑤⑬⑯ 全绿。

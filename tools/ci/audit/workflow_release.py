@@ -42,7 +42,7 @@ def release_problems(text, rel):
         return []
     jobs = dict(jobs_of(text))
     bad = []
-    for job in ("build", "build-riscv64", "merge", "firmware", "distro-bundle"):
+    for job in ("build", "build-riscv64", "merge", "firmware", "distro-bundle", "release-verify"):
         if job not in jobs:
             bad.append(f"{rel} 缺发布 job {job}（发布面被削）")
     for name, check in (
@@ -51,6 +51,7 @@ def release_problems(text, rel):
         ("merge", merge_problems),
         ("firmware", firmware_problems),
         ("distro-bundle", distro_problems),
+        ("release-verify", verify_problems),
     ):
         block = jobs.get(name)
         if block is not None:
@@ -132,6 +133,23 @@ def firmware_problems(block, rel):
     return bad
 
 
+def verify_problems(block, rel):
+    """齐套巡检腿（批179）：总账必须覆盖本流水线三类，且等三条产出腿都完成。"""
+    joined = "\n".join(block)
+    bad = []
+    if "release-verify.sh" not in joined:
+        bad.append(f"{rel} release-verify 未复用 tools/ci/lib/release-verify.sh（判据分叉）")
+    for cls in ("image", "firmware", "distro"):
+        if cls not in joined:
+            bad.append(f"{rel} release-verify 类别缺 {cls}（本流水线产出未进总账）")
+    for dep in ("merge", "firmware", "distro-bundle"):
+        if dep not in needs_of(block):
+            bad.append(f"{rel} release-verify.needs 缺 {dep}（早于产出腿跑 = 假红/假绿）")
+    if not re.search(r"^\s+packages:\s*(read|write)\s*$", joined, re.M):
+        bad.append(f"{rel} release-verify 缺 packages 权限（私有包读不到）")
+    return bad
+
+
 def distro_problems(block, rel):
     """distro 腿（RK3566 快路轨）：出包判据同源 + 双载体托管 + 版本门（批174）。"""
     joined = "\n".join(block)
@@ -170,7 +188,9 @@ REQUIRED_JOBS = {
         "cross-artifacts", "riscv-image", "esp32-gates", "autonomy-face",
         "ipct003", "host-windows", "host-macos",
     ),
-    "publish.yml": ("build", "build-riscv64", "merge", "firmware", "distro-bundle"),
+    "publish.yml": (
+        "build", "build-riscv64", "merge", "firmware", "distro-bundle", "release-verify",
+    ),
     "buildroot.yml": ("dtb-backport", "image", "release"),
     # 观测面同样受覆盖契约约束（2026-11-27 批90）：coverage 非阻断，但"两个 job 都消失"
     # 属于验证面静默停跑——非阻断 ≠ 可以被悄悄摘掉。
@@ -200,6 +220,8 @@ def release_artifacts_problems(text, rel):
             bad.append(f"{rel} job {job} 未推 {name}（正式制品必须进 ghcr）")
     if "oras push" not in joined:
         bad.append(f"{rel} job {job} 缺 oras push（ghcr 制品未发布）")
+    if "release-verify.sh" not in joined:
+        bad.append(f"{rel} job {job} 未接 release-verify.sh（推完无齐套判据）")
     if not re.search(r"^\s+packages:\s*write\s*$", joined, re.M):
         bad.append(f"{rel} job {job} 缺 packages: write（无法推 ghcr）")
     if "startsWith(github.ref, 'refs/tags/v')" not in joined:

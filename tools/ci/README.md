@@ -117,6 +117,16 @@ CI 单一事实源在 [`.github/workflows/`](../../.github/workflows)（gate / p
 匿名可读 runs 列表；job 日志需鉴权（403 已实证），脚本不碰。`GITHUB_TOKEN` 可选，
 仅用于提高 API 限额。
 
+## 发布面齐套巡检入口：`lib/release-verify.sh`
+
+[release-verify.sh](lib/release-verify.sh) 是发版后的**总账**（2026-11-27 批178）：
+一条只读命令按 tag 核对五类 ghcr 制品——运行镜像三架构与 attestation≥2、固件九件、
+distro 两件与 artifactType、OTA 六件（含 `keys/*.pub`）、buildroot 四件；缺件/不合规
+逐项点名并打印 digest，不发写请求。`--classes` 供两条发布流水线分账（publish 核
+image/firmware/distro，buildroot 核 ota/buildroot），默认五类给操作者做发版总检。
+`--self-test` 用假 oras + manifest 夹具跑七例（含类别过滤与拼错即拒），在 gate 的
+scripts 步实跑；实仓回读要 ghcr 凭据，归 tag 回执窗口（runbook B）。
+
 ## 构建失败归因入口：`log-digest.sh`
 
 [log-digest.sh](lib/log-digest.sh) 是 CI 失败日志的**单点归因**（2026-11-17 立）：

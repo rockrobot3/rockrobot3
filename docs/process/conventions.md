@@ -2691,7 +2691,7 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/bas
 | `cross-artifacts`（矩阵） | 非 x86 芯片平台静态产物：构建七件 +（`with-brain` 腿加 `rr3-brain`）+ ELF 断言 + **qemu 目标 ISA 执行冒烟** + 产物上传 | push / PR / 周程 |
 | `riscv-image` | riscv64 运行镜像构建门：交叉产物 → 宿主 `rr3-pack` stage → QEMU `docker build` → 文件面/运行面两段冒烟（不推送）；发布腿复用同一脚本 | push / PR / 周程 |
 | `esp32-gates`（矩阵两腿） | xtensa/espidf 五门按芯片分腿：ESP32 腿 5 门（外设底座 / UART echo / espidf std / 哨兵 / act·sense classic 面）、ESP32-S3 腿 2 门（S3 外设底座 / act·sense S3 面）；每腿独立装本芯片工具链 | push / PR / 手动 / 周程 |
-| `publish`（`publish.yml`） | 运行镜像发布到 `ghcr.io/rockrobot3/rockrobot3`：amd64/arm64 原生构建 + riscv64 交叉（QEMU）→ 单架构镜像 → 三架构清单合并；tag 时 `firmware` job 另把 classic/S3 ELF 推 `rockrobot3-firmware`、`distro-bundle` job 出 RK3566 bundle 推 `rockrobot3-distro`；镜像根 = rr3-pack stage 树 | 打 `v*` 标签 / main（edge）/ 手动 |
+| `publish`（`publish.yml`） | 运行镜像发布到 `ghcr.io/rockrobot3/rockrobot3`：amd64/arm64 原生构建 + riscv64 交叉（QEMU）→ 单架构镜像 → 三架构清单合并；tag 时 `firmware` job 另把 classic/S3 ELF 推 `rockrobot3-firmware`、`distro-bundle` job 出 RK3566 bundle 推 `rockrobot3-distro`，`release-verify` job 等三腿完成后按 `release-verify.sh` 回读齐套；镜像根 = rr3-pack stage 树 | 打 `v*` 标签 / main（edge）/ 手动 |
 
 **首发布回执（2026-11-15）**：`v0.0.9` 标签（锚提交 `372817a`，dev/hubs-01）触发
 publish 首跑即全绿——amd64（`ubuntu-latest`）与 arm64（`ubuntu-24.04-arm`）两条原生腿

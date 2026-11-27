@@ -161,6 +161,11 @@ aarch64 腿同一套步骤出 RK3566 快路轨的版本化 bundle（`cross-artif
 `ghcr.io/<owner>/rockrobot3-distro:<tag>`（不可变标签 + keyless 签名）。构建/断言两步
 逐推已在 platforms 腿实跑，发布腿只多双载体与签名；`workflows_audit` 钉住"出包判据
 同源 / 双载体托管 / sha256 / tag 门 / permissions"五面，缺一即红。
+**齐套总账（2026-11-27 批179）**：`release-verify` 作业等 `merge`/`firmware`/`distro-bundle`
+全部完成后，用 `tools/ci/lib/release-verify.sh --classes image,firmware,distro` 回读三类
+（三架构、attestation≥2、成员清单、distro artifactType）；`buildroot.yml` 的 `release`
+作业推完 OTA/buildroot 后以 `--classes ota,buildroot` 自核。两条流水线各记各的账，
+小时级 buildroot 不再拖住 publish；操作者用默认五类口径做发版后总检。
 **整片烧录镜像（2026-11-26 补）**：classic safe 与 S3 full 各出单文件整片镜像
 （4 MB / 16 MB，bootloader + 分区表 + app，`write_flash 0x0` 直烧），由
 `tools/deploy/image-esp32.sh` 装配并自检三点 magic 与整片尺寸；espflash 固定
