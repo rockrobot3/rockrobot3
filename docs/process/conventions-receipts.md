@@ -3004,3 +3004,12 @@ swap 1521-2545ms、rollback 3903-4852ms，全部远低于上限（10000/10000/15
 distro 首发后 `--deep` / runbook B.2 实测与 `distro` 类匿名回读裁定；③ 批278 跨载体
 时延对照入册（distro 1010/1014ms 对 install 2133-2685ms，差在 systemd 拉起与环境，
 不据此改判据）；④ 批279 三线收口与再拟下轮。
+
+**2026-11-28 批276 ghcr 匿名交付面预检（首跑前基线）**：事实——`release-anon` 首跑
+（11-30 03:00 UTC）未到，但"无凭据可下载"是公开承诺，需在窗口前确认当前状态。预检
+（匿名 registry API + token 流程，只读）：镜像 `v0.0.8` 清单 200（amd64/arm64/riscv64
++ 3 条 attestation），签名 tag `sha256-07d1…9b3e.sig` 200；固件 `v0.0.8` 200（9 层，
+与 release 资产同名），其签名 tag 200；`rockrobot3-distro` 403（未发布，符合现状）；
+镜像 tag 集仅 `latest`/`edge*`/`v0.0.8*`。另查明固件仓 v0.0.17-23 属归档线
+`archive/v0.0.x/*` 的历史制品，不是脏数据，`--tag auto` 只取镜像仓 tag 不受影响——已
+写入 status 第 30 行，防止后续误清理。判据——HTTP 200/403 逐项在案；⑤ 文档门绿。
