@@ -14,6 +14,10 @@
 #
 # [os] 段缺省：route 轴（distro | buildroot）是 Linux 底座镜像路线，rtos 档不适用
 # （rrd 装载对 [os] 只收不读，与 esp32-mini 同口径）。
+#
+# 命名口径（2026-11-27 批118）：本文件是 S3 描述符的唯一实名。"esp32s3-solo" 是
+# 形态标签（单板全链运行方式，出现在 CI 产物名与证据 frontmatter），不另立
+# profiles/esp32s3-solo.toml——两个名字会在装载面变成第二真值。
 
 schema_version = 5
 
