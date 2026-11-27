@@ -2147,3 +2147,9 @@ platforms 腿日志为准。
 （`ssh -n <host> "<cmd>"` 的 cmd 在本机跑）真跑远端四例：全等过／改一字节红／unit 口径
 仍过／缺件红；远端用例走档位模式，避开档位负例夹具的全档噪音。判据——self-test 18/18
 PASS；⑤⑬⑯ 与 ⑫（重复率 0.41%、CC 2.47）全绿。
+
+**2026-11-27 批171 tools 清单订正**：事实——`tools/README.md` 的 deploy 行写"12 支"并漏列
+`build-riscv-image`／`flash-artifact`／`fw-set`／`console-log.py`，与实际 14 支 .sh 不符
+（清单是唯一说明面，漏列即"有件无据"）。处置——按真实成员改写为"14 支 .sh 与
+`Containerfile`、`console-log.py`"并补全名单。判据——`ls tools/deploy/*.sh` 14 支与行内
+名单逐名对上；⑤ 文档门绿。

@@ -7,7 +7,7 @@
 | `rrctl/` | `rr3-ctl` | 订阅总线查状态/日志/触发 OTA 的运维 CLI（命令面与参数见其 README） |
 | `sim/` | `rr3-sim` | mock HAL 设备源 + 假模块，x86 全链路联调 |
 | `pi-periph-probe/` | — | 树莓派直连板子的**七支** Python 探针（全功能冒烟、带宽/混跑压测、U3 digest、帧面残尾、行面 robustness、写前记账），缺省 1.5M 档，`RR3_PROBE_TTY`/`RR3_PROBE_BAUD` 可换口换档；公共层 `probe_common.py` 是波特率解析/开口/收流/帧扫描与字节分类的**唯一实现**（判据口径不得在各脚本里另写一套） |
-| `deploy/` | — | 部署/烧录/打包/OTA 的 **12 支**主机侧脚本（`Containerfile`、`build-onboard`、`flash-esp32`、`image-esp32`、`image-smoke`、`install-bundle`、`ota-bundle`、`pack-arm64`、`pack-bundle`、`stage-image`、`verify-board-config`、`audio-rec`），按名即义；每支脚本头部注释是唯一详注 |
+| `deploy/` | — | 部署/烧录/打包/OTA 的 **14 支 .sh** 主机侧脚本与 `Containerfile`、`console-log.py`（`audio-rec`、`build-onboard`、`build-riscv-image`、`flash-artifact`、`flash-esp32`、`fw-set`、`image-esp32`、`image-smoke`、`install-bundle`、`ota-bundle`、`pack-arm64`、`pack-bundle`、`stage-image`、`verify-board-config`），按名即义；每支脚本头部注释是唯一详注 |
 | `esp32-periph-base/` | `esp32-periph-base` | ESP32 外设底座档固件：OLED + 双轴舵机 + UART 帧行指令 + I2S 麦（esp 专用工程，归专用门） |
 | `esp32-uart-echo/` | `esp32-uart-echo` | UART 板级 round-trip 裸金属 echo 夹具（esp 专用工程，归专用门） |
 | `espidf-sentinel/` | `espidf-sentinel` | 层③ 真板哨兵：esp-rs std，板内跑 rr-core 运行时（机制核真板消费者） |
