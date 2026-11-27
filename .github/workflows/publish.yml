@@ -325,27 +325,10 @@ jobs:
           boot_s3="$(rr3_idf_bootloader "$s3")" || {
             echo "::error title=fw-boot-s3::S3 bootloader.bin 不在产出树"; exit 1; }
           cd "$GITHUB_WORKSPACE"
-          cp "$classic" rr3-periph-base-esp32-safe-dev.elf
-          cp "$s3" rr3-periph-base-esp32s3-full-dev.elf
-          cp "$boot_classic" rr3-bootloader-esp32-dev.bin
-          cp "$boot_s3" rr3-bootloader-esp32s3-dev.bin
-          cp tools/esp32-periph-base/partitions.csv rr3-partitions.csv
-          cp tools/deploy/README.md FLASHING.md
-          test -s FLASHING.md
-          grep -Eq '^[[:space:]]*spool' rr3-partitions.csv || {
-            echo "::error title=fw-partitions::rr3-partitions.csv 缺 spool 条目"; exit 1; }
-          for b in rr3-bootloader-esp32-dev.bin rr3-bootloader-esp32s3-dev.bin; do
-            if [ "$(head -c 1 "$b" | od -An -tx1 | tr -d ' \n')" != "e9" ]; then
-              echo "::error title=fw-boot::$b 首字节非 e9（不是 ESP 引导镜像）"
-              exit 1
-            fi
-          done
-          ls -l rr3-periph-base-*.elf rr3-bootloader-*.bin rr3-partitions.csv FLASHING.md
-          sha256sum rr3-periph-base-esp32-safe-dev.elf \
-                    rr3-periph-base-esp32s3-full-dev.elf \
-                    rr3-bootloader-esp32-dev.bin rr3-bootloader-esp32s3-dev.bin \
-                    rr3-partitions.csv FLASHING.md \
-            | tee firmware-sha256.txt
+          # 发布集装配与三道判据（ELF 齐 / 分区表含 spool / bootloader magic e9）
+          # 在 tools/deploy/fw-set.sh（2026-11-27 批135 从本步收出，名称与 sha
+          # 清单是发布合同的一部分）。
+          bash tools/deploy/fw-set.sh --from "$classic" "$s3" "$boot_classic" "$boot_s3"
       - name: 安装 espflash 4.6.0（整片镜像装配，预编译件 + sha256）
         run: |
           set -euo pipefail
