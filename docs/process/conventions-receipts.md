@@ -2099,3 +2099,10 @@ die（点名 bundle 不装 unit、先装 deb 铺 base 层）；PASS 段按两种
 `--profile` 指向不存在/不可读、或 ExecStart 未声明 --profile ⇒ 只验到 rrd 应答）。
 判据——`bash -n` 过；die 位于 tar 校验、换树与 `systemctl stop` 之前；README 装机节
 已写 deb 前置，文案与之一致。
+
+**2026-11-27 批165 bundle 自足面入册 §3**：事实——`pack-bundle.sh` 的随装面一直不含
+systemd unit，"bundle 能不能单独交付"这个决定从未登记（L-33 病形：事实在跑、决定无主）；
+批164 把缺 unit 改为 fail-closed 后，缺省态的代价才显式可见。处置——[decisions.md §3](decisions.md)
+补一行"bundle 自足面"（裁定类）：不裁缺省态＝先 deb 后 bundle，两选项代价（随包自足 vs
+覆盖用户 unit）与触发条件（bundle-only 首次上线）写入行内；计数 2→3。判据——六列齐全；
+取证基线号填批164 提交 `33c0af76`；§3 头行与末段计数同步。
