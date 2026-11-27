@@ -3013,3 +3013,12 @@ distro 首发后 `--deep` / runbook B.2 实测与 `distro` 类匿名回读裁定
 镜像 tag 集仅 `latest`/`edge*`/`v0.0.8*`。另查明固件仓 v0.0.17-23 属归档线
 `archive/v0.0.x/*` 的历史制品，不是脏数据，`--tag auto` 只取镜像仓 tag 不受影响——已
 写入 status 第 30 行，防止后续误清理。判据——HTTP 200/403 逐项在案；⑤ 文档门绿。
+
+**2026-11-28 批277 签名身份离线核对**：事实——"签名 tag 存在"不等于"身份合规"，
+周程验签若因身份判据不匹配会红在窗口里。核对（匿名拉 sig manifest → 层注解取证书 →
+`openssl x509` 读 SAN/issuer）：镜像合并清单与固件包两份证书均命中 SAN
+`https://github.com/rockrobot3/rockrobot3/.github/workflows/publish.yml@refs/tags/v0.0.8`、
+issuer `https://token.actions.githubusercontent.com`，与 `release-verify` 的身份正则
+同源。处置——status 第 30 行补记该结论，首跑窗口只需确认"跑起来"，判据本身已预验。
+判据——两份证书 `Not After` 分别为 2026-11-26 05:00:30Z / 05:05:29Z（签名时刻有效），
+SAN/issuer 逐字在案；⑤ 文档门绿。
