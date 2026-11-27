@@ -1543,3 +1543,34 @@ integration 7 / platforms 6（实例 9）/ publish 3 / buildroot 3 / coverage 1"
 进正文，而唯一真源本是 `workflows_audit.py` 的 `REQUIRED_JOBS`。处置——正文改为
 "条数不在这里抄，真源指过去"，并把这次实测值作为反面教材写进同一段；表格 platforms
 修正为 7。判据——⑤ 文档门绿；`workflows_audit.py` 七项全过。
+
+**2026-11-27 批83 平台表五段与段序对齐**：事实——四份 `contracts/platform/*.toml` 段集合
+其实齐全（esp32/S3 的 `[controller_wordform]` 是**空表显式声明**，不是缺段），但发现两处
+形状漂移：① 树莓派表把 `[construction]` 排在 `[capabilities]` 之前（另三份都在其后）；
+② `contracts/README.md` 仍写"每平台一份**四段**"，漏了 `[controller_wordform]`。
+另有一条容易误读的差异：无冲突平台的 `conflict = []` 出现在 `[[controller]]` 之前——
+那是 TOML"顶层键必须在任何段头之前"的硬约束，不是形状不同。处置——树莓派表按
+controller → capabilities → construction → wordform 重排（内容逐字未动）；README 改为
+五段并写明段序与顶层键规则。判据——⑤ 文档门绿；rrd lib 326 项全过（平台表由装载链
+逐段解析，重排后照常通过）。
+
+**2026-11-27 批84 rrd 判活时钟面复核（无改动）**：事实——逐条查过：判活读数
+`rr3_now_ms(t0: Instant)` 走 `t0.elapsed()`（单调，不回拨）；`since_beat_ms` 与
+`boot_ms` 全部 `saturating_sub`；注册时刻与判死时刻同一单调轴；头里的
+`timestamp_ns` 按契约用 CLOCK_REALTIME（`SystemTime`），早于 Unix epoch 的退化为 0
+（不可达，且只影响时间戳字段、不参与判活）。处置——本批零代码改动；结论入册，
+避免下一轮重复排查。
+
+**2026-11-27 批85 装配单段形状入册**：事实——十份 `profiles/*.toml` 逐份对表：`[runtime]`
+→ `[platform]` → `[supplies]` → `[bindings]` → `[hardware]` → `[enabled_slots]` →
+`[slots]` 七段齐全；**唯一缺段是两份 MCU 档的 `[os]`**，classic 档在文件里写了理由，
+S3 档没写。处置——`profiles/README.md` 增"段形状"规则（唯一可缺段 = `[os]`，缺省须
+写明理由，其余任一段缺即 fail-closed）；`esp32s3-mini.toml` 补上与 classic 同口径的缺省
+注记。判据——⑤ 文档门绿；两份 MCU 装配单在 `integration` 的装配演练里照常装载。
+
+**2026-11-27 批86 发布资产集复核**：事实——`publish.yml` 的 `firmware` 腿资产集 =
+双 ELF + 双整片 + 双 bootloader + `rr3-partitions.csv` + `FLASHING.md` + `firmware-sha256.txt`
+（整片在大步骤后用 `tee -a` 追加进 sha256，oras 推送清单也含它们），与 `tools/deploy/README.md`
+的资产表逐项一致；唯一不一致是**推送回执行文**只写了"双 ELF + 双 bootloader + 分区表 +
+烧录说明 + sha256"，漏掉双整片——回执与资产集不符会让审阅者以为整片没发。处置——回执行文
+补齐"双整片镜像"。判据——`workflows_audit.py` 七项全过；gate / integration 在 `34a6883` 绿。
