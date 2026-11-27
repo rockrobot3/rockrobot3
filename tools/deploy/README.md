@@ -59,6 +59,24 @@ MCU 无 A/B 分区，升级一律线下重烧。每个芯片平台独立部署�
 实现单点：[`pack-bundle.sh`](pack-bundle.sh) 的 BUNDLE_VERSION 段、[`install-bundle.sh`](install-bundle.sh)
 的顶层校验与 `rollback()`；改任一侧都要同批改本节。
 
+### 装机后核验：`verify-board-config.sh`
+
+装机树与仓内真值逐文件 sha256 判等，**覆盖六类**：模块 config（含 esp32/pi4b 档）、
+`profiles/<name>.toml`、契约四册与平台事实表（`contracts/*.toml`，平台册按档位
+`[platform].chip` 选一）、systemd unit（口径忽略 `ExecStart=` 行）、
+`boards/<profile>/etc/**`、`hardware/<stem>/{wiring.toml,axis/*.toml}`（rrd 装载直接
+消费，漂了即拒 boot）。缺件与内容不同同权计漂移。
+
+```bash
+# 本机装机树 / 远端板卡二选一；--profile 只比该机型（缺省扫全部档）
+bash tools/deploy/verify-board-config.sh --repo . --local /usr/lib/rockrobot3 --profile pi4b-solo
+bash tools/deploy/verify-board-config.sh --repo . --remote <user@host> --profile pi4b-solo
+# 工具自检（gate ⑥b 同款，九例）
+bash tools/deploy/verify-board-config.sh --self-test
+```
+
+退出码：`0` 全等 / `1` 有漂移或缺件 / `2` 用法错 / `3` self-test 失败。
+
 ## 制品 tag 与 `VERSION` 对表
 
 **版本唯一真源是仓根 `VERSION`（现为 `0.0.8`）**，tag 与它同名且只打在 release 提交上；
