@@ -1653,3 +1653,26 @@ restart_policy 重启——这是 rr3mod 写明的"模块不装活着"语义，�
 metrics / lockio）与 `lib/{log-digest,skip,release-tag}.sh` 三支自检，在 `gate.yml` 的
 `scripts` job 里**全部有调用点**，无"有自检没人跑"的死件；`bash -n` 全量语法检查与
 actionlint 也在同 job。处置——零改动，结论入册（避免下轮重复排查）。
+
+**2026-11-27 批99 广播过滤待裁项入册**：事实——`fanout_shadow*` 三键（0.0.8c 起）一直在
+记账"按 manifest `subscribes` 本应过滤多少目标"，但它要回答的那个决定（扇出要不要改成
+过滤投递）在 `docs/process/decisions.md` 里**没有行**——机制在跑、决定无主，正是 L-33 的病形。
+处置——§3 补一行：缺**裁定**、缺省态=维持全量扇出（模块侧自行丢弃）、触发=某主题
+`fanout_shadow/<topic>` ÷ 该主题发布帧数 ≥ 在册连接数一半，或链路预算被广播面吃掉；
+标题计数与预算段同步（§3 余 2 条：评审 1 + 裁定 1）。判据——⑤ 文档门绿；六列齐全。
+
+**2026-11-27 批100 rr3-ctl 错误面复核（无改动）**：事实——错误信封渲染单点在
+`rr3_ctl_reject`：`cmd 被拒（code N）：msg`，缺字段以 `?` 占位（"被拒"这一事实比字段完整度
+重要），码与文案原样透传、不改写不吞；ota/reboot 两条恒拒回显有 fake-rrd 真 UDS 往返用例。
+处置——零改动，结论入册。
+
+**2026-11-27 批101 RK3566 派生链对拍（无改动）**：事实——用脚本把
+`profiles/default.toml` 的 6 条 `[[pin]]` 与 `contracts/platform/rk3566.toml` 对拍：
+控制器引用（`pwm0`/`gpiochip0`/`i2c1`/`spidev0`）**全部在册**，零缺失；四条 `[controller_wordform]`
+前缀与各自控制器名逐一对齐（`pwm`/`gpiochip`/`i2c`/`spidev`）。处置——零改动，结论入册。
+
+**2026-11-27 批102 判死边界用例**：事实——`rr3_reg_kill` 的判据是 `elapsed >= watchdog`，
+但既有用例只覆盖"超窗"（600 vs 500）与"喂狗后 1ms 不判死"，**恰好相等那一毫秒没有钉住**：
+`>` 与 `>=` 的差别决定"准点判死"还是"多等一拍"。处置——新增 `expire_boundary_inclusive`：
+`499 放行 / 500 判死`，并断言回执的 `(elapsed, watchdog) = (500, 500)`。判据——rrd lib
+327 项全过；gate / integration 在 `1ce8432` 绿。
