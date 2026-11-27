@@ -28,6 +28,12 @@ unit_arg() {
 }
 SOCK=${RR3_BUS_PATH:-$(unit_arg --socket)}
 SOCK=${SOCK:-/var/run/rock3-ipc.sock}
+# base 层点名（2026-11-27 批161）：bundle 不含也不装 unit——unit 缺失时本脚本会走
+# 缺省 socket 继续换树，若在干净机上会得到"装完没有服务"的静默结果。这里如实提示
+# 而不中止：--local staging 树/chroot 场景下 systemctl 不可用是合法的。
+if [ -z "$(unit_arg --socket)" ] && [ -z "$(unit_arg --profile)" ]; then
+  echo "WARN  未找到已装 rrd.service（ExecStart 无 --socket/--profile）——bundle 不装 unit；干净机请先装 deb。本次按缺省 socket 继续" >&2
+fi
 
 die() { echo "FAIL  $*" >&2; exit 1; }
 
