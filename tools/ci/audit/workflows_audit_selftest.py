@@ -71,7 +71,11 @@ def _write_flows(wf):
         "          cargo build -q --locked --release --manifest-path tools/rr3-pack/Cargo.toml\n"
         "  firmware:\n    if: startsWith(github.ref, 'refs/tags/v')\n"
         "    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
-        "    steps:\n      - run: echo classic\n",
+        "    steps:\n      - run: echo classic\n"
+        # distro 腿故意只留出包一步（缺契约断言/双载体托管/sha256）：新判据要有靶子。
+        "  distro-bundle:\n    if: startsWith(github.ref, 'refs/tags/v')\n"
+        "    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        "    steps:\n      - run: bash tools/deploy/pack-bundle.sh\n",
         encoding="utf-8",
     )
 
@@ -127,7 +131,7 @@ def _write_platforms(wf):
 
 
 def _cases(bad):
-    """返回 25 条断言用例表。"""
+    """返回 26 条断言用例表。"""
     return [
         ("缺 concurrency 被抓", any("concurrency" in b for b in bad)),
         ("缺 timeout 被抓", any("timeout-minutes" in b for b in bad)),
@@ -152,13 +156,14 @@ def _cases(bad):
         ("发布运行面缺模块被抓", any("运行面缺模块 sense" in b for b in bad)),
         ("门禁 job 缩水被抓", any("缺 job conventions" in b for b in bad)),
         ("固件缺 S3 被抓", any("未构建 S3 目标" in b for b in bad)),
+        ("发布包腿未托管被抓", any("未推 rockrobot3-distro" in b for b in bad)),
         ("制品面缺名被抓", any("未推 rockrobot3-buildroot" in b for b in bad)),
         ("好例零误报", not any("good.yml" in b for b in bad)),
     ]
 
 
 def self_test():
-    """建临时夹具跑 audit 并逐条打印 25 条断言结果。"""
+    """建临时夹具跑 audit 并逐条打印 26 条断言结果。"""
     import tempfile
 
     with tempfile.TemporaryDirectory() as td:

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """发布面与正式制品面判据（publish.yml / buildroot.yml）。
 
-四腿完整性、merge 三架构、固件资产集、ghcr 托管、job 覆盖契约——这些判据
+五腿完整性、merge 三架构、固件与 distro 资产集、ghcr 托管、job 覆盖契约——这些判据
 只在 tag/main 暴露，故与结构面分开成篇，改动聚焦发布策略。
 """
 
@@ -37,12 +37,12 @@ def runtime_problems(joined, rel):
 
 
 def release_problems(text, rel):
-    """发布面完整性：四腿齐；逐腿判据分给下方四个小函数（单函数 <50 行）。"""
+    """发布面完整性：五腿齐；逐腿判据分给下方小函数（单函数 <50 行）。"""
     if rel.name != "publish.yml":
         return []
     jobs = dict(jobs_of(text))
     bad = []
-    for job in ("build", "build-riscv64", "merge", "firmware"):
+    for job in ("build", "build-riscv64", "merge", "firmware", "distro-bundle"):
         if job not in jobs:
             bad.append(f"{rel} 缺发布 job {job}（发布面被削）")
     for name, check in (
@@ -50,6 +50,7 @@ def release_problems(text, rel):
         ("build-riscv64", riscv_problems),
         ("merge", merge_problems),
         ("firmware", firmware_problems),
+        ("distro-bundle", distro_problems),
     ):
         block = jobs.get(name)
         if block is not None:
@@ -131,6 +132,28 @@ def firmware_problems(block, rel):
     return bad
 
 
+def distro_problems(block, rel):
+    """distro 腿（RK3566 快路轨）：出包判据同源 + 双载体托管 + 版本门（批174）。"""
+    joined = "\n".join(block)
+    bad = []
+    for needle in ("pack-bundle.sh", "bundle-contract.sh"):
+        if needle not in joined:
+            bad.append(f"{rel} distro-bundle 缺 {needle}（发布包未按 A10 契约验证）")
+    if "rockrobot3-distro" not in joined:
+        bad.append(f"{rel} distro-bundle 未推 rockrobot3-distro（正式制品必须进 ghcr）")
+    if "oras push" not in joined:
+        bad.append(f"{rel} distro-bundle 缺 oras push（ghcr 制品未发布）")
+    if "distro-sha256.txt" not in joined:
+        bad.append(f"{rel} distro-bundle 缺 sha256 清单（release 资产不完整）")
+    if not re.search(r"^\s+packages:\s*write\s*$", joined, re.M):
+        bad.append(f"{rel} distro-bundle 缺 packages: write（无法推 ghcr）")
+    if not re.search(r"^\s+contents:\s*write\s*$", joined, re.M):
+        bad.append(f"{rel} distro-bundle 缺 contents: write（无法传 release 资产）")
+    if "startsWith(github.ref, 'refs/tags/v')" not in joined:
+        bad.append(f"{rel} distro-bundle 必须 tag 门（v* 才发布）")
+    return bad
+
+
 # 作业覆盖面（按名钉住）：门禁/集成/平台/发布/固件的 job 是覆盖契约的一部分，
 # 删除或改名即"某类验证不再跑"——必须同批改本表，不许静默缩水。
 REQUIRED_JOBS = {
@@ -147,7 +170,7 @@ REQUIRED_JOBS = {
         "cross-artifacts", "riscv-image", "esp32-gates", "autonomy-face",
         "ipct003", "host-windows", "host-macos",
     ),
-    "publish.yml": ("build", "build-riscv64", "merge", "firmware"),
+    "publish.yml": ("build", "build-riscv64", "merge", "firmware", "distro-bundle"),
     "buildroot.yml": ("dtb-backport", "image", "release"),
     # 观测面同样受覆盖契约约束（2026-11-27 批90）：coverage 非阻断，但"两个 job 都消失"
     # 属于验证面静默停跑——非阻断 ≠ 可以被悄悄摘掉。

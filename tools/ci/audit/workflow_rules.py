@@ -14,7 +14,7 @@
 - platforms.yml 的五芯片矩阵腿（英特尔/AMD x86_64、瑞芯微 aarch64、进迭时空
   riscv64、esp32、esp32s3）缺任一即红，腿内验证脚本缺一即红；riscv-image
   构建门（腿 + 脚本）同样钉住：覆盖缩水不能只靠评审记得。
-- publish.yml 的发布面完整性（四腿 / merge 三架构 / 固件资产集）与 buildroot.yml
+- publish.yml 的发布面完整性（五腿 / merge 三架构 / 固件与 distro 资产集）与 buildroot.yml
   的正式制品托管面，判据在 [`workflow_release.py`](workflow_release.py)——只在
   tag 暴露，独立成篇。
 

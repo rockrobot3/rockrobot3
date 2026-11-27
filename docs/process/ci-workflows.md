@@ -153,6 +153,14 @@ bootloader/分区表**，espflash 未显式给 `--bootloader` 时用它自带的
 `buildroot.yml` 的 `release` 腿必须 tag 门（`refs/tags/v`）、登录 ghcr、带
 `packages: write`，并以 oras 推 `rockrobot3-ota` 与 `rockrobot3-buildroot`；
 正式制品只发 release asset 不进 ghcr 即红。
+
+**distro bundle（2026-11-27 批174）**：tag 发布的 `distro-bundle` job 用与 platforms
+aarch64 腿同一套步骤出 RK3566 快路轨的版本化 bundle（`cross-artifacts` → `pack-bundle`
+→ `bundle-contract` 的 A10 断言），release 资产为
+`rockrobot3-distro-<ver>-aarch64.tar.gz` 与 `distro-sha256.txt`，并以 oras 推
+`ghcr.io/<owner>/rockrobot3-distro:<tag>`（不可变标签 + keyless 签名）。构建/断言两步
+逐推已在 platforms 腿实跑，发布腿只多双载体与签名；`workflows_audit` 钉住"出包判据
+同源 / 双载体托管 / sha256 / tag 门 / permissions"五面，缺一即红。
 **整片烧录镜像（2026-11-26 补）**：classic safe 与 S3 full 各出单文件整片镜像
 （4 MB / 16 MB，bootloader + 分区表 + app，`write_flash 0x0` 直烧），由
 `tools/deploy/image-esp32.sh` 装配并自检三点 magic 与整片尺寸；espflash 固定

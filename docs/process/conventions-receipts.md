@@ -2178,3 +2178,12 @@ tag 推送，与 firmware 同纪律）：`release-tag.sh` 版本门 → `cross-a
 A10 断言 → release 资产（含 sha256）→ oras 推 `rockrobot3-distro:<tag>`（不可变标签）→
 cosign keyless 正/负验证。判据——YAML 解析过；workflow 结构审计通过；构建/断言两步与
 platforms aarch64 腿逐字同源（该腿 2026-11-27 实跑 success）；tag 窗口实推待下次发版。
+
+**2026-11-27 批175 发布面审计纳入 distro 腿**：事实——批174 新增第五条发布腿，而
+`workflows_audit` 的发布面契约仍按四腿（build/build-riscv64/merge/firmware）钉名，
+新腿被删或托管面被削都不会红；"发布面完整性"的覆盖与实际发布集不再同集。处置——
+`workflow_release.py` 的必列 job 与断言表加入 `distro-bundle`，并新增
+`distro_problems`（pack-bundle/bundle-contract 同源、rockrobot3-distro 与 oras 双载体、
+sha256 清单、tag 门、contents/packages 权限）；自检夹具补一条"只有出包一步"的 distro
+腿作靶，断言表 25→26；`ci-workflows.md` 与 conventions 的发布面表同步。判据——
+`workflows_audit --self-test` 26/26 PASS；结构审计绿；⑤⑬⑯ 全绿。
