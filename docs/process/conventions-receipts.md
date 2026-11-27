@@ -2378,3 +2378,12 @@ ci-workflows 的"build/build-riscv64/merge/firmware 四个出口"、tools/ci REA
 release-verify；覆盖契约补 release-anon 文件级存在判据）；历史回执/证据档不改写
 （记录当时事实）。判据——⑤ 文档门绿；结构审计绿；三处数字与 `REQUIRED_JOBS`、
 publish.yml 的 job 列表逐名对上。
+
+**2026-11-27 批198 本轮收口·三线全绿**：事实——代码头 `465c7cb9` 上 gate/integration/
+platforms 均 success（含 platforms 全矩阵复跑；新增 `release-anon.yml` 仅 schedule/
+dispatch，不参与推送触发）。本轮两件：匿名回读拆独立 workflow（196）、发布面腿数陈旧
+计数清扫（197）。处置——本轮收口；下轮三件：① distro 首发窗口的 B.2 五项实测与默认
+五类复核（无 release 触发时先做 `--deep` 的夹具与无包路径，真包留首发，不造演示件）；
+② 周程首次自动跑（UTC 周一 03:00）结果归因，失败按注解定位；③ distro-smoke 的
+boot/status 上限按可读数据收紧（无板/无日志则如实记敞口）。判据——三线结论与 run 页
+一致；巡检自检 15/15、审计自检 30/30；⑤⑬⑯ 绿。
