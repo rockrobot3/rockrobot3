@@ -1603,3 +1603,30 @@ integration（含 sim-chain 真 socket 全链）在 `3d2ae04` 绿——线上字
 但两块一起消失时没有任何判据会红——"非阻断"被误读成"可以被悄悄摘掉"。处置——契约表补
 `coverage.yml` 两条；`ci-workflows.md` 同口径说明。判据——`workflows_audit.py` 七项全过
 （含 job 覆盖契约一项），gate 绿。
+
+**2026-11-27 批91 写出口统一拒超帽帧**：事实——单帧 1MiB 上界此前只有 `ctl.logs` 一处自查，
+写出口不判；超帽帧写出去只会换来对端读侧拒收 + 断链，模块只看到"总线断了"。处置——
+`rr3_write_bytes` 在写前按同一常量（`RR3_FRAMING_PLEN_CAP_DEFAULT`）判，超帽即回带名字的
+错误（"查该应答的产侧是否该分页/限行"），由 `rr3_write` 统一落日志；批88 的点防护收成面防护。
+**审计连带修**：既有 `write_counted` 用例拿 4MiB 帧"赌缓冲满"——那种帧生产里根本发不出去，
+测的是"超帽被拒"而不是"对端不收"；改成 64KiB 帧写满 socket，仍走慢消费者那条路。
+判据——rrd lib 326 项全过、clippy 干净。
+
+**2026-11-27 批92 版本读法收成一处**：事实——`stage-image.sh` 与 `build-riscv-image.sh` 各自
+`cat VERSION`，`release-tag.sh` 又内嵌一份 X.Y.Z 校验：VERSION 一旦带后缀（rc/日期），
+拼名与 tag 判定就会各说一套。处置——`release-tag.sh` 抽出 `rr3_version_value`（trim + 三段
+校验 + 点名），发布执法与两个部署脚本共用；两个脚本改为 source 该库（路径相对仓根，
+脚本本来就 `cd` 到仓根）。判据——`release-tag.sh --self-test` 六项全绿；
+`bash -n` 两个脚本通过；⑬ 仓面卫生绿。
+
+**2026-11-27 批93 bridge 背压口径复核（无改动）**：事实——`rr3-bridge` 是零解析字节中继，
+UDS 未就绪/断链期间**不缓冲、直接丢弃并计数**（`link/stat.rs` 只在进入丢弃期打一行、恢复时
+报累计），与 rrd "满即丢帧、保连接"同一口径；`link/tests.rs` 已覆盖"断连窗口丢弃 + 恢复后
+续传"。处置——零改动，结论入册。
+
+**2026-11-27 批94 SKIP 面收口**：事实——七把平台门都走 `tools/ci/lib/skip.sh`（CI 内 SKIP
+即红），只有 `ipct003.sh` 因为要跑完四路再汇总而自己判 SKIP，靠调用方记得加 `--strict`：
+漏加一次就是"零覆盖但流水线绿"。处置——汇总段补 `CI=true` 条件（与 `--strict` 同判同码），
+`--strict` 语义不变；`ci-workflows.md` 同口径注明。判据——`bash -n` 通过；
+`skip.sh --self-test` 与 `release-tag.sh --self-test` 在 gate `scripts` job 里照常执行；
+gate / integration 在 `2152fcd` 绿。
