@@ -11,6 +11,9 @@
 #
 # 板侧必须自己守住：限位 / 时限 / 饱和通告在板侧跑（桥断仍守护）。本文件只加数据，
 # 件码、对外主题、contracts/slots.toml 零改动（功能守恒红线）。
+#
+# [os] 段缺省：route 轴（distro | buildroot）是 Linux 底座镜像路线，rtos 档不适用
+# （rrd 装载对 [os] 只收不读，与 esp32-mini 同口径）。
 
 schema_version = 5
 

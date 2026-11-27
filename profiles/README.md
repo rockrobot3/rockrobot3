@@ -23,6 +23,11 @@
 
 - `schema_version = 5`，`[runtime]` 段必填（缺即红）；字段字典唯一真源是
   [`../base/runtime/rr-registry/src/module.schema.toml`](../base/runtime/rr-registry/src/module.schema.toml)。
+- **段形状**（2026-11-27 批85 十份逐份对表）：`[runtime]`（必填）→ `[platform]` →
+  `[supplies]`（含 `[[supplies.domain]]` / `[supplies.budget]`）→ `[bindings]` →
+  `[hardware]`（含 `[[pin]]`）→ `[enabled_slots]` → `[slots]`；**唯一可缺的段是 `[os]`**：
+  它的 route 轴是 Linux 底座镜像路线，rtos 档不适用、rrd 装载也只收不读，缺省须在文件里
+  写明理由（两份 MCU 装配单都这么写）。除 `[os]` 外任何一段缺失都算形状不合，fail-closed。
 - 能力格坐标唯一真源是 [`../contracts/slots.toml`](../contracts/slots.toml)；装配单只能
   引用在册格位，不能自造名字。
 - 每个芯片平台是**独立开发板**，没有主/副板：单板形态各自一份装配单，双板档只作台架。
