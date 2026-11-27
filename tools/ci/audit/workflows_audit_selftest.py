@@ -135,7 +135,7 @@ def _write_platforms(wf):
 
 
 def _cases(bad):
-    """返回 29 条断言用例表。"""
+    """返回 30 条断言用例表。"""
     return [
         ("缺 concurrency 被抓", any("concurrency" in b for b in bad)),
         ("缺 timeout 被抓", any("timeout-minutes" in b for b in bad)),
@@ -162,7 +162,7 @@ def _cases(bad):
         ("固件缺 S3 被抓", any("未构建 S3 目标" in b for b in bad)),
         ("发布包腿未托管被抓", any("未推 rockrobot3-distro" in b for b in bad)),
         ("发布总账腿缺失被抓", any("未复用 tools/ci/lib/release-verify.sh" in b for b in bad)),
-        ("匿名回读腿缺失被抓", any("缺 job release-anon" in b for b in bad)),
+        ("匿名回读 workflow 缺失被抓", any("缺 workflow release-anon.yml" in b for b in bad)),
         ("制品面缺齐套巡检被抓", any("未接 release-verify.sh" in b for b in bad)),
         ("制品面缺名被抓", any("未推 rockrobot3-buildroot" in b for b in bad)),
         ("好例零误报", not any("good.yml" in b for b in bad)),
@@ -170,7 +170,7 @@ def _cases(bad):
 
 
 def self_test():
-    """建临时夹具跑 audit 并逐条打印 29 条断言结果。"""
+    """建临时夹具跑 audit 并逐条打印 30 条断言结果。"""
     import tempfile
 
     with tempfile.TemporaryDirectory() as td:

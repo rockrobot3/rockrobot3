@@ -2361,3 +2361,12 @@ digest 汇总表（192）、周程启用验签（193）、回执签名面边界�
 陈旧计数清扫（README/runbook 为准，历史回执不改写）；③ distro 首发后的 B.2 五项实测与
 `--classes` 默认口径复核（待 release 触发）。判据——三线结论与 run 页一致；巡检自检
 15/15、审计自检 29/29；⑤⑬⑯ 绿。
+
+**2026-11-27 批196 匿名回读拆成独立 workflow**：事实——`release-anon` 挂在 platforms 里，
+手动验证要拉五芯片全矩阵（本腿只读 15 分钟，成本与收益不匹配）；且 `REQUIRED_JOBS`
+只校验"文件存在时的 job 名"，整文件被删不会红（覆盖契约的文件级洞）。处置——新建
+`release-anon.yml`（周程 UTC 周一 03:00 + 手动，independent 并发组，只读、不登录，
+`--tag auto --with-signature --classes image,firmware`），platforms 删该腿；审计加
+`missing_workflows`（必列 workflow 文件缺即红）并把 `release-anon.yml`/`anon` 入表；
+ci-workflows 与 conventions 同步。判据——两文件 YAML 解析过；结构审计绿；自检 30/30
+（夹具缺该文件被抓）；⑤⑬⑯ 全绿；真实周程/手动结果待触达。

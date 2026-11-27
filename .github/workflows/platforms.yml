@@ -631,29 +631,3 @@ jobs:
               exit 1
             fi
           done
-
-
-  # 发布面匿名回读（2026-11-27 批182）：ghcr 上的正式制品是**公开交付面**——status 与
-  # runbook 都按"无凭据可下载"记账，但这条承诺此前没有任何周期性机器判据（包被转私有、
-  # 误删 tag、成员被改，三条流水线都不会红）。周程与手动各跑一次只读巡检：不登录、不推
-  # 送、不回滚，失败只红这一腿。tag 取仓根 VERSION 的单一真值（发版纪律保证同名 tag）。
-  # OTA/buildroot 在 v0.0.8 是"无 v 前缀"的历史例外（见 status.md），故本腿只核
-  # image+firmware；两者补齐后按默认五类扩。
-  release-anon:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - uses: oras-project/setup-oras@v2
-      # 签名面匿名可读（sig tag 是公开仓的普通 tag）：周程顺手把"签了没验"补上，
-      # 身份约束固定 canonical 仓（tools/ci/lib/release-verify.sh 的 SIG_ID_RE）。
-      - uses: sigstore/cosign-installer@v3
-        with:
-          cosign-release: "v2.6.5"
-      - name: 匿名齐套回读（镜像三架构 + 固件 + 签名，tag 取已发布最新正式版）
-        run: |
-          # --tag auto：从 registry 取最新正式 semver tag，避免"VERSION 已 bump、tag 未推"
-          # 的发布前窗口把周程打红（见 tools/ci/lib/release-verify.sh 的 rr3_resolve_tag）。
-          bash tools/ci/lib/release-verify.sh --tag auto --with-signature \
-            --repo "${{ github.repository }}" --classes image,firmware

@@ -237,12 +237,22 @@ def workflow_problems(path, root):
     return bad
 
 
+def missing_workflows(wf_dir):
+    """覆盖契约也是文件级：必列 workflow 被整文件删除不能静默（批196 补）。"""
+    bad = []
+    for name in REQUIRED_JOBS:
+        if not (wf_dir / name).is_file():
+            bad.append(f"缺 workflow {name}（覆盖契约被削，改表须同批评审）")
+    return bad
+
+
 def audit(root):
     bad = []
     wf_dir = root / ".github" / "workflows"
     files = sorted(wf_dir.glob("*.yml"))
     if not files:
         return ["未找到 .github/workflows/*.yml"]
+    bad.extend(missing_workflows(wf_dir))
     for p in files:
         bad.extend(workflow_problems(p, root))
     for p in sorted((root / ".github" / "actions").glob("*/action.yml")):

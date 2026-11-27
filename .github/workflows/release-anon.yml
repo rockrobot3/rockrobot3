@@ -1,0 +1,32 @@
+# 发布面匿名回读（2026-11-27 批182 立，批196 从 platforms 拆出）：
+# ghcr 正式制品是**公开交付面**——status 与 runbook 都按"无凭据可下载"记账，但这条
+# 承诺需要周期机器判据：包被转私有、tag 误删、成员被改、签名丢失，三线都不会红。
+# 拆因：本腿只读、15 分钟级；留在 platforms 里手动验证要拉五芯片全矩阵，成本与收益
+# 不匹配。独立并发组，不占平台腿名额；tag 取 registry 最新正式版，发布前窗口不误红。
+name: release-anon
+on:
+  schedule:
+    # UTC 周一 03:00 = 北京周一 11:00：与 platforms（周日 18:00）、buildroot 错峰。
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release-anon-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  anon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oras-project/setup-oras@v2
+      # 签名面匿名可读（.sig 是公开仓的普通 tag）：把"签了没验"补上；身份约束固定
+      # canonical 仓（tools/ci/lib/release-verify.sh 的 SIG_ID_RE），不在工作流放宽。
+      - uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: "v2.6.5"
+      - name: 匿名齐套回读（镜像三架构 + 固件 + 签名，tag 取已发布最新正式版）
+        run: |
+          bash tools/ci/lib/release-verify.sh --tag auto --with-signature \
+            --repo "${{ github.repository }}" --classes image,firmware

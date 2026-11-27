@@ -167,6 +167,10 @@ aarch64 腿同一套步骤出 RK3566 快路轨的版本化 bundle（`cross-artif
 （三架构、attestation≥2、成员清单、distro artifactType）；`buildroot.yml` 的 `release`
 作业推完 OTA/buildroot 后以 `--classes ota,buildroot` 自核。两条流水线各记各的账，
 小时级 buildroot 不再拖住 publish；操作者用默认五类口径做发版后总检。
+**周程匿名回读（批196 拆出独立文件）**：`release-anon.yml` 每周一 03:00 UTC 与手动可跑，
+只读、不登录：`--tag auto --with-signature --classes image,firmware`——校验已发布最新
+正式版的三架构、证明面、固件九件与 keyless 签名；手动复跑不再需要拉五芯片全矩阵。
+
 **整片烧录镜像（2026-11-26 补）**：classic safe 与 S3 full 各出单文件整片镜像
 （4 MB / 16 MB，bootloader + 分区表 + app，`write_flash 0x0` 直烧），由
 `tools/deploy/image-esp32.sh` 装配并自检三点 magic 与整片尺寸；espflash 固定
