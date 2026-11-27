@@ -220,32 +220,11 @@ jobs:
           docker buildx imagetools inspect "${IMAGE}:${tag}"
           # 合并结果必须真含三架构：单腿都绿但合并丢一条，是"看起来绿"的经典形态
           # （inspect 只打印不判等，所以这里把平台集合当判据）。python3 是 runner 自带面。
-          # 判据只数**镜像清单**：buildx 构建会在每腿附一条 attestation manifest
-          # （provenance/SBOM，platform=unknown/unknown），它合法存在但不能算进架构集
-          # ——2026-11-15 v0.0.13 首跑就是被这条多出来的 unknown 判红（断言过严的假红）。
-          # 三腿均 `buildx --push` 附 provenance/SBOM attestation；合并清单另由
-          # cosign keyless 签名（runbook B.1），签名对象是合并后的 index digest。
-          python3 - "${IMAGE}:${tag}" <<'PY'
-          import json, subprocess, sys
-          img = sys.argv[1]
-          raw = subprocess.run(
-              ["docker", "buildx", "imagetools", "inspect", "--raw", img],
-              capture_output=True, text=True, check=True,
-          ).stdout
-          plats, att = [], 0
-          for m in json.loads(raw).get("manifests", []):
-              ann = m.get("annotations") or {}
-              if ann.get("vnd.docker.reference.type") == "attestation-manifest":
-                  att += 1
-                  continue
-              plats.append((m.get("platform") or {}).get("architecture", "?"))
-          plats.sort()
-          want = ["amd64", "arm64", "riscv64"]
-          if plats != want:
-              print(f"::error title=manifest-platforms::合并清单架构 {plats}（期望 {want}）")
-              sys.exit(1)
-          print(f"PASS  多架构清单架构 {plats}（attestation {att} 条，不计入架构集）")
-          PY
+          # 判据体在 tools/ci/platform/manifest-platforms.py（纯函数 + 自检，
+          # 2026-11-27 批132 从内联 heredoc 抽出）：判据只数**镜像清单**，
+          # buildx 的 attestation manifest（platform=unknown/unknown）不计入架构集。
+          docker buildx imagetools inspect --raw "${IMAGE}:${tag}" >/tmp/manifest.json
+          python3 tools/ci/platform/manifest-platforms.py /tmp/manifest.json
           # 合并标签本身必须可拉取且装机树完整：两只单架构腿绿不等于合并清单
           # 指向的层都在（清单指向丢失层是"看起来发布成功"的经典形态）。
           bash tools/deploy/image-smoke.sh file "${IMAGE}:${tag}"
