@@ -1979,3 +1979,21 @@ firmware job 的 `if` 只判 `refs/tags/v`：在 tag ref 上手触 dispatch 时�
 `tools/deploy/README.md`（即随包 FLASHING.md）列出的七件与 `fw-set.sh` 产物名逐字一致
 （两只 ELF / 两只 bootloader / `rr3-partitions.csv` / `firmware-sha256.txt` / FLASHING.md），
 烧录命令与 `flash-artifact.sh` 参数对得上。处置——零改动。
+
+**2026-11-27 批146 S3 线束文档与真值对表（无改动）**：事实——`tools/deploy/README.md`
+是**制品级**入口（镜像/ELF/烧录命令），不承载引脚表；S3 引脚真值三处同源：`board/pins_s3.rs`、
+`profiles/esp32s3-mini.toml [hardware]/[[pin]]`、参赛介绍 §S3（41/42、8/9、4/5、6/15/7、
+ADC1 GPIO1）——逐组相等。处置——零改动（README 不抄引脚是避免第二真值的正确分工）。
+判据——三处逐键对读。
+
+**2026-11-27 批147 五芯片部署文档覆盖复核（无改动）**：事实——`tools/deploy/README.md`
+平台表五档齐（ESP32 classic / ESP32-S3 / RK3566 buildroot / RK3566 distro / 英特尔-AMD x86_64 /
+进迭时空 riscv64），每档有制品、入口、验收判据；`base/os/distro/boards/` 只收**物理板**
+笔记（Pi 4B / RK3566），x86_64 与 riscv64 是镜像/容器部署面，不属板卡笔记。处置——零改动。
+判据——平台表逐行与 `platforms.yml` 五芯片矩阵对照。
+
+**2026-11-27 批148 OTA 包内容与分区文档对表（无改动）**：事实——匿名拉
+`rockrobot3-ota:0.0.8` manifest：6 层 = 镜像 / `.manifest` / `.sig` / `keys/8570b80b2a0f82c3.pub` /
+`checksums.txt` / `bundle.txt`，与 `ota-bundle.sh` 头注"四件 + 两清单"逐名一致；公钥包内路径
+`keys/<key_id>.pub` 与文档"安装树 `ota/keys/<key_id>.pub`"是同一物的打包/安装两态。处置——
+零改动。判据——层名与脚本产物清单逐条对上。
