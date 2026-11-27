@@ -29,7 +29,7 @@ from workflow_release import PUBLISH_MODULES  # noqa: E402
 
 BRAIN = "brain"
 LOOP_RE = re.compile(r"for m in ([\w ]+); do")
-COUNT_RE = re.compile(r'-eq\s+(\d+)')
+COUNT_RE = re.compile(r'\[\s*"\$n"\s*-eq\s+(\d+)\s*\]')
 
 
 def truth_modules(root):
@@ -121,8 +121,10 @@ def check_image_smoke(text, policy):
         if d:
             bad.append(f"image-smoke.sh:{line} 起齐循环与发布策略不一致：" + "；".join(d))
     nums = [int(x) for x in COUNT_RE.findall(text)]
-    if len(loops[0][1]) not in nums:
-        bad.append(f"image-smoke.sh 起齐断言未用 {len(loops[0][1])}（实见计数 "
+    if not nums:
+        bad.append('image-smoke.sh 缺起齐阈值断言（形如 [ "$n" -eq N ]），循环无判据')
+    elif len(loops[0][1]) not in nums:
+        bad.append(f"image-smoke.sh 起齐断言未用 {len(loops[0][1])}（实见阈值 "
                    f"{sorted(set(nums))}），循环与阈值不同源")
     return bad
 
@@ -271,7 +273,13 @@ def selftest():
         (root_p / "modules" / "rr3-ghost" / "Cargo.toml").write_text(
             '[package]\nname = "rr3-ghost"\n', encoding="utf-8")
         ok &= _expect(check(root_p), "缺 module.toml", "模块 crate 漏写 module.toml")
-    print("PASS  发布面清单自检通过（1 正例 / 7 负例）" if ok else "FAIL  发布面清单自检未通过")
+        root_c = _copy(root, pathlib.Path(base) / "masked")
+        f = root_c / "tools/deploy/image-smoke.sh"
+        f.write_text(f.read_text(encoding="utf-8").replace(
+            '[ "$n" -eq 6 ] && ok=1',
+            '[ "$n" -eq 9 ] && ok=1\n[ "$unrelated" -eq 6 ]'), encoding="utf-8")
+        ok &= _expect(check(root_c), "起齐断言", "阈值漂移被无关 -eq 6 遮蔽")
+    print("PASS  发布面清单自检通过（1 正例 / 8 负例）" if ok else "FAIL  发布面清单自检未通过")
     return 0 if ok else 1
 
 

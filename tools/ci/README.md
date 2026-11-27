@@ -218,7 +218,7 @@ firmware 必须带 `packages: write`、推 `rockrobot3-firmware`，且 S3 目标
 （`pack-bundle.sh` / `pack-arm64.sh` 必须派生并保留 brain 例外，出现字面量清单即红）；
 并核真值面成对——`modules/rr3-*` 的 `Cargo.toml` 与 `module.toml` 缺一即点名。
 判据是**集合相等**而非包含：新增模块不入选发布集必须显式改策略，不许默默漏件。
-`python3 tools/ci/audit/release_sets.py [--root DIR]`；`--self-test` 给 1 正例 + 7 负例。
+`python3 tools/ci/audit/release_sets.py [--root DIR]`；`--self-test` 给 1 正例 + 8 负例。
 门位：check.sh ⑰（本地与 gate `conventions` 同源执法），自检与即时执法另在 gate
 `scripts` job 跑一遍（不编译，秒级），失败归因不再混进度量门。
 
