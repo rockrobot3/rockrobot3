@@ -54,6 +54,20 @@ fn rr3_write_bytes(guard: &mut UnixStream, frame: &Rr3Frame) -> (Result<(), Stri
         };
         return (Err(format!("{e:?}")), false);
     }
+    // 单帧上界：读侧按 1MiB 帽拒收（`rr3_frame_read_cap`），超帽帧写出去只会换来
+    // 对端断链——模块只看到"总线断了"，查不出是哪个应答太大。写侧先拒并点名，
+    // 与模块客户端 `rr3_write_frame` 的同一判据同源（2026-11-27 批91 收成面防护：
+    // 之前只有 `ctl.logs` 一处自查）。
+    let plen = frame.payload.len();
+    if plen > rr_ipc::RR3_FRAMING_PLEN_CAP_DEFAULT {
+        return (
+            Err(format!(
+                "载荷 {plen}B 超单帧上界 {}B（对端读侧会拒收）：查该应答的产侧是否该分页/限行",
+                rr_ipc::RR3_FRAMING_PLEN_CAP_DEFAULT
+            )),
+            false,
+        );
+    }
     match rr_ipc::rr3_frame_write_io(guard, frame) {
         Ok(()) => (Ok(()), false),
         Err(e) => (
