@@ -101,11 +101,14 @@ fn rr3_pub_topic<'a>(
 }
 
 /// 归属门判定：拒则记拒次并带回拒因。
+///
+/// 走 `rr3_reg_with`（不是裸锁）：拒要留一行点名"谁、什么主题、被哪一层拒"，
+/// 而这行由注册表在放锁后落盘——registry 锁内零文件 I/O。
 fn rr3_pub_check(ctx: &Rr3ConnCtx, me: &Rr3Peer, topic: &str) -> Option<Rr3PublishDeny> {
     let check = RrdRegistry::rr3_reg_pub_check(&me.name, topic, &ctx.topics);
-    if let Err(e) = check {
-        rr3_lock(&ctx.shared).rr3_reg_note_denied();
-        Some(e)
+    if let Err(e) = &check {
+        crate::registry::rr3_reg_with(&ctx.shared, |g| g.rr3_reg_note_deny(&me.name, topic, e));
+        check.err()
     } else {
         None
     }

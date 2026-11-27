@@ -13,6 +13,7 @@ impl RrdRegistry {
             restart_base_ms,
             boot_ms: None,
             denied_publish: 0,
+            deny_logged: BTreeMap::new(),
             crash_streak: BTreeMap::new(),
             owned: BTreeSet::new(),
             stopped: BTreeSet::new(),

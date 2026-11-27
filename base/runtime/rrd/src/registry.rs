@@ -61,6 +61,10 @@ pub struct RrdRegistry {
     /// 由 `registered_at_ms - boot_ms` 导出。None = 未定格（单元/后门路径）。
     boot_ms: Option<u64>,
     denied_publish: u32,
+    /// 归属拒的留痕闸（2026-11-27 批81）：键 = `模块名` + 主题，值 = 该键的拒次。
+    /// 首见必点名、此后每 64 次再点名一次——`denied_publish` 只是个总数，
+    /// 没有这行运维只能看到"有人在越权"却查不出是谁、发的什么主题。
+    deny_logged: BTreeMap<String, u64>,
     /// 崩溃连击计数（D-1）：键是 **name**，所以重注册、换 task、条目被整体替换都不影响它。
     /// 唯一写入方是 `rr3_charge`；唯一清空方是 `rr3_reg_expire` 的恢复归零段（D-2）。
     /// 取代旧的 `Entry.restarts`（那条账随旧条目一起归零，导致 5 次上限永远撞不到）。

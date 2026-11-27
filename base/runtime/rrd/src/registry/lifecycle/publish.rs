@@ -76,6 +76,25 @@ impl RrdRegistry {
         self.denied_publish = self.denied_publish.saturating_add(1);
     }
 
+    /// 归属拒的记账 + 留痕（批81）：除总数外点名"谁、发了什么主题、被哪一层拒"。
+    /// 首见必落一行、同一 (模块, 主题) 此后每 64 次再落一行——越权若来自写错的
+    /// 模块，第一条就够定位；重复刷屏会把日志环冲垮（与广播丢帧同一节奏）。
+    /// 行只进 `pending_logs`，由 [`crate::registry::rr3_reg_with`] 放锁后落盘。
+    pub fn rr3_reg_note_deny(&mut self, name: &str, topic: &str, deny: &Rr3PublishDeny) {
+        self.rr3_reg_note_denied();
+        let key = format!("{name}\u{1}{topic}");
+        let n = {
+            let slot = self.deny_logged.entry(key).or_insert(0);
+            *slot = slot.saturating_add(1);
+            *slot
+        };
+        if n % 64 == 1 {
+            self.pending_logs.push(format!(
+                "发布被拒 {name}: {topic} —— {deny}（同名同题累计 {n} 次，此后每 64 次再报）"
+            ));
+        }
+    }
+
     pub fn rr3_reg_denied(&self) -> u32 {
         self.denied_publish
     }
