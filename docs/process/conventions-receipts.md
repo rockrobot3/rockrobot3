@@ -2813,3 +2813,12 @@ install-smoke 公开回读 `rollback_ms=4513`（旧 32619ms）、`boot_systemd_m
 "数值未取回"的阻塞；② 批259 用连续两拍实测值校准 20s/5s 上限（无数据不调参，保留
 余量）；③ 批260 11-30 03:00 UTC `release-anon` 首跑归因；distro 首发后 `--deep` /
 B.2 实测与 `distro` 类纳入匿名回读的裁定；④ 批261 三线收口与再拟下轮。
+
+**2026-11-28 批258 distro-smoke 时延公开回传**：事实——`distro-smoke` 的
+`boot_spawn6_ms` / `status_rtt_ms` 只写 job summary 与日志（summary 需鉴权、日志匿名
+403），status 第 29 行"上限贴合实测"因此长期缺证据。处置——容器退出后在宿主把 timing
+文件拼成一行 `::notice title=distro-smoke-timing::`（与 install-smoke 同通道），数字
+进注解面。判据——commit `2d3ae48a`：integration success，distro-smoke job
+`140710054135` 注解实测 `boot_spawn6_ms=1010 ceiling_ms=20000`、`status_rtt_ms=2
+ceiling_ms=5000`；install-smoke 同拍 success（rollback 早停无回归）。上限本批不动：
+单拍不足以校准，第二拍后再按实测余量收紧。
