@@ -4,11 +4,15 @@ CI 单一事实源在 GitHub Actions（R30 裁定：atomgit 无流水线功能�
 `.gitcode/workflows/` 单真源路径作废，`.gitcode/` 已删除）。判据仍以
 `tools/ci/*.sh` 为唯一真源，工作流只负责装工具、跑脚本、把失败压成注解。
 
-## 作业组织（2026-11-17 结构治理）
+## 作业组织（2026-11-17 结构治理，2026-11-27 批82 去手抄计数）
 
-- **每条流水线 ≤ 10 个作业**（含矩阵腿的执行实例口径）：现行 gate 7 /
-  integration 7 / platforms 6（执行实例 9）/ publish 3 / buildroot 3 / coverage 1。
-  新作业先论证归属流水线，塞不下就拆新流水线，不回流"一条大 ci.yml"。
+- **每条流水线 ≤ 10 个作业**（含矩阵腿的执行实例口径）。**现行条数不在这里抄**：
+  唯一真源是 [`tools/ci/audit/workflows_audit.py`](../../tools/ci/audit/workflows_audit.py)
+  的 `REQUIRED_JOBS`（删/改一个 job 即红），job 名逐条列在下表。此前正文手抄过
+  一组条数，随 job 增删漂成了两套数（2026-11-27 实测 gate 6 / integration 7 /
+  platforms 7 / publish 4 / buildroot 3 / coverage 2）——这正是"会漂的数字不抄进
+  文档"那条纪律的反面教材。新作业先论证归属流水线，塞不下就拆新流水线，
+  不回流"一条大 ci.yml"。
 - **职责域六分**：门禁（gate）／平台（platforms）／集成（integration）／
   发布（publish）／出厂轨（buildroot）／覆盖率（coverage），互不混装。
 - **触发面按需**：gate 永远全量（规约门含文档门 ⑤，不设路径过滤）；
@@ -37,7 +41,7 @@ CI 单一事实源在 GitHub Actions（R30 裁定：atomgit 无流水线功能�
 | 工作流 | 作业 | 职责 |
 |---|---|---|
 | `gate.yml`（6） | conventions / release / supply / alsa / ota-bundle / scripts | 门禁主线（与本地 `tools/ci/check.sh` 同一入口）：规约全步（含 rustfmt/clippy、质量度量与仓面卫生）、release 档溢出检查测试、supply 供应链审计（cargo-deny --strict，周程定时复核公告）、ALSA 真后端编译门、OTA bundle 装配门、脚本卫生与基线棘轮审计、SKIP 纪律自检、门禁步骤清单审计。风格/lint 不单列 job：判据体只在 check.sh ①c/①d/④b，避免第二份 find/clippy 形状 |
-| `platforms.yml`（8） | cross-artifacts ×3 / riscv-image / esp32-gates ×2 / autonomy-face / ipct003 / host-windows / host-macos | 跨平台与跨架构面：交叉编译矩阵、RISC-V 运行镜像构建门（交叉产物 → stage → QEMU 两段冒烟，不推送）、ESP32 专用门（含 autonomy/tts 双档构建腿 + 双芯片整片烧录镜像装配）、自治健康面真跑（30 s 模拟 + 复位闸门）、ipct003 跨架构对拍（--strict）、宿主等价面（Windows＋macOS；macOS 单腿含 workspace 与独立工程串行） |
+| `platforms.yml`（7） | cross-artifacts ×3 / riscv-image / esp32-gates ×2 / autonomy-face / ipct003 / host-windows / host-macos | 跨平台与跨架构面：交叉编译矩阵、RISC-V 运行镜像构建门（交叉产物 → stage → QEMU 两段冒烟，不推送）、ESP32 专用门（含 autonomy/tts 双档构建腿 + 双芯片整片烧录镜像装配）、自治健康面真跑（30 s 模拟 + 复位闸门）、ipct003 跨架构对拍（--strict）、宿主等价面（Windows＋macOS；macOS 单腿含 workspace 与独立工程串行） |
 | `integration.yml`（7） | distro-smoke / ota-sign / rk3566-onboard / buildroot-assembly / sim-assemble / sim-chain / matrix | 集成面：deb 装机冒烟、OTA 签名链、板面装配断言、装配与全链闭环演练（含 60s 稳态与阻塞面判据）、点验矩阵出数 |
 | `coverage.yml`（2） | workspace / independent ×9 | 覆盖率观测面：周程/手动跑 `cargo llvm-cov`，workspace 与独立工程（六模块 + rrctl / ota-ctl / pack）分开出 summary，artifact 留存；非阻断，先积累趋势再决定 ratchet |
 
