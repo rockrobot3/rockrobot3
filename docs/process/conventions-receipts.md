@@ -2522,3 +2522,29 @@ install-smoke 时延回传（systemd 拉起与换树窗口的 boot→六模块�
 补第二载体）；② 11-30 后 release-anon 首跑归因；③ distro 首发后 `--deep` 与 B.2 实测；④
 装机面漂移门负例（真装机树上改一件 config 期望 DRIFT，验完还原）与三线收口。判据——三线在
 `b964890b` 上 gate / integration / platforms 三线 success；⑤⑬⑯、度量与流水线审计自检绿。
+
+**2026-11-27 批221 install-smoke 三段时延公开回传**：事实——unit 拉起/换树/回滚耗时只活在
+匿名不可读的 job 日志里，发版回执与敞口 29 都取不到数。处置——脚本在三个边界记毫秒：
+`boot_systemd_ms`（systemctl start→六模块 running）、`bundle_swap_ms`（含停 rrd、换树、起、
+六模块）、`rollback_ms`（坏包安装到恢复 running），汇总一条 notice + 各阶段 notice 带数 +
+`GITHUB_STEP_SUMMARY`；**只记录不判红**（阈值校准归敞口 29，先积累实测）。判据——
+integration run `46026067849` / job `140597668459` success，notice 逐字
+`boot_systemd_ms=2115 bundle_swap_ms=2333 rollback_ms=32550`；同提交 gate success。首组实测
+显示回滚恢复被 30s 健康探针窗口主导（坏包起不来要走满探针），登记为后续优化候选，本批
+不改产品行为。
+
+**2026-11-27 批222 漂移门负例（真装机面）**：事实——漂移门在真装机树上只有正例（没漂时
+判一致），"漂了门看不看得见"仍只有自检夹具证据。处置——正例之后改一件装机 config
+（`modules/rr3-sense/config.toml` 追加一行注释），要求门非 0 退出并点名
+`DRIFT modules/rr3-sense/config.toml`；随即还原并重新判一致。抽 `drift_probe` 单点命令，
+正负例共用同一参数，不写第二套。判据——integration run `46026798086` / job
+`140600166786` success，notice 逐字："改一件 config 后漂移门判 DRIFT 并点名，还原后重回一致"；
+同批时延 notice 两拍稳定（boot≈2.1s、换树≈2.4s、回滚≈33s）；同提交 gate success。
+
+**2026-11-27 批223-224 窗口复核与本轮收口**：事实——`release-anon` runs 仍为 0（cron 首跑
+2026-11-30 03:00 UTC 未到）；GitHub releases 最新 v0.0.8 资产仍无 distro bundle，`--deep`
+深检与 B.2 签名实测无真包，按登记不冒充。处置——本轮 install-smoke 三批（217 正例/回滚、
+218 真包/漂移门正例、221 时延、222 漂移门负例）收口；下轮四件：① 11-30 后 release-anon
+首跑归因；② distro 首发后 `--deep` 与 B.2 实测；③ install-smoke 回滚检测时延优化评估
+（33s 由 30s 探针窗口主导，先取证再定是否收窄，禁止无据调参）；④ 三线收口与再拟下轮。
+判据——`0a3ffd75` 上 gate（run `46026797980`）/ integration（run `46026798086`）/ platforms（run `46026797816`）三线 success；⑤⑬⑯、度量与流水线审计自检绿。
