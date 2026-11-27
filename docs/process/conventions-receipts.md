@@ -2162,3 +2162,10 @@ platforms in_progress ⇒ 0，同一时刻平台上并无当前代码的结论�
 改为"任一 workflow 最新一条在跑即 2"，并加 `--self-test` 四例（全绿过／旧头仍在跑报
 未定／任一红／本地头无 run，各钉一条退出码）；README 的条数与口径同步。判据——
 self-test 4/4 PASS；同一时刻真实调用得 rc=2（旧实现 0）；⑤⑬⑯ 全绿。
+
+**2026-11-27 批173 本轮收口·代码头三线全绿**：事实——代码头 `3e154a8e` 上 gate success、
+integration success、platforms success（run #825，HTML 面核对 `WORKFLOW_RUN_CONCLUSION_SUCCESS`；
+同一 job 在 `cfd51ebb` 运行时"版本化部署包契约"与"装机器干净机拒绝"两步均 success，批168/169
+实跑成立）；期间匿名 API 撞 60/h 限额，ci-status 如实报"未定"（不冒充绿），改用 actions
+页面核对。处置——本轮收口；下轮第一件＝rk3566 bundle 进发布面（publish 现只出镜像/固件/
+release 资产，bundle 不在列）。判据——`ci-status --self-test` 4/4；三线结论与 run 页一致。
