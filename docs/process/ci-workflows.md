@@ -81,9 +81,11 @@ with 入参），不依赖 runner 镜像预装版本；交叉 job 同时显式�
 本文件的**结构判据**由 [`tools/ci/audit/workflows_audit.py`](../../tools/ci/audit/workflows_audit.py)
 在 gate `scripts` job 执法（工具链钉版 / 缓存参数 / 触发过滤 / 作业上限 / needs 图 /
 并发语义 / 权限面 / 失败显形 / 五芯片矩阵腿 / 作业覆盖契约 / 发布面与正式制品托管），
-政策变更须同批改脚本与自检夹具。**作业覆盖契约（2026-11-20 补）**：gate /
-integration / platforms / publish / buildroot 的 job 名按 `REQUIRED_JOBS` 钉住——
-删一个 job 就是某类验证静默停跑，必须同批评审改表，不得只靠记忆。
+政策变更须同批改脚本与自检夹具。**作业覆盖契约（2026-11-20 补，2026-11-27 批90 收编 coverage）**：gate /
+integration / platforms / publish / buildroot / **coverage** 的 job 名按 `REQUIRED_JOBS` 钉住——
+删一个 job 就是某类验证静默停跑，必须同批评审改表，不得只靠记忆。coverage 两头
+（`workspace` / `independent`）是非阻断的观测面，但"非阻断"不等于"可以被悄悄摘掉"：
+它此前不在契约表里，两个 job 一起消失没有任何判据会红。
 **YAML/表达式语法面（2026-11-24 补盲）**：`workflows_audit` 是文本扫描器，workflow
 被改坏缩进或表达式类型时 GitHub 会直接不跑/整文件失败，而文本判据仍绿——gate
 `scripts` job 因此增 `actionlint`（官方 schema 解析；关 shellcheck/pyflakes，只留

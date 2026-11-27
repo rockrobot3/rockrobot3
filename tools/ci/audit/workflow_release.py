@@ -149,6 +149,9 @@ REQUIRED_JOBS = {
     ),
     "publish.yml": ("build", "build-riscv64", "merge", "firmware"),
     "buildroot.yml": ("dtb-backport", "image", "release"),
+    # 观测面同样受覆盖契约约束（2026-11-27 批90）：coverage 非阻断，但"两个 job 都消失"
+    # 属于验证面静默停跑——非阻断 ≠ 可以被悄悄摘掉。
+    "coverage.yml": ("workspace", "independent"),
 }
 
 # 正式制品面（buildroot.yml）：job 名 → 必须进 ghcr 的制品名。
