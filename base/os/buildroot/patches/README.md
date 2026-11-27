@@ -1,15 +1,17 @@
-# base/os/buildroot/patches —— 内核 / U-Boot 回移补丁
+# base/os/buildroot/patches —— 内核 / U-Boot 回移补丁台账
 
-本目录承载 Buildroot 全量构建（Linux/容器侧）所需的内核与 U-Boot 补丁。
-**现存一件**：`0001-arm64-dts-rockchip-add-radxa-zero-3.patch`（v6.12 → 6.6 板级
-dts 回移）。下方核对清单是"落补丁前必须先核对"的台账，逐条结论随实测回填；
-本机（macOS）不承担构建验证，构建回执归 CI `buildroot` 流水线。
+**本目录只放台账，不放补丁本体**（2026-11-27 批107 订正：原文写"本目录承载补丁…现存
+一件"，而 `ls` 这里只有 README——补丁体按 Buildroot 惯例住板目录
+`board/<板>/patches/`，defconfig 的 `BR2_LINUX_KERNEL_PATCH` 指过去）。
+现存一件：`board/radxa-zero3/patches/0001-arm64-dts-rockchip-add-radxa-zero-3.patch`
+（v6.12 → 6.6 板级 dts 回移，注册两个 dtb）。下方核对清单是"落补丁前必须先核对"的台账，
+逐条结论随实测回填；本机（macOS）不承担构建验证，构建回执归 CI `buildroot` 流水线。
 
 ## 核对清单（建镜像前逐条过）
 
 | # | 事项 | 核对方法 | 结论 / 未命中的处置 |
 |---|---|---|---|
-| 1 | `rk3566-radxa-zero-3*.dts` 是否在 Linux 6.6 的 `arch/arm64/boot/dts/rockchip/` 里 | mainline 目录逐 tag 实查 | **2026-11-16 已核对：v6.6 没有该板 dts**；主线只有 `-3e`（v6.11 起）与 `-3w`（v6.12 起）。已从 v6.12 逐字回移三份文件并在本目录 `0001-…patch` 注册两个 dtb；defconfig 用 `BR2_LINUX_KERNEL_PATCH` 应用 |
+| 1 | `rk3566-radxa-zero-3*.dts` 是否在 Linux 6.6 的 `arch/arm64/boot/dts/rockchip/` 里 | mainline 目录逐 tag 实查 | **2026-11-16 已核对：v6.6 没有该板 dts**；主线只有 `-3e`（v6.11 起）与 `-3w`（v6.12 起）。已从 v6.12 逐字回移三份文件并在 `board/radxa-zero3/patches/0001-…patch` 注册两个 dtb；defconfig 用 `BR2_LINUX_KERNEL_PATCH` 应用 |
 | 2 | `radxa-zero-3-rk3566` 是否为 U-Boot `2024.10` 的有效 defconfig | 源码树实查 + `make …_defconfig` | **2026-11-16 已核对存在**（`source.denx.de/u-boot/u-boot` v2024.10，`configs/radxa-zero-3-rk3566_defconfig` HTTP 200）；构建期一次 make 回执随全量构建 CI |
 | 3 | extlinux 的 `console=ttyS2,1500000` 与 fdt 文件名 | 板上串口实测 | 属板上收口；fdt 默认 `rk3566-radxa-zero-3w.dtb`（3E 实板改 `-3e.dtb`），见 `board/radxa-zero3/extlinux.conf` 尾注 |
 | 4 | RK3566 的 TPL/BL31 blob | rkbin 仓内实查 + binman 回执 | **2026-11-17 已核对**：`bin/rk35/rk3566_ddr_1056MHz_v1.18.bin` 与 `bin/rk35/rk3568_bl31_v1.43.elf` 在 Buildroot 2024.02.11 钉住的 rkbin 提交 `b4558da` 内；defconfig 已启用 `BR2_PACKAGE_ROCKCHIP_RKBIN` + `BR2_TARGET_UBOOT_NEEDS_ROCKCHIP_RKBIN`。缺任一时 binman 报 `.binman_stamp Error 103`（第 5 拍实证） |
