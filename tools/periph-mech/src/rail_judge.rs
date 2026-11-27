@@ -31,8 +31,8 @@ impl RailTier {
     }
 }
 
-/// 分压换算纯函数：轨压 mV = 引脚 mV × NUM / DEN（只算不碰硬件）。占位 1:1 下
-/// 即恒等；标定后由策略面填入非平凡比值。
+/// 分压换算纯函数：轨压 mV = 引脚 mV × NUM / DEN（只算不碰硬件）。比值由策略面
+/// 给（现役板侧常量 2:1；1:1 是历史占位档，恒等仅作单元对照）。
 pub fn rr3_rail_mv_from_pin(pin_mv: u16, num: u32, den: u32) -> u16 {
     ((pin_mv as u32) * num / den) as u16
 }
