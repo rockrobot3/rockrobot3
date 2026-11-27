@@ -29,7 +29,7 @@ docker run --rm -v "$(pwd)":/work -w /work -v "$SUM_FILE:/tmp/rr3-timing" "$IMAG
   MODS=$(rr3_modules .)
   MODN=$(printf "%s\n" "$MODS" | wc -l | tr -d " ")
 
-  echo "== ① 构建：base/runtime 工作区 + 全模块（$MODN）+ rr3-ctl + rr3-ota-ctl + rr3-pack =="
+  echo "== ① 构建：base/runtime 工作区 + 全模块（${MODN}）+ rr3-ctl + rr3-ota-ctl + rr3-pack =="
   cargo build -q --locked --release --manifest-path base/runtime/Cargo.toml -p rrd
   for m in $MODS; do
     cargo build -q --locked --release --manifest-path "modules/rr3-$m/Cargo.toml"
@@ -140,7 +140,7 @@ docker run --rm -v "$(pwd)":/work -w /work -v "$SUM_FILE:/tmp/rr3-timing" "$IMAG
   RRDPID=$!
   trap "kill $RRDPID 2>/dev/null || true" EXIT
 
-  echo "== ⑧ 冒烟断言：全模块 spawn（$MODN，含 Rust brain）+ 0 拒 boot + 0 denied =="
+  echo "== ⑧ 冒烟断言：全模块 spawn（${MODN}，含 Rust brain）+ 0 拒 boot + 0 denied =="
   ok=""
   READY_MS=""
   for _ in $(seq 1 30); do
@@ -198,7 +198,7 @@ docker run --rm -v "$(pwd)":/work -w /work -v "$SUM_FILE:/tmp/rr3-timing" "$IMAG
   test -f /var/lib/rockrobot3/counters.json
   grep -q "\"boots\"" /var/lib/rockrobot3/counters.json
 
-  echo "distro-smoke 绿：deb 装机 → rrd 正门起全模块（$MODN，sim 面冒烟，部署真值零改），counters 回写落盘"
+  echo "distro-smoke 绿：deb 装机 → rrd 正门起全模块（${MODN}，sim 面冒烟，部署真值零改），counters 回写落盘"
 '
 
 # timing 回显 + 公开面（无 GITHUB_STEP_SUMMARY 时只回显）。
