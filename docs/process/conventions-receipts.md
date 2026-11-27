@@ -1909,3 +1909,29 @@ raw dump + 脚本调用，判据语义与错误标题（`manifest-platforms`）�
 核心六例、豁免三例、总入口五函数（最长 22 行），夹具与断言提到文件作用域共用。
 判据——真仓 `check_docs` 绿、自检九例全过、`gate_steps_audit` 29 步清单逐字一致；
 gate/integration/platforms 在 `5582681` 全 success。
+
+**2026-11-27 批135 固件发布集装配收为脚本（可本地干跑）**：事实——`publish.yml` 的
+firmware 块内联 25 行做"四件拷贝 + 分区 spool 断言 + bootloader magic 断言 + sha 清单"，
+只在 tag/main 触发时才执行，仓内无法验证。处置——抽 `tools/deploy/fw-set.sh`：
+`--from <c-elf> <s-elf> <c-boot> <s-boot> [--out <dir>]` 装配七件集 + 三道判据
+（ELF 齐 / 分区表含 spool / bootloader 首字节 e9）+ sha 清单；`--out` 供本地干跑不污染
+工作区，sha 工具 Linux `sha256sum` / macOS `shasum -a 256` 双档；workflow 只留构建与
+bootloader 定位，错误标题（fw-build/fw-elf/fw-boot/fw-partitions）不变。判据——本地干跑：
+正例七件齐且 `firmware-sha256.txt` 生成（rc=0），bootloader 非 e9 反例按 `fw-boot` 退 1；
+`workflows_audit` PASS；gate/integration/platforms 在 `d545adaf` 全 success。
+**证据边界**：publish 流水线只在 tag/main 触发，本仓暂无发布窗口——脚本逻辑由本地干跑
+验证，发布面真跑归下次正式发布。
+
+**2026-11-27 批136 集成腿脚本体量审计（无改动）**：事实——`distro-smoke.sh` 160 行、
+`sim-chain.sh` 60 行、`sim-assemble.sh` 24 行、`rk3566-onboard-check.sh` 86 行；均为线性
+编排或单函数（rk3566 仅 `check_file` 3 行），无 >50 行函数、无 >500 行脚本。处置——零改动。
+
+**2026-11-27 批137 门禁步骤面函数长度复核（无改动）**：事实——对 `tools/**/*.sh` 全量
+函数扫描（列 0 收尾口径）：仅 `tools/ci/steps/5.sh` 曾有两函数超 50 行（批134 已拆，
+现最长 22 行）；其余步骤体与平台脚本均 ≤50。处置——零改动。
+
+**2026-11-27 批138 下次发布 tag 规范确认（无改动）**：事实——`buildroot.yml` 的 OTA 与
+buildroot 包推送标签已是 `v${VER}`（行 425/426），`VER` 来自 `release-tag.sh` 与 `VERSION`
+同源；firmware 包用 `${{ github.ref_name }}`（正式 tag = `vX.Y.Z`）；运行镜像 tag 由
+release meta 生成。下次发布不会重演首发无 `v` 前缀的疏漏。处置——零改动，登记为发布前
+复核结论。判据——三处 tag 生成式逐行对上 `VERSION` 与 semver 正则。
