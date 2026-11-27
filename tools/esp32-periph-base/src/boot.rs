@@ -37,9 +37,9 @@ use esp_idf_hal::units::Hertz;
 use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size, EspError};
 
 use crate::board::{
-    BOOT_PAN_DEG, BOOT_TILT_DEG, LEDC_FREQ_HZ, LEDC_RES_BITS, RR3_BIND_LEDC_PAN,
-    RR3_BIND_LEDC_TILT, RR3_BIND_UART2_RX, RR3_BIND_UART2_TX, THREAD_STACK, UART2_BAUD_HZ,
-    UART2_RX_RING, UART2_TX_RING,
+    ADC_RAIL_DIVIDER_DEN, ADC_RAIL_DIVIDER_NUM, BOOT_PAN_DEG, BOOT_TILT_DEG, LEDC_FREQ_HZ,
+    LEDC_RES_BITS, RAIL_GATE_ARMED, RR3_BIND_LEDC_PAN, RR3_BIND_LEDC_TILT, RR3_BIND_UART2_RX,
+    RR3_BIND_UART2_TX, THREAD_STACK, UART2_BAUD_HZ, UART2_RX_RING, UART2_TX_RING,
 };
 use crate::commands::cmd_loop;
 use crate::face::expr_eye_base;
@@ -113,8 +113,11 @@ fn rail_open(rail: Result<RailMonitor, EspError>) -> Option<RailMonitor> {
     match rail {
         Ok(r) => {
             // 测点引脚号不上打印（批N4 件七(c)）：真值以 rr3.set_bindings 注入为准。
+            // 分压比与接闸态从 board 常量取（2026-11-27 批120 修打印口径漂移：
+            // 常量已是 2:1，旧文案写死 1:1——假读数比缺读数更坏）。
             println!(
-                "[periph] 5V 轨监测 ✓ ADC1 @ 测点引脚经 rr3.set_bindings 下发（占位分压 1:1 待标定；RAIL 命令采一次）"
+                "[periph] 5V 轨监测 ✓ ADC1 @ 测点引脚经 rr3.set_bindings 下发（分压 {}:{}，接闸 armed={}；RAIL 命令采一次）",
+                ADC_RAIL_DIVIDER_NUM, ADC_RAIL_DIVIDER_DEN, RAIL_GATE_ARMED
             );
             Some(r)
         }

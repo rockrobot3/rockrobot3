@@ -50,7 +50,7 @@ ADC1_CH6 @ GPIO34 采样轨压，按「**机制与策略分离**」落两处：
 
 | 面 | 落点 | 内容 |
 |---|---|---|
-| 策略 | [`board.rs`](src/board.rs) `ADC_*` / `RAIL_*` 常量区 | 引脚 / 分压比（**占位 1:1 待标定**）/ 采样节拍 / ADC 衰减·分辨率·标定 / 双阈值（`RAIL_MILD_MV`/`RAIL_SEVERE_MV`，**占位待标定**）/ 接闸（`RAIL_GATE_ARMED`） |
+| 策略 | [`board.rs`](src/board.rs) `ADC_*` / `RAIL_*` 常量区 | 引脚 / 分压比（**2:1 已回填**，2026-11-27 订正原"占位 1:1"）/ 采样节拍 / ADC 衰减·分辨率·标定 / 双阈值（`RAIL_MILD_MV`/`RAIL_SEVERE_MV`，**占位待标定**）/ 接闸（`RAIL_GATE_ARMED`） |
 | 机制 | [`power.rs`](src/power.rs) | `RailMonitor` 读 ADC 一次 + 按分压比换算回轨压 mV；`tier_of` 双阈值电平分类；`RailJudge` 一核两条线（rr-mech `Rr3LowEdge` ×2）产越阈事件 |
 
 运行面自主节拍每 `RAIL_SAMPLE_PERIOD_MS` 周期采一次：喂判定核 → 写
@@ -78,7 +78,7 @@ rr-mech 安全核 `Rr3LowEdge` **两实例**（一核两条线）产——"越�
 | 舵机 pan（水平） | 信号→GPIO32 · 电源→**板载 5V（现场档-甲首选：5V/3A 充电头直喂本排针）** · GND→共地 | 正式装机改独立轨（见"供电档位"节，堵转 ~700mA/只） |
 | 舵机 tilt（俯仰） | 信号→GPIO33 · 电源→**板载 5V（现场档-甲首选：5V/3A 充电头直喂本排针）** · GND→共地 | 独立轨时 UBEC/板/舵机单点共地（铁律） |
 | UART2 指令面 | GPIO18→CP2102 RXD · GPIO19←CP2102 TXD · GND→共地 | **1500000（1.5M，2026-10-30 定档；此前 921600）**（Q1=(a) 带宽账：音频上行 16k 双声道 b64 后 ≈87KB/s，921600 只剩 ~5% 余量；宿主缺省已同档——板/宿主共用 `rr_periph_proto::consts::RR3_BRIDGE_BAUD=1500000`，`RR3_HAL_PERIPH_BAUD` 或 recorder `--baud` 仅作降速实验覆盖），3.3V TTL（严禁 5V）。**引脚定案（2026-10-12 真板实锤）：GPIO16/17 一装 UART2 驱动即把 I2C0 打死（换序/前后装均复现），故改 18/19**；19 与未来点阵 VSPI 预留同脚，已记为技术债 |
-| 5V 轨分压测点（方案A Q1/Q2） | GPIO34 ← 5V 轨经分压网络（5V→≤3.3V） · GND→单点共地 | ADC1_CH6（input-only 档）；分压比/阈值在 `board.rs` 策略面（**占位待标定**，接线后对拍回填）。属观测面、**非必接线**——未接线时浮空读数**不接闸**（`RAIL_GATE_ARMED=false`），只观测不拒动 |
+| 5V 轨分压测点（方案A Q1/Q2） | GPIO34 ← 5V 轨经分压网络（5V→≤3.3V） · GND→单点共地 | ADC1_CH6（input-only 档）；分压比 **2:1 已回填**（`board.rs` 常量，启动横幅按常量打印：分压 N:D + armed 态）、阈值仍占位待标定。属观测面、**非必接线**——未接线时浮空读数**不接闸**（`RAIL_GATE_ARMED=false`），只观测不拒动 |
 | 板载 USB（cu.usbserial-1410） | 烧录 + monitor | `cargo +esp run`，Ctrl+] 退出 |
 
 ## 供电档位（首选 → 整机；2026-10-13 裁定）
