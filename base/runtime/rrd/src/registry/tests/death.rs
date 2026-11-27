@@ -106,6 +106,43 @@ fn expired_fanout() {
     assert!(rxa.try_recv().is_ok());
 }
 
+/// 收件端消失（writer 线程写超时收摊 → 通道 drop）→ 该连接**当场摘出投递面**：
+/// 投递数不再计入、`tx` 置空（`rr3_reg_live` 转假），活连接不受牵连。
+/// 这是"慢消费者不拖累全局"的最后一段闭环——写侧只负责让 writer 退出，
+/// 回收由本分支完成；缺了它，扇出会一直往一条没人读的通道里塞帧并记 `fan_dropped`。
+#[test]
+fn fanout_drops_dead_writer() {
+    let mut r = RrdRegistry::new(1000);
+    let (txa, _rxa) = chan();
+    let (txb, rxb) = chan();
+    r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), txa, 0)
+        .unwrap();
+    r.rr3_reg_add(&facts("rr3-simb", 100, 500, "always"), txb, 0)
+        .unwrap();
+    drop(rxb);
+    let frame = frame_to(rr_bus::RR3_BROADCAST_DST_TASK);
+    assert_eq!(
+        r.rr3_reg_fanout(frame.clone(), rr_bus::RR3_BROADCAST_DST_TASK),
+        1,
+        "死连接不得计入投递数"
+    );
+    assert!(
+        !r.rr3_reg_live("rr3-simb"),
+        "Disconnected 必须把 tx 置空（此后不再投递）"
+    );
+    assert!(r.rr3_reg_live("rr3-sima"), "活连接不受牵连");
+    assert_eq!(
+        r.rr3_reg_fanout(frame.clone(), rr_bus::RR3_BROADCAST_DST_TASK),
+        1,
+        "置空后第二帧仍只投活连接"
+    );
+    assert_eq!(
+        r.rr3_reg_fan_dropped(),
+        0,
+        "死连接的帧不算积压丢帧（两者是不同故障）"
+    );
+}
+
 /// 移除后既不在快照里也不再是 fanout 目标，task 号也不回收
 #[test]
 fn removed_entirely() {
