@@ -632,3 +632,23 @@ jobs:
             fi
           done
 
+
+  # 发布面匿名回读（2026-11-27 批182）：ghcr 上的正式制品是**公开交付面**——status 与
+  # runbook 都按"无凭据可下载"记账，但这条承诺此前没有任何周期性机器判据（包被转私有、
+  # 误删 tag、成员被改，三条流水线都不会红）。周程与手动各跑一次只读巡检：不登录、不推
+  # 送、不回滚，失败只红这一腿。tag 取仓根 VERSION 的单一真值（发版纪律保证同名 tag）。
+  # OTA/buildroot 在 v0.0.8 是"无 v 前缀"的历史例外（见 status.md），故本腿只核
+  # image+firmware；两者补齐后按默认五类扩。
+  release-anon:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oras-project/setup-oras@v2
+      - name: 匿名齐套回读（镜像三架构 + 固件）
+        run: |
+          tag="v$(tr -d '[:space:]' < VERSION)"
+          echo "回读 tag=${tag}（匿名，不登录）"
+          bash tools/ci/lib/release-verify.sh --tag "$tag" \
+            --repo "${{ github.repository }}" --classes image,firmware

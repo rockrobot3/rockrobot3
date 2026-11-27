@@ -2240,3 +2240,12 @@ platforms 均 success，改过 YAML 的 buildroot 在 `0ef9c4df` 也 success（�
 匿名回读（已发布包公开，防包被删/权限回退），其次补 distro-smoke 的 boot 时延上限判据
 （流畅度基线；本机无板、匿名读不到日志，故用"步骤内计时+保守上限"而非事后取数）。
 判据——四线结论与 run 页一致；audit self-test 28/28、巡检自检 7/7。
+
+**2026-11-27 批182 发布面匿名回读进周程**：事实——ghcr 正式制品是公开交付面（status 与
+runbook 都按"无凭据可下载"记账），但该承诺没有任何周期判据：包被转私有、tag 误删、成员
+被改，三条流水线都不会红。处置——platforms 增 `release-anon` 作业（只在 schedule/
+workflow_dispatch 跑，不登录、不推送、不回滚）：tag 取仓根 VERSION 的单一真值，按
+`release-verify --classes image,firmware` 匿名回读三架构与固件九件；OTA/buildroot 在
+v0.0.8 是无 v 前缀的历史例外，暂不纳入，补齐后按默认五类扩。审计必列 job 加该腿，
+自检断言 28→29。判据——YAML 解析过；结构审计绿；定向自检 29/29；⑤⑬⑯ 全绿；实跑
+在下一次周程（或手动 dispatch），不冒充已验。

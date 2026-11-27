@@ -186,7 +186,7 @@ REQUIRED_JOBS = {
     ),
     "platforms.yml": (
         "cross-artifacts", "riscv-image", "esp32-gates", "autonomy-face",
-        "ipct003", "host-windows", "host-macos",
+        "ipct003", "host-windows", "host-macos", "release-anon",
     ),
     "publish.yml": (
         "build", "build-riscv64", "merge", "firmware", "distro-bundle", "release-verify",
