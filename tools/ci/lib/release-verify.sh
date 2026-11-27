@@ -7,7 +7,7 @@
 # 实推的 `v<VER>` 不一致）。本脚本把发布集收成一张数据表，逐项只读核对并打印 digest，
 # 不发任何写请求；发布面本身仍由 publish.yml / buildroot.yml 产出（机制与策略分离）。
 #
-# 用法：release-verify.sh --tag vX.Y.Z [--repo owner/name] [--classes image,firmware,distro,ota,buildroot]
+# 用法：release-verify.sh --tag vX.Y.Z|auto [--repo owner/name] [--classes image,firmware,distro,ota,buildroot]
 #                             [--with-signature]
 #       release-verify.sh --self-test
 # 判据：0 所选类别全齐且成员/证明面合规 / 1 有缺件或不合规（逐项点名）
@@ -273,6 +273,23 @@ rr3_run() {
 	return 0
 }
 
+# --tag auto（批189）：取 registry 上最新的正式 semver tag。周程不能用仓根 VERSION
+# 直接拼 tag——"VERSION 已 bump、tag 未推"是发布前的正常窗口，按 VERSION 会周程常红；
+# 取已发布的最新 tag 才是"公开交付面现在是什么"的正确问题。
+rr3_resolve_tag() {
+	[ "$TAG" = auto ] || return 0
+	local found
+	found=$(oras repo tags "ghcr.io/${OWNER}/rockrobot3" 2>/dev/null \
+		| grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -n 1)
+	if [ -z "$found" ]; then
+		echo "FAIL  --tag auto 未能从 registry 取到正式 tag（网络/可见性）" >&2
+		return 2
+	fi
+	TAG="$found"
+	ok "tag auto → ${TAG}"
+	return 0
+}
+
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--tag) TAG="${2:?--tag 缺参数}"; shift 2 ;;
@@ -302,9 +319,10 @@ for c in ${CLASSES//,/ }; do
 	*) echo "FAIL  --classes 含未知类别 ${c}" >&2; exit 2 ;;
 	esac
 done
-printf '%s' "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-	|| { echo "FAIL  --tag 只认正式版 vX.Y.Z（实得 ${TAG}）" >&2; exit 2; }
 command -v oras >/dev/null || { echo "FAIL  本机无 oras（发布面取数依赖它）" >&2; exit 2; }
+rr3_resolve_tag || exit $?
+printf '%s' "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+	|| { echo "FAIL  --tag 只认正式版 vX.Y.Z 或 auto（实得 ${TAG}）" >&2; exit 2; }
 if [ "$SIGN" -eq 1 ]; then
 	command -v cosign >/dev/null || {
 		echo "FAIL  --with-signature 需要 cosign（keyless 验签不可跳过）" >&2

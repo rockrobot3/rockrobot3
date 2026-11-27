@@ -646,9 +646,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: oras-project/setup-oras@v2
-      - name: 匿名齐套回读（镜像三架构 + 固件）
+      - name: 匿名齐套回读（镜像三架构 + 固件，tag 取已发布最新正式版）
         run: |
-          tag="v$(tr -d '[:space:]' < VERSION)"
-          echo "回读 tag=${tag}（匿名，不登录）"
-          bash tools/ci/lib/release-verify.sh --tag "$tag" \
+          # --tag auto：从 registry 取最新正式 semver tag，避免"VERSION 已 bump、tag 未推"
+          # 的发布前窗口把周程打红（见 tools/ci/lib/release-verify.sh 的 rr3_resolve_tag）。
+          bash tools/ci/lib/release-verify.sh --tag auto \
             --repo "${{ github.repository }}" --classes image,firmware

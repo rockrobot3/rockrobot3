@@ -13,6 +13,10 @@ rv_stub() {
 	local dir="$1"
 	printf '%s\n' '#!/usr/bin/env bash' \
 		'[ "${RR3_ORAS_FAIL:-}" = 1 ] && { echo "401 Unauthorized" >&2; exit 1; }' \
+		'if [ "$2" = "tags" ]; then' \
+		'  if [ "${RR3_TAGS_EMPTY:-}" = 1 ]; then echo edge; else printf "v0.0.7\nedge\nv0.0.8\nlatest\n"; fi' \
+		'  exit 0' \
+		'fi' \
 		'if [ "$3" = "--descriptor" ]; then echo "{\"digest\":\"sha256:deadbeef\"}"; exit 0; fi' \
 		'ref="${3:-}"' \
 		'case "$ref" in' \
@@ -146,6 +150,26 @@ rv_sig_case() { # 名称 期望码 失败开关 额外参数 期望片段 [rm-co
 	return 0
 }
 
+# --tag auto（批189）：取 registry 最新正式 semver tag；一个正式 tag 都没有时必须报未定，
+# 不能退化成"随便挑一个 edge/latest 去核"。
+rv_auto_case() { # 名称 期望码 空tag开关 期望片段
+	local d out rc
+	d=$(mktemp -d)
+	mkdir -p "$d/bin"
+	rv_stub "$d"
+	python3 "$rv_lib/release-verify.fixture.py" "$d/fix" none >/dev/null
+	out=$(env "${3:-RR3_NOOP}=1" FIX="$d/fix" PATH="$d/bin:$PATH" \
+		bash "$rv_main" --tag auto --repo test --classes firmware 2>&1)
+	rc=$?
+	rm -rf "$d"
+	if [ "$rc" -ne "$2" ] || ! printf '%s' "$out" | grep -qF "$4"; then
+		printf 'FAIL  self-test/%s（期望 %d/「%s」实得 %d）\n' "$1" "$2" "$4" "$rc"
+		return 1
+	fi
+	printf 'PASS  self-test/%s（退出码 %d）\n' "$1" "$rc"
+	return 0
+}
+
 # 用法面：非正式版 tag 必须在取数之前拒绝（退出 2）。
 rv_usage_case() {
 	local rc
@@ -172,6 +196,8 @@ rr3_rv_self_test() {
 	rv_sig_case 签名全通过 0 "" "--with-signature" "签名验证通过" || fail=1
 	rv_sig_case 无匹配签名红 1 RR3_COSIGN_FAIL "--with-signature" "签名验证失败" || fail=1
 	rv_sig_case 缺cosign未定 2 "" "--with-signature" "cosign" rm-cosign || fail=1
+	rv_auto_case 自动取最新tag 0 "" "tag auto → v0.0.8" || fail=1
+	rv_auto_case 无正式tag报未定 2 RR3_TAGS_EMPTY "取到正式 tag" || fail=1
 	rv_usage_case || fail=1
 	[ "$fail" -eq 0 ] || return 3
 	return 0

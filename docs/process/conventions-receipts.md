@@ -2303,3 +2303,12 @@ distro 按 `oras` descriptor 取 digest，调 cosign verify 并**固定**身份�
 （与 B.1 同源，不做可配置放宽）；缺 cosign 退 2（未定），无匹配签名退 1。自检加
 cosign 桩与三例（通过/无匹配/缺工具），共十二例。判据——self-test 12/12；签名 tag
 匿名可读的证据如上；端到端 cosign 验证待有 cosign 的环境（tag 窗口或本机安装）。
+
+**2026-11-27 批189 周程按"已发布最新 tag"回读**：事实——批182 的周程腿用
+`v$(cat VERSION)` 拼 tag；VERSION 在 release 提交里先 bump、tag 随后才推，这个正常窗口
+会让周程常红（假红久了就没人看），而"公开交付面现在是什么"的正确问题对象是**已发布
+的最新正式 tag**。处置——巡检器增 `--tag auto`：`oras repo tags` 取镜像仓 tag，筛
+`vX.Y.Z` 后 `sort -V` 取最大；一个正式 tag 都没有时报未定（2），不退化成拿 edge/latest
+去核；platforms 周程腿改 `--tag auto`。自检加两例（auto 选中 v0.0.8 / 无正式 tag 报
+未定），共十四例。判据——self-test 14/14；本机匿名实跑 `--tag auto` 选中 v0.0.8 并
+image+firmware 全 PASS；⑤⑬⑯ 绿。
