@@ -59,6 +59,11 @@ MCU 无 A/B 分区，升级一律线下重烧。每个芯片平台独立部署�
 实现单点：[`pack-bundle.sh`](pack-bundle.sh) 的 BUNDLE_VERSION 段、[`install-bundle.sh`](install-bundle.sh)
 的顶层校验与 `rollback()`；改任一侧都要同批改本节。
 
+**前置（base 层）**：本包是 A10 更新/重装 payload，**不含也不装 systemd unit**——
+`install-bundle.sh` 从已装 `rrd.service` 读 `--socket`/`--profile` 开关。干净机首装必须
+先走 deb（unit 随 deb 落位）；bundle-only 干净机上漂移门报 unit `MISS` 是如实提示，
+不是误报。
+
 ### 装机后核验：`verify-board-config.sh`
 
 装机树与仓内真值逐文件 sha256 判等，**覆盖六类**：模块 config（含 esp32/pi4b 档）、
