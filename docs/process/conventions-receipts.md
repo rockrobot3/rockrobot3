@@ -1511,3 +1511,35 @@ JSON 解析 1 次整树复制（要 topic 必须解析，换借用式需引入 s
 （面板回看待接线）。**没有未登记的遗留**；`rr3_frame_to_bytes` 仍有真实消费者
 （rrctl/sim/夹具），不退役。处置——本批零代码改动，结论入册（宁缺勿滥）。判据——
 `grep -rn 'allow(dead_code)'` 逐条有理由；`cargo check` 无新增告警。
+
+**2026-11-27 批79 rock3 双轨目录核对与"换板六件"**：事实——`base/os/` 两个子轨的落点
+散在 README 的散文里，没人能一页回答"接一块新板要交什么、现役长什么样、谁接住"；
+核对两轨现役文件（保底轨 8 件全在 `board/radxa-zero3/` + `configs/` + `patches/`，
+快路轨 2 页 board 笔记 + 1 个 unit）无孤儿件；两轨形状不同（`board/<板>/` 多件 vs
+单页 md）也不是缺口。处置——`base/os/README.md` 增"接入一块新板：要交的六件"表
+（芯片事实 / 装机描述符 / 引脚构造 / 保底轨 / 快路轨 / 制品与烧录入口），每行给现役
+实例与接手它的判据；写明形状差异的理由（构建系统按目录取板级件，发行版差异是运维笔记）。
+判据——⑤ 文档门绿；表中每个路径都在仓内存在（逐条 `test -e` 过），每条判据都能点回
+workflow 或门禁步。
+
+**2026-11-27 批80 慢消费者闭环补测**：事实——慢消费者链三段（队列满丢帧 + 写超时计数）
+有单测，第三段"收件端消失 → 扇出摘连接（`Disconnected` → `tx=None`）"**没有**：缺了它，
+扇出会一直往没人读的通道塞帧、只记账不摘链。处置——`registry/tests/death.rs` 增
+`fanout_drops_dead_writer`：drop 接收端后，投递数不计死连接、`rr3_reg_live` 转假、
+活连接不受牵连、且**不计入 `fan_dropped`**（两种故障分开，不混账）。判据——
+rrd lib 测试 326 项全过；`write_counted`（写超时分类）在批72 的 writev 后照常通过，
+说明写路径换实现没有改变超时语义。
+
+**2026-11-27 批81 发布被拒点名留痕**：事实——归属拒只在 `denied_publish` 加一，
+rrd 日志里没有"谁、什么主题、被哪一层拒"；运维看得到在越权却查不出源头。
+处置——注册表新增 `rr3_reg_note_deny`（总数照记 + 首见必落一行、同一 (模块,主题)
+此后每 64 次再报），行只进 `pending_logs`、由 `rr3_reg_with` 放锁后落盘（registry 锁内
+零文件 I/O 的纪律不变）；`conn/publish.rs` 的 `rr3_pub_check` 改走 `rr3_reg_with`。
+判据——rrd lib 326 项 + `register_publish` 19 项集成用例全过、clippy `-D warnings` 干净。
+
+**2026-11-27 批82 流水线计数去手抄**：事实——`ci-workflows.md` 正文写"gate 7 /
+integration 7 / platforms 6（实例 9）/ publish 3 / buildroot 3 / coverage 1"，同文件
+表格写 platforms 8，实测是 6/7/7/4/3/2——同一个文件里三套数。根因是 job 清点被手抄
+进正文，而唯一真源本是 `workflows_audit.py` 的 `REQUIRED_JOBS`。处置——正文改为
+"条数不在这里抄，真源指过去"，并把这次实测值作为反面教材写进同一段；表格 platforms
+修正为 7。判据——⑤ 文档门绿；`workflows_audit.py` 七项全过。
