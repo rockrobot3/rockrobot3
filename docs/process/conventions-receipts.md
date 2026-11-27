@@ -1445,3 +1445,39 @@ gate / integration 在 `bed8eb4` 全绿。
 `archive/v0.0.x/*`、五类制品的 tag 形状与触发条件、开发分支不产出制品）。判据——⑤ 文档门
 绿；表中每条"已跑"都能点回证据册条目或流水线 run 号，每个制品名都能在
 `publish.yml` / `buildroot.yml` 里逐字找到。
+
+**2026-11-27 批71–72 写侧零拷贝（广播链第二刀）**：事实——扇出已改共享体，但
+`rr3_write_bytes` 仍走 `rr3_frame_to_bytes`，**每个收件连接每帧再拼一份 头+payload**
+（音频片 ~11KB，六连接就是 66KB/帧 的分配与复制，且在出向锁内）。处置——头用
+`rr3_header_encode` 出 128B 栈缓冲、payload 用帧内切片，两段 iovec 一次
+`write_vectored` 提交，部分写在锁内续投；每帧复制由 **1 次/连接 → 0**，系统调用
+**1 次/帧**，`RR3_FAN_WRITE_TIMEOUT` 仍是"一帧 5s"。**审计修正（重要）**：批71 首版
+写成两次 `write_all`，审计发现它把 5s 预算拆成两段（最坏 10s），与
+`rrd-rpc.md` 的"对端 5s 不收"口径不符——批72 改单次 `writev` 收回口径，两次提交
+在同一条历史里，不掩盖。判据——`rrd` 325 项 lib 测试全过、clippy `-D warnings` 与
+`cargo fmt --check` 干净；gate / integration / platforms 在 `3c1c22d` 前后均绿。
+
+**2026-11-27 批73 六份模块 README 同形**：事实——六模块 README 骨架不一致：brain 的
+"与其它模块的边界"实为一张主题表（就是总线面），且把记账落点写成已不存在的
+`dispatch.rs`（实为 `dispatch/turn.rs`）、还抄了"77 条"这种会漂的单测计数；
+connect 缺"心跳自报计数"节。处置——brain 该节改名"总线面"并补一句"边界就是下表"、
+落点改 `dispatch/turn.rs`、删硬编码条数；connect 补"不上报自报计数"一节并给理由；
+`modules/README.md` 记下同形裁定（目录结构 → 总线面 → 心跳自报计数 → 本地自检，
+无计数也要写这节，会漂的数字不抄）。判据——⑤ 文档门绿；六份 README 的二级标题
+逐份对照只差模块专属小节（interact 的 Web 面板、brain 的意图规则面）。
+
+**2026-11-27 批74 五芯片覆盖矩阵**：事实——`platforms.yml` 的五芯片约束只有散文
+（哪些腿必须有），没有"某芯片在哪条腿、拿什么判据、发布面走哪条"的一页对表，
+评审时要翻三份 workflow。处置——`docs/process/ci-workflows.md` 在"五芯片覆盖"下
+落矩阵表（芯片 × 环境 target × 每次 push 的腿 × 发布面腿 × 判据），并写明两条口径：
+英特尔与 AMD 同属 `x86_64`，一条腿覆盖两家、不造重复腿；Windows/macOS 是宿主等价面
+不计芯片覆盖；另注明 `ipct003` 与 `autonomy-face` 两腿的证据归属。判据——⑤ 文档门绿；
+`workflows_audit.py` 七项全过（矩阵里每个 job 名都能在 workflow 中找到）。
+
+**2026-11-27 批74 附 漂红处置（distro-smoke）**：事实——`87de7c5` 的 integration 红在
+`distro-smoke`，注解只有"exit code 101"，job 日志匿名不可读（403），且该腿 96 秒即退出
+（不足以完成容器内全量构建）——根因不可见。处置——不猜、不改判据：把该步套上仓库既有
+的 `.github/actions/guarded-run`（失败时把 error 行连同后 3 行上下文压成注解，并对
+`spurious network error/502/504` 退避重试两次），命令与判据不变。判据——重推后
+gate / integration 在 `3c1c22d` 全绿（distro-smoke 通过），落定为**容器侧瞬态**而非
+代码缺陷；此后该腿失败会自带根因行，不再只剩退出码。
