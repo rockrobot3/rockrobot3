@@ -254,18 +254,41 @@ install_bundle() {
   echo "::notice title=install-smoke-bundle::换树成功 commit=${commit}，六模块 running（窗口=${SWAP_MS}ms）"
 }
 
+# 装机面漂移门的单次调用（正例与负例共用同一条命令，避免两处各写一套参数）。
+drift_probe() {
+  bash tools/deploy/verify-board-config.sh --repo "$PWD" --local "$ROOT" \
+    --unit-dir /usr/lib/systemd/system --profile distro
+}
+
 # 装机面漂移门正例：真包换树后，仓与装机应逐字节相等。判据体复用
 # tools/deploy/verify-board-config.sh（此前只有 20 条自检与真板远端，没有一次
 # "刚装完的机器"本地正例）；这里只决定跑法与断言，不复制比对逻辑。
 verify_install() {
   local out
-  out=$(bash tools/deploy/verify-board-config.sh --repo "$PWD" --local "$ROOT" \
-    --unit-dir /usr/lib/systemd/system --profile distro) \
+  out=$(drift_probe 2>&1) \
     || { printf '%s\n' "$out" >&2; die "装机面漂移门判红（真包换树后不应有漂移/缺件）"; }
   printf '%s\n' "$out" | tail -3
   grep -q '结论：装机面.*与仓内一致' <<<"$out" \
     || die "装机面漂移门未给出「与仓内一致」结论"
   echo "::notice title=install-smoke-drift::真包换树后装机面漂移门判一致（仓/装机逐字节）"
+}
+
+# 漂移门负例（批222）：在真装机树上改一件 config，门必须判 DRIFT 并点名；还原后
+# 必须重回一致。正例只证明"没漂时不误报"，负例才证明"漂了看得见"——两者合起来
+# 才是这台门在真装机面上的完整回执。
+drift_negative() {
+  local target="$ROOT/modules/rr3-sense/config.toml" backup="$WORK/config.toml.bak"
+  local out rc=0
+  cp "$target" "$backup"
+  printf '\n# ci drift probe\n' | as_root tee -a "$target" >/dev/null
+  out=$(drift_probe 2>&1) || rc=$?
+  as_root install -m644 "$backup" "$target"
+  [ "$rc" -eq 1 ] \
+    || die "改一件 config 后漂移门未判红（rc=${rc}）：$(tail -2 <<<"$out" | tr '\n' ' ')"
+  grep -q '^DRIFT modules/rr3-sense/config.toml' <<<"$out" \
+    || die "漂移门未点名被改的 config（DRIFT 行缺席）"
+  drift_probe >/dev/null || die "还原 config 后漂移门仍判红"
+  echo "::notice title=install-smoke-drift-neg::改一件 config 后漂移门判 DRIFT 并点名，还原后重回一致"
 }
 
 # 回滚例：坏 rrd（非 ELF）能通过解包前检查，但起不来——install-bundle 必须回滚。
@@ -308,6 +331,7 @@ main() {
   make_bundle
   install_bundle
   verify_install
+  drift_negative
   rollback_case
   report_timing
   echo "PASS  装机器正例：deb→systemd 六模块 running；真包换树成功且装机面无漂移；坏包回滚成功"
