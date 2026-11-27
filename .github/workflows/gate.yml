@@ -347,4 +347,11 @@ jobs:
         run: python3 tools/ci/audit/lockio_audit.py --self-test
       - name: 锁内 I/O 审计（lock·log 同行 / 条件位 guard / 直调 reg 日志方法）
         run: python3 tools/ci/audit/lockio_audit.py
+      # 发布/部署面清单对拍（批250 立，批252 接门）：模块增删漏改任一处（发布策略 /
+      # 镜像装机 / 镜像起齐 / 板侧派生），流水线仍绿而某载体静默缺件；判据是集合相等。
+      # 先自检夹具（1 正例 + 6 负例），再执法。
+      - name: 发布面清单对拍自检（正例 + 六负例）
+        run: python3 tools/ci/audit/release_sets.py --self-test
+      - name: 发布面清单对拍（真值 / 发布策略 / 镜像 / 板侧派生）
+        run: python3 tools/ci/audit/release_sets.py
 

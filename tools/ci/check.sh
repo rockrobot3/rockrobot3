@@ -132,6 +132,7 @@ mod_lang() {
 . "$root/tools/ci/steps/13.sh"
 . "$root/tools/ci/steps/14.sh"
 . "$root/tools/ci/steps/16.sh"
+. "$root/tools/ci/steps/17.sh"
 
 step "① workspace 编译"
 run sh -c 'cd base/runtime && cargo check --locked --all-targets --workspace'
@@ -422,6 +423,12 @@ if command -v python3 >/dev/null 2>&1; then
 else
   printf 'SKIP  ⑮ python3 缺位——锁内 I/O 门不执行（CI runner 自带 python3）\n'
 fi
+
+# ⑰ 发布/部署面清单对拍（批250 立脚本，批252 接门）：模块增删漏改任一处（发布策略 /
+# 镜像装机 / 镜像起齐 / 板侧派生），流水线仍绿而某载体静默缺件——只在真板装上暴露。
+# 判据是集合相等：新增模块不入选发布集必须显式改策略，不许默默漏。
+step "⑰ 发布/部署面清单对拍（真值 / 发布策略 / 镜像 / 板侧派生）"
+rr3_step_17
 
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then

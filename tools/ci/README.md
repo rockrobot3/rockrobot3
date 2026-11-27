@@ -52,6 +52,7 @@
 | ⑭ | `steps/14.sh` | 装载门体量基线门（裁-13/基-38）：装配单锚函数的块行数、`read_to_string` 样板数、rr-registry 同形函数数按 `gate-size-baseline.txt` 只降不升；锚函数缺失或基线形状坏即红 |
 | ⑮ | `python3 tools/ci/audit/lockio_audit.py`（先 `--self-test`） | 锁内 I/O 门：`lock·log` 同行 / 条件位临时 guard 延寿到块体 / 直调会写待落盘日志的 registry 方法；扫面打空即门禁失效；gate `scripts` 同源执法 |
 | ⑯ | `steps/16.sh` | 源文件行数门：每个 `.rs/.py/.sh` <500 行（铁律，2026-11-22 收紧）；按 `gate-lines-baseline.txt` 只降不升 |
+| ⑰ | `python3 tools/ci/audit/release_sets.py`（自检在 gate `scripts`） | 发布/部署面清单对拍：仓内真值（`modules/rr3-*/module.toml`）/ 发布策略（`PUBLISH_MODULES` + publish.yml 构建循环）/ 镜像（stage-image 两处装机 + image-smoke 起齐与阈值）/ 板侧派生（pack-bundle、pack-arm64 走 `runtime-members` 且留 brain 例外）必须同一集合；缺/多逐项点名 |
 
 **基线只降不升审计（`baselines_audit.py`，gate `scripts` job）**：把 `tools/ci/baseline/*-baseline.*`
 与 base ref 的同名文件逐键比对——已存在的键上调即红；新键/缺键告警；未登记基线文件即红。
@@ -217,7 +218,8 @@ firmware 必须带 `packages: write`、推 `rockrobot3-firmware`，且 S3 目标
 （`pack-bundle.sh` / `pack-arm64.sh` 必须派生并保留 brain 例外，出现字面量清单即红）。
 判据是**集合相等**而非包含：新增模块不入选发布集必须显式改策略，不许默默漏件。
 `python3 tools/ci/audit/release_sets.py [--root DIR]`；`--self-test` 给 1 正例 + 6 负例。
-**暂未接 check.sh**（先随批观察，门位另行裁定）。
+门位：check.sh ⑰（本地与 gate `conventions` 同源执法），自检与即时执法另在 gate
+`scripts` job 跑一遍（不编译，秒级），失败归因不再混进度量门。
 
 ## 平台覆盖矩阵（2026-11-17 首立，按 workflow 事实源抄录）
 

@@ -2737,3 +2737,12 @@ stage-image:49/57、image-smoke:80 各命中真实循环）。本轮不接 check
 没有；② 批253 把 brain 例外从 `pack-bundle.sh` / `pack-arm64.sh` 两处收敛进
 `runtime-members.sh`（新增派生入口），并让 `release_sets.py` 核"板侧包走派生入口"；
 ③ 批254 三线查红与回执收口，复核 11-30 窗口是否触发；④ 每步 commit+push 三远端。
+
+**2026-11-28 批252 清单对拍接门（⑰）**：事实——批250 立的 `release_sets.py` 若无任何
+门调用，等价于死代码；"已立机制真正发挥作用"要求它进入例行执法位。处置——新增 ⑰
+步骤（[steps/17.sh](../../tools/ci/steps/17.sh) 只执法，自检归 gate `scripts`），
+`check.sh` 调用序与 [gate_steps.txt](../../tools/ci/baseline/gate_steps.txt) 逐字登记
+（30 步）；gate `scripts` job 增自检（1 正例 + 6 负例）与执法两行；ci/README 步骤表、
+对拍章节与"暂未接"表述同批订正。判据——`gate_steps_audit.py` PASS（30 步逐字同序）；
+`workflows_audit.py` PASS；`bash -n` 两脚本通过；⑰ 单步执行 PASS（真值 6 · 策略 6 ·
+镜像同集 · 派生 5）；⑤ 文档门与 ⑯ 行数门绿（752 源文件、硬线 0）。
