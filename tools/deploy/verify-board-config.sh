@@ -63,8 +63,29 @@ rr3_deploy_manifest() {
 	rr3_manifest_modules "$repo"
 	rr3_manifest_boards "$repo" "$profile"
 	rr3_manifest_profiles "$repo" "$profile"
+	rr3_manifest_contracts "$repo" "$profile"
 	rr3_manifest_units "$repo"
 	rr3_manifest_hardware "$repo" "$profile"
+}
+
+# 契约册与平台事实表：rr3-pack 随包装机、rrd 装载期直接读——漂了同样拒 boot。
+# 四册名单与 rrd 代码里的 RR3_CONTRACT_BOOKS 同集（真值在代码；本表是部署侧
+# 对账面，名单变化须同批改两处）。平台册按档位 [platform].chip 选一；无 --profile
+# 的 legacy/多档模式不猜芯片，只比四册（平台册按 MISS 计会误报）。
+rr3_manifest_contracts() {
+	local repo="$1" profile="$2" b f chip=""
+	for b in topics slots roles devices; do
+		[ -f "$repo/contracts/$b.toml" ] \
+			&& printf 'contracts/%s.toml|contracts/%s.toml|full\n' "$b" "$b"
+	done
+	[ -n "$profile" ] || return 0
+	[ -f "$repo/profiles/$profile.toml" ] || return 0
+	chip="$(sed -n '/^\[platform\]/,/^\[/s/^chip[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+		"$repo/profiles/$profile.toml" | head -n 1)"
+	[ -n "$chip" ] || return 0
+	f="$repo/contracts/platform/$chip.toml"
+	[ -f "$f" ] && printf 'contracts/platform/%s.toml|contracts/platform/%s.toml|full\n' "$chip" "$chip"
+	return 0
 }
 
 # 模块 config：每模块三份候选（默认 / esp32 档 / pi4b 档），存在即比。
@@ -221,7 +242,7 @@ EOF
 		echo "结论：装机面与仓内不一致——重装包（dpkg -i）或重新铺镜像后再跑本工具确认"
 		return 1
 	fi
-	echo "结论：装机面（模块 config / 装配单 / systemd unit / 板级资产 / hardware 真值集）与仓内一致"
+	echo "结论：装机面（模块 config / 装配单 / 契约册 / systemd unit / 板级资产 / hardware 真值集）与仓内一致"
 	return 0
 }
 
@@ -240,6 +261,7 @@ st_prepare() {
 	ETC_DIR="$st_dir/inst-etc"
 	mkdir -p "$st_dir/repo/modules/rr3-a" "$st_dir/inst/modules/rr3-a" \
 		"$st_dir/repo/profiles" "$st_dir/inst/profiles" \
+		"$st_dir/repo/contracts" "$st_dir/inst/contracts" \
 		"$st_dir/repo/hardware/p/axis" "$st_dir/inst/hardware/p/axis" \
 		"$st_dir/repo/base/os/distro/units" "$UNIT_DIR" \
 		"$st_dir/repo/base/os/distro/boards/p/etc/systemd/system/rrd.service.d" \
@@ -248,6 +270,11 @@ st_prepare() {
 	cp "$st_dir/repo/modules/rr3-a/config.toml" "$st_dir/inst/modules/rr3-a/config.toml"
 	printf '[hardware]\nalsa_device = "plughw:CARD=Device"\n' >"$st_dir/repo/profiles/p.toml"
 	cp "$st_dir/repo/profiles/p.toml" "$st_dir/inst/profiles/p.toml"
+	# 契约四册：装机侧与仓内逐字节一致才算过（平台册按档位 chip 另算，夹具不立）。
+	for b in topics slots roles devices; do
+		printf '# %s\n' "$b" >"$st_dir/repo/contracts/$b.toml"
+		cp "$st_dir/repo/contracts/$b.toml" "$st_dir/inst/contracts/$b.toml"
+	done
 	# 装载真值集 hardware 面（wiring + axis）：与装机侧逐字节一致才算过。
 	printf '[[wire]]\nconnector = "J0"\n' >"$st_dir/repo/hardware/p/wiring.toml"
 	cp "$st_dir/repo/hardware/p/wiring.toml" "$st_dir/inst/hardware/p/wiring.toml"
@@ -288,6 +315,9 @@ st_cases() {
 	printf '[hardware]\nalsa_device = "plughw:CARD=sndrpigooglevoi"\n' >"$st_dir/inst/profiles/p.toml"
 	st_case 装配单漂移红 1
 	printf '[hardware]\nalsa_device = "plughw:CARD=Device"\n' >"$st_dir/inst/profiles/p.toml"
+	printf '# drift\n' >"$st_dir/inst/contracts/topics.toml"
+	st_case 契约册漂移红 1
+	cp "$st_dir/repo/contracts/topics.toml" "$st_dir/inst/contracts/topics.toml"
 	printf '[[wire]]\nconnector = "JX"\n' >"$st_dir/inst/hardware/p/wiring.toml"
 	st_case wiring漂移红 1
 	cp "$st_dir/repo/hardware/p/wiring.toml" "$st_dir/inst/hardware/p/wiring.toml"
