@@ -2074,3 +2074,19 @@ unit `MISS` 是如实提示。判据——两脚本文件清单与扫描面逐�
 口径分支**都带 `ssh -n`**（2026-11-16 的 here-doc 吃 stdin 修复对新增成员自动生效）；
 安装侧路径由 `rr3_inst_path` 默认分支拼 `$root/hardware|contracts/...`，与安装根一致。
 处置——零改动。判据——函数调用链静态走读。
+
+**2026-11-27 批161 install-bundle 缺 unit 时点名**：事实——bundle 不含也不装 unit；
+`unit_arg` 吞掉 `systemctl cat` 非零后，`SOCK` 走缺省、`profile` 为空，脚本会**静默**
+换树——干净机上得到"装完没有服务"的结果。处置——在 SOCK 缺省后补一条 WARN：点名
+「未找到已装 rrd.service、bundle 不装 unit、干净机先装 deb、本次按缺省 socket 继续」；
+不中止（staging 树/chroot 下 systemctl 不可用属合法场景）。判据——`bash -n` 过；
+分支条件为 `--socket` 与 `--profile` 双空，避免误报。
+
+**2026-11-27 批162 boards §10 漂移核验命令复核（无改动）**：事实——
+`base/os/distro/boards/raspberry-pi-64.md` §10 步④ 已写
+`--repo . --remote pi@<板地址> --profile pi4b-solo`，与批159 的 profile 口径一致。
+处置——零改动。
+
+**2026-11-27 批163 build-onboard 用法在文档中的引用复核（无改动）**：事实——README 与
+boards 只按名引用 `build-onboard.sh`（作为"板上原生构建音频件"的入口），未抄参数表；
+批159 新增的第 4 参不产生文档漂移。处置——零改动。
