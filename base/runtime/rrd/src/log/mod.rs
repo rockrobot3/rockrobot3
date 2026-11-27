@@ -144,16 +144,17 @@ pub fn rr3_log_query(prefix: &str, tail: usize) -> Vec<String> {
 }
 
 /// 查询的纯函数核（锁外可测）：过滤与尾行裁剪，不改环。
+///
+/// `tail > 0` 时**只从环尾往回收 tail 条**再反转——旧写法先全量 `cloned()` 再
+/// `drain` 头部，大环（装配单 `log_ring_cap` 可调大）配小 tail 会白拷一遍全环。
 #[cfg(unix)]
 fn rr3_log_filter(lines: &VecDeque<String>, prefix: &str, tail: usize) -> Vec<String> {
-    let mut out: Vec<String> = lines
-        .iter()
-        .filter(|line| prefix.is_empty() || line.contains(prefix))
-        .cloned()
-        .collect();
-    if tail > 0 && out.len() > tail {
-        out.drain(..out.len() - tail);
+    let hit = |line: &&String| prefix.is_empty() || line.contains(prefix);
+    if tail == 0 {
+        return lines.iter().filter(hit).cloned().collect();
     }
+    let mut out: Vec<String> = lines.iter().rev().filter(hit).take(tail).cloned().collect();
+    out.reverse();
     out
 }
 
