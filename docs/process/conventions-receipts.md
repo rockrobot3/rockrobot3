@@ -2370,3 +2370,11 @@ digest 汇总表（192）、周程启用验签（193）、回执签名面边界�
 `missing_workflows`（必列 workflow 文件缺即红）并把 `release-anon.yml`/`anon` 入表；
 ci-workflows 与 conventions 同步。判据——两文件 YAML 解析过；结构审计绿；自检 30/30
 （夹具缺该文件被抓）；⑤⑬⑯ 全绿；真实周程/手动结果待触达。
+
+**2026-11-27 批197 发布面腿数陈旧计数清扫**：事实——批174/179 把发布腿扩到五条产出腿
+＋总账腿后，三处现行文档仍写旧数：publish.yml 的 version-gate 注释"四个出口"、
+ci-workflows 的"build/build-riscv64/merge/firmware 四个出口"、tools/ci README 的
+"四腿"；读者按文档核对会漏掉 distro 与总账。处置——三处按现状改写（五条产出腿＋
+release-verify；覆盖契约补 release-anon 文件级存在判据）；历史回执/证据档不改写
+（记录当时事实）。判据——⑤ 文档门绿；结构审计绿；三处数字与 `REQUIRED_JOBS`、
+publish.yml 的 job 列表逐名对上。

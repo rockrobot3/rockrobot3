@@ -63,8 +63,9 @@ check-runs/{id}/annotations`，无需 token；取数收成单点
 tag 与它同名并打在该提交上。atomgit 是主仓，github 是镜像仓（只借流水线），
 tag 先推 atomgit 再镜像 github。口径全文见 [conventions §7 版本纪律](conventions.md)。
 
-执法点只有一处：`tools/ci/lib/release-tag.sh`——publish 的 build / build-riscv64 /
-merge / firmware 四个出制品出口与 buildroot 的 release 腿都先调它取 `tag=` / `version=`；
+执法点只有一处：`tools/ci/lib/release-tag.sh`——publish 的五条产出腿
+（build / build-riscv64 / merge / firmware / distro-bundle）与 buildroot 的 release 腿
+都先调它取 `tag=` / `version=`；
 tag 与 `VERSION` 不同源、或 tag 未指向 release 提交即非 0 退出，不出制品。firmware
 腿 2026-11-27 批142 补齐（此前与 build 并行且只判 `refs/tags/v`，版本纪律可被绕开）。`workflow_dispatch`
 与分支推送两条路径不做版本判定（它们不发 Release，行为不变）。自检

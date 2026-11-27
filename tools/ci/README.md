@@ -191,9 +191,10 @@ job 定义 ≤10；integration/platforms 的 push/PR 必须 `paths-ignore` 含 `
 芯片矩阵缩水/芯片 job 缺失/芯片验证步骤缺失/riscv 镜像腿缺失/发布面缺腿/发布矩阵缺 arm64/
 发布镜像冒烟缺失/门禁 job 缩水/固件缺 S3/制品面缺名二十三条负例，gate 的 `scripts` job
 先自检后执法。
-**作业覆盖契约**：gate / integration / platforms / publish / buildroot 的 job 名全部按
-`REQUIRED_JOBS` 钉住（删名即红，改名须同批评审）；发布面完整性：
-`publish.yml` 必须有 build / build-riscv64 / merge / firmware 四腿；build 矩阵必须
+**作业覆盖契约**：gate / integration / platforms / publish / buildroot / coverage /
+release-anon 的 job 名全部按 `REQUIRED_JOBS` 钉住（删名即红、整文件删也红，改名须同批
+评审）；发布面完整性：`publish.yml` 必须有 build / build-riscv64 / merge / firmware /
+distro-bundle 五条产出腿与 release-verify 总账腿；build 矩阵必须
 含 amd64/arm64 原生腿与 `ubuntu-24.04-arm`；build 必须走 `stage-image.sh` 与
 `image-smoke.sh file|run`（发布镜像按装机面验证）；build-riscv64 必须复用
 `build-riscv-image.sh` 并推送；merge 必须等两条构建腿、合并命令含三架构单镜像并
