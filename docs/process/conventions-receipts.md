@@ -2822,3 +2822,12 @@ B.2 实测与 `distro` 类纳入匿名回读的裁定；④ 批261 三线收口�
 `140710054135` 注解实测 `boot_spawn6_ms=1010 ceiling_ms=20000`、`status_rtt_ms=2
 ceiling_ms=5000`；install-smoke 同拍 success（rollback 早停无回归）。上限本批不动：
 单拍不足以校准，第二拍后再按实测余量收紧。
+
+**2026-11-28 批259 distro-smoke 时延上限校准（两拍实测）**：事实——批258 后注解面
+连续两拍可读：`2d3ae48a` 拍 `boot_spawn6_ms=1010` / `status_rtt_ms=2`，`3eb4ffbf` 拍
+`boot_spawn6_ms=1014` / `status_rtt_ms=2`（偏差 0.4%）。处置——上限由保守值
+20000/5000 收紧到 10000/1000（boot 约 10 倍余量，status 只拦总线卡顿/守护假死），
+两处上限行带校准出处；status 第 29 行由"未校准"改为已校准并记两拍原值。判据——
+`3eb4ffbf` integration success，distro-smoke job `140712122709` 注解实测
+`boot_spawn6_ms=1014 ceiling_ms=10000`、`status_rtt_ms=2 ceiling_ms=1000`；install-smoke
+同拍 success。
