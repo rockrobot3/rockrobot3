@@ -31,8 +31,13 @@ SOCK=/var/run/rock3-ipc.sock
 MODULES=$(rr3_modules .)
 UNITS=$(rr3_module_bins . | tr '\n' ' ')
 
-# 时延观测（批221）：三段数字各记一次，只回传不判红（阈值校准归 status 敞口 29，
-# 先积累实测再收紧；日志匿名不可读，notice 与 step summary 是公开面）。
+# 时延观测（批221）与上限（批265）：三段各记一次并经 notice 公开回传。
+# 四拍基线（notice 可回读）：rollback 4359/4374/4453/4513ms、swap 2319-2531ms、
+# boot_systemd 1651-2137ms。上限取约 3-5 倍余量，只拦回涨——旧回滚 32619ms 会被
+# 15000ms 直接拦下；正常抖动不触发。
+BOOT_CEIL_MS=10000
+SWAP_CEIL_MS=10000
+ROLLBACK_CEIL_MS=15000
 BOOT_MS=""
 SWAP_MS=""
 ROLLBACK_MS=""
@@ -47,6 +52,15 @@ die() {
 # root 直跑或免密 sudo 二选一：CI runner 是非 root + sudo，root 面（容器/真板）直接执行。
 as_root() {
   if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo -n "$@"; fi
+}
+
+# 时延上限判据（批265）：超限即红并打印实测/上限——回归必须能定位到具体段。
+tt_ceiling() {
+  local name=$1 ms=$2 ceil=$3
+  if [ "$ms" -le "$ceil" ]; then
+    return 0
+  fi
+  die "${name} ${ms}ms 超过上限 ${ceil}ms（流畅度回归；基线见 status 部署面时延四拍）"
 }
 
 # 失败现场：unit 状态 + journal + 装机树。归因不能只看脚本自己的一行 FAIL——
@@ -234,8 +248,9 @@ start_unit() {
   as_root systemctl is-active --quiet rrd || die "rrd 未 active：$(unit_reason)"
   wait_modules
   BOOT_MS=$(( $(now_ms) - t0 ))
-  echo "     unit active，全模块 running（boot ${BOOT_MS}ms）"
-  echo "::notice title=install-smoke-systemd::deb 装机 + systemd unit 拉起成立，全模块 running（boot=${BOOT_MS}ms）"
+  tt_ceiling boot_systemd "$BOOT_MS" "$BOOT_CEIL_MS"
+  echo "     unit active，全模块 running（boot ${BOOT_MS}ms / 上限 ${BOOT_CEIL_MS}ms）"
+  echo "::notice title=install-smoke-systemd::deb 装机 + systemd unit 拉起成立，全模块 running（boot=${BOOT_MS}ms/上限 ${BOOT_CEIL_MS}ms）"
 }
 
 # 版本化 bundle：真出包（仓内 profile 原样 linux，不做任何改写）+ A10 契约复核。
@@ -263,8 +278,9 @@ install_bundle() {
   as_root systemctl is-active --quiet rrd || die "换树后 rrd 未 active"
   wait_modules
   SWAP_MS=$(( $(now_ms) - t0 ))
+  tt_ceiling bundle_swap "$SWAP_MS" "$SWAP_CEIL_MS"
   phases=$(install_phases "$out" || true)
-  echo "::notice title=install-smoke-bundle::换树成功 commit=${commit}，全模块 running（窗口=${SWAP_MS}ms${phases:+；$phases}）"
+  echo "::notice title=install-smoke-bundle::换树成功 commit=${commit}，全模块 running（窗口=${SWAP_MS}ms/上限 ${SWAP_CEIL_MS}ms${phases:+；$phases}）"
 }
 
 # 装机面漂移门的单次调用（正例与负例共用同一条命令，避免两处各写一套参数）。
@@ -329,9 +345,10 @@ rollback_case() {
   as_root systemctl is-active --quiet rrd || die "回滚后 rrd 未 active"
   wait_modules
   ROLLBACK_MS=$(( $(now_ms) - t0 ))
+  tt_ceiling rollback "$ROLLBACK_MS" "$ROLLBACK_CEIL_MS"
   attempt=$(grep -o '本次尝试 [0-9]*ms' <<<"$out" | tail -1 || true)
   echo "     回滚证据：rc=${rc}，$(grep '已回滚' <<<"$out" | tail -1)"
-  echo "::notice title=install-smoke-rollback::坏包回滚成立 rc=${rc}（树与二进制已回上一版，全模块 running，恢复=${ROLLBACK_MS}ms${attempt:+；$attempt}）"
+  echo "::notice title=install-smoke-rollback::坏包回滚成立 rc=${rc}（树与二进制已回上一版，全模块 running，恢复=${ROLLBACK_MS}ms/上限 ${ROLLBACK_CEIL_MS}ms${attempt:+；$attempt}）"
 }
 
 main() {
