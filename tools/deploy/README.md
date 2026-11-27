@@ -75,8 +75,9 @@ MCU 无 A/B 分区，升级一律线下重烧。每个芯片平台独立部署�
 config 验 DRIFT 点名并还原），最后以坏 `rrd` 包验回滚。判据体在
 [`tools/ci/platform/install-smoke.sh`](../ci/platform/install-smoke.sh)；
 `/etc` 部署副本与 unit drop-in 只承担 CI 的 sim 环境，不进包、不改仓。三段时延（boot /
-换树窗口 / 回滚恢复）以 notice 与 step summary 回传（批221），**只记录不判红**——阈值
-待实测积累后按 [status 敞口 29](../../docs/status.md) 校准。
+换树窗口 / 回滚恢复）以 notice 回传并带**上限判据**（批265：boot/换树各 10000ms、
+回滚 15000ms，超限即红并打印实测/上限；上限按四拍实测留 3-5 倍余量，基线数值见
+[status 敞口 29](../../docs/status.md)）。
 
 **发布面（2026-11-27 批174）**：打 `v*` 标签时 `publish.yml` 的 `distro-bundle` 腿用同一
 `pack-bundle.sh` 出包、过 `tools/ci/platform/bundle-contract.sh` 的 A10 断言，随 release
