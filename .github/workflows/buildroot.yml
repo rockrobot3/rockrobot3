@@ -311,67 +311,11 @@ jobs:
           done
           echo "PASS  Buildroot 2024.02.11 全量构建：${{ steps.img.outputs.name }} 产出"
 
-      # 只读内容断言：genimage 成功不等于分区内容对。e2fsck 抓坏 fs；
-      # dumpe2fs 抓标签错槽；debugfs 抓 /etc/fstab 缺伪文件系统；
-      # fdtdump 抓 u-boot.itb 缺 BL31（binman 成功但 FIT 里没有 bl31 是"能烧不能启"）。
+      # 只读内容断言：genimage 成功不等于分区内容对。判据体在
+      # tools/ci/platform/buildroot-image-check.sh（e2fsck / 标签 / rootfs 内容 /
+      # FIT 与 TPL 四组，2026-11-27 批130 从 workflow 内联 57 行收为脚本）。
       - name: 镜像内容只读断言（ext4 / fstab / FIT）
-        run: |
-          set -euo pipefail
-          d=/tmp/br-out/images
-          host=/tmp/br-out/host
-          for spec in rr_a:rr_a rr_b:rr_b rr_factory:rr_factory rr_staging:rr_staging data:rr_data; do
-            f=${spec%%:*}
-            want=${spec##*:}
-            img="$d/$f.ext4"
-            if [ ! -s "$img" ]; then
-              echo "::error title=br-fs::$f.ext4 缺失"
-              exit 1
-            fi
-            if ! "$host/sbin/e2fsck" -fn "$img" >"/tmp/fsck-$f.log" 2>&1; then
-              echo "::error title=br-fsck::$f.ext4 未过 e2fsck -fn"
-              tail -8 "/tmp/fsck-$f.log"
-              exit 1
-            fi
-            got=$("$host/sbin/dumpe2fs" -h "$img" 2>/dev/null | sed -n 's/^Filesystem volume name:[[:space:]]*//p')
-            if [ "$got" != "$want" ]; then
-              echo "::error title=br-label::$f.ext4 标签 '$got' != '$want'（槽位标签漂移）"
-              exit 1
-            fi
-            echo "PASS  $f.ext4 e2fsck + label=$got"
-          done
-          if [ ! -x "$host/sbin/debugfs" ]; then
-            echo "::error title=br-tool::host debugfs 缺席（host-e2fsprogs 未装 debugfs）"
-            exit 1
-          fi
-          # rootfs 内容断言：只查 fstab 不够——空文件系统也可能有标签。
-          # /usr/bin/rrd 与 S99rrd 必须真在 rr_a.ext4 里，才证明 srcpath 生效。
-          for p in /usr/bin/rrd /etc/init.d/S99rrd; do
-            if ! "$host/sbin/debugfs" -R "stat $p" "$d/rr_a.ext4" 2>&1 | grep -q 'Inode:'; then
-              echo "::error title=br-rootfs::rr_a.ext4 缺 $p（rootfs 未装入）"
-              exit 1
-            fi
-            echo "PASS  rr_a.ext4 含 $p"
-          done
-          fstab=$("$host/sbin/debugfs" -R "cat /etc/fstab" "$d/rr_a.ext4" 2>&1 || true)
-          for k in sysfs devtmpfs "LABEL=rr_data" "LABEL=rr_staging"; do
-            if ! printf '%s\n' "$fstab" | grep -q "$k"; then
-              echo "::error title=br-fstab::rr_a.ext4 的 /etc/fstab 缺 '$k'"
-              printf '%s\n' "$fstab"
-              exit 1
-            fi
-          done
-          echo "PASS  rr_a.ext4 /etc/fstab 含 sysfs/devtmpfs/rr_data/rr_staging"
-          if ! "$host/bin/fdtdump" "$d/u-boot.itb" 2>/dev/null | grep -q 'atf-bl31'; then
-            echo "::error title=br-fit::u-boot.itb 缺 atf-bl31（BL31 未进 FIT）"
-            exit 1
-          fi
-          echo "PASS  u-boot.itb 含 atf-bl31"
-          sz=$(stat -c%s "$d/idbloader.img")
-          if [ "$sz" -lt 100000 ]; then
-            echo "::error title=br-tpl::idbloader.img 仅 $sz B，疑似缺 TPL"
-            exit 1
-          fi
-          echo "PASS  idbloader.img $sz B（含 TPL/SPL）"
+        run: bash tools/ci/platform/buildroot-image-check.sh
 
       - name: 生成摘要清单
         run: |
