@@ -1741,3 +1741,37 @@ README 逐个点名 17 支；`grep -rln 'TODO|deprecated|legacy|旧路径'` 零�
 glob 枚举**，并自带"16 件静默缩成 2 件"的守卫（注释与实现同处）；`--profile` 只比该机型
 装配单与其板级资产。新加一份装配单/unit 自动进扫描面，不存在"漏进扫描面"的洞。处置——
 零改动，结论入册。
+
+**2026-11-27 批113 可达终点表 30 格对表（6 格改判）**：事实——该表自批N20（2026-10-23）
+后未按其 §4 维护纪律逐批更新；2026-11-16/22 真板会话（[0012](../evidence/实测/0012.md)、
+[0016](../evidence/实测/0016.md)）已使树莓派行五格"不能（无载体）"的缺载体理由失效；格内
+所引 `rr3_manifest_install_rewrite` 已迁入 rrd 并改名。处置——改判树莓派 出字/转动/拾音/
+播放/标定 五格为"能做到"并逐格挂证据；表头"板当前离线"订正为板在线；RK3566 烧录格依据句
+订正为委托 `rr3-pack --install-root`；符号改名订正；30 格逐格复核（6 格改判、24 格维持）。
+覆盖盲区如实登记：点验矩阵七列与十项不同分母，30 格无自动化腿直接判态，生成器未建前靠
+改判纪律兜底。判据——⑤ 文档门绿；⑯ 硬线 0；全表路径解析无缺。
+
+**2026-11-27 批114 语义漂移巡检（退役路径与符号名）**：事实——W-A 分层后六份模块设计册与
+7 处原子件头注仍引 `src/composite.rs`；3 份事件 schema 描述同；`rr-periph-proto` 两处 schema
+名用下划线而仓内实为连字符（原引用不存在）；`status.md` 事件 schema 行写 3 个、实为 8 个；
+`ci.yml` 已按职责拆六条流水线而多处仍引旧路径。处置——设计册加结构订正注（boot/rpc/
+dispatch 对应关系）；原子件头注改指当前文件，`rr3_relay_apply_error_text` 改名
+`rr3_relay_err_text` 同批订正；schema 描述改当前实现；schema 名订正为实名；status 行补
+5 份；`openitems.toml` 与 `check.sh` 的 ci.yml 引用改指 platforms.yml / gate.yml；
+conventions 加订正段。判据——⑤ 绿；⑬ 五条 PASS；⑫ 各项 PASS；8 份 schema JSON 可解析。
+
+**2026-11-27 批115 entry 装机改写单点对表（无第二套语义）**：事实——post-build.sh 已无
+第二份 entry 改写，统一委托 `rr3-pack --install-root`；全仓装机改写实现只有
+`rrd::manifest::rr3_manifest_rewrite` 一处（rr3-pack 与 sim 演练共用）；运行时的
+`rr3_entry_absolutize` 只造注册帧 wire manifest、不写文件，rrd spawn 取装机 manifest 原文。
+处置——澄清运行时/装机两条路的分工（不是第二实现）；sim 两处"三道门"统一为"四道门"
+（形制/恰一条/旧值对账/重解析复核），与实现阶段、测试面一致。判据——全仓 rg 仅一处
+装机改写实现；三调用点（pack stage、sim layout）同源；⑤ 绿。
+
+**2026-11-27 批116 rr3-ctl 九方法入口覆盖表**：事实——rrd ctl 九方法、CLI 八子命令；
+`domain.set` 无 CLI 入口（唯一入口＝面板 `POST /api/profile/domain`）；`ota` 只有拒因渲染、
+无成功渲染器（rrd 恒拒，成功分支不可达）；面板入口实测为 status/health/data/logs/wiring/
+selftest/reboot/domain 七路。处置——[rrd-rpc §3](../reference/rrd-rpc.md) 增逐方法入口表，
+登记 ota 成功渲染器缺口（触发条件＝M6 接入下载链）；status.md rr3-ctl 行同步指向。
+判据——⑤ 绿；`command_whitelist`（8）与 `RR3_RPC_NAMES`（9）两张 pin 表逐条对上，
+`domain.set` 差额有理由。
