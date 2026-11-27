@@ -51,7 +51,7 @@ STEP_USES = re.compile(r"^\s*-\s*uses:\s*(\S+)")
 TOOLCHAIN = "1.100.0"
 MAX_JOBS = 10
 # 跨多清单共写仓根 target-dir 的作业：rust-cache 必须全量缓存共享依赖
-CACHE_ALL_JOBS = {"conventions", "sim-assemble", "sim-chain", "matrix"}
+CACHE_ALL_JOBS = {"conventions", "sim-assemble", "sim-chain", "matrix", "install-smoke"}
 
 # 五芯片验证面（platforms.yml）：每条矩阵腿都是独立开发板环境的回执，
 # 删除/改名任何一条即"某芯片不再被流水线验证"——用显式清单钉住。

@@ -181,8 +181,8 @@ REQUIRED_JOBS = {
         "conventions", "release", "supply", "alsa", "ota-bundle", "scripts",
     ),
     "integration.yml": (
-        "distro-smoke", "ota-sign", "rk3566-onboard", "buildroot-assembly",
-        "sim-assemble", "sim-chain", "matrix",
+        "distro-smoke", "install-smoke", "ota-sign", "rk3566-onboard",
+        "buildroot-assembly", "sim-assemble", "sim-chain", "matrix",
     ),
     "platforms.yml": (
         "cross-artifacts", "riscv-image", "esp32-gates", "autonomy-face",

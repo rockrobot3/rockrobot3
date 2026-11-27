@@ -41,6 +41,31 @@ jobs:
           title: distro-smoke
           command: bash tools/ci/platform/distro-smoke.sh
 
+  # 装机器正例（2026-11-27 批217）：distro-smoke 在容器里直跑 rrd（容器无 systemd），
+  # platforms 的装机器只验"干净机拒绝"；install-bundle 的**成功换树**与**坏包回滚**
+  # 两条路径此前没有任何流水线执行过。hosted runner 是带 systemd 的 VM，本作业装
+  # 真 deb、由 unit 拉起 rrd（sim 探测档），再以真 unit 跑 bundle 换树与回滚。
+  # 判据体在 tools/ci/platform/install-smoke.sh（失败自带 journal 与装机树现场）。
+  install-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_TARGET_DIR: /tmp/rr3-build
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+          cache-all-crates: "true"
+      - name: 装机器正例（deb → systemd → bundle 换树 → 回滚）
+        uses: ./.github/actions/guarded-run
+        with:
+          title: install-smoke
+          command: bash tools/ci/platform/install-smoke.sh
+
   # OTA 签名演练（ADR-0026，A1c）：临时测试种子走 keypub→manifest→sign→verify，
   # 正例一条 + 镜像篡改/清单篡改/错公钥/降级四条负例；真实私钥不进 CI。
   ota-sign:
