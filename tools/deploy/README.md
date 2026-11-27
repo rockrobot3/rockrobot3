@@ -45,6 +45,20 @@ MCU 无 A/B 分区，升级一律线下重烧。每个芯片平台独立部署�
 | ESP32 基本功能档（classic `safe`） | 烧录链本身跑过：S3 首烧（`espflash flash`，[三平台验证计划 §6.6](../../docs/process/dev/0.0.8/0.0.8版本通用底座三平台验证计划.md)）；classic 真板复烧后 60s 零复位（[证据 0014](../../docs/evidence/实测/0014.md)）；S3 侧此后 0018/0019/0021/0022 四份真板复验 | classic **safe 整片**（`rr3-esp32-safe-merged.bin`）单条命令的产线式实烧回执；S3 外设接线后的复验 | `tools/deploy/image-esp32.sh` 装配整片 → `esptool.py write_flash 0x0`；单件走 `tools/deploy/flash-artifact.sh`（校验 sha 后烧，缺 `spool` 分区即拒） |
 | RK3566 maskrom（Buildroot 保底轨） | 构建面全绿：全量 make + 六分区/内容断言（run `44035094772`，详见 status 能力表"Buildroot OS 层"行）；操作序文档在册 | **全链未跑**：目标板 Radxa ZERO 3 未采购，`rkdeveloptool` 实烧与串口出 shell 均未发生 | [`flash-maskrom.md`](../../base/os/buildroot/board/radxa-zero3/flash-maskrom.md)（idbloader 32K / itb 6M / boot.vfat 16M）+ `buildroot.yml` 的 image job 产物 |
 
+## 版本化部署包契约（A10，主机档）
+
+发行版快路轨的部署包不是"随便打个 tar"：`pack-bundle.sh` 出包、`install-bundle.sh` 装机，
+两边靠下面**三条**对齐（此前只写在两个脚本的注释里，仓内没有第二处可查——2026-11-27 批96 立此节）：
+
+| 契约 | 规则 | 违约后果 |
+|---|---|---|
+| 包顶层目录名 | `rockrobot3-<commit>`（commit 取产物对应提交，不是 tag 或日期） | 装机侧按 `cut -d/ -f1` 取顶层，名字不合 → `非 A10 版本化包` 当场拒 |
+| `BUNDLE_VERSION` | **必在包顶层**，键固定为 `commit=` / `built_at=` / `target=` / `components=` / `natives=`（natives 可为空） | 缺文件或不认识的行 = 不是本仓出的包；装机前先核存在性 |
+| 安装序 | 新树落 `<parent>/.rockrobot3-new.*` → 启动自检 → 换入 → 失败按 `rollback()` 回旧树**并回旧二进制** | 只回树不回二进制会留下"旧树 + 新 `rrd`"（2026-11-09 真板实测过） |
+
+实现单点：[`pack-bundle.sh`](pack-bundle.sh) 的 BUNDLE_VERSION 段、[`install-bundle.sh`](install-bundle.sh)
+的顶层校验与 `rollback()`；改任一侧都要同批改本节。
+
 ## 制品 tag 与 `VERSION` 对表
 
 **版本唯一真源是仓根 `VERSION`（现为 `0.0.8`）**，tag 与它同名且只打在 release 提交上；
