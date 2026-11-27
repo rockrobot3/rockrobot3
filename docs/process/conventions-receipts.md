@@ -2920,3 +2920,16 @@ sentinel / esp32 / esp32s3 periph-base / esp-uart-echo / rr3-act-sense / ipct003
 不覆盖调用方环境），七脚本在 root 确定后 source 单点。判据——`grep -rn
 CARGO_NET_RETRY tools/` 仅 lib 一处命中；七脚本 `bash -n` 全通过；体量净减 42 行
 （7 增 49 删）；⑯ 行数门 PASS（最大 220 行）。
+
+**2026-11-28 批268 本轮收口（重试参数单点）**：事实——七个平台脚本各抄同一份重试
+参数，策略变化要改七处且 metrics 只扫 Rust 抓不到。处置——`cargo-net.sh` 单点 + 七处
+source，README 共享件表补登；净减 42 行。判据——commit `af4a2571` 三线全绿：gate /
+integration / platforms 均 success（esp32 classic/S3、ipct003、riscv-image 等腿实跑
+sourced 脚本），证明 source 路径与优先级正确；`grep CARGO_NET_RETRY` 仅 lib 一处；
+⑯ 行数门 PASS（最大 220 行）；三远端同指 `af4a2571`。
+
+**2026-11-28 批268 下轮任务拟定**：① 批269 11-30 03:00 UTC `release-anon` 首跑归因
+（窗口未到不预写结论；红按镜像/固件/签名三类定位，绿则首份匿名回执入册）；② 批270
+distro 首发后 `--deep` / runbook B.2 实测与 `distro` 类匿名回读裁定（当前纳入会对
+v0.0.8 假红）；③ 批271 时延上限连续两拍观察（`af4a2571` 拍 boot 2118 / 换树 2545 /
+回滚 3903，上一拍 2118/2545/3903 附近），数据支持才收紧；④ 批272 三线收口与再拟下轮。
