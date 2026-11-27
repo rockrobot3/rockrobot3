@@ -2352,3 +2352,12 @@ dispatch 为准，本机未装 cosign，不冒充已验。
 容易被误读成"OTA 未签名 = 发布不合规"。处置——B.2 明确签名面只覆盖三类、OTA/buildroot
 的 `.sig` 不在 cosign 面内；工具代码零改（边界本已正确）。判据——⑤ 文档门绿；
 `check_ota`/`check_buildroot` 无 verify_sig 调用（静态走读）。
+
+**2026-11-27 批195 本轮收口·三线全绿**：事实——代码头 `d72e026d` 上 integration 与
+platforms success（含 workflow 改动），文档头 `1440e165` 的 gate success。本轮三件：
+digest 汇总表（192）、周程启用验签（193）、回执签名面边界写清（194）。处置——本轮
+收口；下轮三件：① 把 `release-anon` 从 platforms 拆成独立轻量 workflow（现在手动验证
+要拉全平台矩阵，成本与收益不匹配），审计必列文件/job 同批更新；② 全仓"例数/件数"类
+陈旧计数清扫（README/runbook 为准，历史回执不改写）；③ distro 首发后的 B.2 五项实测与
+`--classes` 默认口径复核（待 release 触发）。判据——三线结论与 run 页一致；巡检自检
+15/15、审计自检 29/29；⑤⑬⑯ 绿。
