@@ -7,7 +7,7 @@
 # 实推的 `v<VER>` 不一致）。本脚本把发布集收成一张数据表，逐项只读核对并打印 digest，
 # 不发任何写请求；发布面本身仍由 publish.yml / buildroot.yml 产出（机制与策略分离）。
 #
-# 用法：release-verify.sh --tag vX.Y.Z [--repo owner/name]
+# 用法：release-verify.sh --tag vX.Y.Z [--repo owner/name] [--classes image,firmware,distro,ota,buildroot]
 #       release-verify.sh --self-test
 # 判据：0 五类全齐且成员/证明面合规 / 1 有缺件或不合规（逐项点名） / 2 用法错误
 # 依赖：oras（按 docker 登录凭据读私有包）、python3；本脚本不登录、不推送。
@@ -20,11 +20,21 @@ root=$(git rev-parse --show-toplevel 2>/dev/null) || {
 
 TAG=""
 OWNER="rockrobot3"
+CLASSES="image,firmware,distro,ota,buildroot"
 WORK=""
 FAILS=0
 
+# 类别过滤：publish 与 buildroot 两条流水线各自只产一半，tag 窗口不能用"全齐"卡
+# 对方的产物（buildroot 是小时级，晚于 publish）。默认五类，操作者用全量口径。
+has_class() {
+	case ",${CLASSES}," in
+	*",$1,"*) return 0 ;;
+	esac
+	return 1
+}
+
 usage() {
-	sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '3,18p' "$0" | sed 's/^# \{0,1\}//'
 	exit 2
 }
 
@@ -175,17 +185,17 @@ check_buildroot() {
 rr3_run() {
 	WORK=$(mktemp -d)
 	trap 'rm -rf "$WORK"' EXIT
-	check_image "ghcr.io/${OWNER}/rockrobot3" "$TAG"
-	check_firmware
-	check_distro
-	check_ota
-	check_buildroot
+	has_class image && check_image "ghcr.io/${OWNER}/rockrobot3" "$TAG"
+	has_class firmware && check_firmware
+	has_class distro && check_distro
+	has_class ota && check_ota
+	has_class buildroot && check_buildroot
 	printf '\n'
 	if [ "$FAILS" -ne 0 ]; then
 		echo "结论：发布面不齐/不合规 ${FAILS} 处（tag=${TAG}）"
 		return 1
 	fi
-	echo "结论：五类制品齐套（镜像三架构 + 固件 + distro + OTA + buildroot，tag=${TAG}）"
+	echo "结论：发布面齐套（classes=${CLASSES}，tag=${TAG}）"
 	return 0
 }
 
@@ -193,6 +203,7 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 	--tag) TAG="${2:?--tag 缺参数}"; shift 2 ;;
 	--repo) OWNER="${2:?--repo 缺参数}"; OWNER="${OWNER%%/*}"; shift 2 ;;
+	--classes) CLASSES="${2:?--classes 缺参数}"; shift 2 ;;
 	--self-test)
 		# 自检以假 oras 喂夹具，判据腐化即红（见文件末自检段）。
 		. "$(dirname "$0")/release-verify.selftest.sh"
@@ -203,6 +214,19 @@ while [ $# -gt 0 ]; do
 	esac
 done
 [ -n "$TAG" ] || usage
+# 类别名只认五值：拼错时若静默跳过全部判据，巡检会"全绿"而一件没看（F-2 同型）。
+case "$CLASSES" in
+"" | *, | ,* | *,,* | *[!a-z,]*)
+	echo "FAIL  --classes 只认 image,firmware,distro,ota,buildroot（实得 ${CLASSES}）" >&2
+	exit 2
+	;;
+esac
+for c in ${CLASSES//,/ }; do
+	case " image firmware distro ota buildroot " in
+	*" $c "*) ;;
+	*) echo "FAIL  --classes 含未知类别 ${c}" >&2; exit 2 ;;
+	esac
+done
 printf '%s' "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$' \
 	|| { echo "FAIL  --tag 只认正式版 vX.Y.Z（实得 ${TAG}）" >&2; exit 2; }
 command -v oras >/dev/null || { echo "FAIL  本机无 oras（发布面取数依赖它）" >&2; exit 2; }

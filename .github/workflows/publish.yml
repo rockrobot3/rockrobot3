@@ -529,3 +529,28 @@ jobs:
             exit 1
           fi
           echo "PASS  cosign keyless 签名 + 正/负验证（$signed）"
+
+  # 发布面齐套（2026-11-27 批179）：本流水线产出的三类（镜像/固件/distro）推送后在同一
+  # tag 窗口回读核对——各腿自己的"推完即验"只证明自己，三类是否都在、成员是否齐没有
+  # 总账。判据单点在 tools/ci/lib/release-verify.sh（自检在 gate 的 scripts 步）。
+  # OTA/buildroot 由 buildroot.yml 另核（小时级构建，不能卡本流水线）。
+  release-verify:
+    needs: [merge, firmware, distro-bundle]
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: oras-project/setup-oras@v2
+      - name: 发布面齐套（本流水线：镜像三架构 + 固件 + distro）
+        run: |
+          bash tools/ci/lib/release-verify.sh --tag "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" --classes image,firmware,distro

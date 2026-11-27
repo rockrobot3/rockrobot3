@@ -2213,3 +2213,12 @@ buildroot 4 件），镜像索引判三架构、单架构判 attestation≥2；�
 打 digest，不发写请求。自检以假 oras + manifest 夹具跑六例（全齐/缺层/缺架构/缺引导/
 证明面不足/非 semver），纳入 gate 的 scripts 步防判据腐化。判据——self-test 6/6 PASS；
 YAML 解析过；⑤⑬⑯ 全绿；实仓取数待凭据窗口（本机无 ghcr 凭据，不冒充）。
+
+**2026-11-27 批179 齐套巡检接进两条发布流水线**：事实——各发布腿只验自己那一件
+（推完 `oras manifest fetch`），"本流水线三类都在、成员齐不齐"没有总账；而 publish 与
+buildroot 同为 tag 触发、后者是小时级，不能用"五类全齐"互相卡住。处置——巡检器加
+`--classes`（只认五值，拼错即退 2，防"跳过全部判据仍打绿"），publish 增 `release-verify`
+作业（needs merge/firmware/distro-bundle，核 image+firmware+distro），buildroot 的
+release 作业在推完 OTA/buildroot 后核 ota+buildroot；两处同用 `--repo` 取当前仓、
+oras 走本作业登录。判据——self-test 7/7（含类别过滤例）；YAML 解析过；结构审计绿；
+⑬⑯⑤ 全绿；实仓回读待 tag 窗口。

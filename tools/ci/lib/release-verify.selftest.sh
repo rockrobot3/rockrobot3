@@ -54,6 +54,26 @@ rv_case() { # 名称 期望码 变异 期望片段
 	return 0
 }
 
+# 类别过滤：只核 firmware 时，distro/镜像夹具缺失不应拖红——publish 与 buildroot
+# 两条流水线各产一半，tag 窗口不能用"全齐"卡对方尚未完成的产物。
+rv_class_case() {
+	local d out rc
+	d=$(mktemp -d)
+	mkdir -p "$d/bin"
+	rv_stub "$d"
+	python3 "$rv_lib/release-verify.fixture.py" "$d/fix" none >/dev/null
+	rm -f "$d/fix/distro.json" "$d/fix/index.json"
+	out=$(FIX="$d/fix" PATH="$d/bin:$PATH" bash "$rv_main" --tag v0.0.8 --classes firmware 2>&1)
+	rc=$?
+	rm -rf "$d"
+	if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'classes=firmware'; then
+		printf 'PASS  self-test/类别过滤只核所选（退出码 0）\n'
+		return 0
+	fi
+	printf 'FAIL  self-test/类别过滤只核所选（期望 0 实得 %d）\n' "$rc"
+	return 1
+}
+
 # 用法面：非正式版 tag 必须在取数之前拒绝（退出 2）。
 rv_usage_case() {
 	local rc
@@ -74,6 +94,7 @@ rr3_rv_self_test() {
 	rv_case 镜像缺架构红 1 index-riscv "缺架构：riscv64" || fail=1
 	rv_case 固件缺引导红 1 fw-boot "固件 缺层：rr3-bootloader-esp32-dev.bin" || fail=1
 	rv_case 证明面不足红 1 attest "attestation=1" || fail=1
+	rv_class_case || fail=1
 	rv_usage_case || fail=1
 	[ "$fail" -eq 0 ] || return 3
 	return 0

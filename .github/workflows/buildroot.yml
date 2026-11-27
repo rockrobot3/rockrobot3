@@ -457,6 +457,12 @@ jobs:
           oras manifest fetch "$ota" >/dev/null
           oras manifest fetch "$build" >/dev/null
           echo "PASS  ghcr 两个制品可读"
+      # 本流水线产出两类（OTA/buildroot）的成员判据与镜像腿同源（批179）：推完即按
+      # release-verify 的数据表回读，缺层/标签写法漂移当场红。
+      - name: 发布面齐套（本流水线：OTA + buildroot）
+        run: >-
+          bash tools/ci/lib/release-verify.sh --tag "v${VER}"
+          --repo "${{ github.repository }}" --classes ota,buildroot
       - name: job summary
         if: always()
         run: |
