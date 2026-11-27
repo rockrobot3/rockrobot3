@@ -2755,3 +2755,20 @@ stage-image:49/57、image-smoke:80 各命中真实循环）。本轮不接 check
 第 7 条负例（ghost crate）。判据——`--self-test` 8/8 绿；真仓对拍 PASS（6/6/同集/派生 5）；
 真文件镜像注入 `modules/rr3-ghost/Cargo.toml` 后 ⑰ 点名"缺 module.toml"退 1；
 ⑯ 行数门 PASS（脚本 318 行）。
+
+**2026-11-28 批254 本轮收口（⑰ 三线实证）**：事实——`4cf1d121` 三线全绿：
+gate `46054103788` / integration `46054103533` / platforms `46054103755`；其中 gate
+`conventions`（check.sh 全步含 ⑰）success、`scripts`（⑰ 自检 + 执法两行）success，
+scripts 作业 19s 完成（纯 Python，不编译）。中途 `937bb3a2` / `b05ea77a` 的
+conventions/release 为 `cancelled`——被后续提交的并发组取代，非真红（三线在最新提交
+全绿）。处置——同批补齐规约文档：[conventions.md](conventions.md) 门表增 ⑰ 行、
+两处"①–⑯"订正为"①–⑰"，避免门表与 check.sh 漂移。判据——`check_docs` 绿；
+`gate_steps_audit` 30 步逐字一致；⑰ 本地自检 8/8、真仓 PASS。
+
+**2026-11-28 批254 下轮任务拟定**：① 批255 装机回滚早停——`install-bundle.sh` 健康探针
+读 `systemctl show -p NRestarts`，新树崩溃重启即回滚并点名"崩溃重启 N 次"；今日
+`rollback_ms≈32.6s` 全耗在 30s 探针窗口，目标降到 <5s，证据取 install-smoke 公开
+notice 的回滚用时与失败行。② 批256 ⑰ 阈值断言收紧为 `[ "$n" -eq N ]` 精确形状
+（别处 `-eq 6` 不得掩盖计数漂移）+ 负例。③ 批257 11-30 03:00 UTC release-anon 首跑
+归因；distro 首发后评估把 `distro` 类纳入匿名回读（现在纳入会对 v0.0.8 假红）。
+④ 批258 三线收口与再拟下轮。铁律不变：每步 commit+push 三远端并查漂红。

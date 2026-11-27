@@ -51,6 +51,7 @@
 | ⑭ | 装载门体量基线门：装配单锚函数的块行数、`read_to_string` 样板数、rr-registry 同形函数数按 `tools/ci/baseline/gate-size-baseline.txt` 只降不升；锚函数缺失或基线形状坏即红（fail-closed） | `steps/14.sh` |
 | ⑮ | 锁内 I/O 门：`lock·log` 同行 / 条件位临时 guard 延寿到块体 / 直调会写待落盘日志的 registry 方法（fanout/shadow/ctr_merge）；扫面打空即门禁失效 | `python3 tools/ci/audit/lockio_audit.py`（先 `--self-test` 三负例） |
 | ⑯ | 源文件行数门：每个 `.rs/.py/.sh` <500 行（铁律，2026-11-22 由 600 收紧）；按 `tools/ci/baseline/gate-lines-baseline.txt` 只降不升 | `steps/16.sh` |
+| ⑰ | 发布/部署面清单对拍：仓内真值（`modules/rr3-*/module.toml`）/ 发布策略（`PUBLISH_MODULES` + `publish.yml` 构建循环）/ 镜像（`stage-image.sh` 两处装机 + `image-smoke.sh` 起齐与阈值）/ 板侧派生（`pack-bundle.sh`、`pack-arm64.sh` 走 `runtime-members.sh` 且留 brain 例外）必须同一集合；并核真值面成对（`Cargo.toml` 与 `module.toml` 缺一即点名） | `python3 tools/ci/audit/release_sets.py`（自检在 gate `scripts`） |
 
 **⑨-a…⑨-z 各门**（门 a/c/r/y/z 等，后续批次续增）：判据以 `check.sh` 各 `step`
 段注释为唯一真值，本表不逐行抄录——抄一份就多一处漂移面。
@@ -2682,7 +2683,7 @@ fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/bas
 
 | job | 作用 | 触发 |
 |---|---|---|
-| `conventions` | `bash tools/ci/check.sh` 全步（①–⑯，与本地同一入口）；显式装 clippy/rustfmt | push / PR / 周程 |
+| `conventions` | `bash tools/ci/check.sh` 全步（①–⑰，与本地同一入口）；显式装 clippy/rustfmt | push / PR / 周程 |
 | `host-macos` | macOS 宿主等价面：workspace 全量测试 + 独立工程测试（门禁 ④/⑥ 同口径，esp 工程除外） | push / PR / 周程 |
 | `scripts` | 全部追踪 `.sh` 的 `bash -n` 语法门（判据自身不许写坏） | push / PR / 周程 |
 | `lint` | fmt + clippy（workspace + 独立工程） | push / PR / 周程 |
@@ -2736,7 +2737,7 @@ sim 探测档 + mock 云，六模块全 spawn、零拒绝；判据与 `distro-sm
 | ESP32 / ESP32-S3（乐鑫，xtensa） | `esp32` / `esp32s3`（espup v0.17.1 钉版 + ESP-IDF v5.2.2） | `esp32-gates`（按芯片两腿，`esp32` / `esp32s3` 各一腿） | ESP32 腿：外设基座 debug+release+测试编译、UART echo、espidf std、哨兵、act/sense classic 构建面；S3 腿：S3 外设基座 debug+release+测试编译、act/sense S3 check 面；每腿只装本芯片工具链（安装面单点 = `.github/actions/esp-toolchain`），六门判据零缩水 |
 | 瑞芯微 RK3566 / RK3588（aarch64） | `aarch64-unknown-linux-musl`（+ `-gnu` 字节对拍归 `ipct003`） | `cross-artifacts` 矩阵一腿（mode=musl） | 七件全静态 aarch64 产物 + ELF 断言 + docker binfmt 执行冒烟（断言打印用法） |
 | 进迭时空 SpacemiT K1/K3（RISC-V） | `riscv64gc-unknown-linux-gnu`（apt 交叉 gcc，`CARGO_TARGET_*_LINKER` 显式注入） | `cross-artifacts` 矩阵一腿（mode=gnu，assert=any） | 七件 riscv64 产物 + ELF 断言 + `qemu-riscv64-static -L <sysroot>` 执行冒烟（断言打印用法）——**2026-11-16 从"仅编译面"升到"构建 + 真执行"**；静态断言为例外：musl 交叉链不可得（cross 镜像链路过宿主 cc 失败，实测），gnu 动态链接如实登记 |
-| 英特尔 / AMD（x86_64） | 原生 `x86_64-unknown-linux-gnu` | `cross-artifacts` 原生腿 + `conventions`（全量门）+ `distro-smoke`（deb 真装） | 七件原生产物 + 原生执行冒烟 + 全量测试与门禁 ①–⑯ + 容器内真装起机（两家同 ISA/ABI，一腿覆盖，`assert=any` 因原生动态链接） |
+| 英特尔 / AMD（x86_64） | 原生 `x86_64-unknown-linux-gnu` | `cross-artifacts` 原生腿 + `conventions`（全量门）+ `distro-smoke`（deb 真装） | 七件原生产物 + 原生执行冒烟 + 全量测试与门禁 ①–⑰ + 容器内真装起机（两家同 ISA/ABI，一腿覆盖，`assert=any` 因原生动态链接） |
 | Windows（x86_64，登记平台 L1） | 原生 `x86_64-pc-windows-msvc` | `host-windows` | workspace 编译面 + ①b 全量测试（POSIX 段由 cfg 门控不参与；原子落盘/权限位类用例按 unix 能力门控；换行由 `.gitattributes` 归一 LF） |
 
 口径说明：以上是**构建/执行环境**验证（能在目标 ISA 上编译并跑起来）；真板上的
