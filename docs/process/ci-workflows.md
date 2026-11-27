@@ -112,7 +112,8 @@ integration / platforms / publish / buildroot / **coverage** 的 job 名按 `REQ
 `host-macos`），证明"同一份代码换个宿主仍成立"，不计入芯片覆盖。
 
 另有两腿不按芯片归属、但构成芯片证据：`ipct003`（x86_64 + QEMU arm64/riscv64 +
-xtensa 四路 `--strict` 逐字节对拍，任一 SKIP 即不放行）与 `autonomy-face`（在宿主机真跑
+xtensa 四路 `--strict` 逐字节对拍，任一 SKIP 即不放行；2026-11-27 批94 起该脚本的 SKIP
+汇总也认 `CI=true`，与 `tools/ci/lib/skip.sh` 同口径——调用方忘加 `--strict` 也不会绿）与 `autonomy-face`（在宿主机真跑
 自治健康面判据，验证的是 S3 档共用的健康面机制，不是 S3 编译面）。
 **brain 产物面（同日）**：有目标 C 工具链的腿（原生 x86_64、apt 交叉 riscv64）
 带 `with-brain` 构建 `rr3-brain` 并单独上传；瑞芯微 musl 腿走 rust-lld 无目标 C

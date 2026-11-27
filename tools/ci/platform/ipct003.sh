@@ -151,8 +151,11 @@ if [ "$fail" -ne 0 ]; then
   echo "IPC-T-003 对拍存在失败项"
   exit 1
 fi
-if [ "$skip" -ne 0 ] && [ "$strict" -ne 0 ]; then
-  echo "--strict：存在 SKIP，跨架构验证不完整，不放行"
+# SKIP 纪律（tools/ci/lib/skip.sh 同源）：CI 内 SKIP 即红，不靠调用方记得加 --strict。
+# 本脚本要先把各路跑完再汇总（不像单门那样当场退出），故在这里按同一口径判：
+# CI 里出现任何 SKIP = 覆盖不全 = 不放行，理由与 exit 2 的 --strict 完全一致。
+if [ "$skip" -ne 0 ] && { [ "$strict" -ne 0 ] || [ "${CI:-}" = "true" ]; }; then
+  echo "--strict/CI：存在 SKIP，跨架构验证不完整，不放行"
   exit 2
 fi
 if [ "$skip" -ne 0 ]; then
