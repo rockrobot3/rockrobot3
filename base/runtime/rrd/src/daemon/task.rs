@@ -32,12 +32,15 @@ fn rr3_queue_arb(jobs: &[Rr3SpawnJob]) -> Rr3BootPlan {
     rr3_plan_boot(&arb)
 }
 
-/// boot 队列：装载 → 仲裁 → 提供者表 → 按 order 投递（缺格模块跳过）
+/// boot 队列：装载 → 仲裁 → 提供者表 → 按 order 投递（缺格模块跳过）。
+///
+/// 返回 `(已投递, 缺格跳过, 拒启)`——调用方据此打一行带用时的投递摘要（批207），
+/// 把"卡在装配/卡在等连接"的分界与规模放在同一条日志里。
 pub(super) fn rr3_daemon_queue(
     boot: &Rr3DaemonBoot,
     shared: &Arc<Mutex<RrdRegistry>>,
     sup: &Rr3Supervisor,
-) -> Result<(), String> {
+) -> Result<(usize, usize, usize), String> {
     let jobs = rr3_jobs_load(boot);
     // ADR-0009 裁定 1/2：装载全集交 rr-registry 仲裁——rrd 只执行裁定：
     // 环/名重复 → fatal 拒整个 boot；不可满足 → rejected 点名；order = 拓扑序 +
@@ -52,8 +55,13 @@ pub(super) fn rr3_daemon_queue(
         .into_iter()
         .map(|j| (j.facts.name.clone(), j))
         .collect();
-    rr3_queue_dispatch(boot, &plan, by_name, sup);
-    Ok(())
+    let sent = rr3_queue_dispatch(boot, &plan, by_name, sup);
+    let skipped = plan
+        .order
+        .iter()
+        .filter(|n| boot.degraded.contains(*n))
+        .count();
+    Ok((sent, skipped, plan.rejected.len()))
 }
 
 /// 裁定序一行定格（缺格跳过项已单独点名，不混入）：spawn 行给时刻，本行给顺序与
@@ -119,10 +127,14 @@ fn rr3_queue_dispatch(
     plan: &rr_registry::Rr3BootPlan,
     mut by_name: BTreeMap<String, Rr3SpawnJob>,
     sup: &Rr3Supervisor,
-) {
+) -> usize {
+    let mut sent = 0;
     for name in &plan.order {
-        rr3_dispatch_one(name, boot, &mut by_name, sup);
+        if rr3_dispatch_one(name, boot, &mut by_name, sup) {
+            sent += 1;
+        }
     }
+    sent
 }
 
 fn rr3_dispatch_one(
@@ -130,13 +142,15 @@ fn rr3_dispatch_one(
     boot: &Rr3DaemonBoot,
     by_name: &mut BTreeMap<String, Rr3SpawnJob>,
     sup: &Rr3Supervisor,
-) {
+) -> bool {
     if boot.degraded.contains(name) {
-        return;
+        return false;
     }
     if let Some(job) = by_name.remove(name) {
         sup.rr3_boot(job);
+        return true;
     }
+    false
 }
 
 /// 装配链事实透传给 job（空串 = 不注入）。

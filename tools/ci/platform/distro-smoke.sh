@@ -164,6 +164,12 @@ docker run --rm -v "$(pwd)":/work -w /work -v "$SUM_FILE:/tmp/rr3-timing" "$IMAG
     cat /tmp/rrd-smoke.log
     exit 1
   fi
+  # 投递摘要行（批207）：规模与用时一条看全——缺它说明 boot 没走到 accept 边界。
+  grep -q "boot 队列已投递: 已投递=6 " /tmp/rrd-smoke.log || {
+    echo "--- rrd 日志（缺投递摘要行）---"
+    cat /tmp/rrd-smoke.log
+    exit 1
+  }
   if grep -q "拒绝 boot" /tmp/rrd-smoke.log; then
     echo "--- rrd 日志（出现 拒绝 boot）---"
     cat /tmp/rrd-smoke.log

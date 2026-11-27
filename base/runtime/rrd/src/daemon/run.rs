@@ -90,10 +90,14 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     let sup = rr3_daemon_sup(cfg, &shared, t0);
 
     // E-7 启动序：先全部装载，再交 rr-registry 仲裁，最后按裁定投递
-    rr3_daemon_queue(&boot, &shared, &sup)?;
+    let (sent, skipped, rejected) = rr3_daemon_queue(&boot, &shared, &sup)?;
 
     // 启动段与稳态段的边界：卡在装配/投递与卡在等连接，排障看这一行即知走到哪。
-    rr3_log("boot 队列已投递，进入 accept（等模块连接注册）");
+    // 规模与用时同刻定格（批207）：只有"已投递"没有数字时，慢在哪一段仍要靠猜。
+    rr3_log(&format!(
+        "boot 队列已投递: 已投递={sent} 缺格跳过={skipped} 拒启={rejected} 用时={}ms，进入 accept（等模块连接注册）",
+        t0.elapsed().as_millis()
+    ));
     rr3_daemon_accept(
         listener,
         Rr3AcceptCtx {

@@ -2437,3 +2437,13 @@ platforms success，文档头 `9b1083b8` 的 gate success。本轮四件：distr
 失败凭注解定位；② distro 首发窗口的深检真包验证（B.2 与 `--deep` 同批实测），未触发
 则登记；③ rock3 运行面一项可量化改进（先取证据，再改码）。判据——三线结论与 run 页
 一致；巡检自检 18/18、契约自检 5/5、审计自检 30/30；⑤⑬⑯ 绿。
+
+**2026-11-27 批207 boot 投递摘要带规模与用时**：事实——`rrd` 在 boot 段与 accept 段边界
+只有一句"boot 队列已投递，进入 accept"，没有规模与用时：慢在装配、慢在投递还是慢在等
+连接，只能靠前后 spawn 行人工数；`rr3_daemon_queue` 也丢弃了投递计数。处置——队列返回
+`(已投递, 缺格跳过, 拒启)`，边界日志改为
+`boot 队列已投递: 已投递=N 缺格跳过=K 拒启=R 用时=Xms，进入 accept`；`rr3_queue_dispatch`
+/`rr3_dispatch_one` 返回是否真投递；distro-smoke 增一行断言（`已投递=6` 必须在场，缺行
+即红，防日志被删或 boot 没走到边界）。批205/206 的窗口如实登记：`release-anon` 首跑
+（2026-11-30 03:00 UTC）未到期、distro 无 release 未触发深检，均不冒充。判据——
+rustfmt `--check` 过（本机不编译，Rust 编译与测试由 gate 流水线给回执）；⑤⑬⑯ 绿。
