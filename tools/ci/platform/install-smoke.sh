@@ -323,7 +323,7 @@ drift_negative() {
 # 回滚例：坏 rrd（非 ELF）能通过解包前检查，但起不来——install-bundle 必须回滚。
 # 判据：非 0 退出 + 点名回滚 + 装机树仍是上一版 + rrd 恢复 running。
 rollback_case() {
-  local bad="$WORK/bad.tar.gz" tmp top out rc=0 commit t0 attempt
+  local bad="$WORK/bad.tar.gz" tmp top out rc=0 commit t0 attempt why notice
   commit=$(git rev-parse --short=12 HEAD)
   tmp=$(mktemp -d "$WORK/bad.XXXXXX")
   tar -xzf "$WORK/bundle.tar.gz" -C "$tmp"
@@ -350,8 +350,13 @@ rollback_case() {
   ROLLBACK_MS=$(( $(now_ms) - t0 ))
   tt_ceiling rollback "$ROLLBACK_MS" "$ROLLBACK_CEIL_MS"
   attempt=$(grep -o '本次尝试 [0-9]*ms' <<<"$out" | tail -1 || true)
+  # 失败原因进公开面（批272）：job 日志匿名 403，注解是唯一可读通道；原因只在日志里
+  # 等于公开面仍不可归因。
+  why=$(grep -oE '原因：[^；]*' <<<"$out" | tail -1 || true)
   echo "     回滚证据：rc=${rc}，$(grep '已回滚' <<<"$out" | tail -1)"
-  echo "::notice title=install-smoke-rollback::坏包回滚成立 rc=${rc}（树与二进制已回上一版，全模块 running，恢复=${ROLLBACK_MS}ms/上限 ${ROLLBACK_CEIL_MS}ms${attempt:+；$attempt}）"
+  notice="::notice title=install-smoke-rollback::坏包回滚成立 rc=${rc}（树与二进制已回上一版，全模块 running，恢复=${ROLLBACK_MS}ms/上限 ${ROLLBACK_CEIL_MS}ms${attempt:+；$attempt}${why:+；$why}）"
+  grep -q '原因：' <<<"$notice" || die "回滚 notice 未带失败原因（公开面不可归因）"
+  echo "$notice"
 }
 
 main() {
