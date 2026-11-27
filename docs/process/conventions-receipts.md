@@ -1775,3 +1775,38 @@ selftest/reboot/domain 七路。处置——[rrd-rpc §3](../reference/rrd-rpc.m
 登记 ota 成功渲染器缺口（触发条件＝M6 接入下载链）；status.md rr3-ctl 行同步指向。
 判据——⑤ 绿；`command_whitelist`（8）与 `RR3_RPC_NAMES`（9）两张 pin 表逐条对上，
 `domain.set` 差额有理由。
+
+**2026-11-27 批117 S3 装配单补接线档（可装载）**：事实——`profiles/esp32s3-mini.toml`
+自 W1/T2 落树后一直没有 `hardware/esp32s3-mini/wiring.toml`：按 `rr3_truth_paths` 推导，
+该档装配必缺件，CI 从不装配该档故长期未暴露（0.0.8 单板全链计划 §批45 盲区①）。处置——
+补接线档（J0 电源入 feeds J1/J2 + 两条 SG90 线组，信号写 `act.axis.pwm.pan/tilt`）与双轴
+档案（pan [60,120] / tilt [80,100]，0009 号 S3 全行程实测覆盖同区间）；引脚真值与
+`board/pins_s3.rs`、装配单 `[hardware]`/`[[pin]]` 三处同源。判据——新增
+`esp32s3_boot_drill` 过完整装载门、boot 队列两模块、板侧十一键进注入文本、双轴档案按
+缺省轴投影；drills 8 条全绿（`/tmp` 产物，源码区零残留）。
+
+**2026-11-27 批118 S3 描述符实名统一**：事实——同一块 S3 板在文档/证据里有两个名字：
+`esp32s3-solo`（CI 产物名、证据 frontmatter、计划 W6 原写 `esp32s3-solo.toml`）与
+`esp32s3-mini`（真实落树的装配单与 hardware 目录、architecture 机型集、contract pin）。
+处置——**描述符唯一实名 = `esp32s3-mini`**；"solo" 降为形态标签（单板全链运行方式），
+不另立 `esp32s3-solo.toml`（两个名字会在装载面变成第二真值）。计划 §3.2/W6 加订正注，
+装配单头注登记命名口径。判据——⑤ 文档门绿；`ls profiles/esp32s3-solo.toml` 仍缺席且
+不再被任何步骤引用为待建文件。
+
+**2026-11-27 批119 通用底座计划现状盘点订正**：事实——该计划 §2 的"现状盘点"四项已
+过期：五端口 trait 已迁 `rr-periph-proto::ports`（`pub`，P0-A1）、本地 `ports.rs` 已删；
+S3 已装配并出全链证据；Pi 宿主与 Pi 当板均已兑现。处置——逐条加"2026-11-27 订正"注，
+原计划行保留；§8.2 A1 标"已完成"。判据——⑤ 绿；`base/runtime/rr-periph-proto/src/ports.rs`
+五 trait 均 `pub`，`tools/esp32-periph-base/src/ports.rs` 零命中。
+
+**2026-11-27 批120 分压比打印口径根修**：事实——`board.rs` 的
+`ADC_RAIL_DIVIDER_NUM/DEN` 已是 2:1，而 `boot.rs` 启动横幅写死"占位分压 1:1"、
+README 两处仍写 1:1——运维读到的分压比是假数，标定时会按错比例换算（假读数比缺读数更坏，
+计划 §批45 盲区③）。处置——横幅改为从常量渲染 `分压 N:D，接闸 armed=<bool>`（打印不再
+有第二真值可漂）；README 两处同步订正为 2:1 已回填、阈值仍占位。判据——`cargo fmt --check`
+过；⑯ 硬线 0；常量与打印同源（rg 全仓不再有写死的"1:1"分压文案）。
+
+**2026-11-27 批121 default↔distro 接线镜像机械对账**：事实——两档接线档声称"同板同接线
+镜像"，但一致性只靠人工纪律（计划 §批45 盲区②）；实测两者差异只在注释。处置——新增
+`wiring_mirror_drill`：两档 TOML 解析值必须相等，注释外任何差异即红。判据——drills 8 条
+全绿；`profile::tests::drills::wiring_mirror_drill` 在 CI gate ①b 内真跑。
