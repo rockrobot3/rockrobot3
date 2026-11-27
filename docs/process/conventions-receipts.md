@@ -3064,3 +3064,11 @@ tag/类别结论）；② 批285 下次 `v*` 发布后把 OTA/buildroot 纳入 `
 （v 前缀口径，同批核 buildroot.yml 的 `release-verify --tag v${VER}` 实跑），并裁定
 distro 类别的纳入时点；③ 批286 distro 首发后 `--deep` / B.2 实测；④ 批287 三线收口
 与再拟下轮。
+
+**2026-11-28 批284 制品标签口径入审计（补历史缺陷盲区）**：事实——buildroot.yml 注释
+自述"v0.0.8 首发时此处曾漏 v"，但 `workflow_release.release_artifacts_problems` 只核
+"推了哪个包"，不核标签形状——同一缺陷可再次静默发生（registry 现存 legacy `0.0.8`
+即物证）。处置——该判据增一条：`rockrobot3-ota` / `rockrobot3-buildroot` 的引用必须是
+`<name>:v${VER}`，否则点名"标签必须 v<VER>"；自检夹具把 ota 改成 v 口径并增第 31 条
+负例（改回 `${VER}` 必被抓）。判据——`workflows_audit.py --self-test` 31/31 绿；
+真仓审计 PASS；⑤ 文档门绿。

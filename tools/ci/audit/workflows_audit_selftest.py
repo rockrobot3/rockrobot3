@@ -129,7 +129,7 @@ def _write_platforms(wf):
         "  release:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
         "    if: startsWith(github.ref, 'refs/tags/v')\n"
         "    permissions:\n      contents: read\n      packages: write\n"
-        "    steps:\n      - run: oras push ghcr.io/o/rockrobot3-ota:1\n",
+        "    steps:\n      - run: oras push ghcr.io/o/rockrobot3-ota:v${VER}\n",
         encoding="utf-8",
     )
 
@@ -183,8 +183,21 @@ def self_test():
         _write_limits(wf)
         _write_platforms(wf)
         bad = audit(root)
+        # 标签口径负例（批284）：同一 job 把 v<VER> 改回 <VER>，必须被当场点名。
+        (wf / "buildroot.yml").write_text(
+            "name: br\non:\n  push:\n    tags: [\"v*\"]\n"
+            "permissions:\n  contents: read\n"
+            "concurrency:\n  group: br\njobs:\n"
+            "  release:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    if: startsWith(github.ref, 'refs/tags/v')\n"
+            "    permissions:\n      contents: read\n      packages: write\n"
+            "    steps:\n      - run: oras push ghcr.io/o/rockrobot3-ota:${VER}\n",
+            encoding="utf-8",
+        )
+        bad2 = audit(root)
 
     cases = _cases(bad)
+    cases.append(("制品标签漏 v 被抓", any("标签必须 v<VER>" in b for b in bad2)))
     for name, ok in cases:
         print(("PASS  " if ok else "FAIL  ") + name)
     return 0 if all(ok for _, ok in cases) else 1

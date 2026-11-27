@@ -220,6 +220,10 @@ def release_artifacts_problems(text, rel):
     for name in names:
         if name not in joined:
             bad.append(f"{rel} job {job} 未推 {name}（正式制品必须进 ghcr）")
+        # 标签口径 v<VER>：v0.0.8 首发时此处曾漏 v（推成 0.0.8），发布后才发现——
+        # 名字在场不等于标签合规，口径漂移必须由门当场拦。
+        elif f"{name}:v${{VER}}" not in joined:
+            bad.append(f"{rel} job {job} 的 {name} 标签必须 v<VER>（曾漏 v 推成无前缀）")
     if "oras push" not in joined:
         bad.append(f"{rel} job {job} 缺 oras push（ghcr 制品未发布）")
     if "release-verify.sh" not in joined:

@@ -206,7 +206,8 @@ firmware 必须带 `packages: write`、推 `rockrobot3-firmware`，且 S3 目标
 （`xtensa-esp32s3-espidf` + `MCU=esp32s3` + `esp32s3` feature）与双 ELF 资产按名
 钉住——双芯片发布面不得缩成单芯片，发布路径不得分叉。**制品托管**：`buildroot.yml` 的 `release` 腿必须 tag 门、
 登录 ghcr、带 `packages: write`，并以 oras 推 `rockrobot3-ota` 与
-`rockrobot3-buildroot`——正式制品只发 release asset 不算托管完成。
+`rockrobot3-buildroot`——正式制品只发 release asset 不算托管完成；两包标签口径必须
+`v<VER>`（v0.0.8 首发曾漏 v 推成 `0.0.8`，现由审计当场拦）。
 
 ## 发布/部署面清单对拍：`release_sets.py`
 
