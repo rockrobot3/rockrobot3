@@ -104,8 +104,8 @@ integration / platforms / publish / buildroot / **coverage** 的 job 名按 `REQ
 | 英特尔 / AMD（x86_64） | `x86_64-unknown-linux-gnu`（native，带 `with-brain`） | `platforms` / `cross-artifacts` 该腿 | `publish` / `build` amd64（`ubuntu-latest` 原生） | 交叉产物 + ISA 单测（`assert: any`）；发布腿过 `stage-image.sh` 与 `image-smoke.sh file\|run` |
 | 瑞芯微 RK3566 | `aarch64-unknown-linux-musl`（static 断言）；板档另走 Buildroot 交叉树 | `cross-artifacts` 该腿 + `integration` / `rk3566-onboard`（静态点验）+ `buildroot-assembly` + `buildroot.yml` / `dtb-backport` | `publish` / `build` arm64（`ubuntu-24.04-arm` 原生）；`buildroot.yml` / `image` 出整机镜像 | musl 静态可执行断言；装机面装配断言；镜像六分区与内容断言（实烧仍缺载体，见 status 敞口 6） |
 | 进迭时空（SpacemiT K1/K3） | `riscv64gc-unknown-linux-gnu`（apt 交叉 gcc + QEMU） | `cross-artifacts` 该腿 + `platforms` / `riscv-image`（交叉产物 → stage → QEMU 两段冒烟，不推送） | `publish` / `build-riscv64`（同一脚本 `--push`） | ISA 单测（`assert: any`）+ 镜像文件面/运行面冒烟；合并清单三架构集合判等 |
-| ESP32（classic，xtensa LX6） | `esp32` 工具链（espup + ESP-IDF 5.2.2） | `platforms` / `esp32-gates` 该腿（含整片镜像装配） | `publish` / `firmware`：classic `safe` ELF + 整片 + bootloader | 五门构建/对拍 + 整片三点 magic 与尺寸 fail-closed；实板回执见证据 0014 |
-| ESP32-S3（N16R8，xtensa LX7） | `esp32s3` 工具链（同上） | `esp32-gates` 该腿 | `publish` / `firmware`：S3 `full`（`esp32s3,autonomy,tts`）+ 同版 bootloader | 同 classic；实板回执见证据 0018/0019/0021/0022 |
+| ESP32（classic，xtensa LX6） | `esp32` 工具链（espup + ESP-IDF 5.2.2） | `platforms` / `esp32-gates` 该腿（含整片镜像装配） | `publish` / `firmware`：classic `safe` ELF + 整片 + bootloader | **五门**（`{chip}-periph-base` 外设底座编译 / `esp-uart-echo` 板级回环夹具 / `espidf-std` 构建链冒烟 / `espidf-sentinel` 机制核真板消费者 / `{chip}-act-sense` 执行+感知编译）经 `guarded-run` 执行，任一 SKIP 在 CI 内即红（`skip.sh` 口径）+ 整片镜像装配的三点 magic 与尺寸 fail-closed；实板回执见证据 0014 |
+| ESP32-S3（N16R8，xtensa LX7） | `esp32s3` 工具链（同上） | `esp32-gates` 该腿 | `publish` / `firmware`：S3 `full`（`esp32s3,autonomy,tts`）+ 同版 bootloader | 同 classic 五门（腿内 `chip=esp32s3`）+ 整片 16MB 装配；另上传 `esp32s3-solo-firmware`（release/debug 两档）；实板回执见证据 0018/0019/0021/0022 |
 
 两条口径写明，免得矩阵被读成"六芯片"：**英特尔与 AMD 同属 `x86_64`**，一条腿覆盖两家，
 不造两条同 target 的重复腿；**Windows/macOS 腿是宿主等价面**（`host-windows` /
