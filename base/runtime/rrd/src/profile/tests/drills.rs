@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 真仓装配单钻取：default/distro/esp32-mini/pi4b 四档过完整装载门。
+//! 真仓装配单钻取：default/distro/esp32-mini/esp32s3-mini/pi4b 各档过完整装载门，
+//! 并钉 default↔distro 接线镜像等价（只允许注释差异）。
 //!
 //! 判据是"仓内真值两两闭合"：装配单 + 接线档 + devices.toml 三份真值同时命中；
 //! 镜像/装配单漂移即红。真板侧运行不在本文件（触发条件见各用例注记）。
@@ -352,4 +353,25 @@ fn s3_hal_injected(boot: &Rr3ProfileBoot) {
             boot.hal_bindings
         );
     }
+}
+
+/// default↔distro 接线镜像等价（批45 盲区②；2026-11-27 批121）：两档是同一台
+/// RK3566 参考机 + 同接线的镜像，差异只允许在注释——解析值不等即红，把"人工
+/// 纪律"变成机械对账（改一份忘另一份的漂移当场可见）。
+#[test]
+fn wiring_mirror_drill() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let a = wiring_value(&repo.join("hardware/default/wiring.toml"));
+    let b = wiring_value(&repo.join("hardware/distro/wiring.toml"));
+    assert_eq!(
+        a, b,
+        "default 与 distro 接线解析值必须等价（只允许注释差异）"
+    );
+}
+
+fn wiring_value(p: &Path) -> toml::Value {
+    let text = std::fs::read_to_string(p)
+        .unwrap_or_else(|e| panic!("读 {} 失败: {e}", p.display()));
+    text.parse()
+        .unwrap_or_else(|e| panic!("{} 不是合法 TOML: {e}", p.display()))
 }
