@@ -49,7 +49,22 @@ def _write_flows(wf):
         "name: integ\non:\n  push:\n    branches: [main]\n  pull_request:\n"
         "concurrency:\n  group: i\njobs:\n"
         "  a:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
-        "    steps:\n      - uses: actions/checkout@v7\n",
+        "    steps:\n      - uses: actions/checkout@v7\n"
+        # 集成腿负例（批289）：distro-smoke 换成 echo，其余腿保留脚本——只有它该被点名。
+        "  distro-smoke:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        "    steps:\n      - run: echo no-op\n"
+        "  install-smoke:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        "    steps:\n      - run: bash tools/ci/platform/install-smoke.sh\n"
+        "  ota-sign:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        "    steps:\n      - run: bash tools/ci/platform/ota-sign-smoke.sh\n"
+        "  rk3566-onboard:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        "    steps:\n      - run: bash tools/ci/platform/rk3566-onboard-check.sh\n"
+        "  buildroot-assembly:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        "    steps:\n      - run: bash tools/ci/platform/buildroot-assembly-smoke.sh\n"
+        "  sim-assemble:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        "    steps:\n      - run: bash tools/ci/platform/sim-assemble.sh\n"
+        "  sim-chain:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+        "    steps:\n      - run: bash tools/ci/platform/sim-chain.sh\n",
         encoding="utf-8",
     )
     (wf / "publish.yml").write_text(
@@ -165,6 +180,7 @@ def _cases(bad):
         ("匿名回读 workflow 缺失被抓", any("缺 workflow release-anon.yml" in b for b in bad)),
         ("制品面缺齐套巡检被抓", any("未接 release-verify.sh" in b for b in bad)),
         ("制品面缺名被抓", any("未推 rockrobot3-buildroot" in b for b in bad)),
+        ("集成腿缺验证脚本被抓", any("缺验证脚本 distro-smoke.sh" in b for b in bad)),
         ("好例零误报", not any("good.yml" in b for b in bad)),
     ]
 

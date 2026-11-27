@@ -72,6 +72,17 @@ CHIP_MATRIX = {
 }
 
 # 矩阵腿的验证步骤（脚本名即判据锚）：腿在而步骤被删，等于覆盖名存实亡。
+# 集成腿的验证脚本（批289）：job 名在场不等于腿活着——step 被换成 echo 时，
+# 名与超时全都还在，流水线照样绿。与 JOB_STEPS 同型，只是载体是 integration.yml。
+INTEGRATION_STEPS = {
+    "distro-smoke": ["distro-smoke.sh"],
+    "install-smoke": ["install-smoke.sh"],
+    "ota-sign": ["ota-sign-smoke.sh"],
+    "rk3566-onboard": ["rk3566-onboard-check.sh"],
+    "buildroot-assembly": ["buildroot-assembly-smoke.sh"],
+    "sim-assemble": ["sim-assemble.sh"],
+    "sim-chain": ["sim-chain.sh"],
+}
 JOB_STEPS = {
     "cross-artifacts": ["cross-artifacts.sh", "ipct003_dump"],
     "arm64-deb": ["arm64-deb-check.sh"],
@@ -212,6 +223,23 @@ def chip_problems(text, rel):
     return bad
 
 
+def integration_problems(text, rel):
+    """集成腿验证脚本按名钉住（缺 job 由 REQUIRED_JOBS 点名，这里只核腿内判据）。"""
+    if rel.name != "integration.yml":
+        return []
+    jobs = dict(jobs_of(text))
+    bad = []
+    for job, scripts in INTEGRATION_STEPS.items():
+        block = jobs.get(job)
+        if block is None:
+            continue
+        joined = "\n".join(block)
+        for script in scripts:
+            if script not in joined:
+                bad.append(f"{rel} job {job} 缺验证脚本 {script}（腿名存实亡）")
+    return bad
+
+
 def workflow_problems(path, root):
     text = path.read_text(encoding="utf-8")
     rel = path.relative_to(root)
@@ -222,6 +250,7 @@ def workflow_problems(path, root):
     bad.extend(release_problems(text, rel))
     bad.extend(release_artifacts_problems(text, rel))
     bad.extend(anon_problems(text, rel))
+    bad.extend(integration_problems(text, rel))
     if not re.search(r"^concurrency:\s*$", text, re.M):
         bad.append(f"{rel} 缺顶层 concurrency（同 ref 并发组）")
     if rel.name == "publish.yml" and not re.search(r"cancel-in-progress:\s*false", text):

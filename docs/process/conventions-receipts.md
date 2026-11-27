@@ -3113,3 +3113,11 @@ release-verify.sh / `--with-signature` / `--classes image,firmware` / `--tag aut
 定位）；② 批290 下次 `v*` 发布后把 OTA/buildroot 纳入匿名回读（v 前缀已由批284
 钉住）并核 buildroot 的 `release-verify --tag v${VER}` 实跑；③ 批291 distro 首发后
 `--deep` / B.2 实测与 distro 类裁定；④ 批292 三线收口与再拟下轮。
+
+**2026-11-28 批289 集成腿验证脚本入审计**：事实——`REQUIRED_JOBS` 只钉 job 名，把
+`run: bash tools/ci/platform/install-smoke.sh` 换成 `echo` 后名与超时仍在、流水线照绿，
+"腿名存实亡"没有门；平台腿早有 `JOB_STEPS` 同型判据，集成腿一直缺。处置——
+`INTEGRATION_STEPS` 按名钉住七条腿的验证脚本（distro-smoke / install-smoke / ota-sign /
+rk3566-onboard / buildroot-assembly / sim-assemble / sim-chain），缺脚本即点名；
+自检夹具把 distro-smoke 换成 echo、其余腿保留脚本，新增负例（只该点名它）。判据——
+`--self-test` 全绿（新增用例 PASS，无 FAIL）；真仓审计 PASS；⑤ 文档门绿。
