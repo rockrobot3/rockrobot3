@@ -2447,3 +2447,12 @@ platforms success，文档头 `9b1083b8` 的 gate success。本轮四件：distr
 即红，防日志被删或 boot 没走到边界）。批205/206 的窗口如实登记：`release-anon` 首跑
 （2026-11-30 03:00 UTC）未到期、distro 无 release 未触发深检，均不冒充。判据——
 rustfmt `--check` 过（本机不编译，Rust 编译与测试由 gate 流水线给回执）；⑤⑬⑯ 绿。
+
+**2026-11-27 批208 本轮收口·三线全绿（含 Rust 改动实跑）**：事实——代码头 `ea2c1b1b`
+上 gate/integration/platforms 均 success：gate 完成 Rust 编译与测试，integration 的
+distro-smoke 真起 rrd 并命中了新增的 `boot 队列已投递: 已投递=6 …` 断言（缺行会红）。
+本轮：批205/206 窗口未到（release-anon 首跑 2026-11-30 03:00 UTC；distro 无 release），
+按登记不冒充；批207 落地 boot 投递摘要（规模+用时）。处置——下轮三件：① 周程首跑后按
+runs 结论归因；② distro 首发深检与 B.2 实测；③ 文档/脚本一致性巡检（数量与措辞类，
+历史回执不改写）。判据——三线结论与 run 页一致；rustfmt --check、⑤⑬⑯、巡检自检
+18/18、契约自检 5/5、审计自检 30/30 全绿。
