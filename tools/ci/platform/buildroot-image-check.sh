@@ -82,6 +82,13 @@ rr3_br_rootfs() {
     fi
   done
   echo "PASS  S99rrd 传 --contracts 与 --profile（装载正门同形）"
+  # 启动失败点名（批341）：-b 后台化后 rrd 的 stderr 不落串口，装载门拒起时若连
+  # 点名都没有，现场只剩"没有模块、没有原因"。脚本里必须有这条诊断与手工复现命令。
+  if ! printf '%s\n' "$s99" | grep -q 'S99rrd: rrd 未存活'; then
+    echo "::error title=br-s99rrd::S99rrd 缺启动失败点名（装载门拒起时启动面静默）"
+    exit 1
+  fi
+  echo "PASS  S99rrd 含启动失败点名与手工复现命令"
 }
 
 # FIT 与 TPL：u-boot.itb 缺 atf-bl31 = 能烧不能启；idbloader 体量下限抓缺 TPL。

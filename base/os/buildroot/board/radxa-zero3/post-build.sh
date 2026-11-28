@@ -124,6 +124,19 @@ case "$1" in
 			-x /usr/bin/rrd -- --socket /var/run/rock3-ipc.sock \
 			--contracts /usr/lib/rockrobot3/contracts \
 			--profile /usr/lib/rockrobot3/profiles/distro.toml
+		# 启动自检（批341）：-b 后台化后 rrd 的 stderr 不落串口，装载门拒起时现场
+		# 只剩"静悄悄"（没有模块、没有一行原因）。子壳等 2s 按 pid 存活点名，并给出
+		# 手工复现命令——不阻塞 rcS，也不改变起法。
+		(
+			sleep 2
+			pid=$(cat /var/run/rrd.pid 2>/dev/null)
+			if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+				echo "S99rrd: rrd 运行中（pid=${pid}）"
+			else
+				echo "S99rrd: rrd 未存活——装载门拒起或 socket bind 失败；手工复现："
+				echo "  /usr/bin/rrd --socket /var/run/rock3-ipc.sock --contracts /usr/lib/rockrobot3/contracts --profile /usr/lib/rockrobot3/profiles/distro.toml"
+			fi
+		) &
 		;;
 	stop)
 		start-stop-daemon -K -p /var/run/rrd.pid
