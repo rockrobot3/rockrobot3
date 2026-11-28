@@ -3226,3 +3226,19 @@ PASS 摘要七家族已对齐，后来者读到的覆盖面即真实覆盖面。
 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
 ③ 批303 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批304 三线收口与
 再拟下轮。
+
+**2026-11-28 批301 ota-bundle 意外退出归因**：事实——OTA 包是发布载荷来源，脚本只有
+`die` 显式失败路径，`set -e` 下的裸命令失败只剩退出码与空日志。处置——补 ERR trap：
+`ERROR: 意外退出：<命令>（行 N）`（与 install-bundle / pack-bundle 同款）；gate 的
+ota-bundle 腿每拍真跑（负例走 `if !` 不触发 trap）。判据——commit `0c2f412d`：
+ota-bundle / scripts / conventions 同拍 success，gate 与 integration success。
+
+**2026-11-28 批302 本轮收口**：本轮交付——ota-bundle 补意外退出归因；三处部署脚本
+（install-bundle / pack-bundle / ota-bundle）的失败归因形成同一形态。窗口仍未到
+（runs=0）。判据——`0c2f412d` 的 gate / integration 见上；三远端同指 `0c2f412d`。
+
+**2026-11-28 批302 下轮任务拟定**：① 批303 11-30 03:00 UTC `release-anon` 首跑归因
+（确认 runs>0 并按注解记录 tag/类别；红按镜像/固件/签名三类定位）；② 批304 下次
+`v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
+③ 批305 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批306 三线收口与
+再拟下轮。
