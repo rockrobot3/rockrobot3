@@ -3248,3 +3248,13 @@ ota-bundle / scripts / conventions 同拍 success，gate 与 integration success
 ⑰ 清单对拍 / 工作流审计 / 步骤清单 30 步 / unsafe / 六个库自检），全部 PASS，无需
 修复；体检中发现 `audit/` 目录索引漏登 `release_sets.py`（批250 立的审计未进索引表，
 后来者按索引找会漏）。处置——索引行补登。判据——体检输出逐项在案；⑤ 文档门绿。
+
+**2026-11-28 批304 本轮收口（体检无红 + 索引补登）**：本轮无代码缺陷需修复：全量
+非编译门体检全 PASS，唯一问题是索引漏登 `release_sets.py`，已补。窗口仍未到
+（runs=0，11-30 03:00 UTC）。判据——体检逐项输出在案；⑤ 文档门绿。
+
+**2026-11-28 批304 下轮任务拟定**：① 批305 11-30 03:00 UTC `release-anon` 首跑归因
+（确认 runs>0 并按注解记录 tag/类别；红按镜像/固件/签名三类定位）；② 批306 下次
+`v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
+③ 批307 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批308 三线收口与
+再拟下轮。
