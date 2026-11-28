@@ -3209,3 +3209,9 @@ PASS 摘要七家族已对齐，后来者读到的覆盖面即真实覆盖面。
 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
 ③ 批301 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批302 三线收口与
 再拟下轮。
+
+**2026-11-28 批299 判据表共用实现（去重）**：事实——gate / coverage / integration
+三处"按 job 钉入口"是同一循环的三份拷贝（仅 kind 与提示语不同），改口径要改三处。
+处置——抽 `_entry_problems(text, rel, table, kind, note)`，三个函数只留"按文件名分派
++ 表"；报错文案逐字不变。判据——自检 37/37、0 FAIL；真仓审计 PASS；文件 353→338 行；
+⑯ 行数门 PASS。

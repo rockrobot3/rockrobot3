@@ -244,55 +244,40 @@ def chip_problems(text, rel):
     return bad
 
 
-def gate_problems(text, rel):
-    """门禁主线判据入口按名钉住：入口被换掉 = 整套门禁空转。"""
-    if rel.name != "gate.yml":
-        return []
+def _entry_problems(text, rel, table, kind, note):
+    """按 job 名钉住入口/脚本的共用判据（缺 job 由 REQUIRED_JOBS 单独点名）。"""
     jobs = dict(jobs_of(text))
     bad = []
-    for job, needles in GATE_STEPS.items():
+    for job, needles in table.items():
         block = jobs.get(job)
         if block is None:
             continue
         joined = "\n".join(block)
         for needle in needles:
             if needle not in joined:
-                bad.append(f"{rel} job {job} 缺判据入口 {needle}（门禁空转）")
+                bad.append(f"{rel} job {job} 缺{kind} {needle}（{note}）")
     return bad
+
+
+def gate_problems(text, rel):
+    """门禁主线判据入口按名钉住：入口被换掉 = 整套门禁空转。"""
+    if rel.name != "gate.yml":
+        return []
+    return _entry_problems(text, rel, GATE_STEPS, "判据入口", "门禁空转")
 
 
 def coverage_problems(text, rel):
     """覆盖率观测入口按名钉住：数据静默消失比门禁变红更难发现。"""
     if rel.name != "coverage.yml":
         return []
-    jobs = dict(jobs_of(text))
-    bad = []
-    for job, needles in COVERAGE_STEPS.items():
-        block = jobs.get(job)
-        if block is None:
-            continue
-        joined = "\n".join(block)
-        for needle in needles:
-            if needle not in joined:
-                bad.append(f"{rel} job {job} 缺覆盖率入口 {needle}（数据静默消失）")
-    return bad
+    return _entry_problems(text, rel, COVERAGE_STEPS, "覆盖率入口", "数据静默消失")
 
 
 def integration_problems(text, rel):
     """集成腿验证脚本按名钉住（缺 job 由 REQUIRED_JOBS 点名，这里只核腿内判据）。"""
     if rel.name != "integration.yml":
         return []
-    jobs = dict(jobs_of(text))
-    bad = []
-    for job, scripts in INTEGRATION_STEPS.items():
-        block = jobs.get(job)
-        if block is None:
-            continue
-        joined = "\n".join(block)
-        for script in scripts:
-            if script not in joined:
-                bad.append(f"{rel} job {job} 缺验证脚本 {script}（腿名存实亡）")
-    return bad
+    return _entry_problems(text, rel, INTEGRATION_STEPS, "验证脚本", "腿名存实亡")
 
 
 def workflow_problems(path, root):
