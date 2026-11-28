@@ -19,6 +19,7 @@ BOOT=""
 PARTS="tools/esp32-periph-base/partitions.csv"
 CHIP=esp32
 FLASH=4mb
+trap 'echo "FAIL  意外退出：${BASH_COMMAND}（行 ${LINENO}；镜像 ${OUT:-未定}；芯片 ${CHIP}）" >&2' ERR
 
 die() { echo "FAIL  $1" >&2; exit 1; }
 

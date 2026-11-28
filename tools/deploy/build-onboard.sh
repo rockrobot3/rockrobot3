@@ -29,6 +29,7 @@ PROFILE="${4:-}"
 OUT="${2:-/tmp/rr3-arm64-deploy}"
 RMT_SRC="${3:-~/rockrobot3-src}"
 PAY="$OUT/payload"
+trap 'echo "FAIL  意外退出：${BASH_COMMAND}（行 ${LINENO}；板 ${HOST:-未定}；输出 ${OUT}）" >&2' ERR
 
 if [ -z "$HOST" ]; then
   echo "用法: build-onboard.sh <user@host> [out_dir] [remote_src_dir] [profile]" >&2

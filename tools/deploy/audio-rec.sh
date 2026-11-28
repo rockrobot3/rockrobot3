@@ -32,6 +32,7 @@ OUT=""
 LOG=""
 RESTORE=1
 DRY=0
+trap 'echo "FAIL  意外退出：${BASH_COMMAND}（行 ${LINENO}；串口 ${DEV}；输出 ${OUT:-自动}）" >&2' ERR
 
 usage() {
 	sed -n '3,26p' "$0" | sed 's/^# \{0,1\}//'

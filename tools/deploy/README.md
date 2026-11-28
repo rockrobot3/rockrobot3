@@ -117,7 +117,7 @@ bash tools/deploy/verify-board-config.sh --self-test
 | `publish.yml`（固件腿） | ESP32 固件包（整片 + ELF + bootloader + 分区表 + sha256） | `ghcr.io/<owner>/rockrobot3-firmware:<tag>`（`oras pull` 拉取） | 同上 |
 | `buildroot.yml` | Buildroot 全量镜像 / OTA 包 | `rockrobot3-buildroot:v<VER>` · `rockrobot3-ota:v<VER>`（`VER` 取自 `VERSION`） | 提交触发（`[buildroot-full]`）与 tag |
 
-**载体脚本失败归因约定（2026-11-28 批307）**：凡是 `set -e` 的部署/打包脚本，都在顶部装 ERR trap 点名失败命令与行号（可选带上下文，如产物路径）；`install-bundle` / `pack-bundle` / `pack-arm64` / `ota-bundle` / `build-riscv-image` 已同形——卡住时先看 `FAIL 意外退出：…` 这一行，不用靠猜。
+**载体脚本失败归因约定（2026-11-28 批307，批315 扩齐）**：凡是 `set -e` 的部署/打包/烧录/维护窗脚本，都在顶部装 ERR trap 点名失败命令与行号（可选带上下文，如产物/串口/输出路径）；`install-bundle` / `pack-bundle` / `pack-arm64` / `ota-bundle` / `build-riscv-image` / `stage-image` / `image-smoke` / `flash-artifact` / `flash-esp32` / `image-esp32` / `fw-set` / `audio-rec` / `build-onboard` 全部在位，前缀沿用各脚本既有的 `FAIL` / `ERROR` 口径。巡检器 `verify-board-config` 不套：它以非零退出码表达"有漂移"，属判据而非意外。卡住时先看 `…意外退出：…` 这一行，不用靠猜。
 
 **开发分支不产出制品**：`dev/*` 推送只跑门禁与各平台验证腿，发布面只认 tag 与 `main`。
 所以"`VERSION = 0.0.8` + tag `v0.0.8`"这一对成立时才有 `:v0.0.8` 系列制品；

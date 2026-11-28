@@ -19,6 +19,7 @@
 # （profile/boot/load.rs 的定位判据），单文件复制会让模块发现面打空。故运行面
 # 复制整棵装机树做影子根，只在副本上改 hal_backend（镜像内原件不动）。
 set -euo pipefail
+trap 'echo "FAIL  意外退出：${BASH_COMMAND}（行 ${LINENO}；子命令 ${1:-未定}；镜像 ${2:-未定}）" >&2' ERR
 
 usage() {
 	sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'

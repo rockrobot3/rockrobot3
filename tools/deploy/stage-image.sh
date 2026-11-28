@@ -16,6 +16,7 @@
 # riscv-image 腿）在 x86 宿主交叉构建后用 QEMU 真跑镜像，仅为提前验证镜像路径，
 # 不冒充原生发布腿。
 set -euo pipefail
+trap 'echo "FAIL  意外退出：${BASH_COMMAND}（行 ${LINENO}；stage ${out:-未定}）" >&2' ERR
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "ERROR: 不在 git 仓库内" >&2
   exit 1

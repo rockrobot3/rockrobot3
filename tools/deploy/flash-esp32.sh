@@ -35,6 +35,7 @@ cd "$(dirname "$0")/../.." # 仓根
 PROJ=tools/esp32-periph-base
 ELF_NAME=esp32-periph-base
 PARTITIONS="$PROJ/partitions.csv"
+trap 'echo "FAIL  意外退出：${BASH_COMMAND}（行 ${LINENO}；固件 ${ELF_NAME}；串口 ${PORT:-自动}）" >&2' ERR
 BUILD=debug
 MONITOR=0
 PORT=

@@ -12,6 +12,7 @@
 # --bootloader 时用其自带镜像（IDF 版本与 app 不保证一致）。发布包随带与 app
 # 同版 bootloader 时用 --bootloader 指过去；未带时 PASS 行如实打印"内置"。
 set -euo pipefail
+trap 'echo "FAIL  意外退出：${BASH_COMMAND}（行 ${LINENO}；ELF ${elf:-未定}）" >&2' ERR
 
 usage() {
   cat <<'EOF'

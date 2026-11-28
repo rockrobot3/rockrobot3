@@ -14,6 +14,7 @@
 #   缺省输出到仓根（CI 的 GITHUB_WORKSPACE）；--out 供本地干跑（不污染工作区）。
 # 退出码：0 = 七件齐且判据全过；1 = 缺件/判据红；2 = 用法错。
 set -euo pipefail
+trap 'echo "FAIL  意外退出：${BASH_COMMAND}（行 ${LINENO}；输出 ${out:-未定}）" >&2' ERR
 
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "ERROR: git rev-parse --show-toplevel 失败——请在本仓内执行。" >&2
