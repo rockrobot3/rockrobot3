@@ -3215,3 +3215,14 @@ PASS 摘要七家族已对齐，后来者读到的覆盖面即真实覆盖面。
 处置——抽 `_entry_problems(text, rel, table, kind, note)`，三个函数只留"按文件名分派
 + 表"；报错文案逐字不变。判据——自检 37/37、0 FAIL；真仓审计 PASS；文件 353→338 行；
 ⑯ 行数门 PASS。
+
+**2026-11-28 批300 本轮收口（判据实现去重）**：事实——三张判据表共用实现后，
+判据口径的修改点从三处收敛到一处，行数 353→338，文案未变。窗口仍未到（runs=0）。
+判据——commit `886eb8b6`：gate（scripts / conventions）与 integration success；
+自检 37/37；三远端同指 `886eb8b6`。
+
+**2026-11-28 批300 下轮任务拟定**：① 批301 11-30 03:00 UTC `release-anon` 首跑归因
+（确认 runs>0 并按注解记录 tag/类别；红按镜像/固件/签名三类定位）；② 批302 下次
+`v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
+③ 批303 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批304 三线收口与
+再拟下轮。
