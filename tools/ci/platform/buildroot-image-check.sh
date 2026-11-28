@@ -71,6 +71,15 @@ rr3_br_rootfs() {
     fi
   done
   echo "PASS  rr_a.ext4 /etc/fstab 含 sysfs/devtmpfs/rr_data/rr_staging"
+  # tmpfs 挂载点必须在根里先存在（批343）：mount -a 不建目录，缺 /var/run 时
+  # rrd 的 pid 文件与 UDS bind 全失败，镜像"能启动但守护起不来"。
+  for p in /var/run /var/log; do
+    if ! "${host}/sbin/debugfs" -R "stat ${p}" "${d}/rr_a.ext4" 2>&1 | grep -q 'Inode:'; then
+      echo "::error title=br-mount::rr_a.ext4 缺 tmpfs 挂载点 ${p}（mount -a 会失败）"
+      exit 1
+    fi
+    echo "PASS  tmpfs 挂载点 ${p} 在场"
+  done
   # 装载正门参数（批340）：S99rrd 必须与 rrd.service 的 ExecStart 同形传 --contracts
   # 与 --profile。历史上这里只传 --socket/--manifest，装载门十位判据一位不跑而 rrd
   # 退出 0（status 敞口 20 的病形）——参数漂移必须由镜像断言拦下。

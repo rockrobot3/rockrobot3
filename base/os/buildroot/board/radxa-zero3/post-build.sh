@@ -32,9 +32,15 @@ install -d -m 0755 \
 	"$TARGET/usr/bin" \
 	"$TARGET/usr/lib/rockrobot3/modules" \
 	"$TARGET/var/lib/rr3/staging" \
+	"$TARGET/var/run" \
+	"$TARGET/var/log" \
 	"$TARGET/data" \
 	"$TARGET/extlinux" \
 	"$BINARIES_DIR/extlinux"
+# /var/run 与 /var/log 是下面 fstab 的 tmpfs 挂载点：**mount -a 不会自动建目标目录**，
+# 缺目录时启动期两条 mount 直接报 No such file or directory，随后 rrd 的
+# `/var/run/rock3-ipc.sock` bind 与 pid 文件写入全部失败（2026-11-28 批343 审计：
+# 镜像此前只建了 /var/lib/rr3/staging，/var/run 与 /var/log 两个挂载点缺位）。
 
 # genimage 的 --inputpath 是 $BINARIES_DIR：boot.vfat 的 files 里
 # "extlinux/extlinux.conf" 必须在 BINARIES_DIR 下真实存在，否则全量 make
