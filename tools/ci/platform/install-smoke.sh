@@ -359,6 +359,29 @@ rollback_case() {
   echo "$notice"
 }
 
+# 坏包预检例（批309）：缺模块二进制的包必须在停 rrd **之前**被拒——整机不停机、
+# 树不变，失败行点名缺件；这条判据防的是"坏包换来一次真实停机 + 回滚"。
+malformed_case() {
+  local bad="$WORK/malformed.tar.gz" tmp top out rc=0 before after
+  tmp=$(mktemp -d "$WORK/malformed.XXXXXX")
+  tar -xzf "$WORK/bundle.tar.gz" -C "$tmp"
+  top=$(basename "$(find "$tmp" -mindepth 1 -maxdepth 1 -type d)")
+  rm -f "$tmp/$top/modules/rr3-sense/rr3-sense"
+  tar -C "$tmp" -czf "$bad" "$top"
+  before=$(sed -n 's/^commit=//p' "$ROOT/BUNDLE_VERSION")
+  out=$(as_root bash tools/deploy/install-bundle.sh "$bad" 2>&1) || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    printf '%s\n' "$out" >&2
+    die "缺模块二进制的包竟然被接受（预检未生效）"
+  fi
+  grep -q '包内缺 modules/rr3-sense/rr3-sense' <<<"$out" \
+    || { printf '%s\n' "$out" >&2; die "坏包被拒但未点名缺件"; }
+  after=$(sed -n 's/^commit=//p' "$ROOT/BUNDLE_VERSION")
+  [ "$before" = "$after" ] || die "坏包被拒后装机树却变了（${before} → ${after}）"
+  as_root systemctl is-active --quiet rrd || die "坏包被拒后 rrd 不再 active（停机副作用）"
+  echo "::notice title=install-smoke-malformed::缺模块二进制的包在停 rrd 前被拒（rc=${rc}），树与 unit 未变"
+}
+
 main() {
   preflight
   mkdir -p "$WORK"
@@ -371,9 +394,10 @@ main() {
   install_bundle
   verify_install
   drift_negative
+  malformed_case
   rollback_case
   report_timing
-  echo "PASS  装机器正例：deb→systemd 全模块 running；真包换树成功且装机面无漂移；坏包回滚成功"
+  echo "PASS  装机器正例：deb→systemd 全模块 running；真包换树成功且装机面无漂移；坏包预检拒绝且机器未停机；坏包回滚成功"
 }
 
 main "$@"

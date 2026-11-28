@@ -62,6 +62,17 @@ grep -qx "$top/BUNDLE_VERSION" <<<"$list" \
   || die "部署包缺 $top/BUNDLE_VERSION（非 A10 版本化包）"
 grep -qx "$top/bin/rrd" <<<"$list" || die "部署包缺 bin/rrd"
 
+# 包内模块结构预检（批309）：缺 bin/manifest 的包在停 rrd **之前**拒掉——坏包不该
+# 换来整机停机与一次回滚，也不该"换上去才发现少件"。
+bmods=$(printf '%s\n' "$list" | sed -n "s#^$top/modules/\(rr3-[A-Za-z0-9_-]*\)/.*#\1#p" | sort -u)
+[ -n "$bmods" ] || die "包内没有任何模块（modules/* 为空，拒绝换树）"
+for m in $bmods; do
+  grep -qx "$top/modules/$m/module.toml" <<<"$list" \
+    || die "包内缺 modules/$m/module.toml（模块结构不完整，未停 rrd）"
+  grep -qx "$top/modules/$m/$m" <<<"$list" \
+    || die "包内缺 modules/$m/$m（模块二进制缺失，未停 rrd）"
+done
+
 [ "$ROOT" != "/" ] || die "安装根不得为 /"
 parent=$(dirname "$ROOT")
 stage=$(mktemp -d "$parent/.rockrobot3-new.XXXXXX")
