@@ -3462,3 +3462,21 @@ brain 交叉构建、全量 make、GPT/dtb 与镜像内容只读断言（新增 
 distro 首发后把 distro 类纳入；③ 批327 distro 首发后 `--deep` / B.2 实测与 distro
 类裁定；④ 批328 镜像内 brain 的运行证据（真板或 QEMU 启动；硬件未到则以已知边界
 记账，不冒领）；⑤ 批329 三线收口与再拟下轮。
+
+**2026-11-28 批325 装配冒烟覆盖 brain 三件**：事实——brain 随装后，快速装配冒烟
+仍只垫 sense：镜像的 brain 打包面只有小时级 buildroot 镜像作业覆盖，日常推送没有
+快信号。处置——冒烟夹具加入仓库真 brain manifest + 假 bin，断言 manifest 归位、
+entry 绝对化后 bin 可执行、config 与仓源逐字节一致三件（与 sense 同口径）。判据——
+`7d94d4a9` integration 的 buildroot-assembly job success（三件断言全过）；gate /
+integration / platforms 三线 success。
+
+**2026-11-28 批326 本轮收口（窗口未到）**：本轮把 rock3 镜像的 brain 随装从"只有
+小时级镜像作业验证"补到"每次集成的装配冒烟也覆盖三件"，并在 status 的 Buildroot
+行登记六模块对齐与运行证据边界。窗口事实——`release-anon` runs=0（首跑 11-30
+03:00 UTC，不预写结论）。判据——`7d94d4a9` 三线 success；三远端同指 `7d94d4a9`。
+
+**2026-11-28 批326 下轮任务拟定**：① 批327 11-30 03:00 UTC `release-anon` 首跑
+归因（runs>0；按注解记 tag/类别/签名，红按镜像/固件/签名三类定位）；② 批328 下次
+`v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑，
+distro 首发后把 distro 类纳入；③ 批329 镜像内 brain 的运行证据（真板或 QEMU 启动；
+硬件未到则以已知边界记账，不冒领）；④ 批330 三线收口与再拟下轮。
