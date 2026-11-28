@@ -77,7 +77,7 @@ rr3_br_rootfs() {
   s99=$("${host}/sbin/debugfs" -R "cat /etc/init.d/S99rrd" "${d}/rr_a.ext4" 2>&1 || true)
   for k in "--contracts" "--profile"; do
     if ! printf '%s\n' "$s99" | grep -q -- "$k"; then
-      echo "::error title=br-s99rrd::/etc/init.d/S99rrd 缺 $k（装载门不跑却会绿）"
+      echo "::error title=br-s99rrd::/etc/init.d/S99rrd 缺 ${k}（装载门不跑却会绿）"
       exit 1
     fi
   done
