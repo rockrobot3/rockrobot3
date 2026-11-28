@@ -3676,3 +3676,18 @@ rcS、不改变起法。镜像内容断言 pin 住该点名语句与 `--contract
 **下轮任务拟定**：① 批344 11-30 03:00 UTC `release-anon` 首跑归因；② 批345 下次
 `v*` 发布后 OTA/buildroot/distro 纳入匿名回读；③ 批346 网络/时间面裁定材料（按
 decisions.md 新未决项）；④ 批347 镜像内 brain 系统级运行证据；⑤ 批348 三线收口。
+
+**2026-11-29 批346 出厂镜像网络与时间面裁定材料**：事实——镜像用户态包只有 ALSA
+两项（无 NetworkManager/wpa_supplicant/NTP）；connect 的 linux 面是 `nmcli` 子进程；
+板载 WiFi 走 SDIO 且 mainline 6.6 无芯片驱动（MAINTAINERS 无 AIC8800）；brain 的 TLS
+依赖正确时钟而代码无时钟门；arm64 defconfig 的 USB gadget（NCM/ECM/RNDIS）与 dwc3
+可用；Buildroot 2024.02.11 在库 network-manager/wpa_supplicant/chrony/ntp 四包。
+处置——落 [裁定材料](dev/0.0.8/无硬件开发/0.0.8版本出厂镜像网络与时间面裁定材料.md)：
+三选项代价（厂商驱动+NM／换链路后端／USB 旁路）、时间同步机制、可判终态、取证命令；
+decisions §3 行与计划册 §2 两行加指针。附带证实：arm64 defconfig `DEVTMPFS_MOUNT=y`，
+fstab 的 `devtmpfs /dev` 是冗余行（每次启动一条 already mounted 错误），建议下次镜像
+批次删除并加断言。判据——⑤ 文档门通过；不改任何产品代码。边界——三选项均未实施，
+真板前不 claim 任一路径可用。
+**下轮任务拟定**：① 批344 11-30 03:00 UTC `release-anon` 首跑归因；② 批345 下次
+`v*` 发布后 OTA/buildroot/distro 纳入匿名回读；③ 批347 镜像内 brain 系统级运行证据；
+④ 批348 三线收口与再拟下轮（含时钟就绪门是否独立先落的裁定）。
