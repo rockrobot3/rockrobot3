@@ -87,6 +87,36 @@ fn store_atomically() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// 数据目录自建（批349）：出厂镜像 rr_data 分区出厂为空，`/data/rr3` 无人预建——
+/// 落盘须自己建出父目录，否则首启每次 ENOENT、boots 每次开机重置为 1。
+#[cfg(unix)]
+#[test]
+fn store_creates_dir() {
+    let dir = tmpdir("mkdir");
+    let path = dir.join("rr3").join("nested").join(COUNTERS_FILE);
+    let mut t = BTreeMap::new();
+    t.insert(RR3_COUNTERS_BOOTS_KEY.to_string(), 3);
+    rr3_counters_store(&path, &t).expect("缺目录时应自建并落盘");
+    assert!(path.is_file(), "落盘后目标档必须在场");
+    let (loaded, note) = rr3_counters_load(&path);
+    assert!(note.is_none(), "自建目录写出的档应可直接读回: {note:?}");
+    assert_eq!(loaded[RR3_COUNTERS_BOOTS_KEY], 3);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 父路径是文件 = 建目录必败：错误交回调用方点名，不许 panic、不许当成功。
+#[cfg(unix)]
+#[test]
+fn store_names_bad_dir() {
+    let dir = tmpdir("baddir");
+    let blocker = dir.join("blocker");
+    std::fs::write(&blocker, b"x").unwrap();
+    let err = rr3_counters_store(&blocker.join(COUNTERS_FILE), &BTreeMap::new())
+        .expect_err("父路径是文件必败");
+    assert!(err.contains("建数据目录"), "错误须点名目录面: {err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// 加载的容错：首启（不存在）= 空表无怨言；坏文件 = 空表 + 原因
 #[test]
 fn load_miss_files() {

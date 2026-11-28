@@ -13,6 +13,8 @@
 //! 旋钮（env，parse-or-default）：`RR3_COUNTERS_FLUSH_MS` 合并窗口（缺省 10_000）、
 //! `RR3_COUNTERS_FLUSH_MAX` 拍数兜底（缺省 64）。路径 [`rr3_path_with`]（纯函数）：
 //! `RR3_DATA_DIR` 有值 → `$RR3_DATA_DIR/counters.json`；linux 无 env → `/data/rr3/counters.json`。
+//! 落盘前 [`rr3_ctr_dir_ensure`] 自建父目录：出厂镜像的 rr_data 分区出厂为空，
+//! 数据目录没有任何装机侧预建者。
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -89,6 +91,18 @@ fn rr3_ctr_path(dir: &str) -> String {
         .into_owned()
 }
 
+/// 计数档父目录就绪（机制）：缺席即建。出厂镜像的 rr_data 分区出厂为空
+/// （genimage `empty = true`），`/data/rr3` 无人预建——不建则首启每次落盘
+/// ENOENT、boots 恒 1（与发行版轨 `RR3_DATA_DIR` 缺目录同病形，0.0.6 批E' 已修
+/// 一侧）。失败交回调用方点名，不 panic 不吞错。
+pub fn rr3_ctr_dir_ensure(path: &Path) -> Result<(), String> {
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or_else(|| format!("计数档路径无父目录: {}", path.display()))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("建数据目录 {} 失败: {e}", dir.display()))
+}
+
 /// 启动加载：读全表。文件不存在 = 首启（空表）；坏文件按空表处理并回显原因
 /// （计数账丢了不致命，守护必须照常起来——运维账不许挡产品路）。
 pub fn rr3_counters_load(path: &Path) -> (BTreeMap<String, u64>, Option<String>) {
@@ -150,6 +164,7 @@ pub use rr_ipc::persist::rr3_atomic_store;
 #[cfg(unix)]
 pub fn rr3_counters_store(path: &Path, table: &BTreeMap<String, u64>) -> Result<(), String> {
     let _one_writer = RR3_COUNTERS_STORE.lock().unwrap_or_else(|p| p.into_inner());
+    rr3_ctr_dir_ensure(path)?;
     let body = json!(table).to_string();
     let tmp = path.with_file_name(COUNTERS_TMP);
     rr3_atomic_store(path, &tmp, body.as_bytes())
