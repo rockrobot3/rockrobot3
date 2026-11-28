@@ -3339,3 +3339,15 @@ guarded-run 15s×2 重试用尽；该提交只改 install-bundle/install-smoke�
 属外部镜像中断，不是回归。处置——`guarded-run` 对网络镜像失败改为 15/30/60s 三次退避
 （总约 105s，镜像恢复通常在一分钟内）；代码/构建错误仍当场红、不重试。判据——
 提交后由 esp32-gates 实跑验证（本地不编译）。
+
+**2026-11-28 批314 本轮收口（红因处置闭环）**：事实——`464e3ccb` 的 platforms 红已
+归因外部镜像 504（非本轮改动），退避升级后 `ed2bbcf8` 的 esp32-gates classic/S3 双双
+success、platforms / gate / integration 三线全绿。本轮另交付坏包预检前移（必需件 +
+profile，双变体用例公开可读）。窗口仍未到（runs=0）。判据——`ed2bbcf8` 三线全绿；
+三远端同指 `ed2bbcf8`。
+
+**2026-11-28 批314 下轮任务拟定**：① 批315 11-30 03:00 UTC `release-anon` 首跑归因
+（确认 runs>0 并按注解记录 tag/类别；红按镜像/固件/签名三类定位）；② 批316 下次
+`v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
+③ 批317 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批318 三线收口与
+再拟下轮。
