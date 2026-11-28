@@ -29,6 +29,9 @@ trap 'rm -rf "$STAGE"' EXIT
 . "$ROOT/tools/ci/lib/runtime-members.sh"
 
 die() { echo "FAIL  $*" >&2; exit 1; }
+# 意外退出必须可归因（批295）：`set -e` 下的裸命令失败不经过 die，只剩退出码与
+# 空树干——出包链是发布面载荷来源，卡住时必须能看到失败命令与产物路径。
+trap 'echo "FAIL  意外退出：${BASH_COMMAND}（行 ${LINENO}；产物 ${OUT}）" >&2' ERR
 
 mods=$(rr3_modules "$ROOT") || die "仓内没有任何 modules/rr3-*/module.toml（模块清单真值缺席）"
 
