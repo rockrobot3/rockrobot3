@@ -4,8 +4,9 @@
 # 构造最小 TARGET_DIR / BINARIES_DIR，以仓内真实 manifest 与 config 为源跑 post-build.sh，
 # 断言两轨共用装配程序 rr3-pack 的落位：manifest 归位 modules/<name>/module.toml、
 # entry 装机绝对化（除 entry 行外字节零差异）、bin 按 entry 落位、config/atoms 随装、
-# 装载真值集三目录落位；坏模块（缺 bin / 无 entry 行）**整镜像构建失败**（fail-closed，
-# 不再警告跳过——rrd 会 spawn 必退出模块形成重启环）。
+# brain 三件随装（批325：镜像六模块与装配单同集）、装载真值集三目录落位；坏模块
+# （缺 bin / 无 entry 行）**整镜像构建失败**（fail-closed，不再警告跳过——rrd 会
+# spawn 必退出模块形成重启环）。
 #
 # 前置：宿主原生 rr3-pack。CI 由 integration 的 buildroot-assembly job 构建并
 # 用 RR3_PACK_BIN 指入；本地可先 `cargo build --release --manifest-path
@@ -23,7 +24,8 @@ work="$(mktemp -d /tmp/rr3-assembly-smoke.XXXXXX)"
 trap 'rm -rf "$work"' EXIT
 TARGET="$work/target"
 BINARIES="$work/binaries"
-mkdir -p "$TARGET/etc/init.d" "$BINARIES/rr3-modules/rr3-sense"
+mkdir -p "$TARGET/etc/init.d" "$BINARIES/rr3-modules/rr3-sense" \
+	"$BINARIES/rr3-modules/rr3-brain"
 install -m 0755 "$PACK" "$BINARIES/rr3-pack"
 # 三件入口产物：rr3-pack 的 --payload 完整性门要求在场（内容不参与本次断言）
 for b in rrd rr3-ctl rr3-ota-ctl; do
@@ -35,6 +37,10 @@ done
 cp "$REPO_ROOT/modules/rr3-sense/module.toml" "$BINARIES/rr3-modules/rr3-sense/manifest.toml"
 printf '#!/bin/sh\nexit 0\n' > "$BINARIES/rr3-modules/rr3-sense/bin"
 chmod +x "$BINARIES/rr3-modules/rr3-sense/bin"
+# brain 同批（批325）：镜像六模块与 distro 装配单同集，装配面必须一并覆盖。
+cp "$REPO_ROOT/modules/rr3-brain/module.toml" "$BINARIES/rr3-modules/rr3-brain/manifest.toml"
+printf '#!/bin/sh\nexit 0\n' > "$BINARIES/rr3-modules/rr3-brain/bin"
+chmod +x "$BINARIES/rr3-modules/rr3-brain/bin"
 
 # 不传 RR3_REPO_ROOT：顺带验证 post-build.sh 的仓根五级上溯缺省路径
 out="$work/out.log"
@@ -85,6 +91,18 @@ if [ -f "$TARGET/usr/lib/rockrobot3/modules/rr3-sense/config.toml" ] &&
 else
 	bad "config 未随装或与仓源不一致"
 fi
+
+echo "断言：brain 三件随装（批325——镜像六模块与装配单同集）"
+b_src="$REPO_ROOT/modules/rr3-brain/module.toml"
+b_dst="$TARGET/usr/lib/rockrobot3/modules/rr3-brain/module.toml"
+b_rel="$(sed -n 's/^entry[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$b_src" | head -n 1)"
+b_want="/usr/lib/rockrobot3/modules/rr3-brain/$b_rel"
+[ -f "$b_dst" ] && ok "brain manifest 归位" || bad "brain manifest 未归位"
+[ -x "$TARGET$b_want" ] && ok "brain bin 按 entry 落位且可执行" || bad "brain bin 未落 entry 名"
+[ -f "$TARGET/usr/lib/rockrobot3/modules/rr3-brain/config.toml" ] &&
+	diff "$REPO_ROOT/modules/rr3-brain/config.toml" \
+		"$TARGET/usr/lib/rockrobot3/modules/rr3-brain/config.toml" >/dev/null &&
+	ok "brain config 随装且与仓源一致" || bad "brain config 未随装或与仓源不一致"
 
 echo "断言：装载消费真值集三目录落盘（基-25 装机面 + 基-23 S99rrd 启用消费的前件）"
 for rel in profiles contracts hardware; do
