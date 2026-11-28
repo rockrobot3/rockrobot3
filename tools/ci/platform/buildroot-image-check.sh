@@ -3,8 +3,9 @@
 # Buildroot 出厂镜像内容只读断言（0.0.8 buildroot 轨）。genimage 成功不等于分区
 # 内容对，本脚本把它变成可判的四组事实：
 #   ① e2fsck 抓坏文件系统；② dumpe2fs 抓槽位标签漂移；③ debugfs 抓 rootfs 内容
-#      （/usr/bin/rrd、S99rrd、/etc/fstab 四键、brain 的 manifest 与二进制——装配单
-#      enabled_slots 含 rr3-brain，镜像缺它即开机拒启）；④ fdtdump 抓 u-boot.itb 缺
+#      （/usr/bin/rrd、S99rrd、/etc/fstab 四键、六模块各自的 manifest 与二进制、
+#      装载正门输入 profile/contracts 与运维入口——装配单声明什么，镜像就得有什么，
+#      缺任一模块 rrd 装载门判 assemble_broken 拒起）；④ fdtdump 抓 u-boot.itb 缺
 #      BL31（binman 成功但 FIT 里没有 bl31 = "能烧不能启"）＋ idbloader 体量下限；
 #   ⑤ inittab 抓串口登录面（M1"串口出 shell"的前件：缺 respawn getty 时镜像能启动
 #      却没人能登录，板上只剩 blind 串口）。
@@ -12,7 +13,7 @@
 # 用法：bash tools/ci/platform/buildroot-image-check.sh [镜像目录] [宿主工具目录]
 #   缺省 /tmp/br-out/images 与 /tmp/br-out/host（buildroot job 的固定产出位）。
 # 退出码：0 = 全过；1 = 任一组红（错误标题沿用 CI 注解面 br-fs/br-fsck/br-label/
-#   br-tool/br-rootfs/br-fstab/br-fit/br-tpl/br-getty，取数面不变）。
+#   br-tool/br-rootfs/br-mount/br-fstab/br-s99rrd/br-fit/br-tpl/br-getty，取数面不变）。
 set -euo pipefail
 
 d="${1:-/tmp/br-out/images}"
@@ -46,22 +47,53 @@ rr3_br_fsck() {
 # rootfs 内容：只查 fstab 不够——空文件系统也可能有标签；rrd 与 S99rrd 必须真在
 # rr_a.ext4 里，才证明 srcpath 生效。
 rr3_br_rootfs() {
-  local p k fstab s99
+  local p
   if [ ! -x "${host}/sbin/debugfs" ]; then
     echo "::error title=br-tool::host debugfs 缺席（host-e2fsprogs 未装 debugfs）"
     exit 1
   fi
-  # brain 的两件同断言（批320）：distro 装配单声明了 cognition 四格，镜像必须带
-  # manifest 与二进制；只装五模块时开机有"manifest 读取失败"拒绝启动，镜像却绿。
-  for p in /usr/bin/rrd /etc/init.d/S99rrd \
-    /usr/lib/rockrobot3/modules/rr3-brain/module.toml \
-    /usr/lib/rockrobot3/modules/rr3-brain/rr3-brain; do
-    if ! "${host}/sbin/debugfs" -R "stat ${p}" "${d}/rr_a.ext4" 2>&1 | grep -q 'Inode:'; then
-      echo "::error title=br-rootfs::rr_a.ext4 缺 ${p}（rootfs 未装入）"
-      exit 1
-    fi
-    echo "PASS  rr_a.ext4 含 ${p}"
+  for p in /usr/bin/rrd /etc/init.d/S99rrd; do
+    rr3_br_need "$p" "rootfs 未装入"
   done
+}
+
+# 单件在场判据（debugfs stat 看 Inode）；error 文案由调用方给。
+rr3_br_need() {
+  if ! "${host}/sbin/debugfs" -R "stat $1" "${d}/rr_a.ext4" 2>&1 | grep -q 'Inode:'; then
+    echo "::error title=br-rootfs::rr_a.ext4 缺 $1（$2）"
+    exit 1
+  fi
+  echo "PASS  rr_a.ext4 含 $1"
+}
+
+# 装配覆盖（批350）：装配单 enabled_slots 声明的六模块，镜像必须逐件带 manifest 与
+# 二进制。此前只查 brain 两件——任何一模块漏装，rrd 装载门判 assemble_broken 拒起，
+# 而镜像断言仍绿（批320 的 brain 漏装正是这条病形的实例）。
+rr3_br_modules() {
+  local m p
+  for m in act connect interact sense power brain; do
+    for p in module.toml "rr3-$m"; do
+      rr3_br_need "/usr/lib/rockrobot3/modules/rr3-$m/$p" "装配缺模块"
+    done
+    echo "PASS  模块 rr3-$m（manifest + binary）在场"
+  done
+}
+
+# 装载正门输入与运维入口（批350）：S99rrd 的 --profile/--contracts 各有落点，缺席
+# 即开机拒起；rr3-ctl / rr3-ota-ctl 是运维面入口，镜像缺件只在现场才发现。
+rr3_br_install() {
+  local p
+  for p in /usr/lib/rockrobot3/profiles/distro.toml \
+    /usr/lib/rockrobot3/contracts/topics.toml \
+    /usr/bin/rr3-ctl /usr/bin/rr3-ota-ctl; do
+    rr3_br_need "$p" "装配缺安装位"
+  done
+  echo "PASS  装载正门输入（profile/contracts）与运维入口齐套"
+}
+
+# 挂载面（批343/348）：fstab 三键 + /dev 不重复挂载 + tmpfs 挂载点目录在场。
+rr3_br_fstab() {
+  local k p fstab
   fstab=$("${host}/sbin/debugfs" -R "cat /etc/fstab" "${d}/rr_a.ext4" 2>&1 || true)
   for k in sysfs "LABEL=rr_data" "LABEL=rr_staging"; do
     if ! printf '%s\n' "$fstab" | grep -q "$k"; then
@@ -88,6 +120,11 @@ rr3_br_rootfs() {
     fi
     echo "PASS  tmpfs 挂载点 ${p} 在场"
   done
+}
+
+# S99rrd 两件（批340/341）：装载正门参数同形 + 启动失败点名。
+rr3_br_s99() {
+  local k s99
   # 装载正门参数（批340）：S99rrd 必须与 rrd.service 的 ExecStart 同形传 --contracts
   # 与 --profile。历史上这里只传 --socket/--manifest，装载门十位判据一位不跑而 rrd
   # 退出 0（status 敞口 20 的病形）——参数漂移必须由镜像断言拦下。
@@ -141,5 +178,9 @@ rr3_br_getty() {
 
 rr3_br_fsck
 rr3_br_rootfs
+rr3_br_modules
+rr3_br_install
+rr3_br_fstab
+rr3_br_s99
 rr3_br_getty
 rr3_br_fit
