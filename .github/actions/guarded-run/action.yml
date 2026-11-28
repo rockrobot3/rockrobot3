@@ -4,7 +4,7 @@
 # 改六处，漏改就让失败退化成 GitHub 上只有一句 "exit code 1"（根因不可见）。
 # 本 action 是判据单点；调用方只给 title / prelude / command（策略面）。
 name: guarded-run
-description: 执行一条命令，失败时把日志里的错误行压成一条可归因的 GitHub 注解；仅网络镜像失败（502/504/下载失败）时按 15s 退避重试两次，代码/构建错误不重试
+description: 执行一条命令，失败时把日志里的错误行压成一条可归因的 GitHub 注解；仅网络镜像失败（502/504/下载失败）时按 15/30/60s 退避重试三次，代码/构建错误不重试
 inputs:
   title:
     description: 注解标题（失败归因的锚，如 esp32-periph-base）
@@ -39,12 +39,13 @@ runs:
         }
         if ! run_guarded; then
           # 网络镜像抖动（rsproxy 502/504）与代码错误分开处置：仅当日志命中网络
-          # 标记时按 15s 退避重试两次（2026-11-24 实测单次重试仍撞上 504）；
-          # 代码/构建错误照旧当场红，不掩盖根因。
+          # 标记时按 15/30/60s 退避重试三次（2026-11-28：15s×2 仍撞上 504 连续失败，
+          # 镜像恢复通常在一分钟内）；代码/构建错误照旧当场红，不掩盖根因。
           if grep -qiE 'spurious network error|Gateway Time-out|Bad Gateway|failed to download' "${log}"; then
-            for attempt in 1 2; do
-              echo "::warning title=${GUARDED_TITLE}::网络镜像失败，第 ${attempt}/2 次重试（15s 退避）"
-              sleep 15
+            for attempt in 1 2 3; do
+              case $attempt in 1) delay=15 ;; 2) delay=30 ;; *) delay=60 ;; esac
+              echo "::warning title=${GUARDED_TITLE}::网络镜像失败，第 ${attempt}/3 次重试（${delay}s 退避）"
+              sleep "$delay"
               if run_guarded; then
                 exit 0
               fi

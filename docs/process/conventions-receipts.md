@@ -3332,3 +3332,10 @@ integration 见上；三远端同指 `464e3ccb`。
 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
 ③ 批315 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批316 三线收口与
 再拟下轮。
+
+**2026-11-28 批313 镜像抖动退避升级（红因归因）**：事实——`464e3ccb` 的 platforms 红在
+ESP32 classic 的 `espidf-std`：注解命中 `rsproxy.cn` 返回 504（`cc/1.6.0` 下载），
+guarded-run 15s×2 重试用尽；该提交只改 install-bundle/install-smoke，与 ESP 无关——
+属外部镜像中断，不是回归。处置——`guarded-run` 对网络镜像失败改为 15/30/60s 三次退避
+（总约 105s，镜像恢复通常在一分钟内）；代码/构建错误仍当场红、不重试。判据——
+提交后由 esp32-gates 实跑验证（本地不编译）。
