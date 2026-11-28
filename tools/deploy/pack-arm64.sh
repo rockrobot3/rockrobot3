@@ -15,6 +15,10 @@
 # 机型选择：RR3_PROFILE=<name>（缺省 distro）；Pi 单板全链用 RR3_PROFILE=pi4b-solo。
 set -euo pipefail
 
+# 意外退出必须可归因（批307）：`set -e` 下的裸命令失败只剩退出码；载体脚本统一
+# 装 ERR trap 点名命令与行号（约定见 tools/deploy/README.md）。
+trap 'echo "FAIL  意外退出：${BASH_COMMAND}（行 ${LINENO}）" >&2' ERR
+
 cd "$(dirname "$0")/../.." # 仓根
 
 # 模块清单取仓内真值（modules/rr3-*/module.toml）；空清单即失败。

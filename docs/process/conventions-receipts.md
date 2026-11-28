@@ -3276,3 +3276,10 @@ cross-artifacts / arm64-deb / riscv-image）。窗口仍未到（runs=0）。判
 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
 ③ 批309 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批310 三线收口与
 再拟下轮。
+
+**2026-11-28 批307 载体脚本归因约定 + pack-arm64 补齐**：事实——`pack-arm64.sh` 是唯一
+没装 ERR trap 的载体脚本（也是唯一不进 CI 的），失败只剩退出码；六处 trap 形态此前
+没有成文约定，新脚本容易漏。处置——pack-arm64 补同款 `FAIL 意外退出：<命令>（行 N）`；
+`tools/deploy/README.md` 增"载体脚本失败归因约定"一段（set -e 脚本必须装 ERR trap，
+可带产物路径上下文）。判据——`bash -n` 通过；gate `scripts` 的全量 `.sh` 语法检查覆盖；
+⑤ 文档门绿。
