@@ -4,8 +4,8 @@
 # 内容对，本脚本把它变成可判的四组事实：
 #   ① e2fsck 抓坏文件系统；② dumpe2fs 抓槽位标签漂移；③ debugfs 抓 rootfs 内容
 #      （/usr/bin/rrd、S99rrd、/etc/fstab 四键、六模块各自的 manifest 与二进制、
-#      装载正门输入 profile/contracts 与运维入口——装配单声明什么，镜像就得有什么，
-#      缺任一模块 rrd 装载门判 assemble_broken 拒起）；④ fdtdump 抓 u-boot.itb 缺
+#      装载正门输入（装配单/契约册/平台事实表/接线档）与运维入口——装配单声明什么，
+#      镜像就得有什么，缺任一模块 rrd 装载门判 assemble_broken 拒起）；④ fdtdump 抓 u-boot.itb 缺
 #      BL31（binman 成功但 FIT 里没有 bl31 = "能烧不能启"）＋ idbloader 体量下限；
 #   ⑤ inittab 抓串口登录面（M1"串口出 shell"的前件：缺 respawn getty 时镜像能启动
 #      却没人能登录，板上只剩 blind 串口）。
@@ -81,14 +81,18 @@ rr3_br_modules() {
 
 # 装载正门输入与运维入口（批350）：S99rrd 的 --profile/--contracts 各有落点，缺席
 # 即开机拒起；rr3-ctl / rr3-ota-ctl 是运维面入口，镜像缺件只在现场才发现。
+# 成员清单对齐 rrd 装载真值集（profile/契约册/平台事实表/接线档）：本轨是 RK3566
+# 参考机（distro 档 chip=rk3566），换机型档时这四类路径随装配单改，不在此盲猜。
 rr3_br_install() {
   local p
   for p in /usr/lib/rockrobot3/profiles/distro.toml \
     /usr/lib/rockrobot3/contracts/topics.toml \
+    /usr/lib/rockrobot3/contracts/platform/rk3566.toml \
+    /usr/lib/rockrobot3/hardware/distro/wiring.toml \
     /usr/bin/rr3-ctl /usr/bin/rr3-ota-ctl; do
     rr3_br_need "$p" "装配缺安装位"
   done
-  echo "PASS  装载正门输入（profile/contracts）与运维入口齐套"
+  echo "PASS  装载正门输入（装配单/契约/平台表/接线档）与运维入口齐套"
 }
 
 # 挂载面（批343/348）：fstab 三键 + /dev 不重复挂载 + tmpfs 挂载点目录在场。
