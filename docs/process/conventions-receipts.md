@@ -3480,3 +3480,18 @@ integration / platforms 三线 success。
 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑，
 distro 首发后把 distro 类纳入；③ 批329 镜像内 brain 的运行证据（真板或 QEMU 启动；
 硬件未到则以已知边界记账，不冒领）；④ 批330 三线收口与再拟下轮。
+
+**2026-11-28 批327 测试抖动根因修复（红因）**：事实——纯文档提交 `622e46b4` 的 gate
+在 `killed_eof_skipped` 红（注解：4 通过 + 1 失败共 6.4 s，`support/client.rs:118`
+panic；同一用例前一提交绿），与文档改动无因果关系。根因——`rr3_read_where` 把
+SO_RCVTIMEO 的 5 s 读超时当成"读结束"直接终态；CI 负载下 state 广播晚到就随机红。
+处置——正向前提改为墙钟预算 20 s 内重试读超时；`Closed`/`Torn*`/其它 IO 仍立即
+终态；若超时恰落在半帧中间，后续读因 magic/长度/CRC 失败而显性红，不会把错位读成
+"等到了"。判据——`086b40c6` gate / integration / platforms 三线 success（全量测试
+含该用例）；`622e46b4` 的 gate 红已归因为测试面抖动、非文档内容问题。
+
+**2026-11-28 批327 下轮任务维持批326清单**（窗口未到）：① 批328 11-30 03:00 UTC
+`release-anon` 首跑归因；② 批329 下次 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核
+buildroot 的 `release-verify` 实跑，distro 首发后纳入 distro 类；③ 批330 镜像内
+brain 的运行证据（真板或 QEMU 启动；硬件未到则如实记边界）；④ 批331 三线收口与
+再拟下轮。
