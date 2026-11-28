@@ -3434,3 +3434,31 @@ br-rootfs 注解定位并修复（根因修复，不改档掩盖）；② 批323
 定位）；③ 批324 下次 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的
 `release-verify` 实跑，distro 首发后把 distro 类纳入；④ 批325 distro 首发后
 `--deep` / B.2 实测与 distro 类裁定；⑤ 批326 三线收口与再拟下轮。
+
+**2026-11-28 批322 rock3 镜像回执（批320 收口）**：事实——buildroot run
+`46114023878` success；image job `140883805524` 的 U-Boot、Buildroot 工具链、
+brain 交叉构建、全量 make、GPT/dtb 与镜像内容只读断言（新增 rr3-brain 的 manifest
+与二进制两件）全过。处置——无代码改动，只收证据。判据——同上。诚实边界：内容
+断言证明文件在位，不证明板上可运行（动态依赖与启动行为需真板或 QEMU 启动证据，
+硬件未采购，不以"构建绿"冒充"运行绿"）。
+
+**2026-11-28 批323 rock3 镜像装配集纳入对拍**：事实——批320 暴露的盲区是"镜像装
+什么"没有任何静态判据：装配单启用六件、镜像装配循环只列五件，brain 靠专属步补装，
+新增/移除模块时快门抓不到。处置——`release_sets.py` 新增 `profile_modules` 与
+`check_buildroot_image`：distro 装配单 `[enabled_slots]` = 发布策略；buildroot.yml
+模块循环 = 装配单−brain；brain 专属步必须在位。判据——`--self-test` 13/13（1 正例 /
+12 负例，新增镜像漏件/缺 brain 步/装配单漂移三例）；真实对拍 PASS（真值 6 · 策略 6 ·
+镜像同集 · rock3=distro · 派生 5）；`e9e9853c` gate / integration / platforms
+三线 success。
+
+**2026-11-28 批324 本轮收口**：本轮把 rock3 镜像从"装五模块而装配单启六件"改为
+"Buildroot 同源工具链随装 brain"，并把镜像装配集纳入既有对拍。窗口仍未到
+（`release-anon` runs=0，首跑 11-30 03:00 UTC）。判据——`e9e9853c` 三线 success；
+三远端同指 `e9e9853c`。
+
+**2026-11-28 批324 下轮任务拟定**：① 批325 11-30 03:00 UTC `release-anon` 首跑
+归因（runs>0；按注解记 tag/类别/签名，红按镜像/固件/签名三类定位）；② 批326 下次
+`v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑，
+distro 首发后把 distro 类纳入；③ 批327 distro 首发后 `--deep` / B.2 实测与 distro
+类裁定；④ 批328 镜像内 brain 的运行证据（真板或 QEMU 启动；硬件未到则以已知边界
+记账，不冒领）；⑤ 批329 三线收口与再拟下轮。
