@@ -3121,3 +3121,15 @@ release-verify.sh / `--with-signature` / `--classes image,firmware` / `--tag aut
 rk3566-onboard / buildroot-assembly / sim-assemble / sim-chain），缺脚本即点名；
 自检夹具把 distro-smoke 换成 echo、其余腿保留脚本，新增负例（只该点名它）。判据——
 `--self-test` 全绿（新增用例 PASS，无 FAIL）；真仓审计 PASS；⑤ 文档门绿。
+
+**2026-11-28 批290 本轮收口（集成腿脚本钉住）**：事实——集成面七条验证腿的脚本
+调用现已入审计（step 换 echo 即红）；与平台腿 `JOB_STEPS`、匿名回读命令、发布制品
+标签口径共同构成本轮"名在场 → 行为在场"的补齐。窗口仍未到（runs=0）。判据——
+commit `30c0f266` 三线全绿（gate / integration / platforms 均 success），gate
+`scripts`（自检）与 `conventions` success；三远端同指 `30c0f266`。
+
+**2026-11-28 批290 下轮任务拟定**：① 批291 11-30 03:00 UTC `release-anon` 首跑归因
+（机制已全部钉住：job 名 / 命令四要素 / 周程触发；确认 runs>0 并按注解记录 tag 与
+类别结论，红按镜像/固件/签名三类定位）；② 批292 下次 `v*` 发布后把 OTA/buildroot
+纳入匿名回读并核 buildroot 的 `release-verify --tag v${VER}` 实跑；③ 批293 distro
+首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批294 三线收口与再拟下轮。
