@@ -146,6 +146,54 @@ def check_derived(text, rel, truth):
     return bad
 
 
+def profile_modules(root):
+    """distro 装配单 [enabled_slots] 的模块名集（键 `rr3-<name>`，排序后返回）。"""
+    text = _read(root, "profiles", "distro.toml")
+    if text is None:
+        return None
+    mods = set()
+    inside = False
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("["):
+            inside = s == "[enabled_slots]"
+            continue
+        if inside:
+            m = re.match(r"^rr3-([A-Za-z0-9_-]+)\s*=", s)
+            if m:
+                mods.add(m.group(1))
+    return mods
+
+
+def check_buildroot_image(text, profile, policy):
+    """Buildroot 镜像装配集 = distro 装配单 = 发布策略（批320 的盲区收口）。
+
+    镜像此前只装五模块而装配单启用六件（brain 因 musl 交叉面缺 C 工具链被另步
+    补装），开机有"manifest 读取失败"拒绝启动而镜像仍绿；本判据把"镜像装配循环 +
+    brain 专属步"这个组合集与 distro 装配单对齐，新增/移除模块时同批被抓。
+    """
+    if profile is None:
+        return ["profiles/distro.toml 不存在（镜像装配失去对拍对象）"]
+    want = set(profile)
+    bad = diff(policy, want)
+    if bad:
+        bad = ["profiles/distro.toml [enabled_slots] 与发布策略不一致：" + "；".join(bad)]
+    if not want:
+        bad.append("profiles/distro.toml 无 [enabled_slots] 条目（镜像装配失去判据）")
+        return bad
+    loops = loop_sets(text)
+    if not loops:
+        bad.append("buildroot.yml 缺字面量模块装配循环（镜像模块集不可核）")
+        return bad
+    for line, got in loops:
+        d = diff(want - {BRAIN}, got)
+        if d:
+            bad.append(f"buildroot.yml:{line} 镜像装配循环与 distro 装配单不一致：" + "；".join(d))
+    if not re.search(r"rr3-modules/rr3-brain", text):
+        bad.append("buildroot.yml 缺 brain 装配步（distro 装配单启用 rr3-brain，镜像缺它即开机拒启）")
+    return bad
+
+
 def _read(root, *parts):
     p = root.joinpath(*parts)
     if not p.is_file():
@@ -174,13 +222,19 @@ def check(root):
             bad.append(f"{rel} 不存在（发布/部署面被删）")
             continue
         bad.extend(fn(text))
+    profile = profile_modules(root)
+    buildroot = _read(root, ".github", "workflows", "buildroot.yml")
+    if buildroot is None:
+        bad.append(".github/workflows/buildroot.yml 不存在（rock3 镜像装配面被删）")
+    else:
+        bad.extend(check_buildroot_image(buildroot, profile, policy))
     return bad
 
 
 def summary(root):
     truth = truth_modules(root)
     return (f"PASS  发布/部署面清单一致（真值 {len(truth)} 件 · 策略 {len(PUBLISH_MODULES)} 件 · "
-            f"镜像同集 · 派生 {len(truth) - 1} 件 = 真值−{BRAIN}）")
+            f"镜像同集 · rock3 镜像=distro 装配单 · 派生 {len(truth) - 1} 件 = 真值−{BRAIN}）")
 
 
 FIX_FILES = {
@@ -219,6 +273,26 @@ for m in $mods; do
     continue
   fi
 done
+""",
+    ".github/workflows/buildroot.yml": """jobs:
+  image:
+    steps:
+      - run: |
+          for m in act connect interact sense power; do
+            echo "$m"
+          done
+      - run: |
+          d=/tmp/br-out/images/rr3-modules/rr3-brain
+          echo "$d"
+""",
+    "profiles/distro.toml": """# 夹具：镜像装配对拍对象
+[enabled_slots]
+rr3-act = ["act.servo"]
+rr3-brain = ["cognition.dialog"]
+rr3-connect = ["net.wifi"]
+rr3-interact = ["ui.face"]
+rr3-sense = ["audio.capture"]
+rr3-power = ["power.battery"]
 """,
 }
 
@@ -263,6 +337,9 @@ def selftest():
             ("image-smoke.sh", "connect", "image-smoke.sh", "起齐循环漏件"),
             ("pack-arm64.sh", "brain", "pack-arm64.sh", "派生脚本失去 brain 例外"),
             ("pack-bundle.sh", "brain", "pack-bundle.sh", "派生脚本失去 brain 例外"),
+            ("buildroot.yml", "power", "镜像装配循环", "rock3 镜像装配漏件"),
+            ("buildroot.yml", "brain", "brain 装配步", "rock3 镜像缺 brain 专属步"),
+            ("distro.toml", "brain", "发布策略", "distro 装配单与发布策略漂移"),
         )
         for name, token, needle, label in cases:
             root_m = _mutate(root, pathlib.Path(base) / f"m-{name}", name, token)
@@ -283,7 +360,7 @@ def selftest():
             '[ "$n" -eq 6 ] && ok=1',
             '[ "$n" -eq 9 ] && ok=1\n[ "$unrelated" -eq 6 ]'), encoding="utf-8")
         ok &= _expect(check(root_c), "起齐断言", "阈值漂移被无关 -eq 6 遮蔽")
-    print("PASS  发布面清单自检通过（1 正例 / 8 负例）" if ok else "FAIL  发布面清单自检未通过")
+    print("PASS  发布面清单自检通过（1 正例 / 12 负例）" if ok else "FAIL  发布面清单自检未通过")
     return 0 if ok else 1
 
 
