@@ -88,16 +88,20 @@ BR2_TARGET_UBOOT_NEEDS_ROCKCHIP_RKBIN=y
 # ---- 用户态包（M3 音频链路的板上依赖）---------------------------------------
 BR2_PACKAGE_ALSA_LIB=y
 BR2_PACKAGE_ALSA_UTILS=y
-BR2_PACKAGE_PYTHON3=y
+# 不装 python3（2026-11-28 批337）：brain 自 ADR-0017 起是 Rust 二进制，镜像装配的
+# 六个模块全是 ELF；目标侧零 python 消费者（post-build/post-image 与镜像内容断言
+# 都在宿主执行，`git grep python3 -- base/os/buildroot tools/ci` 只剩宿主依赖行）。
+# 复核判据：新增目标侧脚本若真要 python3，必须同批把上面这条 grep 结论写进评审，
+# 不允许按印象加回。
 
 # ---- 镜像产物 ---------------------------------------------------------------
 # 根文件系统只出 ext4 一份；rr_a / rr_b 两个槽位镜像由 genimage 从同一份
 # rootfs.ext4 生成（两槽内容在出厂烧录时一致，升级后才分叉）。
 BR2_TARGET_ROOTFS_EXT2=y
 BR2_TARGET_ROOTFS_EXT2_4=y
-# Buildroot 2024.02 的缺省容量是 60M；本档目标树含 glibc + Python3 + ALSA
-# utils，60M 放不下——mkfs.ext4 直接失败（2026-11-17 实测，ext2.mk 的
-# "Maybe you need to increase the filesystem size" 提示）。
+# Buildroot 2024.02 的缺省容量是 60M；本档目标树含 glibc、ALSA utils 与六模块装机
+# 面（brain 为 gnu 动态产物），60M 放不下——mkfs.ext4 直接失败（2026-11-17 实测，
+# ext2.mk 的 "Maybe you need to increase the filesystem size" 提示）。
 # 512M 只是**中间产物** rootfs.ext2 的容量；最终 rr_a/rr_b/rr_factory 由
 # genimage 从同一 target 目录按各自 @XXX_SIZE@ 生成，不受此值约束。
 BR2_TARGET_ROOTFS_EXT2_SIZE="512M"
