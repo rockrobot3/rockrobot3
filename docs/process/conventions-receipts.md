@@ -3403,3 +3403,34 @@ success：正例全模块 running、换树 1799ms / 回滚 4173ms / 坏包双变
 下次 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify`
 实跑，distro 首发后把 distro 类纳入；③ 批322 distro 首发后 `--deep` / B.2 实测与
 distro 类裁定；④ 批323 三线收口与再拟下轮。
+
+**2026-11-28 批319 健康探针轮询细化**：事实——探针 1s 粒度把就绪时刻向上取整，且
+崩溃循环检测同样受 1s 粒度限制。处置——窗口仍 30s（150 拍 × 0.2s），轮询细化到
+0.2s；只读 status，零副作用。判据——`de1962e8` gate success（integration 被后续
+提交按并发组取消，不作绿证）；`0d50b1fd` install-smoke job `140883664345` success：
+启动探针 2270ms、换树 2599ms、回滚 3952ms（上限 15000ms）。本拍未见显著提速（模块
+起齐耗时主导），如实取"无回归 + 检测粒度细化"，不冒领提速。
+
+**2026-11-28 批320 rock3 镜像随装 brain**：事实——`profiles/distro.toml` 的
+`enabled_slots` 含 rr3-brain，而 aarch64-musl 交叉面因 ring 需目标 C 工具链不含它，
+Buildroot 镜像只装五模块；开机必有"manifest 读取失败"拒绝启动，镜像与装配单不一致
+（构建工作流的注入步注释同源写"五模块"）。处置——镜像构建用 Buildroot 自带
+glibc 工具链（与镜像 glibc 同源，避免宿主 apt gcc 的 GLIBC_2.x 过新）交叉构建
+brain 并入 payload；镜像内容断言补 brain 的 manifest 与二进制两件；distro 档头注
+纠正 Python 承载残留（brain 自 0.0.8 批N32 起为 Rust）。判据——`0d50b1fd` gate /
+integration / platforms success；buildroot image job `140883805524` 的 U-Boot、
+工具链、brain 交叉构建三步 success，全量 make 进行中——**镜像内容断言未收，不以
+"构建过"代替"内容对"**，下轮首项收口。
+
+**2026-11-28 批321 本轮收口（窗口未到 + 镜像待收）**：窗口事实——`release-anon`
+runs=0（首跑 11-30 03:00 UTC）；最新正式 tag 仍 `v0.0.8`；匿名只读回读镜像三架构、
+固件九层、每架构 attestation 双谓词齐；distro 未发、OTA/buildroot 仅 legacy
+`0.0.8`。判据——`0d50b1fd` 三线 success；三远端同指 `0d50b1fd`。
+
+**2026-11-28 批321 下轮任务拟定**：① 批322 收 buildroot image job `140883805524`：
+绿则记 brain 两件断言通过与镜像 digest；红按 br-toolchain/br-brain/br-build/
+br-rootfs 注解定位并修复（根因修复，不改档掩盖）；② 批323 11-30 03:00 UTC
+`release-anon` 首跑归因（runs>0；按注解记 tag/类别/签名，红按镜像/固件/签名三类
+定位）；③ 批324 下次 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的
+`release-verify` 实跑，distro 首发后把 distro 类纳入；④ 批325 distro 首发后
+`--deep` / B.2 实测与 distro 类裁定；⑤ 批326 三线收口与再拟下轮。
