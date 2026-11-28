@@ -359,27 +359,34 @@ rollback_case() {
   echo "$notice"
 }
 
-# 坏包预检例（批309）：缺模块二进制的包必须在停 rrd **之前**被拒——整机不停机、
-# 树不变，失败行点名缺件；这条判据防的是"坏包换来一次真实停机 + 回滚"。
-malformed_case() {
-  local bad="$WORK/malformed.tar.gz" tmp top out rc=0 before after
-  tmp=$(mktemp -d "$WORK/malformed.XXXXXX")
+# 坏包预检例（批309/311）：结构缺件必须在停 rrd **之前**被拒——整机不停机、树不变，
+# 失败行点名缺件；防的是"坏包换来一次真实停机 + 回滚"。
+expect_pre_reject() {
+  local label="$1" rm_rel="$2" needle="$3"
+  local bad="$WORK/malformed-$label.tar.gz" tmp top out rc=0 before after
+  tmp=$(mktemp -d "$WORK/malformed-$label.XXXXXX")
   tar -xzf "$WORK/bundle.tar.gz" -C "$tmp"
   top=$(basename "$(find "$tmp" -mindepth 1 -maxdepth 1 -type d)")
-  rm -f "$tmp/$top/modules/rr3-sense/rr3-sense"
+  rm -f "$tmp/$top/$rm_rel"
   tar -C "$tmp" -czf "$bad" "$top"
   before=$(sed -n 's/^commit=//p' "$ROOT/BUNDLE_VERSION")
   out=$(as_root bash tools/deploy/install-bundle.sh "$bad" 2>&1) || rc=$?
   if [ "$rc" -eq 0 ]; then
     printf '%s\n' "$out" >&2
-    die "缺模块二进制的包竟然被接受（预检未生效）"
+    die "缺 ${rm_rel} 的包竟然被接受（预检未生效，${label}）"
   fi
-  grep -q '包内缺 modules/rr3-sense/rr3-sense' <<<"$out" \
-    || { printf '%s\n' "$out" >&2; die "坏包被拒但未点名缺件"; }
+  grep -qF "$needle" <<<"$out" \
+    || { printf '%s\n' "$out" >&2; die "坏包被拒但未点名缺件（${label}）"; }
   after=$(sed -n 's/^commit=//p' "$ROOT/BUNDLE_VERSION")
   [ "$before" = "$after" ] || die "坏包被拒后装机树却变了（${before} → ${after}）"
   as_root systemctl is-active --quiet rrd || die "坏包被拒后 rrd 不再 active（停机副作用）"
-  echo "::notice title=install-smoke-malformed::缺模块二进制的包在停 rrd 前被拒（rc=${rc}），树与 unit 未变"
+  echo "::notice title=install-smoke-malformed::${label}：在停 rrd 前被拒（rc=${rc}），树与 unit 未变"
+}
+
+malformed_case() {
+  expect_pre_reject "mod-bin" "modules/rr3-sense/rr3-sense" \
+    "包内缺 modules/rr3-sense/rr3-sense"
+  expect_pre_reject "contract" "contracts/slots.toml" "包内缺 contracts/slots.toml"
 }
 
 main() {

@@ -54,7 +54,7 @@ MCU 无 A/B 分区，升级一律线下重烧。每个芯片平台独立部署�
 |---|---|---|
 | 包顶层目录名 | `rockrobot3-<commit>`（commit 取产物对应提交，不是 tag 或日期） | 装机侧按 `cut -d/ -f1` 取顶层，名字不合 → `非 A10 版本化包` 当场拒 |
 | `BUNDLE_VERSION` | **必在包顶层**，键固定为 `commit=` / `built_at=` / `target=` / `components=` / `natives=`（natives 可为空） | 缺文件或不认识的行 = 不是本仓出的包；装机前先核存在性 |
-| 安装序 | 新树落 `<parent>/.rockrobot3-new.*` → 启动自检 → 换入 → 失败按 `rollback()` 回旧树**并回旧二进制** | 只回树不回二进制会留下"旧树 + 新 `rrd`"（2026-11-09 真板实测过） |
+| 安装序 | 停 rrd 前先做包结构预检（必需件 + 每模块 `module.toml`/bin，缺件即拒、不停机）→ 新树落 `<parent>/.rockrobot3-new.*` → 启动自检 → 换入 → 失败按 `rollback()` 回旧树**并回旧二进制** | 只回树不回二进制会留下"旧树 + 新 `rrd`"（2026-11-09 真板实测过） |
 
 实现单点：[`pack-bundle.sh`](pack-bundle.sh) 的 BUNDLE_VERSION 段、[`install-bundle.sh`](install-bundle.sh)
 的顶层校验与 `rollback()`；改任一侧都要同批改本节。安装成功/回滚行带四段用时（停机 /

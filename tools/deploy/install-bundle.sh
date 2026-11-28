@@ -108,6 +108,15 @@ if [ -n "$profile" ] && [ -f "$profile" ]; then
   expected=$(awk '/^\[enabled_slots\]/{f=1;next} /^\[/{f=0} f && /^[A-Za-z0-9_-]+ *=/ {sub(/ *=.*/, ""); print}' "$profile")
 fi
 
+# 必需件预检（批311）：与解包后断言同源，但前移到停 rrd 之前——缺件不该换来停机。
+for f in bin/rrd bin/rr3-ctl bin/rr3-ota-ctl contracts/topics.toml contracts/slots.toml; do
+  grep -qx "$top/$f" <<<"$list" || die "包内缺 ${f}（A10 必需件，未停 rrd）"
+done
+if [ -n "$profile" ]; then
+  grep -qx "$top/profiles/${profile##*/}" <<<"$list" \
+    || die "包内缺 profiles/${profile##*/}（unit 的 --profile 不在包内，未停 rrd）"
+fi
+
 # 回滚带归因（批270）：板侧运维通常只读最后一行"已回滚"，不带原因就还得翻整段日志。
 rollback() {
   local why="${1:-未知原因}"
