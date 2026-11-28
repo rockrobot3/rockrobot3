@@ -3381,3 +3381,25 @@ platforms 三线 success；三远端同指 `bef53eae`。
 下次 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify`
 实跑，distro 首发后把 distro 类纳入；③ 批320 distro 首发后 `--deep` / B.2 实测与
 distro 类裁定；④ 批321 三线收口与再拟下轮。
+
+**2026-11-28 批318 健康探针按 running 判据核验**：事实——`install-bundle.sh` 健康
+探针的注释承诺"enabled_slots 的每个模块都 running"，实现却只查"模块名出现 + 无
+failed"：degraded / 未起齐也会判过，成功声明与门文案不一致。处置——逐模块按
+`$3=="running"` 判（awk 与 install-smoke 外部判据同口径），未 running 的模块名并入
+回滚原因，板侧读最后一行即可定位是哪个模块；期望集仍取 unit `--profile` 的
+`[enabled_slots]`，不引入第二份清单。判据——`bash -n` 过；三行样例（running /
+degraded / failed）验证 miss 点名；`19bcc2b0` install-smoke job `140876369479`
+success：正例全模块 running、换树 1799ms / 回滚 4173ms / 坏包双变体停树前拒，
+无时延回归；gate / integration / platforms 三线 success。
+
+**2026-11-28 批319 本轮收口（窗口未到）**：窗口事实复核——`release-anon` runs=0
+（首跑 11-30 03:00 UTC，不预写结论）；最新正式 tag 仍 `v0.0.8`；匿名只读回读：固件
+9 层齐、镜像索引三架构齐、每架构 attestation 双谓词（SLSA provenance + SPDX SBOM）
+齐；distro 仍未发（匿名 403）、OTA / buildroot 仅 legacy `0.0.8`。判据——`19bcc2b0`
+三线 success；三远端同指 `19bcc2b0`。
+
+**2026-11-28 批319 下轮任务拟定**：① 批320 11-30 03:00 UTC `release-anon` 首跑归因
+（确认 runs>0 并按注解记录 tag/类别/签名结论；红按镜像/固件/签名三类定位）；② 批321
+下次 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify`
+实跑，distro 首发后把 distro 类纳入；③ 批322 distro 首发后 `--deep` / B.2 实测与
+distro 类裁定；④ 批323 三线收口与再拟下轮。
