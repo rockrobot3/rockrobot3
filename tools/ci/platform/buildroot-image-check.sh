@@ -75,7 +75,7 @@ rr3_br_modules() {
     for p in module.toml "rr3-$m"; do
       rr3_br_need "/usr/lib/rockrobot3/modules/rr3-$m/$p" "装配缺模块"
     done
-    echo "PASS  模块 rr3-$m（manifest + binary）在场"
+    echo "PASS  模块 rr3-${m}（manifest + binary）在场"
   done
 }
 
