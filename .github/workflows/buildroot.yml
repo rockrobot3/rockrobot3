@@ -357,6 +357,35 @@ jobs:
           }
           echo "PASS  brain 在目标根下可加载并进入启动序列（rc=${rc}，无总线按预期退出）"
 
+      # 出厂轨装载门负例（批340，status 敞口 20 的"坏档对照"半边）：把平台档换成
+      # 不存在的芯片后，rrd 必须在 bind 前拒起并点名。跑的是目标根里的**真安装布局**
+      # （整树拷一份、只改 chip 行，contracts/hardware/profiles 与镜像同源），不是仓内
+      # 夹具——判据是"装机布局下坏档不让起"。正向启动（好档跑起来）仍归真板。
+      - name: 出厂轨装载门负例（坏平台档必须拒起）
+        run: |
+          set -euo pipefail
+          root=/tmp/br-out/target
+          bin="$root/usr/bin/rrd"
+          [ -x "$bin" ] || { echo "::error title=br-load-gate::目标根缺 $bin"; exit 1; }
+          tmp=/tmp/rr3-bad-root
+          rm -rf "$tmp"
+          cp -a "$root/usr/lib/rockrobot3" "$tmp"
+          sed -i 's/^chip = "rk3566"/chip = "rk9999"/' "$tmp/profiles/distro.toml"
+          grep -q '^chip = "rk9999"' "$tmp/profiles/distro.toml" || {
+            echo "::error title=br-load-gate::坏档构造失败（chip 行未命中）"; exit 1; }
+          rc=0
+          qemu-aarch64-static -L "$root" "$bin" \
+            --socket /tmp/rr3-bad.sock \
+            --contracts "$tmp/contracts" \
+            --profile "$tmp/profiles/distro.toml" > /tmp/rrd-bad.log 2>&1 || rc=$?
+          cat /tmp/rrd-bad.log
+          [ "$rc" -ne 0 ] || {
+            echo "::error title=br-load-gate::坏平台档未被拒（rrd 退出 0）"; exit 1; }
+          grep -q 'rk9999' /tmp/rrd-bad.log || {
+            echo "::error title=br-load-gate::拒起但未点名坏档（输出无 rk9999）"; exit 1; }
+          echo "PASS  装载门在目标根拒起坏平台档（rc=${rc}，坏档被点名）"
+          rm -rf "$tmp" /tmp/rr3-bad.sock
+
       - name: 上传构建日志（失败时）
         if: failure()
         uses: actions/upload-artifact@v7

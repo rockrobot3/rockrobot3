@@ -46,7 +46,7 @@ rr3_br_fsck() {
 # rootfs 内容：只查 fstab 不够——空文件系统也可能有标签；rrd 与 S99rrd 必须真在
 # rr_a.ext4 里，才证明 srcpath 生效。
 rr3_br_rootfs() {
-  local p k fstab
+  local p k fstab s99
   if [ ! -x "${host}/sbin/debugfs" ]; then
     echo "::error title=br-tool::host debugfs 缺席（host-e2fsprogs 未装 debugfs）"
     exit 1
@@ -71,6 +71,17 @@ rr3_br_rootfs() {
     fi
   done
   echo "PASS  rr_a.ext4 /etc/fstab 含 sysfs/devtmpfs/rr_data/rr_staging"
+  # 装载正门参数（批340）：S99rrd 必须与 rrd.service 的 ExecStart 同形传 --contracts
+  # 与 --profile。历史上这里只传 --socket/--manifest，装载门十位判据一位不跑而 rrd
+  # 退出 0（status 敞口 20 的病形）——参数漂移必须由镜像断言拦下。
+  s99=$("${host}/sbin/debugfs" -R "cat /etc/init.d/S99rrd" "${d}/rr_a.ext4" 2>&1 || true)
+  for k in "--contracts" "--profile"; do
+    if ! printf '%s\n' "$s99" | grep -q -- "$k"; then
+      echo "::error title=br-s99rrd::/etc/init.d/S99rrd 缺 $k（装载门不跑却会绿）"
+      exit 1
+    fi
+  done
+  echo "PASS  S99rrd 传 --contracts 与 --profile（装载正门同形）"
 }
 
 # FIT 与 TPL：u-boot.itb 缺 atf-bl31 = 能烧不能启；idbloader 体量下限抓缺 TPL。
