@@ -3242,3 +3242,9 @@ ota-bundle / scripts / conventions 同拍 success，gate 与 integration success
 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
 ③ 批305 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批306 三线收口与
 再拟下轮。
+
+**2026-11-28 批303 全量本地门体检 + 索引补登**：事实——本轮对全部非编译门做了一次
+逐项体检（⑤ 文档 / ⑬ 仓面卫生 / ⑯ 行数 / ⑫ 度量 8 项 / ⑮ 锁 I/O 120 文件 48 处 /
+⑰ 清单对拍 / 工作流审计 / 步骤清单 30 步 / unsafe / 六个库自检），全部 PASS，无需
+修复；体检中发现 `audit/` 目录索引漏登 `release_sets.py`（批250 立的审计未进索引表，
+后来者按索引找会漏）。处置——索引行补登。判据——体检输出逐项在案；⑤ 文档门绿。

@@ -15,7 +15,7 @@
 | 根 | 入口 | `check.sh`（规约门）、`ci-status.sh`（漂红巡检）、本文 |
 | `steps/` | `check.sh` 的步骤体，由入口显式 source | `<门号>.sh` |
 | `lib/` | 被 ≥3 处共用的公共件 | `skip.sh`、`cargo-artifact.sh`、`cargo-net.sh`、`log-digest.sh`、`release-tag.sh`、`runtime-members.sh` |
-| `audit/` | 静态审计与自检（Python，同目录平铺 import） | `metrics*.py`、`workflows_audit*.py`、`workflow_*.py`、`baselines_audit.py`、`gate_steps_audit.py`、`lockio_audit.py`、`unsafe_audit.py`、`ci_steady.py` |
+| `audit/` | 静态审计与自检（Python，同目录平铺 import） | `metrics*.py`、`workflows_audit*.py`、`workflow_*.py`、`release_sets.py`、`baselines_audit.py`、`gate_steps_audit.py`、`lockio_audit.py`、`unsafe_audit.py`、`ci_steady.py` |
 | `baseline/` | 棘轮基线数据（只降不升） | `gate-*-baseline.txt`、`gate_steps.txt`、`metrics-baseline.json`、`unsafe-baseline.txt` |
 | `platform/` | 工作流直调的平台腿、esp 专用门与自检 | `cross-*.sh`、`sim-*.sh`、`*-check.sh`、`matrix.sh`、`docs_gate_selftest.sh` 等 |
 
