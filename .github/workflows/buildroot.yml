@@ -320,6 +320,33 @@ jobs:
             echo "PASS  $lib → ${hit#/tmp/br-out/target}"
           done
 
+      # 加载自证（批333）：依赖件齐套只证明"文件在"，不证明加载器接得上。brain 没有
+      # CLI 参数面，起手先打版本行再连总线；用 qemu-aarch64 以目标根为 sysroot 直接
+      # 执行，判据 = 版本行出现且无加载器错误。无总线按预期非 0 退出，不以退出码冒充
+      # 功能运行；系统级启动仍归真板/QEMU 整机窗口。
+      - name: brain 加载自证（qemu-aarch64，目标根 sysroot）
+        run: |
+          set -euo pipefail
+          bin=/tmp/br-out/target/usr/lib/rockrobot3/modules/rr3-brain/rr3-brain
+          [ -x "$bin" ] || { echo "::error title=br-brain-run::目标根缺 $bin"; exit 1; }
+          if ! command -v qemu-aarch64-static >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq qemu-user-static >/dev/null
+          fi
+          rc=0
+          RR3_BUS_PATH=/tmp/rr3-no-bus.sock \
+            qemu-aarch64-static -L /tmp/br-out/target "$bin" > /tmp/brain-run.log 2>&1 || rc=$?
+          cat /tmp/brain-run.log
+          if grep -qiE 'error while loading shared libraries|cannot open shared object' /tmp/brain-run.log; then
+            echo "::error title=br-brain-run::动态加载失败（依赖件在位但加载器接不上）"
+            exit 1
+          fi
+          grep -q 'rr3-brain 0\.0\.1' /tmp/brain-run.log || {
+            echo "::error title=br-brain-run::未打印版本行（二进制未真正执行，rc=${rc}）"
+            exit 1
+          }
+          echo "PASS  brain 在目标根下可加载并进入启动序列（rc=${rc}，无总线按预期退出）"
+
       - name: 上传构建日志（失败时）
         if: failure()
         uses: actions/upload-artifact@v7
