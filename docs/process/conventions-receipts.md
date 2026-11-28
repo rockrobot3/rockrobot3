@@ -3653,3 +3653,26 @@ make、brain 依赖齐套、加载自证、**新负例步**、GPT 六分区与�
 **下轮任务拟定**：① 批341 11-30 03:00 UTC `release-anon` 首跑归因；② 批342 下次
 `v*` 发布后 OTA/buildroot/distro 纳入匿名回读；③ 批343 出厂镜像网络与时间面选型裁定；
 ④ 批344 镜像内 brain 系统级运行证据；⑤ 批345 三线收口与再拟下轮。
+
+**2026-11-28 批341 S99rrd 启动失败点名（构建回执）**：事实——出厂轨 `S99rrd` 用
+`start-stop-daemon -b` 后台起 rrd，装载门拒起时串口只剩"没有模块、没有原因"（后台化
+后 rrd 的 stderr 不落串口）。处置——start 后追加后台子壳：2s 后按 pid 存活点名
+（`rrd 运行中`／`未存活——装载门拒起或 socket bind 失败`）并给手工复现命令；不阻塞
+rcS、不改变起法。镜像内容断言 pin 住该点名语句与 `--contracts`/`--profile`。判据——
+最终树 `785fbd91` 的 run `46163216070`（job `141035274521`）image 全步骤 success
+（含 step 21 镜像内容断言）；同头 gate / integration / platforms 三线 success。边界——
+点亮的是"启动面可见"（脚本语句＋镜像断言）；真实坏档/断电下的串口输出仍归真板。
+
+**2026-11-28 批343 出厂镜像 tmpfs 挂载点缺陷（根因修复）**：事实——fstab 声明
+`tmpfs /var/run` 与 `tmpfs /var/log`，而 post-build 只 `install -d
+/var/lib/rr3/staging`；`mount -a` 不创建挂载点，缺 `/var/run` 时 rrd 的 pid 文件与
+`/var/run/rock3-ipc.sock` bind 全部失败——镜像能启动、守护起不来，而镜像内容断言
+只查 fstab 文本，看不见这条。处置——`install -d` 补 `/var/run`、`/var/log`；镜像
+内容断言新增 `br-mount`（debugfs 逐点 stat，缺即红）。判据——同 run step 21 success
+（新增与既有断言同批全过）、step 17 装载门负例同批 success。边界/余量——`devtmpfs
+/dev` 覆盖后 `/dev/pts`、`/dev/shm` 两个挂载点是否仍在（取决于 devtmpfs 是否自带
+目录）未经真板 `mount` 输出核对，不 claim；该面不影响 console getty 与 rrd（UDS 在
+/var/run）。
+**下轮任务拟定**：① 批344 11-30 03:00 UTC `release-anon` 首跑归因；② 批345 下次
+`v*` 发布后 OTA/buildroot/distro 纳入匿名回读；③ 批346 网络/时间面裁定材料（按
+decisions.md 新未决项）；④ 批347 镜像内 brain 系统级运行证据；⑤ 批348 三线收口。
