@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""流水线结构审计自检夹具：24 条正/负例（与规则核分离，保持单文件 <500 行）。"""
+"""流水线结构审计自检夹具：37 条断言（与规则核分离，保持单文件 <500 行）。"""
 
 import pathlib
 
@@ -150,7 +150,7 @@ def _write_platforms(wf):
 
 
 def _cases(bad):
-    """返回 30 条断言用例表。"""
+    """返回 30 条常备断言用例表（另有 7 条由各负例夹具在 self_test 内追加）。"""
     return [
         ("缺 concurrency 被抓", any("concurrency" in b for b in bad)),
         ("缺 timeout 被抓", any("timeout-minutes" in b for b in bad)),
@@ -186,7 +186,7 @@ def _cases(bad):
 
 
 def self_test():
-    """建临时夹具跑 audit 并逐条打印 30 条断言结果。"""
+    """建临时夹具跑 audit 并逐条打印 37 条断言结果。"""
     import tempfile
 
     with tempfile.TemporaryDirectory() as td:

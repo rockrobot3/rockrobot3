@@ -192,7 +192,7 @@ job 定义 ≤10；integration/platforms 的 push/PR 必须 `paths-ignore` 含 `
 好例 + 缺并发/缺超时/版本漂移/needs 悬空/needs 成环/push 无范围/工具链未钉版/
 缓存缺参/paths-ignore 缺失/publish 可取消/job 超限/continue-on-error/缺 permissions/
 芯片矩阵缩水/芯片 job 缺失/芯片验证步骤缺失/riscv 镜像腿缺失/发布面缺腿/发布矩阵缺 arm64/
-发布镜像冒烟缺失/门禁 job 缩水/固件缺 S3/制品面缺名二十三条负例，gate 的 `scripts` job
+发布镜像冒烟缺失/门禁 job 缩水/固件缺 S3/制品面缺名/制品标签漏 v/匿名回读命令与周程被削/集成与门禁入口空转/覆盖率入口被削等三十七条断言，gate 的 `scripts` job
 先自检后执法。
 **作业覆盖契约**：gate / integration / platforms / publish / buildroot / coverage /
 release-anon 的 job 名全部按 `REQUIRED_JOBS` 钉住（删名即红、整文件删也红，改名须同批
