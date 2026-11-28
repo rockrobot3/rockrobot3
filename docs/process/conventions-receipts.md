@@ -3313,3 +3313,22 @@ cross-artifacts / arm64-deb / riscv-image）。窗口仍未到（runs=0）。判
 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
 ③ 批313 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批314 三线收口与
 再拟下轮。
+
+**2026-11-28 批311 必需件预检前移 + 双变体坏包用例**：事实——批309 只把模块结构前移；
+必需的 bin/契约/profile 仍要等解包后才断言，缺件依旧换来停机 + 回滚。处置——把
+`bin/rrd`、`bin/rr3-ctl`、`bin/rr3-ota-ctl`、`contracts/{topics,slots}.toml` 与 unit
+`--profile` 所指 profile 文件一并前移到停 rrd 之前校验；install-smoke 坏包例抽
+`expect_pre_reject`，跑"缺模块 bin"与"缺契约"两变体（各自断言点名、树未变、unit 未停）。
+判据——commit `464e3ccb`：install-smoke job `140853213588` success，公开注解两条
+`install-smoke-malformed::{contract,mod-bin}：在停 rrd 前被拒（rc=1），树与 unit 未变`；
+正常换树 2419ms、回滚 4491ms 无回归；distro-smoke 同拍 success。
+
+**2026-11-28 批312 本轮收口**：本轮把"坏包"闸门覆盖到全部 A10 必需件与 profile，
+结构不合格的包一律不停机拒绝。窗口仍未到（runs=0）。判据——`464e3ccb` 的 gate /
+integration 见上；三远端同指 `464e3ccb`。
+
+**2026-11-28 批312 下轮任务拟定**：① 批313 11-30 03:00 UTC `release-anon` 首跑归因
+（确认 runs>0 并按注解记录 tag/类别；红按镜像/固件/签名三类定位）；② 批314 下次
+`v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
+③ 批315 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批316 三线收口与
+再拟下轮。
