@@ -3351,3 +3351,33 @@ profile，双变体用例公开可读）。窗口仍未到（runs=0）。判据�
 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
 ③ 批317 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批318 三线收口与
 再拟下轮。
+
+**2026-11-28 批315 载体脚本 ERR trap 扩齐**：事实——`tools/deploy/README.md` 约定
+"凡是 `set -e` 的部署/打包脚本都在顶部装 ERR trap"，实际 14 个载体脚本只有 6 个在位；
+`image-smoke` / `stage-image` / `flash-artifact` / `flash-esp32` / `image-esp32` /
+`fw-set` / `audio-rec` / `build-onboard` 失败只剩退出码。处置——八处按同句式补装
+（上下文分别带 stage / 镜像 / ELF / 固件 / 输出 / 串口 / 板），README 改为"载体全部
+在位"，并写明巡检器 `verify-board-config` 不套：非零退出码表达"有漂移"，属判据而非
+意外。判据——`bash -n` 全量过；强制失败探针（副本注入 `false`）八处均打印
+`FAIL 意外退出：false（行 N；<上下文>）`；提交 `c5f9275a` gate / integration success
+（platforms 被下一提交按并发组取消，不作绿证）。
+
+**2026-11-28 批316 回滚后核验旧版恢复**：事实——`install-bundle.sh` 回滚只"尝试"
+`systemctl start rrd` 就报"已回滚到上一版"；旧树因部署面变化起不来时，板侧会误以为
+服务在跑。处置——回滚后 3s 内探 `is-active`：起则消息带"rrd 已重新 active"，未起则
+点名"旧树也未起来，查 journalctl -u rrd"；恢复时延上限不变。判据——`bef53eae`
+install-smoke job `140869355592` success，公开注解 `rollback 恢复=4404ms/上限
+15000ms；原因：rrd 崩溃重启 1 次`，换树 1799ms / 装机 2321ms 无回归。
+
+**2026-11-28 批317 本轮收口（窗口未到）**：本轮两项交付都属"让已有机制真正生效"：
+归因覆盖从 6/14 扩到 13/13 载体，回滚成功声明与旧版实际状态对齐。窗口事实复核——
+`release-anon` runs=0（首跑 11-30 03:00 UTC，不预写结论）；最新正式 tag 仍 `v0.0.8`；
+`rockrobot3-distro:v0.0.8` 匿名 403（未发）；OTA / buildroot 仅 legacy `0.0.8`
+（无 v 前缀，200；下次发布产 v 前缀）。判据——`bef53eae` gate / integration /
+platforms 三线 success；三远端同指 `bef53eae`。
+
+**2026-11-28 批317 下轮任务拟定**：① 批318 11-30 03:00 UTC `release-anon` 首跑归因
+（确认 runs>0 并按注解记录 tag/类别/签名结论；红按镜像/固件/签名三类定位）；② 批319
+下次 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify`
+实跑，distro 首发后把 distro 类纳入；③ 批320 distro 首发后 `--deep` / B.2 实测与
+distro 类裁定；④ 批321 三线收口与再拟下轮。
