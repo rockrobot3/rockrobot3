@@ -3554,3 +3554,19 @@ integration / platforms success；buildroot image job 的该步待收（run `461
 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑，distro
 首发后把 distro 类纳入；④ 批338 镜像内 brain 的系统级运行证据（真板/QEMU 整机；
 硬件未到则如实记边界）；⑤ 批339 三线收口与再拟下轮。
+
+**2026-11-28 批335 release-anon 首跑预演（同脚本、同类别）**：事实——11-30 首跑
+会执行 `release-verify.sh --tag auto --with-signature --classes image,firmware`；
+此前只有零散 curl 预检，脚本本体未在真实 registry 上跑过。处置——本机装 oras 1.2.0
+（只读工具，非构建），以仓内脚本原命令（去 `--with-signature`，本机无 cosign）跑
+两遍。判据——`--tag auto → v0.0.8`；镜像三架构齐、每架构 SLSA provenance + SPDX
+SBOM 双谓词齐；固件九件齐；`结论：发布面齐套`，rc=0；digest 镜像
+`sha256:07d189…9b3e`、固件 `sha256:39cc0f…0315`。边界——签名半边与首跑结论仍以
+11-30 任务为权威，不预写。
+
+**2026-11-28 批335 下轮任务拟定**：① 批336 收 buildroot image job（brain 加载自证
+步骤；红按 br-brain-run 定位）；② 批337 11-30 03:00 UTC `release-anon` 首跑归因
+（runs>0；按注解记 tag/类别/签名，红按镜像/固件/签名三类定位）；③ 批338 下次 `v*`
+发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑，distro
+首发后把 distro 类纳入；④ 批339 镜像内 brain 的系统级运行证据（真板/QEMU 整机；
+硬件未到则如实记边界）；⑤ 批340 三线收口与再拟下轮。
