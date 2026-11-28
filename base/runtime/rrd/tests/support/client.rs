@@ -28,6 +28,14 @@ pub struct RrdClient {
 /// `rr3_json_of(f)["字段"] == 值`），无一例外满足此条件；新增读法请照此约束写。
 const SCAN_BUDGET: usize = 64;
 
+/// 正向前提（"等某帧到"）的墙钟预算：读超时不是终态。CI 负载下广播/重启副作用
+/// 可能晚于 5 s 读超时才到——2026-11-28 实测：纯文档提交 `killed_eof_skipped`
+/// 在 5 s 读超时处红（同一用例前一提交绿，4 通过 + 1 失败共 6.4 s），把超时当
+/// "读结束"就是随机红。连接真关闭（Closed/Torn*）与其它 IO 错误仍立即判终态。
+/// 边界：重试只对"等下一帧首字节"安全；若超时恰落在半帧中间，后续读会因 magic/
+/// 长度/CRC 失败而终态——是显性红，不会把错位读成"等到了"。
+const READ_WAIT_CAP: Duration = Duration::from_secs(20);
+
 /// 帧的一行摘要，只用于失败诊断
 fn rr3_frame_brief(f: &Rr3Frame) -> String {
     format!("{:?} {}", f.header, String::from_utf8_lossy(&f.payload))
@@ -75,6 +83,17 @@ pub fn rr3_json_of(frame: &Rr3Frame) -> Value {
     serde_json::from_slice(&body).expect("体必须是 JSON")
 }
 
+/// 读超时形态（SO_RCVTIMEO 的 WouldBlock/TimedOut）：不是终态。Linux 报
+/// `temporarily unavailable (os error 11)`、macOS 报 `os error 35`、Rust 也可能
+/// 已折成 "timed out"；只认这三类，Closed/Torn*/其它 Io 一律不在此列。
+fn rr3_read_timeout(e: &Rr3FrameError) -> bool {
+    matches!(e, Rr3FrameError::Io(s)
+        if s.contains("temporarily unavailable")
+            || s.contains("timed out")
+            || s.contains("os error 11")
+            || s.contains("os error 35"))
+}
+
 /// 按谓词挑帧（最多 `SCAN_BUDGET` 帧）。为什么必须挑：见本文件头注释的"顺序约定"。
 /// 谓词不成立的帧**存回队列**（`push_front` 回原位，保持到达次序），后来的读法还能读到它们。
 ///
@@ -89,18 +108,24 @@ pub fn rr3_read_where<F: FnMut(&Rr3Frame) -> bool>(
 ) -> Rr3Frame {
     let mut deferred: Vec<Rr3Frame> = Vec::new();
     let mut outcome: Result<Rr3Frame, String> = Err(format!(
-        "{SCAN_BUDGET} 帧内没等到{what}（超出预算即视为夹具 bug：谓词写错或 rrd 确实没发这一帧）"
+        "{SCAN_BUDGET} 帧 / {READ_WAIT_CAP:?} 内没等到{what}（超出预算即视为夹具 bug：谓词写错或 rrd 确实没发这一帧）"
     ));
-    for _ in 0..SCAN_BUDGET {
+    let deadline = Instant::now() + READ_WAIT_CAP;
+    let mut scanned = 0usize;
+    while scanned < SCAN_BUDGET && Instant::now() < deadline {
         match rr3_try_recv(c) {
             Ok(frame) => {
+                scanned += 1;
                 if pred(&frame) {
                     outcome = Ok(frame);
                     break;
                 }
                 deferred.push(frame);
             }
-            // 对端关闭（Closed / Torn*）与 5 s 读超时（Io os error 11）都不是"没等到 X"的
+            // 读超时（SO_RCVTIMEO）只是"这一拍没到"，不是"这条连接读完了"：重试到
+            // 墙钟预算；真关闭/坏帧/其它 IO 错误照旧立即终态并带现场。
+            Err(e) if rr3_read_timeout(&e) => {}
+            // 对端关闭（Closed / Torn*）与其它 IO 错误都不是"没等到 X"的
             // 替代品：要说清没等到什么、哪些帧还压在队列里。
             Err(e) => {
                 outcome = Err(format!("没等到{what}（读帧提前结束: {e:?}）"));
