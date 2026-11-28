@@ -3161,3 +3161,16 @@ job 仍绿、覆盖率数据静默消失（非阻断≠可以无声消失）。�
 两腿的 llvm-cov 入口（workspace 全量 / independent 按清单），缺即点名；自检夹具把
 workspace 换成 echo、independent 保留，新增负例。判据——`--self-test` 37/37 绿；真仓
 审计 PASS；⑤ 文档门绿。
+
+**2026-11-28 批294 本轮收口（覆盖率入口钉住）**：事实——coverage 两腿的 llvm-cov
+入口已入审计（换 echo 即红），补上"非阻断观测面也可以无声消失"的盲区；自检 37/37。
+窗口仍未到（runs=0）。判据——commit `3aa62d0b` 三线全绿（gate / integration /
+platforms 均 success）；三远端同指 `3aa62d0b`。
+
+**2026-11-28 批294 下轮任务拟定**：① 批295 11-30 03:00 UTC `release-anon` 首跑归因
+（确认 runs>0 并按注解记录 tag/类别；红按镜像/固件/签名三类定位）；② 批296 下次
+`v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
+③ 批297 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批298 判据入口扩面
+收口裁定——buildroot `image` 已由 `release`（缺产物即红）间接覆盖、`dtb-backport`
+仅有编译器探针可锚，**不再扩面**（避免为检查而检查），理由入册；⑤ 批299 三线收口
+与再拟下轮。
