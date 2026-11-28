@@ -3619,3 +3619,20 @@ gate / integration success。边界——历史文档（0.0.1 方案、批F1 回
 getty 断言）；② 批340 11-30 03:00 UTC `release-anon` 首跑归因；③ 批341 下次 `v*`
 发布后 OTA/buildroot/distro 纳入匿名回读；④ 批342 出厂镜像网络与时间面的选型裁定；
 ⑤ 批343 三线收口与再拟下轮。
+
+**2026-11-28 批339 镜像断言补串口登录面＋判据脚本进触发面**：事实——M1 的"串口出
+shell"前件是 inittab 里的 respawn getty（Buildroot 缺省 getty 落 console，console 即
+extlinux cmdline 的 ttyS2），而镜像内容断言此前只查 rrd/S99rrd/fstab/brain/FIT，没人
+看登录面；同时 buildroot 流水线的 paths 只列 `base/os/buildroot/**` 与本文件，镜像 job
+实际执行的 buildroot-image-check.sh / cross-artifacts.sh / log-digest.sh 与 release 腿的
+ota-bundle.sh / release-tag.sh / release-verify.sh 改动都不触发——"判据改了没人跑"。
+处置——镜像内容断言新增第 ⑤ 组 getty（缺 respawn getty 即 `br-getty` 红并回显 inittab）；
+六个脚本纳入触发面（注释写明消费关系，杜绝"改判据不跑判据"）。判据——`996595a7`
+（`[buildroot-full]`）run `46144733504`：dtb-backport 与 image 双 success，全量 make、
+brain 依赖齐套、加载自证、GPT 六分区、镜像内容断言（含新增 getty 组）、摘要上传全过；
+同头 gate / integration / platforms 三线 success。边界——getty 断言证明"镜像里有登录面"，
+不证明"板上串口出字"；真板仍待硬件。
+**下轮任务拟定**：① 批340 11-30 03:00 UTC `release-anon` 首跑归因；② 批341 下次
+`v*` 发布后 OTA/buildroot/distro 纳入匿名回读；③ 批342 出厂镜像网络与时间面选型裁定
+（WiFi 驱动/SDIO 前件与 NTP）；④ 批343 镜像内 brain 系统级运行证据；⑤ 批344 三线
+收口与再拟下轮。
