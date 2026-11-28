@@ -17,6 +17,16 @@ on:
     paths:
       - "base/os/buildroot/**"
       - ".github/workflows/buildroot.yml"
+      # 本流水线消费的判据/产物脚本同属触发面（2026-11-28 批339）：镜像 job 跑
+      # buildroot-image-check.sh 与 cross-artifacts.sh，失败归因走 log-digest.sh；
+      # release 腿跑 ota-bundle.sh / release-tag.sh / release-verify.sh。脚本改了
+      # 不触发 = "判据改了没人跑"，正是本流水线最该防的假绿形态。
+      - "tools/ci/platform/buildroot-image-check.sh"
+      - "tools/ci/platform/cross-artifacts.sh"
+      - "tools/ci/lib/log-digest.sh"
+      - "tools/ci/lib/release-tag.sh"
+      - "tools/ci/lib/release-verify.sh"
+      - "tools/deploy/ota-bundle.sh"
   workflow_dispatch:
     inputs:
       tag:

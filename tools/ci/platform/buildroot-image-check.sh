@@ -5,12 +5,14 @@
 #   ① e2fsck 抓坏文件系统；② dumpe2fs 抓槽位标签漂移；③ debugfs 抓 rootfs 内容
 #      （/usr/bin/rrd、S99rrd、/etc/fstab 四键、brain 的 manifest 与二进制——装配单
 #      enabled_slots 含 rr3-brain，镜像缺它即开机拒启）；④ fdtdump 抓 u-boot.itb 缺
-#      BL31（binman 成功但 FIT 里没有 bl31 = "能烧不能启"）＋ idbloader 体量下限。
+#      BL31（binman 成功但 FIT 里没有 bl31 = "能烧不能启"）＋ idbloader 体量下限；
+#   ⑤ inittab 抓串口登录面（M1"串口出 shell"的前件：缺 respawn getty 时镜像能启动
+#      却没人能登录，板上只剩 blind 串口）。
 #
 # 用法：bash tools/ci/platform/buildroot-image-check.sh [镜像目录] [宿主工具目录]
 #   缺省 /tmp/br-out/images 与 /tmp/br-out/host（buildroot job 的固定产出位）。
 # 退出码：0 = 全过；1 = 任一组红（错误标题沿用 CI 注解面 br-fs/br-fsck/br-label/
-#   br-tool/br-rootfs/br-fstab/br-fit/br-tpl，取数面不变）。
+#   br-tool/br-rootfs/br-fstab/br-fit/br-tpl/br-getty，取数面不变）。
 set -euo pipefail
 
 d="${1:-/tmp/br-out/images}"
@@ -87,6 +89,22 @@ rr3_br_fit() {
   echo "PASS  idbloader.img ${sz} B（含 TPL/SPL）"
 }
 
+# 串口登录面：Buildroot 缺省 getty 落 console（BR2_TARGET_GENERIC_GETTY 默认 y、
+# port=console），console 即 extlinux cmdline 的 ttyS2。缺这条时镜像能启动、串口却
+# 没有登录 prompt——M1 的"串口出 shell"就无从谈起（板上只剩 blind 串口）。
+rr3_br_getty() {
+  local initab line
+  initab=$("${host}/sbin/debugfs" -R "cat /etc/inittab" "${d}/rr_a.ext4" 2>&1 || true)
+  line=$(printf '%s\n' "$initab" | grep -E '^[^#].*:respawn:/sbin/getty' | head -1)
+  if [ -z "$line" ]; then
+    echo "::error title=br-getty::rr_a.ext4 的 /etc/inittab 无 respawn getty（串口无登录面）"
+    printf '%s\n' "$initab"
+    exit 1
+  fi
+  echo "PASS  inittab getty: ${line}"
+}
+
 rr3_br_fsck
 rr3_br_rootfs
+rr3_br_getty
 rr3_br_fit
