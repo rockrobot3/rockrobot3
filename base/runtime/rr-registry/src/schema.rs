@@ -89,7 +89,7 @@ mod tests {
     #[test]
     fn schema_rule_present() {
         assert_eq!(rr3_rule_list("type").unwrap(), ["module", "brain"]);
-        assert_eq!(rr3_rule_list("lang").unwrap(), ["rust", "python"]);
+        assert_eq!(rr3_rule_list("lang").unwrap(), ["rust"]);
         assert_eq!(rr3_rule_list("restart_policy").unwrap().len(), 3);
         assert!(rr3_rule_list("base_capabilities")
             .unwrap()

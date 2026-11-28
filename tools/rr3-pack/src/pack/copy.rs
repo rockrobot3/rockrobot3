@@ -1,24 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 落盘原语：目录树拷贝、清单改写、模块名枚举与 py shim。
+//! 落盘原语：目录树拷贝、清单改写与模块名枚举。
 
 use super::*;
 
-/// python 模块的 entry 装机产物：shim 脚本（机制保留位——批N32 件四起仓内六模块
-/// 全 Rust，暂无消费模块；装机布局多一层 `pkg/`，config 位只有打包器知道）。
-/// `pkg_dir` 是**装机绝对**包树目录（其下含 `<py_module>/` 包），
-/// 包名 = 目录名连字符转下划线（`rr3-brain` → `rr3_brain`）；`config_path` 是装机绝对
-/// config 位，经 `RR3_BRAIN_CONFIG` 注入（brain rr3_config_load 的文档化优先口，
-/// 0.0.6 批F1：python 模块 config 契约当前即 brain 契约）。
-pub(super) fn rr3_python_shim_text(pkg_dir: &Path, py_module: &str, config_path: &Path) -> String {
-    format!(
-        "#!/bin/sh\nRR3_BRAIN_CONFIG={} PYTHONPATH={} exec python3 -m {py_module}\n",
-        config_path.display(),
-        pkg_dir.display()
-    )
-}
-
-/// 递归拷贝目录树（python pkg 落位用）。只处理普通文件与目录；符号链接/特殊文件
-/// 一律点名拒绝——注入产物是仓内包的纯副本，出现链接是装配契约事故，不静默跟随。
+/// 递归拷贝目录树（模块 atoms 子树等可选件落位用）。只处理普通文件与目录；符号
+/// 链接/特殊文件一律点名拒绝——注入产物是仓内包的纯副本，出现链接是装配契约事故，
+/// 不静默跟随。
 pub(super) fn rr3_copy_dir(src: &Path, dst: &Path) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| format!("建目录 {} 失败: {e}", dst.display()))?;
     let entries = fs::read_dir(src).map_err(|e| format!("读目录 {} 失败: {e}", src.display()))?;
@@ -53,7 +40,7 @@ fn rr3_copy_node(ft: fs::FileType, from: PathBuf, to: PathBuf) -> Result<(), Str
         return rr3_copy_plain(&from, &to);
     }
     Err(format!(
-        "python pkg 树含非普通文件（{}）——注入产物须是仓内包目录的纯副本，打包拒绝",
+        "目录树含非普通文件（{}）——拷贝面只接受普通文件与目录，打包拒绝",
         from.display()
     ))
 }

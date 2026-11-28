@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! 逐模块装配面：manifest 事实解析、装机改写、config/包/可执行件/opt 落位。
+//! 逐模块装配面：manifest 事实解析、装机改写、config/可执行件/opt 落位。
 //!
 //! 判据要点：module.toml 的 name 必须与目录名一致（facts 交叉核验）；entry
 //! 装机绝对化后重解析复核；缺 bin/config 按警告+整模块跳过（不带病装）。
@@ -8,30 +8,15 @@
 
 use super::*;
 
-/// 单模块落 staging：产物按 lang 分型（rust = 注入 bin 按 entry 落位；python =
-/// pkg 树落位 + 打包器生成 shim——PYTHONPATH 须装机绝对，只有打包器知道
-/// RR3_INSTALL_ROOT）；config 与可选原子件/编排/形态档按"在位即纯副本"随装。
+/// 单模块落 staging：注入 bin 按 entry 落位（entry 装机绝对由 manifest 改写给），
+/// config 与可选原子件/编排/形态档按"在位即纯副本"随装。
 pub(super) fn rr3_stage_module(cfg: &Rr3PackConfig, root: &Path, name: &str) -> Result<(), String> {
     let mod_src = cfg.payload.join("rr3-modules").join(name);
     let staged = root.join("modules").join(name);
-    let (facts, entry_path) = rr3_stage_manifest(&mod_src, &staged, name)?;
-    rr3_stage_lang(&mod_src, &staged, &entry_path, name, &facts.lang)?;
+    let (_facts, entry_path) = rr3_stage_manifest(&mod_src, &staged, name)?;
+    rr3_stage_bin(&mod_src, &entry_path, name)?;
     rr3_stage_cfg(cfg, &staged, name)?;
     rr3_stage_opt(cfg, &staged, name)
-}
-
-/// 产物按 lang 分型落位（python = pkg 树 + shim；其余 = 注入 bin 按 entry 落位）。
-fn rr3_stage_lang(
-    mod_src: &Path,
-    staged: &Path,
-    entry_path: &Path,
-    name: &str,
-    lang: &str,
-) -> Result<(), String> {
-    if lang == "python" {
-        return rr3_stage_py(mod_src, staged, entry_path, name);
-    }
-    rr3_stage_bin(mod_src, entry_path, name)
 }
 
 /// manifest 改写落位 + entry 父目录就绪；返回 facts 与 entry 装机路径。
@@ -148,47 +133,7 @@ fn rr3_stage_cfg(cfg: &Rr3PackConfig, staged: &Path, name: &str) -> Result<(), S
     Ok(())
 }
 
-/// python 模块：pkg 树 + 装机绝对路径 shim。
-fn rr3_stage_py(
-    mod_src: &Path,
-    staged: &Path,
-    entry_path: &Path,
-    name: &str,
-) -> Result<(), String> {
-    let pkg_src = mod_src.join("pkg");
-    rr3_stage_pkg(&pkg_src, staged, name)?;
-    rr3_stage_py_shim(entry_path, name)?;
-    rr3_make_executable(entry_path);
-    Ok(())
-}
-
-/// pkg 树落位（缺席先点名，复制失败带模块名）。
-fn rr3_stage_pkg(pkg_src: &Path, staged: &Path, name: &str) -> Result<(), String> {
-    if !pkg_src.is_dir() {
-        return Err(format!(
-            "模块 {name}（lang=python）注入产物不完整: {} 缺席（python 模块约定 rr3-modules/<name>/{{pkg/,manifest.toml}}）",
-            pkg_src.display()
-        ));
-    }
-    rr3_copy_dir(pkg_src, &staged.join("pkg")).map_err(|e| format!("复制 {name} pkg 树失败: {e}"))
-}
-
-/// python 入口 shim：装机绝对路径的 pkg/config 写进 entry。
-fn rr3_stage_py_shim(entry_path: &Path, name: &str) -> Result<(), String> {
-    let pkg_installed = format!("{RR3_INSTALL_ROOT}/modules/{name}/pkg");
-    let config_installed = format!("{RR3_INSTALL_ROOT}/modules/{name}/config.toml");
-    fs::write(
-        entry_path,
-        rr3_python_shim_text(
-            Path::new(&pkg_installed),
-            &name.replace('-', "_"),
-            Path::new(&config_installed),
-        ),
-    )
-    .map_err(|e| format!("写 {name} shim 失败: {e}"))
-}
-
-/// rust 模块：注入 bin 按 entry 落位。
+/// 注入 bin 按 entry 落位。
 fn rr3_stage_bin(mod_src: &Path, entry_path: &Path, name: &str) -> Result<(), String> {
     let bin_src = mod_src.join("bin");
     if !bin_src.is_file() {

@@ -229,7 +229,7 @@ fn miss_pieces_named() {
     let (cfg, _) = cfg_of(&payload, &repo);
     let e = rr3_stage(&cfg).unwrap_err();
     assert!(e.contains("rr3-act") && e.contains("bin"), "{e}");
-    // 无模块（三个注入目录全清，含 python 的 rr3-brain）
+    // 无模块（三个注入目录全清）
     let (payload, repo) = fixture();
     for m in ["rr3-act", "rr3-connect", "rr3-brain"] {
         fs::remove_dir_all(payload.join(format!("rr3-modules/{m}"))).unwrap();
@@ -297,56 +297,6 @@ fn module_dir_mft_agree() {
     let (cfg, _) = cfg_of(&payload, &repo);
     let e = rr3_stage(&cfg).unwrap_err();
     assert!(e.contains("rr3-actx") && e.contains("不一致"), "{e}");
-}
-
-/// python 模块（批F1）：entry 装机产物 = 打包器生成的 shim（PYTHONPATH 装机绝对），
-/// pkg 树落位、entry 改写为装机绝对路径、config 随包、shim 可执行。
-#[test]
-fn python_shim_pkg_tree() {
-    let (payload, repo) = fixture();
-    let (cfg, _) = cfg_of(&payload, &repo);
-    let stage = rr3_stage(&cfg).unwrap();
-    let dir = stage.join("usr/lib/rockrobot3/modules/rr3-brain");
-    // pkg 树落位（逐文件，非空目录即过）
-    assert_eq!(
-        fs::read_to_string(dir.join("pkg/rr3_brain/__init__.py")).unwrap(),
-        "__version__ = \"0.0.1\"\n"
-    );
-    // entry 改写为装机绝对路径，lang 事实保留
-    let facts = rr3_manifest_parse(&fs::read_to_string(dir.join("module.toml")).unwrap()).unwrap();
-    assert_eq!(facts.lang, "python");
-    assert_eq!(
-        facts.entry,
-        "/usr/lib/rockrobot3/modules/rr3-brain/rr3-brain"
-    );
-    // shim 形状：RR3_BRAIN_CONFIG + PYTHONPATH 装机绝对 + python3 -m rr3_brain
-    // （目录名连字符转下划线；config 注入是装机布局修正——brain 回退按"包上一级"
-    // 寻址，pkg/ 嵌套下会指到 pkg/config.toml 虚位，见批F1 真板验证）
-    assert_eq!(
-        fs::read_to_string(dir.join("rr3-brain")).unwrap(),
-        "#!/bin/sh\nRR3_BRAIN_CONFIG=/usr/lib/rockrobot3/modules/rr3-brain/config.toml \
-             PYTHONPATH=/usr/lib/rockrobot3/modules/rr3-brain/pkg exec python3 -m rr3_brain\n"
-    );
-    assert!(dir.join("config.toml").is_file());
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = fs::metadata(dir.join("rr3-brain"))
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_ne!(mode & 0o111, 0, "shim 必须可执行（rrd 直接 exec entry）");
-    }
-}
-
-/// python 模块缺 pkg 树 → 点名拒绝（不是含糊的 "bin 缺席"）
-#[test]
-fn python_pkg_rej_name() {
-    let (payload, repo) = fixture();
-    fs::remove_dir_all(payload.join("rr3-modules/rr3-brain/pkg")).unwrap();
-    let (cfg, _) = cfg_of(&payload, &repo);
-    let e = rr3_stage(&cfg).unwrap_err();
-    assert!(e.contains("rr3-brain") && e.contains("pkg"), "{e}");
 }
 
 #[test]

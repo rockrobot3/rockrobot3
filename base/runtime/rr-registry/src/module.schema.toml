@@ -123,7 +123,9 @@ required = false
 # ---------- 规则表（rr3_registry_check 消费） ----------
 [rules]
 type = ["module", "brain"]
-lang = ["rust", "python"]
+# ADR-0016 裁定 3：python 运行时随 brain 迁移退役，语言面只认 rust（仓内六模块全
+# ELF；打包侧 shim 同步删除，见 0.0.8 批338）。
+lang = ["rust"]
 restart_policy = ["always", "on-failure", "never"]
 topic_allowed_kinds = ["request", "event", "stream", "notification"]
 # v0.0.1 的"依赖只许 base 白名单"已由 ADR-0009 定型：可满足者 = 本表 ∪ 本次 boot

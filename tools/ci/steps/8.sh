@@ -93,15 +93,11 @@ parity_slot_check() {
     printf 'PASS  ⑧-a %s→%s: placeholder 记不适用（占位 ≠ 通过，登记填实触发条件；tier_scope=%s）\n' "$atom_name" "$slot" "$tier_scope"
     return $rc
   fi
-  # Python 两件式件（lang=python：atom.toml + assemble.toml，机制本体 .py 原位）——
-  # 无 Rust 扫描面，记不适用（判据 = module.toml 数据位，非 `[ ! -f mech.rs ]` 启发式）。
+  # 件形只认 rust（python 语言面随 ADR-0016 裁定 3 退役，批338）；判据 = module.toml
+  # 数据位，不是 `[ ! -f mech.rs ]` 启发式。
   lang="$(mod_lang "$mod_dir/module.toml")"
-  if [ "$lang" = "python" ]; then
-    printf 'PASS  ⑧-a %s→%s: normal 格但 lang=python 两件式件，记不适用（tier_scope=%s）\n' "$atom_name" "$slot" "$tier_scope"
-    return $rc
-  fi
   if [ "$lang" != "rust" ]; then
-    printf 'FAIL  ⑧-a %s→%s: module.toml lang=%s（白名单 rust|python，缺/非法即 fail-closed）\n' "$atom_name" "$slot" "${lang:-<空>}"
+    printf 'FAIL  ⑧-a %s→%s: module.toml lang=%s（白名单 rust，缺/非法即 fail-closed）\n' "$atom_name" "$slot" "${lang:-<空>}"
     return 1
   fi
   # 件级精确归属：对拍函数名须带本件名前缀（fn parity_leg1_<件名>_*）——

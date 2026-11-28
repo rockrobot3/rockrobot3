@@ -15,8 +15,8 @@ pub struct Rr3ManifestFacts {
     pub watchdog_ms: u64,
     pub restart_policy: String,
     pub entry: String,
-    /// `[manifest].lang`：rust | python。运行期不分支语言（spawn 只看 entry 可执行），
-    /// 进 facts 是因为演练/打包侧的产物路径推导要它（python 模块产物 = shim 脚本），
+    /// `[manifest].lang`：语言标签，当前只认 rust（ADR-0016 裁定 3）。运行期不分支
+    /// 语言（spawn 只看 entry 可执行），进 facts 是因为演练/打包侧要它做产物形态核对，
     /// 解析真值保持一册——不逼调用方自己再开一份 TOML 读取。
     pub lang: String,
     pub start_priority: i64,

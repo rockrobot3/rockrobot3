@@ -646,7 +646,7 @@ schema_version = 1
 name    = "rr3-sense"       # 必须与目录名/进程名/IPC 前缀一致（校验入口见 §6.3）
 version = "0.1.0"
 type    = "module"          # module | brain
-lang    = "rust"            # rust | python
+lang    = "rust"            # 只认 rust（python 语言面随 ADR-0016 裁定 3 退役）
 entry   = "rr3-sense"
 
 [provides]

@@ -36,7 +36,7 @@ pub(super) fn fixture() -> (PathBuf, PathBuf) {
     fs::write(payload.join("rr3-ctl"), "ctl-bin-bytes").unwrap();
     fs::write(payload.join("rr3-ota-ctl"), "ota-ctl-bin-bytes").unwrap();
     let manifest = "[manifest]\nschema_version = 1\nname = \"rr3-act\"\nversion = \"0.0.1\"\ntype = \"module\"\nlang = \"rust\"\nentry = \"rr3-act\" # 在仓相对\n\n[provides]\ncapabilities = [\"act.servo\"]\n\n[depends]\nrequired = [\"bus.publish\"]\n\n[events]\npublishes = []\nsubscribes = []\n\n[health]\nheartbeat_ms = 1000\nwatchdog_timeout_ms = 5000\n\n[resources]\nrestart_policy = \"always\"\nmem_limit_mb = 16\nstart_priority = 40\n";
-    for m in ["rr3-act", "rr3-connect"] {
+    for m in ["rr3-act", "rr3-connect", "rr3-brain"] {
         fs::write(
             payload.join(format!("rr3-modules/{m}/manifest.toml")),
             manifest.replace("rr3-act", m),
@@ -49,23 +49,6 @@ pub(super) fn fixture() -> (PathBuf, PathBuf) {
         .unwrap();
         fs::write(repo.join(format!("modules/{m}/config.toml")), "[x]\n").unwrap();
     }
-    // python 模块（批F1）：pkg 树 + manifest（lang=python），无 bin——
-    // entry 装机产物是打包器生成的 shim（PYTHONPATH 须装机绝对）
-    fs::create_dir_all(payload.join("rr3-modules/rr3-brain/pkg/rr3_brain")).unwrap();
-    fs::create_dir_all(repo.join("modules/rr3-brain")).unwrap();
-    fs::write(
-        payload.join("rr3-modules/rr3-brain/manifest.toml"),
-        manifest
-            .replace("rr3-act", "rr3-brain")
-            .replace("lang = \"rust\"", "lang = \"python\""),
-    )
-    .unwrap();
-    fs::write(
-        payload.join("rr3-modules/rr3-brain/pkg/rr3_brain/__init__.py"),
-        "__version__ = \"0.0.1\"\n",
-    )
-    .unwrap();
-    fs::write(repo.join("modules/rr3-brain/config.toml"), "[rr3-brain]\n").unwrap();
     fs::write(repo.join("profiles/distro.toml"), DISTRO_PROFILE).unwrap();
     fs::write(repo.join("contracts/topics.toml"), "# topics\n").unwrap();
     fs::write(repo.join("contracts/slots.toml"), "# slots\n").unwrap();

@@ -105,10 +105,11 @@ run_tests() {
   printf 'PASS  %s\n' "$*"
 }
 
-# 模块语言数据源（读 module.toml `manifest.lang`；schema 必填 + 枚举 rust|python，
-# contract 钉死 schema.rs）。⑦-c 件形与 ⑧-a 豁免的**唯一判据数据源**——门内零零件名
-# 硬编码（0.0.5 批M MC-10 L-2，承 R-8：architecture §13"⑦-c 仍留两处 if rr3-brain"
-# 收编；参数 = module.toml 路径，供 ⑦-c/$mod 与 ⑧-a/$mod_dir 两处共用同一真值）。
+# 模块语言数据源（读 module.toml `manifest.lang`；schema 必填 + 枚举 rust，contract
+# 钉死 schema.rs；python 语言面随 ADR-0016 裁定 3 退役，批338）。⑦-c 件形与 ⑧-a 的
+# **唯一判据数据源**——门内零零件名硬编码（0.0.5 批M MC-10 L-2，承 R-8：architecture
+# §13"⑦-c 仍留两处 if rr3-brain"收编；参数 = module.toml 路径，供 ⑦-c/$mod 与
+# ⑧-a/$mod_dir 两处共用同一真值）。
 mod_lang() {
   grep -m1 -E '^lang[[:space:]]*=' "$1" 2>/dev/null | sed -E 's/.*"([^"]*)".*/\1/'
 }
@@ -248,9 +249,9 @@ rr3_step_7
 #     拆分后多落点，批N26 件二订正；其实体的 tests/ 子目录同计：单测随结构化拆分搬走
 #     时门按内容执法、不按文件名执法）两腿各 ≥1（腿一 fn parity_leg1_*、腿二
 #     fn parity_leg2_*，命名即机器锚）；只有腿一记未达标（§4.0.3：否则恒输出 0 的空件
-#     照样过门）。件形由 module.toml `lang` 数据位判（rust|python，缺/非法即 fail-closed，
-#     不再用 `[ ! -f mech.rs ]` 存在性启发式猜）——lang=python 两件式件（无 atoms/*.rs
-#     扫描面）记"不适用"；其 cognition 四格不属本门分母（H1 口径 11 件 = Rust 真件）。
+#     照样过门）。件形由 module.toml `lang` 数据位判（只认 rust，缺/非法即 fail-closed，
+#     不再用 `[ ! -f mech.rs ]` 存在性启发式猜）；其 cognition 四格不属本门分母
+#     （H1 口径 11 件 = Rust 真件）。
 # ⑧-a C10 反例自证：门内建 stub fixture（恒输出 0 的件 + 只有腿一），同一计数函数
 #     必须拦下——拦不住则门本身 FAIL（对拍门若放行空件就只是仪式）。
 # ⑧-b 件级依赖闭包 grep 门（C7 分级执法）：扫 modules/*/atoms/*/*.rs 的**非 test 面**

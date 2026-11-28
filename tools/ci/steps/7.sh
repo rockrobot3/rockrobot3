@@ -94,9 +94,8 @@ rr3_7c_five() {
 }
 
 # ⑦-c 原子件计数：Rust 五件 = atom.toml + <名>.rs（入口）+ mech.rs（实现）+
-#     assemble.toml（装配清单）+ private.rs（唯一私有头）；Python 件为两件式
-#     （atom.toml + assemble.toml，机制本体 .py 原位——conventions §2 批C⑤ 在案，
-#     属登记豁免非 SKIP）。件形由 module.toml `lang` 数据位选（不再按零件名 `if` 猜）。
+#     assemble.toml（装配清单）+ private.rs（唯一私有头）。件形由 module.toml `lang`
+#     数据位选（不再按零件名 `if` 猜）；python 语言面随 ADR-0016 裁定 3 退役（批338）。
 rr3_7c_atoms() {
   local d mod name lang five f
   for d in modules/*/atoms/*/; do
@@ -104,9 +103,8 @@ rr3_7c_atoms() {
     lang="$(mod_lang "modules/$mod/module.toml")"
     case "$lang" in
       rust)   five="atom.toml assemble.toml private.rs mech.rs $name.rs" ;;
-      python) five="atom.toml assemble.toml" ;;
       *)
-        printf 'FAIL  ⑦-c 五件套: %s 模块 %s 的 lang=%s（module.toml manifest.lang 白名单 rust|python，缺/非法即 fail-closed）\n' "$d" "$mod" "${lang:-<空>}"
+        printf 'FAIL  ⑦-c 五件套: %s 模块 %s 的 lang=%s（module.toml manifest.lang 白名单 rust，缺/非法即 fail-closed）\n' "$d" "$mod" "${lang:-<空>}"
         static_fail=1; continue
         ;;
     esac
@@ -120,10 +118,9 @@ rr3_7c_atoms() {
 }
 
 # ⑦-c 组合件实体计数：rust 组合件必在 src/main.rs，运行机制实体 src/composite.rs 与
-#     拆分后 src/dispatch.rs 至少其一（过渡期双态可判）；Python 组合件 = 包目录
-#     （模块名破折号转下划线，naming.md §3 同源）的 __main__.py + composite.py。
+#     拆分后 src/dispatch.rs 至少其一（过渡期双态可判）。
 rr3_7c_composites() {
-  local c mod_dir mod lang alt req pkg f alt_ok
+  local c mod_dir mod lang alt req f alt_ok
   for c in modules/*/composite.toml; do
     mod_dir="$(dirname "$c")"; mod="$(basename "$mod_dir")"
     lang="$(mod_lang "$mod_dir/module.toml")"
@@ -133,9 +130,6 @@ rr3_7c_composites() {
       # 运行机制实体 src/composite.rs（五件套②）与拆分后 src/dispatch.rs（0.0.8 方案 §4
       # 各批目标树）至少其一——过渡期未拆模块持 composite.rs、已拆模块持 dispatch.rs，双态可判。
       rust)   req="src/main.rs"; alt="src/composite.rs src/dispatch.rs" ;;
-      # Python 组合件实体：包目录 = 模块名破折号转下划线（naming.md §3 目录名 == 进程名 ==
-      # manifest.name；pyproject `packages.find` include `"<包>*"` 同源），不硬编码零件名。
-      python) pkg="$(printf '%s' "$mod" | tr '-' '_')"; req="$pkg/__main__.py $pkg/composite.py" ;;
       *)
         printf 'FAIL  ⑦-c 五件套(组合件): %s 模块 %s 的 lang=%s（缺/非法即 fail-closed）\n' "$c" "$mod" "${lang:-<空>}"
         static_fail=1; continue
@@ -147,8 +141,7 @@ rr3_7c_composites() {
         static_fail=1
       fi
     done
-    # 运行机制实体至少其一（批N26 件二，0.0.8 W-A 批1 起：composite.rs / dispatch.rs；
-    # alt 非空才判——python 组合件两件全必在，req 已覆盖）
+    # 运行机制实体至少其一（批N26 件二，0.0.8 W-A 批1 起：composite.rs / dispatch.rs）
     if [ -n "$alt" ]; then
       alt_ok=0
       for f in $alt; do [ -f "$mod_dir/$f" ] && alt_ok=1; done
@@ -163,13 +156,12 @@ rr3_7c_composites() {
 # ⑦-d 入口体量（§13：装配入口 ≤80 行；批E 起 fail-closed——六入口现况 16–18 行）。
 #     入口路径按 module.toml `lang` 数据位推导（L-2：此前硬编码 modules/rr3-brain/…）。
 rr3_7d_entry() {
-  local mt mod_dir mod lang e lines pkg
+  local mt mod_dir mod lang e lines
   for mt in modules/*/module.toml; do
     mod_dir="$(dirname "$mt")"; mod="$(basename "$mod_dir")"
     lang="$(mod_lang "$mt")"
     case "$lang" in
       rust)   e="$mod_dir/src/main.rs" ;;
-      python) pkg="$(printf '%s' "$mod" | tr '-' '_')"; e="$mod_dir/$pkg/__main__.py" ;;
       *) continue ;;  # lang 缺/非法已由 ⑦-c 逐件点名，此处不重复扰民
     esac
     [ -f "$e" ] || continue
