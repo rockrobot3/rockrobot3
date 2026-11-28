@@ -71,7 +71,7 @@ impl Drop for E2eRoot {
 pub fn rr3_build_module_bin(name: &str) -> PathBuf {
     let _guard = rr3_fixture_build_lock()
         .lock()
-        .unwrap_or_else(|e| e.into_inner());
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let manifest = rr3_repo_root()
         .join("modules")
         .join(name)
@@ -91,23 +91,20 @@ pub fn rr3_build_module_bin(name: &str) -> PathBuf {
         .arg(&manifest)
         .output();
     let bin = rr3_cargo_artifact(&cargo, &manifest, name);
-    bin.canonicalize()
-        .map(|p| {
-            assert!(p.is_file(), "{} 不是文件", p.display());
-            p
-        })
-        .unwrap_or_else(|e| {
-            panic!(
-                "编译产物 {} 不存在（clean -p 重建后仍失败: {e}；{first}）",
-                bin.display()
-            )
-        })
+    let p = bin.canonicalize().unwrap_or_else(|e| {
+        panic!(
+            "编译产物 {} 不存在（clean -p 重建后仍失败: {e}；{first}）",
+            bin.display()
+        )
+    });
+    assert!(p.is_file(), "{} 不是文件", p.display());
+    p
 }
 
 /// 夹具编译的进程内串行锁：共享 target-dir 的并发 cargo 是随机红的来源（见上）。
 fn rr3_fixture_build_lock() -> &'static std::sync::Mutex<()> {
     static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    LOCK.get_or_init(std::sync::Mutex::default)
 }
 
 /// 跑一次 `cargo build --message-format=json`，从 `compiler-artifact.executable`

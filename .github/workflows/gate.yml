@@ -67,8 +67,10 @@ jobs:
           if ! bash tools/ci/check.sh 2>&1 | tee /tmp/gate.log; then
             # 失败测试名与 panic 行同样进注解：日志匿名不可读，只有注解是公开取数面；
             # 只抓 FAIL/ERROR 会把「哪个测试挂了」挤掉（实测 brain 用例失败不可归因）。
+            # clippy/rustc 的 `error:` 行也必须进信号面（2026-11-28 实测：clippy 红
+            # 只留下命令本身，公开注解里没有 lint 名，根因不可读）。
             bash tools/ci/lib/log-digest.sh --title check.sh --log /tmp/gate.log \
-              --sig '^FAIL|^ERROR|^test .* FAILED|panicked at' --tail 30
+              --sig '^FAIL|^ERROR|^test .* FAILED|panicked at|error(\[|:)' --tail 30
             exit 1
           fi
 
