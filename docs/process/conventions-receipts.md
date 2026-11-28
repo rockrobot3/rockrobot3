@@ -3586,3 +3586,19 @@ Buildroot 自带 glibc 工具链交叉构建并入 payload（与镜像 glibc 同
 归因（runs>0；按注解记 tag/类别/签名）；③ 批339 下次 `v*` 发布后把 OTA/buildroot/
 distro 纳入匿名回读；④ 批340 出厂镜像网络与时间面的选型裁定（NetworkManager 或换
 链路后端、时间同步机制），并给目标运行证据的判据；⑤ 批341 三线收口与再拟下轮。
+
+**2026-11-28 批337 出厂镜像去 Python3（构建回执）**：事实——brain 自 ADR-0017 起是
+Rust ELF，镜像装配的六个模块全是 ELF；defconfig 的 `BR2_PACKAGE_PYTHON3` 是 Python
+brain 时代遗留，目标侧零 python 消费者（post-build/post-image 与镜像内容断言都在宿主
+执行；`git grep python3 -- base/os/buildroot tools/ci` 只剩宿主依赖行）。处置——移除
+该包，defconfig 内留"复核判据"注释（新增目标侧 python 需求必须重跑该 grep 并评审，
+不接受按印象加回）；512M 容量注释同批去掉 Python3 字样。判据——`26326682`
+（`[buildroot-full]`）run `46135736231`：dtb-backport 与 image 两 job success，
+全量 make、brain 依赖齐套、brain 加载自证、GPT 六分区、镜像内容断言、摘要上传全过；
+同头 gate / integration / platforms 三线 success。边界——"镜像内不再选入 python3"是
+**Kconfig 面事实**（保持集只有 ALSA / busybox / uboot / kernel / rkbin，无包以依赖
+形式 select 它）；镜像体积变化未取数（artifact 下载需凭据），不写未测的数字。
+**下轮任务拟定**：① 批338 11-30 03:00 UTC `release-anon` 首跑归因；② 批339 下次
+`v*` 发布后把 OTA/buildroot/distro 纳入匿名回读；③ 批340 出厂镜像网络与时间面的
+选型裁定与目标运行证据判据；④ 批341 Python 语言支持面清理（schema `lang` 收为
+rust、删 rr3-pack python shim，先出契约级评审）；⑤ 批342 三线收口与再拟下轮。
