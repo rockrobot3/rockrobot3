@@ -79,14 +79,15 @@ fi
 echo "post-build.sh: 产物/模块/真值集已由 rr3-pack 装配（profile=${RR3_PROFILE:-distro}）"
 
 # ---- 2. fstab：内核伪文件系统 + /var/run tmpfs + data / staging 挂载 ----------
-# sysfs/devtmpfs 必须显式列出：本轨是 BusyBox init，唯一的伪文件系统挂载器是
-# inittab 的 `mount -a`（读本文件）。缺 sysfs 时 /sys 为空（模块拿不到设备树与
-# class 节点）；devtmpfs 若内核未开自动挂载，/dev 下连 null 都没有。
+# sysfs 必须显式列出：本轨是 BusyBox init，唯一的伪文件系统挂载器是 inittab 的
+# `mount -a`（读本文件）。缺 sysfs 时 /sys 为空（模块拿不到设备树与 class 节点）。
+# /dev 不写：内核已按 CONFIG_DEVTMPFS_MOUNT=y 自动挂 devtmpfs（该前件由
+# kernel.fragment 显式钉住、构建期断言复核）；再写一行只会每次启动报
+# "already mounted"（批348 依 arch defconfig 与构建期 .config 复核定案）。
 cat > "$TARGET/etc/fstab" <<'EOF'
 # <fs>                  <mountpoint>    <type>  <opts>                  <dump> <pass>
 proc                    /proc           proc    defaults                0      0
 sysfs                   /sys            sysfs   defaults                0      0
-devtmpfs                /dev            devtmpfs mode=0755,nosuid       0      0
 devpts                  /dev/pts        devpts  defaults,gid=5,mode=620 0      0
 tmpfs                   /dev/shm        tmpfs   mode=0777               0      0
 tmpfs                   /tmp            tmpfs   mode=1777               0      0

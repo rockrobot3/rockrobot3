@@ -36,6 +36,9 @@ BR2_LINUX_KERNEL=y
 BR2_LINUX_KERNEL_CUSTOM_VERSION=y
 BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="6.6"
 BR2_LINUX_KERNEL_USE_ARCH_DEFAULT_CONFIG=y
+# 显式钉住 devtmpfs 自动挂载（批348）：fstab 不再重复挂 /dev，见
+# board/radxa-zero3/kernel.fragment 文件头与 post-build.sh 的 fstab 段。
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="board/radxa-zero3/kernel.fragment"
 BR2_LINUX_KERNEL_IMAGE=y
 BR2_LINUX_KERNEL_DTS_SUPPORT=y
 # 板级 dts 回移（v6.6 无此板；3E/3W 两个变体都构建，extlinux 默认 3W）。

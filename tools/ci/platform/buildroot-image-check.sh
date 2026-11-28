@@ -63,14 +63,22 @@ rr3_br_rootfs() {
     echo "PASS  rr_a.ext4 含 ${p}"
   done
   fstab=$("${host}/sbin/debugfs" -R "cat /etc/fstab" "${d}/rr_a.ext4" 2>&1 || true)
-  for k in sysfs devtmpfs "LABEL=rr_data" "LABEL=rr_staging"; do
+  for k in sysfs "LABEL=rr_data" "LABEL=rr_staging"; do
     if ! printf '%s\n' "$fstab" | grep -q "$k"; then
       echo "::error title=br-fstab::rr_a.ext4 的 /etc/fstab 缺 '$k'"
       printf '%s\n' "$fstab"
       exit 1
     fi
   done
-  echo "PASS  rr_a.ext4 /etc/fstab 含 sysfs/devtmpfs/rr_data/rr_staging"
+  echo "PASS  rr_a.ext4 /etc/fstab 含 sysfs/rr_data/rr_staging"
+  # /dev 不得再写 devtmpfs 行（批348）：内核已按 CONFIG_DEVTMPFS_MOUNT=y 自动挂载，
+  # 重复挂载每次启动多一条 "already mounted" 错误行；该前件由 kernel.fragment 显式
+  # 钉住、构建期 .config 断言复核（buildroot.yml）。
+  if printf '%s\n' "$fstab" | grep -qE '^devtmpfs[[:space:]]+/dev[[:space:]]'; then
+    echo "::error title=br-fstab::/etc/fstab 仍写 devtmpfs /dev（内核已自动挂载，重复挂载会报错）"
+    exit 1
+  fi
+  echo "PASS  /etc/fstab 不重复挂载 /dev（内核 devtmpfs 自动挂载）"
   # tmpfs 挂载点必须在根里先存在（批343）：mount -a 不建目录，缺 /var/run 时
   # rrd 的 pid 文件与 UDS bind 全失败，镜像"能启动但守护起不来"。
   for p in /var/run /var/log; do

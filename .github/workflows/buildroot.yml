@@ -303,6 +303,18 @@ jobs:
           fi
           tail -5 /tmp/br-build.log
 
+      # 内核 devtmpfs 自动挂载断言（批348）：fstab 不再挂 /dev，前件必须在内核 .config
+      # 里成立；board/radxa-zero3/kernel.fragment 显式钉住，这里复核构建树实际生效值
+      # （防符号名写错，或被上游默认值/碎片合并规则覆盖而静默失效）。
+      - name: 内核 devtmpfs 自动挂载断言（.config 实值）
+        run: |
+          set -euo pipefail
+          cfg=$(find /tmp/br-out/build -maxdepth 2 -path '*/linux-*/.config' -print -quit)
+          [ -n "$cfg" ] || { echo "::error title=br-devtmpfs::未找到内核 .config（构建树布局变了）"; exit 1; }
+          grep -qx 'CONFIG_DEVTMPFS=y' "$cfg" || { echo "::error title=br-devtmpfs::${cfg} 缺 CONFIG_DEVTMPFS=y"; exit 1; }
+          grep -qx 'CONFIG_DEVTMPFS_MOUNT=y' "$cfg" || { echo "::error title=br-devtmpfs::${cfg} 缺 CONFIG_DEVTMPFS_MOUNT=y"; exit 1; }
+          echo "PASS  内核 devtmpfs 自动挂载（${cfg}）"
+
       # 内容在位不等于能跑（批328）：brain 是 post-build 注入、不在 Buildroot 包图里，
       # 而 Rust gnu 产物动态链 libc/libgcc_s 并依赖 ELF interpreter——库缺位只有真板
       # 启动才会暴露。这里在目标根上做 NEEDED + interpreter 齐套判据：readelf 读产物，

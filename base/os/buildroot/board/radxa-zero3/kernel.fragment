@@ -1,0 +1,8 @@
+# 内核必须开 devtmpfs 自动挂载（批348）。
+#
+# 为什么钉在片段里而不是只靠 arch defconfig：出厂镜像的 fstab 不再写 `devtmpfs /dev`
+# （内核已挂，重复挂载只会每次启动多一条 already mounted 错误行，侵蚀启动日志的
+# 可读性）；"内核会挂 /dev"因此成为启动前件，必须显式、可复核、防上游默认值漂移。
+# 构建期由 buildroot job 的 `.config` 断言复核（缺 CONFIG_DEVTMPFS_MOUNT=y 即红）。
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
