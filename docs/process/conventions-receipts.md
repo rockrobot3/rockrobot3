@@ -3283,3 +3283,14 @@ cross-artifacts / arm64-deb / riscv-image）。窗口仍未到（runs=0）。判
 `tools/deploy/README.md` 增"载体脚本失败归因约定"一段（set -e 脚本必须装 ERR trap，
 可带产物路径上下文）。判据——`bash -n` 通过；gate `scripts` 的全量 `.sh` 语法检查覆盖；
 ⑤ 文档门绿。
+
+**2026-11-28 批308 本轮收口**：本轮交付——`pack-arm64.sh` 补齐意外退出归因，载体脚本
+"ERR trap 点名命令+行号"从六处同形上升为成文约定（新增脚本不会再漏）。窗口仍未到
+（runs=0，11-30 03:00 UTC）。判据——commit `deca814e`：gate`scripts`/`conventions`
+与 integration success；三远端同指 `deca814e`。
+
+**2026-11-28 批308 下轮任务拟定**：① 批309 11-30 03:00 UTC `release-anon` 首跑归因
+（确认 runs>0 并按注解记录 tag/类别；红按镜像/固件/签名三类定位）；② 批310 下次
+`v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
+③ 批311 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批312 三线收口与
+再拟下轮。
