@@ -23,6 +23,10 @@
 # 用系统/交叉链接器（调用方经 CARGO_TARGET_<TRIPLE>_LINKER 注入）。
 # 第三参 static（缺省）断言全静态；any 跳过该断言（gnu 目标动态链接）。
 set -euo pipefail
+
+# 意外退出必须可归因（批305）：三条交叉腿共用本脚本，`set -e` 下的裸命令失败
+# 只剩退出码——点名命令与行号，失败归因不再靠猜。
+trap 'echo "FAIL  意外退出：${BASH_COMMAND}（行 ${LINENO}）" >&2' ERR
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "ERROR: 不在 git 仓库内" >&2
   exit 1

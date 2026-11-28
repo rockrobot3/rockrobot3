@@ -26,6 +26,8 @@ DEB=""
 MODULES=$(rr3_modules .)
 
 die() { echo "FAIL  $*" >&2; exit 1; }
+# 意外退出必须可归因（批305）：裸命令失败不经过 die，只剩退出码。
+trap 'echo "FAIL  意外退出：${BASH_COMMAND}（行 ${LINENO}）" >&2' ERR
 
 # 宿主前置：交叉 C 工具链（ring/alsa 需要）、dpkg-deb、cargo。
 preflight() {
