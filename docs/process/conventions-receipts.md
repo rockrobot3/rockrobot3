@@ -3721,3 +3721,21 @@ run `46173456269` 在跑）；② 批350 出厂镜像内容断言补装配全覆
 profiles/contracts、rr3-ctl/rr3-ota-ctl——现状只查 brain 两件）；③ 批344 11-30 03:00
 UTC `release-anon` 首跑归因；④ 批345 下次 `v*` 后 OTA/buildroot/distro 入匿名回读；
 ⑤ 批351 镜像内 brain 系统级运行证据（硬件）；⑥ 批352 三线收口与再拟下轮。
+
+**2026-11-29 批348 出厂镜像 devtmpfs 自动挂载（fstab 重复行根除）**：事实——arm64
+架构 defconfig 本就 `DEVTMPFS=y`/`DEVTMPFS_MOUNT=y`（批346 核对），内核在 init 前
+已把 devtmpfs 挂到 `/dev`；fstab 再写一行只会在每次启动多一条 "already mounted" 错误，
+且该前件在仓内没有显式声明者（只剩架构缺省），配置漂移无人拦。处置——新增
+`board/radxa-zero3/kernel.fragment` 显式钉两符号，defconfig 加
+`BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES`；post-build 的 fstab 删 `devtmpfs /dev` 行；
+buildroot.yml 新增「内核 devtmpfs 自动挂载断言（.config 实值）」，镜像断言 `br-fstab`
+增"禁止 `devtmpfs /dev`"判据。判据——buildroot run `46173456269`（job `141066988701`）
+全步骤 success：step 15 `.config` 实值断言 success（fragment 真生效）、step 22 镜像内容
+只读断言 success（新判据同批）、step 17 brain 加载自证与 step 18 装载门负例同绿。
+边界——`/dev/pts`、`/dev/shm` 挂载点余量由上游原文关账（Buildroot 2024.02.11
+`package/busybox/inittab` 的 `::sysinit:/bin/mkdir -p /dev/pts /dev/shm` 先于
+`::sysinit:/bin/mount -a`），不需真板 `mount` 复核；串口出 shell 等板上项仍归 M1 窗口。
+**下轮任务拟定**：① 批350 回执（装配全覆盖断言，head `95b0870d` 的 buildroot run
+在跑）；② 批344 11-30 03:00 UTC `release-anon` 首跑归因；③ 批345 下次 `v*` 后
+OTA/buildroot/distro 入匿名回读；④ 批351 镜像内 brain 系统级运行证据（硬件）；
+⑤ 批352 三线收口与再拟下轮。
