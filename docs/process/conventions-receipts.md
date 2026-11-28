@@ -3534,3 +3534,23 @@ abort 前显式 `shutdown(Both)`，把连接状态定格为 FIN；仍不 unregis
 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑，
 distro 首发后把 distro 类纳入；③ 批335 镜像内 brain 的运行证据（真板或 QEMU 启动；
 硬件未到则如实记边界）；④ 批336 三线收口与再拟下轮。
+
+**2026-11-28 批333 brain 加载自证（qemu）**：事实——批328 的 NEEDED/interpreter
+齐套只证明"文件在"，不证明 ELF 能被加载器接上；brain 无 CLI 参数面，起手先打版本行
+再连总线。处置——镜像构建后在既有验证段加一步：qemu-aarch64 以目标根为 sysroot
+直接执行 brain（`RR3_BUS_PATH` 指向不存在路径），判据 = 出现 `rr3-brain 0.0.1`
+版本行且无 `error while loading shared libraries` / `cannot open shared object`；
+无总线按预期非 0 退出，不以退出码冒充功能运行。判据——`9caa24e4` gate /
+integration / platforms success；buildroot image job 的该步待收（run `46130592655`，
+全量 make 进行中）。
+
+**2026-11-28 批334 本轮收口（镜像待收）**：本轮把 brain 的镜像证据从"依赖件齐套"
+推进到"加载自证"。窗口仍未到（`release-anon` runs=0，首跑 11-30 03:00 UTC）。判据——
+`9caa24e4` 三线 success；三远端同指 `9caa24e4`。
+
+**2026-11-28 批334 下轮任务拟定**：① 批335 收 buildroot image job（brain 加载自证
+步骤；红按 br-brain-run 定位）；② 批336 11-30 03:00 UTC `release-anon` 首跑归因
+（runs>0；按注解记 tag/类别/签名，红按镜像/固件/签名三类定位）；③ 批337 下次 `v*`
+发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑，distro
+首发后把 distro 类纳入；④ 批338 镜像内 brain 的系统级运行证据（真板/QEMU 整机；
+硬件未到则如实记边界）；⑤ 批339 三线收口与再拟下轮。
