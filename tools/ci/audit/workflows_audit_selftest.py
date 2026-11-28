@@ -255,6 +255,17 @@ def self_test():
             encoding="utf-8",
         )
         bad5 = audit(root)
+        # 覆盖率入口负例（批293）：workspace 换成 echo，independent 保留——只该点名前者。
+        (wf / "coverage.yml").write_text(
+            "name: coverage\non:\n  push:\n    branches: [main]\n"
+            "permissions:\n  contents: read\nconcurrency:\n  group: cov\njobs:\n"
+            "  workspace:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    steps:\n      - run: echo no-op\n"
+            "  independent:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    steps:\n      - run: cargo llvm-cov --locked --manifest-path tools/x/Cargo.toml\n",
+            encoding="utf-8",
+        )
+        bad6 = audit(root)
 
     cases = _cases(bad)
     cases.append(("制品标签漏 v 被抓", any("标签必须 v<VER>" in b for b in bad2)))
@@ -263,6 +274,7 @@ def self_test():
     cases.append(("匿名回读固定 tag 被抓", any("必须 --tag auto" in b for b in bad3)))
     cases.append(("匿名回读缺周程被抓", any("缺 schedule" in b for b in bad4)))
     cases.append(("门禁主线入口被削被抓", any("缺判据入口 tools/ci/check.sh" in b for b in bad5)))
+    cases.append(("覆盖率入口被削被抓", any("缺覆盖率入口 cargo llvm-cov --locked --workspace" in b for b in bad6)))
     for name, ok in cases:
         print(("PASS  " if ok else "FAIL  ") + name)
     return 0 if all(ok for _, ok in cases) else 1

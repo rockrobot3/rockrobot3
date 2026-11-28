@@ -196,7 +196,8 @@ job 定义 ≤10；integration/platforms 的 push/PR 必须 `paths-ignore` 含 `
 先自检后执法。
 **作业覆盖契约**：gate / integration / platforms / publish / buildroot / coverage /
 release-anon 的 job 名全部按 `REQUIRED_JOBS` 钉住（删名即红、整文件删也红，改名须同批
-评审）；gate 主线各 job 的**判据入口**也按名钉住（conventions→`check.sh`、
+评审）；coverage 两腿的**覆盖率入口**按名钉住（`cargo llvm-cov` 被换掉 = 数据静默
+消失，upload-artifact 默认只在缺文件时告警）；gate 主线各 job 的**判据入口**也按名钉住（conventions→`check.sh`、
 supply→`supply-audit.sh --strict`、ota-bundle→`ota-bundle.sh`、scripts→四个审计、
 release/alsa 的 cargo 判据——入口被换掉即红，整套门禁不得空转）；集成腿的**验证脚本**按名钉住（distro-smoke / install-smoke / ota-sign /
 rk3566-onboard / buildroot-assembly / sim-assemble / sim-chain——step 换成 echo 即红）；`release-anon` 的**命令**也按判据钉住（必须复用 `release-verify.sh`、带

@@ -98,6 +98,12 @@ GATE_STEPS = {
         "tools/ci/audit/gate_steps_audit.py",
     ],
 }
+# 覆盖率观测面（批293）：两个 job 的产物靠 upload-artifact 落地，而该 action 默认
+# if-no-files-found=warn——把 llvm-cov 那步换成 echo，job 依旧绿、覆盖率数据静默消失。
+COVERAGE_STEPS = {
+    "workspace": ["cargo llvm-cov --locked --workspace"],
+    "independent": ["cargo llvm-cov --locked --manifest-path"],
+}
 JOB_STEPS = {
     "cross-artifacts": ["cross-artifacts.sh", "ipct003_dump"],
     "arm64-deb": ["arm64-deb-check.sh"],
@@ -255,6 +261,23 @@ def gate_problems(text, rel):
     return bad
 
 
+def coverage_problems(text, rel):
+    """覆盖率观测入口按名钉住：数据静默消失比门禁变红更难发现。"""
+    if rel.name != "coverage.yml":
+        return []
+    jobs = dict(jobs_of(text))
+    bad = []
+    for job, needles in COVERAGE_STEPS.items():
+        block = jobs.get(job)
+        if block is None:
+            continue
+        joined = "\n".join(block)
+        for needle in needles:
+            if needle not in joined:
+                bad.append(f"{rel} job {job} 缺覆盖率入口 {needle}（数据静默消失）")
+    return bad
+
+
 def integration_problems(text, rel):
     """集成腿验证脚本按名钉住（缺 job 由 REQUIRED_JOBS 点名，这里只核腿内判据）。"""
     if rel.name != "integration.yml":
@@ -284,6 +307,7 @@ def workflow_problems(path, root):
     bad.extend(anon_problems(text, rel))
     bad.extend(integration_problems(text, rel))
     bad.extend(gate_problems(text, rel))
+    bad.extend(coverage_problems(text, rel))
     if not re.search(r"^concurrency:\s*$", text, re.M):
         bad.append(f"{rel} 缺顶层 concurrency（同 ref 并发组）")
     if rel.name == "publish.yml" and not re.search(r"cancel-in-progress:\s*false", text):

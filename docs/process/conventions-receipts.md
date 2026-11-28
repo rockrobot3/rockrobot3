@@ -3154,3 +3154,10 @@ alsa feature / ota-bundle.sh / scripts 的四审计），缺即点名"门禁空�
 `release-verify --tag v${VER}` 实跑；③ 批295 distro 首发后 `--deep` / B.2 实测与
 distro 类裁定；④ 批296 取证 coverage.yml / buildroot.yml 非发布作业是否也需钉判据
 入口（先有证据再改，不无据扩面）；⑤ 批297 三线收口与再拟下轮。
+
+**2026-11-28 批293 覆盖率观测入口入审计**：事实——coverage 两腿先跑 `cargo llvm-cov`
+再 upload-artifact，而该 action 默认 `if-no-files-found=warn`：把 llvm-cov 换成 echo 后
+job 仍绿、覆盖率数据静默消失（非阻断≠可以无声消失）。处置——`COVERAGE_STEPS` 按名钉住
+两腿的 llvm-cov 入口（workspace 全量 / independent 按清单），缺即点名；自检夹具把
+workspace 换成 echo、independent 保留，新增负例。判据——`--self-test` 37/37 绿；真仓
+审计 PASS；⑤ 文档门绿。
