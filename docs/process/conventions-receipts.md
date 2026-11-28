@@ -3703,3 +3703,21 @@ fstab 的 `devtmpfs /dev` 是冗余行（每次启动一条 already mounted 错�
 **下轮任务拟定**：① 批344 11-30 03:00 UTC `release-anon` 首跑归因；② 批345 下次
 `v*` 发布后 OTA/buildroot/distro 纳入匿名回读；③ 批348 镜像内 brain 系统级运行证据；
 ④ 批349 三线收口（含 devtmpfs 冗余行裁定）与再拟下轮。
+
+**2026-11-29 批349 计数落盘前自建数据目录（出厂镜像持久化根因）**：事实——出厂轨
+（Buildroot/BusyBox）rrd 计数缺省路径是 `/data/rr3/counters.json`（`rr3_counters_path`
+linux 无 env 回落），而 `data.ext4` 由 genimage 以 `empty = true` 产空分区，装机侧与
+init 都没有 `/data/rr3` 的预建者；`rr3_atomic_store` 只写不建父目录，于是首启起每个
+落盘窗口报 `建 counters.json.tmp 失败: No such file or directory`，`boots` 每次开机
+重置为 1——与 0.0.6 批E' 发行版轨 `RR3_DATA_DIR` 缺目录同病形（当时只修了一侧）。
+处置——`rr3_counters_store` 落盘前 `rr3_ctr_dir_ensure` 建父目录（失败点名交回调用方，
+不 panic 不吞错；发行版轨幂等）；单测两例：缺目录自建后可直接读回、父路径是文件必败
+且文案点名"建数据目录"。判据——gate run `46174197155` success（workspace 全量测试含
+两新单测）、integration run `46174197030` success；rustfmt 干净；三远端同头 `9f99b068`。
+边界——真板首启 `boots` 跨重启累积的板上回执仍归硬件窗口（本批只证机制与单测，不动
+分区布局）。
+**下轮任务拟定**：① 批348 镜像回执收口（`.config` devtmpfs 断言 + `br-fstab` 新判据，
+run `46173456269` 在跑）；② 批350 出厂镜像内容断言补装配全覆盖（六模块 binary+manifest、
+profiles/contracts、rr3-ctl/rr3-ota-ctl——现状只查 brain 两件）；③ 批344 11-30 03:00
+UTC `release-anon` 首跑归因；④ 批345 下次 `v*` 后 OTA/buildroot/distro 入匿名回读；
+⑤ 批351 镜像内 brain 系统级运行证据（硬件）；⑥ 批352 三线收口与再拟下轮。
