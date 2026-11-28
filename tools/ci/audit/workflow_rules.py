@@ -83,6 +83,21 @@ INTEGRATION_STEPS = {
     "sim-assemble": ["sim-assemble.sh"],
     "sim-chain": ["sim-chain.sh"],
 }
+# 门禁主线各 job 的判据入口（批291）：conventions 若不再跑 check.sh、scripts 若不再
+# 跑三个审计，job 名与超时全在而门禁整体静默——这是比单腿失效更彻底的空转形态。
+GATE_STEPS = {
+    "conventions": ["tools/ci/check.sh"],
+    "release": ["cargo test --locked --release --workspace"],
+    "supply": ["tools/ci/platform/supply-audit.sh --strict"],
+    "alsa": ["-p rr-hal --features alsa"],
+    "ota-bundle": ["tools/deploy/ota-bundle.sh"],
+    "scripts": [
+        "tools/ci/audit/workflows_audit.py",
+        "tools/ci/audit/metrics.py",
+        "tools/ci/audit/release_sets.py",
+        "tools/ci/audit/gate_steps_audit.py",
+    ],
+}
 JOB_STEPS = {
     "cross-artifacts": ["cross-artifacts.sh", "ipct003_dump"],
     "arm64-deb": ["arm64-deb-check.sh"],
@@ -223,6 +238,23 @@ def chip_problems(text, rel):
     return bad
 
 
+def gate_problems(text, rel):
+    """门禁主线判据入口按名钉住：入口被换掉 = 整套门禁空转。"""
+    if rel.name != "gate.yml":
+        return []
+    jobs = dict(jobs_of(text))
+    bad = []
+    for job, needles in GATE_STEPS.items():
+        block = jobs.get(job)
+        if block is None:
+            continue
+        joined = "\n".join(block)
+        for needle in needles:
+            if needle not in joined:
+                bad.append(f"{rel} job {job} 缺判据入口 {needle}（门禁空转）")
+    return bad
+
+
 def integration_problems(text, rel):
     """集成腿验证脚本按名钉住（缺 job 由 REQUIRED_JOBS 点名，这里只核腿内判据）。"""
     if rel.name != "integration.yml":
@@ -251,6 +283,7 @@ def workflow_problems(path, root):
     bad.extend(release_artifacts_problems(text, rel))
     bad.extend(anon_problems(text, rel))
     bad.extend(integration_problems(text, rel))
+    bad.extend(gate_problems(text, rel))
     if not re.search(r"^concurrency:\s*$", text, re.M):
         bad.append(f"{rel} 缺顶层 concurrency（同 ref 并发组）")
     if rel.name == "publish.yml" and not re.search(r"cancel-in-progress:\s*false", text):

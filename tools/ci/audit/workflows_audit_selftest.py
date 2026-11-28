@@ -232,6 +232,29 @@ def self_test():
             encoding="utf-8",
         )
         bad4 = audit(root)
+        # 门禁主线入口负例（批291）：conventions 换成 echo，其余 job 保留判据入口。
+        (wf / "gate.yml").write_text(
+            "name: g\non:\n  push:\n    branches: [main]\n"
+            "permissions:\n  contents: read\nconcurrency:\n  group: g\njobs:\n"
+            "  conventions:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    steps:\n      - run: echo no-op\n"
+            "  release:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    steps:\n      - run: cargo test --locked --release --workspace\n"
+            "  supply:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    steps:\n      - run: bash tools/ci/platform/supply-audit.sh --strict\n"
+            "  alsa:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    steps:\n      - run: cargo check -p rr-hal --features alsa\n"
+            "  ota-bundle:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    steps:\n      - run: bash tools/deploy/ota-bundle.sh\n"
+            "  scripts:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n"
+            "    steps:\n      - run: |\n"
+            "          python3 tools/ci/audit/workflows_audit.py\n"
+            "          python3 tools/ci/audit/metrics.py\n"
+            "          python3 tools/ci/audit/release_sets.py\n"
+            "          python3 tools/ci/audit/gate_steps_audit.py\n",
+            encoding="utf-8",
+        )
+        bad5 = audit(root)
 
     cases = _cases(bad)
     cases.append(("制品标签漏 v 被抓", any("标签必须 v<VER>" in b for b in bad2)))
@@ -239,6 +262,7 @@ def self_test():
     cases.append(("匿名回读类别被削被抓", any("类别必须 image,firmware" in b for b in bad3)))
     cases.append(("匿名回读固定 tag 被抓", any("必须 --tag auto" in b for b in bad3)))
     cases.append(("匿名回读缺周程被抓", any("缺 schedule" in b for b in bad4)))
+    cases.append(("门禁主线入口被削被抓", any("缺判据入口 tools/ci/check.sh" in b for b in bad5)))
     for name, ok in cases:
         print(("PASS  " if ok else "FAIL  ") + name)
     return 0 if all(ok for _, ok in cases) else 1

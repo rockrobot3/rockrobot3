@@ -3133,3 +3133,11 @@ commit `30c0f266` 三线全绿（gate / integration / platforms 均 success）�
 类别结论，红按镜像/固件/签名三类定位）；② 批292 下次 `v*` 发布后把 OTA/buildroot
 纳入匿名回读并核 buildroot 的 `release-verify --tag v${VER}` 实跑；③ 批293 distro
 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批294 三线收口与再拟下轮。
+
+**2026-11-28 批291 门禁主线判据入口入审计**：事实——gate 的 conventions 若把
+`bash tools/ci/check.sh` 换成 `echo`，job 名与超时仍在、其余五作业照跑，整套门禁空转
+而流水线全绿（比单腿失效更彻底）。处置——`GATE_STEPS` 按名钉住六作业的判据入口
+（check.sh / release 的 `cargo test --release --workspace` / supply-audit --strict /
+alsa feature / ota-bundle.sh / scripts 的四审计），缺即点名"门禁空转"；自检新增负例
+（conventions 换 echo、其余入口保留，只该点名它）。判据——`--self-test` 36/36 绿；
+真仓审计 PASS；⑤ 文档门绿。
