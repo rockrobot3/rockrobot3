@@ -3602,3 +3602,20 @@ brain 时代遗留，目标侧零 python 消费者（post-build/post-image 与�
 `v*` 发布后把 OTA/buildroot/distro 纳入匿名回读；③ 批340 出厂镜像网络与时间面的
 选型裁定与目标运行证据判据；④ 批341 Python 语言支持面清理（schema `lang` 收为
 rust、删 rr3-pack python shim，先出契约级评审）；⑤ 批342 三线收口与再拟下轮。
+
+**2026-11-28 批338 python 模块语言面退役（ADR-0016 裁定 3 兑现）**：事实——ADR-0016
+裁定 3 要求迁移完成后 `lang` 收为 rust、brain shim 与 python3 运行时退役；仓内六模块
+全 Rust，而 schema 仍列 python、打包器仍带 shim 分型、⑦-c/⑧-a 仍留两件式分支（同一
+能力的三处第二路径）。处置——`lang = ["rust"]`；删 `rr3_python_shim_text`、stage 的
+python 分型与 pkg 树落位、两份 python 用例；门禁 ⑦-c/⑧-a 的 python 分支同批删除
+（件形只认 rust）；rrd facts 注释、架构 schema 示例、conventions ⑦/⑧ 行、
+tools/ci/README、status 的 rr3-sim 行同步；净减 190 行。判据——首推 `764f0aca` 的
+gate / integration / host-macos 三处红，注解逐条点名 `tests/fixture.rs`，根因两条：
+python 面退役后夹具仍按旧形组织 brain、且三件宿主产物写入早于 payload 根就位；修
+`330481a3`（按模块名单建目录）＋ `d2550468`（先建 payload/repo 根）后 `996595a7` 的
+gate / integration success。边界——历史文档（0.0.1 方案、批F1 回执、boards 实录）不
+改写；`tools/deploy/console-log.py` 是宿主侧取证工具，不在退役面。
+**下轮任务拟定**：① 批339 收 `996595a7` 的 buildroot image（断言脚本触发面 + 串口
+getty 断言）；② 批340 11-30 03:00 UTC `release-anon` 首跑归因；③ 批341 下次 `v*`
+发布后 OTA/buildroot/distro 纳入匿名回读；④ 批342 出厂镜像网络与时间面的选型裁定；
+⑤ 批343 三线收口与再拟下轮。
