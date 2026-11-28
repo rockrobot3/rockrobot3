@@ -44,6 +44,10 @@ die() {
 	exit 1
 }
 
+# 意外退出必须可归因（批301）：`set -e` 下的裸命令失败不经过 die，只剩退出码；
+# OTA 包是发布载荷，卡住时必须能看到失败命令与所在行（与 install-bundle 同款）。
+trap 'echo "ERROR: 意外退出：${BASH_COMMAND}（行 ${LINENO}）" >&2' ERR
+
 IMAGE=""
 VERSION=""
 KEY_FILE=""
