@@ -13,6 +13,7 @@
 #[path = "../atoms/asr/asr.rs"]
 mod asr;
 mod boot;
+mod clock;
 mod cloud;
 mod config_store;
 #[path = "../atoms/dialog/dialog.rs"]

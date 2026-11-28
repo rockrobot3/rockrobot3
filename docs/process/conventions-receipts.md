@@ -3691,3 +3691,15 @@ fstab 的 `devtmpfs /dev` 是冗余行（每次启动一条 already mounted 错�
 **下轮任务拟定**：① 批344 11-30 03:00 UTC `release-anon` 首跑归因；② 批345 下次
 `v*` 发布后 OTA/buildroot/distro 纳入匿名回读；③ 批347 镜像内 brain 系统级运行证据；
 ④ 批348 三线收口与再拟下轮（含时钟就绪门是否独立先落的裁定）。
+
+**2026-11-29 批347 时钟就绪门（云端单点）**：事实——brain 的 TLS 证书校验依赖系统
+时钟；无 RTC 的 RK3566 镜像首启为 1970，首个云调用只会得到"证书时间错"，容易与
+传输/密钥配置问题混淆。处置——新增 `modules/rr3-brain/src/clock.rs`：release 纪元
+下限 `RR3_CLOCK_MIN_UNIX`（2026-01-01，发布年度抬升）、纯判定 `rr3_clock_ready`、
+当前值 `rr3_clock_now_unix`、门 `rr3_clock_gate`；在唯一 HTTP 出口 `rr3_http_post`
+首行过门（ASR/LLM/TTS/completion/model-test 全覆盖），mock 档不触网不走门。判据——
+独立工程测试随 gate 跑新单测（边界与 1970 两例）；rustfmt 干净；协议与传输语义不变。
+边界——不替代系统授时；真板首启仍要 NTP/RTC，运行面证据归硬件窗口。
+**下轮任务拟定**：① 批344 11-30 03:00 UTC `release-anon` 首跑归因；② 批345 下次
+`v*` 发布后 OTA/buildroot/distro 纳入匿名回读；③ 批348 镜像内 brain 系统级运行证据；
+④ 批349 三线收口（含 devtmpfs 冗余行裁定）与再拟下轮。

@@ -52,6 +52,9 @@ pub(crate) fn rr3_http_post(
     timeout_s: f64,
     fresh: bool,
 ) -> Result<(u16, Vec<u8>), String> {
+    // 时钟门（批347）：TLS 证书校验依赖系统时钟，无 RTC 的板子首启为 1970；在唯一
+    // 的 HTTP 出口先拒并点名，避免把"时钟未就绪"误读成云端/证书配置问题。
+    crate::clock::rr3_clock_gate()?;
     let agent_req = if fresh {
         ureq::post(url)
     } else {
