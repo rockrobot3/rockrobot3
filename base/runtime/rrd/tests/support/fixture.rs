@@ -63,13 +63,59 @@ impl Drop for E2eRoot {
 /// 产物路径从 `--message-format=json` 的 `compiler-artifact.executable` 字段取，
 /// 不假设 `target/debug/<name>`——仓根 `.cargo/config.toml` 可把 target-dir 外移到
 /// `/tmp/rr3-build`，硬编码相对路径会找不到产物（P0-5 后回归门）。
+///
+/// 并发与缓存纪律（2026-11-28 macOS 实测红后补）：同一测试二进制里多个用例会并发
+/// 编译同一模块（audio_chain 两例都编 rr3-sense），共享同一个 target-dir；且
+/// rust-cache 恢复的指纹可能"报 fresh 而产物不在"。前者用进程内锁串行，后者做
+/// 一次 `clean -p` + 重编的有界恢复（仍缺则 panic 并保留首次证据）。
 pub fn rr3_build_module_bin(name: &str) -> PathBuf {
-    let dir = rr3_repo_root().join("modules").join(name);
-    let manifest = dir.join("Cargo.toml");
+    let _guard = rr3_fixture_build_lock()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let manifest = rr3_repo_root()
+        .join("modules")
+        .join(name)
+        .join("Cargo.toml");
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    let out = Command::new(&cargo)
-        .args(["build", "--message-format=json", "--manifest-path"])
+    let bin = rr3_cargo_artifact(&cargo, &manifest, name);
+    if let Ok(p) = bin.canonicalize() {
+        assert!(p.is_file(), "{} 不是文件", p.display());
+        return p;
+    }
+    let first = format!("{}（首次报告路径）", bin.display());
+    let _ = Command::new(&cargo)
+        .arg("clean")
+        .arg("-p")
+        .arg(format!("rr3-{name}"))
+        .arg("--manifest-path")
         .arg(&manifest)
+        .output();
+    let bin = rr3_cargo_artifact(&cargo, &manifest, name);
+    bin.canonicalize()
+        .map(|p| {
+            assert!(p.is_file(), "{} 不是文件", p.display());
+            p
+        })
+        .unwrap_or_else(|e| {
+            panic!(
+                "编译产物 {} 不存在（clean -p 重建后仍失败: {e}；{first}）",
+                bin.display()
+            )
+        })
+}
+
+/// 夹具编译的进程内串行锁：共享 target-dir 的并发 cargo 是随机红的来源（见上）。
+fn rr3_fixture_build_lock() -> &'static std::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
+
+/// 跑一次 `cargo build --message-format=json`，从 `compiler-artifact.executable`
+/// 取产物路径（不校验存在性——存在性归 [`rr3_build_module_bin`] 判）。
+fn rr3_cargo_artifact(cargo: &str, manifest: &Path, name: &str) -> PathBuf {
+    let out = Command::new(cargo)
+        .args(["build", "--message-format=json", "--manifest-path"])
+        .arg(manifest)
         .output()
         .unwrap_or_else(|e| panic!("起 {cargo} 失败: {e}"));
     if !out.status.success() {
@@ -79,7 +125,7 @@ pub fn rr3_build_module_bin(name: &str) -> PathBuf {
             String::from_utf8_lossy(&out.stderr)
         );
     }
-    let bin = String::from_utf8_lossy(&out.stdout)
+    String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
         .find(|v| {
@@ -94,12 +140,7 @@ pub fn rr3_build_module_bin(name: &str) -> PathBuf {
                 .and_then(|e| e.as_str())
                 .map(PathBuf::from)
         })
-        .unwrap_or_else(|| panic!("编译 {name} 成功但 JSON 输出里没有 executable 字段"));
-    let bin = bin
-        .canonicalize()
-        .unwrap_or_else(|e| panic!("编译产物 {} 不存在: {e}", bin.display()));
-    assert!(bin.is_file(), "{} 不是文件", bin.display());
-    bin
+        .unwrap_or_else(|| panic!("编译 {name} 成功但 JSON 输出里没有 executable 字段"))
 }
 
 /// 读真模块的 module.toml（生产契约工件），把 `entry = "<名>"` 换成刚编译出的
