@@ -3258,3 +3258,21 @@ ota-bundle / scripts / conventions 同拍 success，gate 与 integration success
 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
 ③ 批307 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批308 三线收口与
 再拟下轮。
+
+**2026-11-28 批305 平台腿意外退出归因**：事实——`cross-artifacts.sh`（三条交叉腿
+共用）与 `arm64-deb-check.sh` 都没有 ERR trap：`set -e` 下的裸命令失败只剩退出码，
+而 `build-riscv-image.sh` 早已有点名行号的原命令。处置——两脚本补同款
+`FAIL 意外退出：<命令>（行 N）`。判据——commit `d9590581`：cross 三腿（英特尔/AMD、
+瑞芯微、进迭时空）与 arm64-deb 全部 success，gate 与 integration success——trap 在
+真实路径不误触发。
+
+**2026-11-28 批306 本轮收口**：本轮交付——两条平台腿补意外退出归因，四条平台/部署
+载体的失败归因趋于同形（install-bundle / pack-bundle / ota-bundle /
+cross-artifacts / arm64-deb / riscv-image）。窗口仍未到（runs=0）。判据——`d9590581`
+的 cross 三腿 / arm64-deb / gate / integration 见上；三远端同指 `d9590581`。
+
+**2026-11-28 批306 下轮任务拟定**：① 批307 11-30 03:00 UTC `release-anon` 首跑归因
+（确认 runs>0 并按注解记录 tag/类别；红按镜像/固件/签名三类定位）；② 批308 下次
+`v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
+③ 批309 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批310 三线收口与
+再拟下轮。
