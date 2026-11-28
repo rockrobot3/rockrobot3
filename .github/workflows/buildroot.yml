@@ -293,6 +293,33 @@ jobs:
           fi
           tail -5 /tmp/br-build.log
 
+      # 内容在位不等于能跑（批328）：brain 是 post-build 注入、不在 Buildroot 包图里，
+      # 而 Rust gnu 产物动态链 libc/libgcc_s 并依赖 ELF interpreter——库缺位只有真板
+      # 启动才会暴露。这里在目标根上做 NEEDED + interpreter 齐套判据：readelf 读产物，
+      # find 在 /tmp/br-out/target 找同名件（镜像由该根生成）。
+      - name: brain 动态依赖在目标根齐套
+        run: |
+          set -euo pipefail
+          bin=/tmp/rr3-build/aarch64-unknown-linux-gnu/release/rr3-brain
+          [ -x "$bin" ] || { echo "::error title=br-brain-deps::产物不在树 $bin"; exit 1; }
+          interp=$(readelf -l "$bin" | sed -n 's/.*interpreter: \(.*\)\]/\1/p')
+          [ -n "$interp" ] || { echo "::error title=br-brain-deps::readelf 读不到 ELF interpreter"; exit 1; }
+          [ -e "/tmp/br-out/target$interp" ] || {
+            echo "::error title=br-brain-deps::目标根缺 interpreter $interp（brain 无法加载）"
+            exit 1
+          }
+          echo "PASS  interpreter $interp"
+          needed=$(readelf -d "$bin" | sed -n 's/.*NEEDED.*\[\(.*\)\]/\1/p')
+          [ -n "$needed" ] || { echo "::error title=br-brain-deps::readelf 无 NEEDED（产物形态异常）"; exit 1; }
+          for lib in $needed; do
+            hit=$(find /tmp/br-out/target -name "$lib" -print -quit)
+            if [ -z "$hit" ]; then
+              echo "::error title=br-brain-deps::目标根缺 $lib（brain 起到一半会因动态链接失败）"
+              exit 1
+            fi
+            echo "PASS  $lib → ${hit#/tmp/br-out/target}"
+          done
+
       - name: 上传构建日志（失败时）
         if: failure()
         uses: actions/upload-artifact@v7
