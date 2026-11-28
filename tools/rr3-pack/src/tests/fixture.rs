@@ -26,6 +26,10 @@ pub(super) fn fixture() -> (PathBuf, PathBuf) {
     let _ = fs::remove_dir_all(&base);
     let payload = base.join("payload");
     let repo = base.join("repo");
+    // 两个根先就位：三件宿主产物与 repo 子目录的写入都依赖它们（批338 红因二的
+    // 根因——目录建在循环里，写在循环前的 payload 根没人建）。
+    fs::create_dir_all(&payload).unwrap();
+    fs::create_dir_all(&repo).unwrap();
     fs::create_dir_all(repo.join("profiles")).unwrap();
     fs::create_dir_all(repo.join("contracts")).unwrap();
     fs::write(payload.join("rrd"), "rrd-bin-bytes").unwrap();
