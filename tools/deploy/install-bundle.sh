@@ -200,10 +200,13 @@ base_nr=${base_nr#NRestarts=}
 case $base_nr in (''|*[!0-9]*) base_nr=0 ;; esac
 systemctl start rrd || rollback "systemctl start rrd 失败"
 
-# 健康探针：30s 内 rrd 应答 status，且 enabled_slots 的每个模块都 running；
+# 健康探针：30s 内 rrd 应答 status，且 enabled_slots 的每个模块都 running
+# （批318：此前只查"名字出现 + 无 failed"，degraded/未起齐也会判过——与注释承诺
+# 不一致；未 running 的模块名进回滚原因，板侧不用再翻 status）；
 # 期间 NRestarts 增量即崩溃循环，提前结束窗口（省下的 30s 是排障时间的直接收益）。
 ok=0
 crash=""
+miss=""
 for _ in $(seq 1 30); do
   nr=$(systemctl show -p NRestarts --value rrd 2>/dev/null || echo "$base_nr")
   nr=${nr#NRestarts=}
@@ -214,9 +217,12 @@ for _ in $(seq 1 30); do
   fi
   if out=$("$BIN/rr3-ctl" --bus-path "$SOCK" status 2>/dev/null); then
     ok=1
+    miss=""
     for m in $expected; do
-      grep -qE "^$m[[:space:]]" <<<"$out" || { ok=0; break; }
+      awk -v m="$m" '$1==m && $3=="running"{f=1} END{exit !f}' <<<"$out" \
+        || miss="$miss $m"
     done
+    [ -n "$miss" ] && ok=0
     grep -q 'failed' <<<"$out" && ok=0
     [ "$ok" -eq 1 ] && break
   fi
@@ -225,7 +231,11 @@ done
 if [ -n "$crash" ]; then
   rollback "rrd 崩溃重启 ${crash} 次（启动探针 $(( $(now_ms) - T_BOOT ))ms 内即判）"
 fi
-[ "$ok" -eq 1 ] || rollback "30s 内未应答 status 或模块未全 running"
+[ "$ok" -eq 1 ] || {
+  why="30s 内未应答 status 或模块未全 running"
+  [ -n "$miss" ] && why="${why}（未 running：${miss# }）"
+  rollback "$why"
+}
 BOOT_MS=$(( $(now_ms) - T_BOOT ))
 
 echo "PASS  新树已就位：$(sed -n 's/^commit=//p' "$ROOT/BUNDLE_VERSION")（停机 ${STOP_MS}ms / 换树 ${SWAP_MS}ms / 二进制 ${BIN_MS}ms / 启动探针 ${BOOT_MS}ms）"
