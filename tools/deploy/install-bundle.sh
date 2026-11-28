@@ -135,7 +135,17 @@ rollback() {
     done
     systemctl reset-failed rrd >/dev/null 2>&1 || true
     systemctl start rrd >/dev/null 2>&1 || true
-    die "已回滚到上一版（原因：${why}；该树在 ${ROOT}，二进制备份在 ${binbk}；本次尝试 $(( $(now_ms) - T_STOP ))ms）"
+    # 回滚后确认旧版真的在跑（批316）：树换回来不等于服务恢复——旧树也可能因部署面
+    # 变化起不来；只报"已回滚"会让板侧误以为服务在跑。3s 内未 active 就把这半句点名。
+    live=0
+    for _ in $(seq 1 30); do
+      systemctl is-active --quiet rrd && { live=1; break; }
+      sleep 0.1
+    done
+    if [ "$live" -eq 1 ]; then
+      die "已回滚到上一版（原因：${why}；rrd 已重新 active；该树在 ${ROOT}，二进制备份在 ${binbk}；本次尝试 $(( $(now_ms) - T_STOP ))ms）"
+    fi
+    die "已回滚到上一版（原因：${why}；但 rrd 未恢复 active——旧树也未起来，查 journalctl -u rrd；该树在 ${ROOT}，二进制备份在 ${binbk}；本次尝试 $(( $(now_ms) - T_STOP ))ms）"
   fi
   die "首次安装失败且无上一版可回退（原因：${why}；新树已删除，本次尝试 $(( $(now_ms) - T_STOP ))ms，请查 journalctl -u rrd）"
 }
