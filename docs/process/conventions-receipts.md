@@ -3174,3 +3174,21 @@ platforms 均 success）；三远端同指 `3aa62d0b`。
 收口裁定——buildroot `image` 已由 `release`（缺产物即红）间接覆盖、`dtb-backport`
 仅有编译器探针可锚，**不再扩面**（避免为检查而检查），理由入册；⑤ 批299 三线收口
 与再拟下轮。
+
+**2026-11-28 批295 pack-bundle 意外退出归因**：事实——出包链只有 `die` 显式失败路径，
+`set -e` 下的裸命令失败只剩退出码；出包是发布载荷来源，卡住时必须能看到失败命令与
+产物路径。处置——补 ERR trap：`FAIL 意外退出：<命令>（行 N；产物 <path>）`，与
+install-bundle 同款；install-smoke 每次真跑 pack-bundle，成功路径不误触发。判据——
+commit `335556fb`：install-smoke / distro-smoke / scripts / conventions 同拍 success。
+
+**2026-11-28 批296 本轮收口与扩面裁定**：本轮两件——覆盖率入口入审计（批293）、
+pack-bundle 补意外退出归因（批295）。**扩面裁定**：buildroot 的 `image` 已由 `release`
+（缺产物即红）间接覆盖；`dtb-backport` 仅编译器探针可锚、价值低——判据入口扩面**到此
+为止**，不再为检查而检查（理由入册，防后续无据扩面）。窗口仍未到（runs=0）。判据——
+`335556fb` 的 gate / integration 见上；文档提交 gate success；三远端同指。
+
+**2026-11-28 批296 下轮任务拟定**：① 批297 11-30 03:00 UTC `release-anon` 首跑归因
+（确认 runs>0 并按注解记录 tag/类别；红按镜像/固件/签名三类定位）；② 批298 下次
+`v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
+③ 批299 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批300 三线收口与
+再拟下轮。
