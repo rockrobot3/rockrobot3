@@ -3141,3 +3141,16 @@ commit `30c0f266` 三线全绿（gate / integration / platforms 均 success）�
 alsa feature / ota-bundle.sh / scripts 的四审计），缺即点名"门禁空转"；自检新增负例
 （conventions 换 echo、其余入口保留，只该点名它）。判据——`--self-test` 36/36 绿；
 真仓审计 PASS；⑤ 文档门绿。
+
+**2026-11-28 批292 本轮收口（门禁入口钉住）**：事实——gate 六作业的判据入口现已
+逐名入审计，配合前几轮的平台腿 / 集成腿 / 匿名回读 / 制品标签，"名在场"与"行为在场"
+在发布与门禁两条主线上均已对齐；自检 36/36。窗口仍未到（runs=0）。判据——commit
+`398bb0c2` 三线全绿（gate / integration / platforms 均 success）；三远端同指
+`398bb0c2`。
+
+**2026-11-28 批292 下轮任务拟定**：① 批293 11-30 03:00 UTC `release-anon` 首跑归因
+（确认 runs>0 并按注解记录 tag/类别结论；红按镜像/固件/签名三类定位）；② 批294
+下次 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的
+`release-verify --tag v${VER}` 实跑；③ 批295 distro 首发后 `--deep` / B.2 实测与
+distro 类裁定；④ 批296 取证 coverage.yml / buildroot.yml 非发布作业是否也需钉判据
+入口（先有证据再改，不无据扩面）；⑤ 批297 三线收口与再拟下轮。
