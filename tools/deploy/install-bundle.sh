@@ -204,10 +204,12 @@ systemctl start rrd || rollback "systemctl start rrd 失败"
 # （批318：此前只查"名字出现 + 无 failed"，degraded/未起齐也会判过——与注释承诺
 # 不一致；未 running 的模块名进回滚原因，板侧不用再翻 status）；
 # 期间 NRestarts 增量即崩溃循环，提前结束窗口（省下的 30s 是排障时间的直接收益）。
+# 0.2s 粒度（批319）：1s 粒度把就绪时刻向上取整，实测启动探针多等数百 ms；窗口仍
+# 30s（150 拍），轮询只读 status，零副作用。
 ok=0
 crash=""
 miss=""
-for _ in $(seq 1 30); do
+for _ in $(seq 1 150); do
   nr=$(systemctl show -p NRestarts --value rrd 2>/dev/null || echo "$base_nr")
   nr=${nr#NRestarts=}
   case $nr in (''|*[!0-9]*) nr=$base_nr ;; esac
@@ -226,7 +228,7 @@ for _ in $(seq 1 30); do
     grep -q 'failed' <<<"$out" && ok=0
     [ "$ok" -eq 1 ] && break
   fi
-  sleep 1
+  sleep 0.2
 done
 if [ -n "$crash" ]; then
   rollback "rrd 崩溃重启 ${crash} 次（启动探针 $(( $(now_ms) - T_BOOT ))ms 内即判）"
