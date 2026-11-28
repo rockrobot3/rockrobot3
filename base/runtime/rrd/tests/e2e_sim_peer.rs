@@ -123,12 +123,13 @@ fn killed_eof_skipped() {
     rr3_read_state(&mut b, "rr3-sima", "unregistered");
 
     let plan = rrd.rr3_wait_log("重启计划 attempt=1 delay_ms=20");
-    // 这一条把"被打死走的到底是哪条读分支"也钉住：夹具在 abort 前把接收队列排空，于是内核以
-    // FIN 收尾 → `Rr3FrameError::Closed` → `clean_exit = true` → 文案是"干净收尾"。
-    // 队列里留着未读广播时改成 RST → rrd 读到 ECONNRESET → 这里是"帧读取失败…→ failed 广播"，
-    // 本用例的 unregistered 判据就会随机红（实测未排空 10 次红 1 次）。RST 那一支**仍然没人测**
-    // ——11b 把"退出码定性"补给了 owned 那一路（`e2e_spawn_restart` 的 S1/S2），而这条连接是
-    // 外来的，它连 RST 都只会读成一次 EOF。这里排掉混淆项，不是把它判给"不存在"。
+    // 这一条把"被打死走的到底是哪条读分支"也钉住：夹具在 abort 前排空接收队列并显式
+    // shutdown → 内核以 FIN 收尾 → `Rr3FrameError::Closed` → `clean_exit = true` →
+    // 文案是"干净收尾"。不 shutdown 时 drain 与进程死亡之间的新广播会把关闭改成 RST
+    // （rrd 读 ECONNRESET → failed 广播），本用例的 unregistered 判据就会随机红
+    // （2026-11-28 CI 连续两次）。RST 那一支**仍然没人测**——11b 把"退出码定性"补给了
+    // owned 那一路（`e2e_spawn_restart` 的 S1/S2），而这条连接是外来的，它连 RST 都只会
+    // 读成一次 EOF。这里排掉混淆项，不是把它判给"不存在"。
     assert!(
         plan.contains("退出（干净收尾）"),
         "现值：EOF 才叫干净收尾；实际 {plan}"

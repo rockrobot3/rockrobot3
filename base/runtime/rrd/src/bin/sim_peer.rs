@@ -226,18 +226,19 @@ mod peer {
         Ok(()) // 返回即 drop 掉 stream
     }
 
-    /// abort：先排空接收队列再打死。为什么这属于夹具而不是被测行为：队列里留着未读的
-    /// 广播帧时，内核在进程死亡那一刻把关闭改成 RST，rrd 读到的就是 ECONNRESET
-    /// 而不是 EOF → 收尾走 `Err` 分支（phase `failed`）；队列空了才是 FIN → EOF →
-    /// `Rr3FrameError::Closed`（phase `unregistered`）。实测未排空时本用例 10 次红 1 次。
-    /// 这一维量的是"进程有没有把 socket 读干净"，不是"有没有体面退场"，
-    /// 所以本任务把它当混淆项排掉；FIN/RST 双路（连同退出码）归 Task 11 的崩溃检测。
+    /// abort：先排空接收队列、显式 shutdown，再打死进程。
+    ///
+    /// 为什么 shutdown 是判据的一部分：测试要钉的是"对端走 EOF → `unregistered`"这条
+    /// 读分支，而**不 close 直接 abort** 时，drain 与进程死亡之间只要又到了一帧广播，
+    /// 内核就把关闭改成 RST → rrd 读到 ECONNRESET → 走 `failed`（comment 口径的
+    /// "10 次红 1 次"；2026-11-28 CI 连续两次红）。`shutdown(Both)` 先把连接状态
+    /// 定格为 FIN，此后再 abort 不改变 rrd 看到的 EOF；"进程被暴力终止"的语义保留
+    /// （不 unregister、不跑析构），FIN/RST 双路归 Task 11 的崩溃检测。
     fn rr3_peer_abort(stream: &mut UnixStream, task: u64) -> Result<(), String> {
         rr3_beat(stream, task, 10)?;
         rr3_drain_incoming(stream)?;
         println!("sim-peer: 即将 abort");
-        // 不 close、不 unregister：`abort` 立即终止进程、析构不会运行，
-        // rrd 只看到一次 EOF。
+        let _ = stream.shutdown(std::net::Shutdown::Both);
         std::process::abort();
     }
 
