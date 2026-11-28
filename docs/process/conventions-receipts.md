@@ -3570,3 +3570,19 @@ SBOM 双谓词齐；固件九件齐；`结论：发布面齐套`，rc=0；digest
 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑，distro
 首发后把 distro 类纳入；④ 批339 镜像内 brain 的系统级运行证据（真板/QEMU 整机；
 硬件未到则如实记边界）；⑤ 批340 三线收口与再拟下轮。
+
+**2026-11-28 批336 brain 随镜像与加载自证（构建回执）**：事实——批320 起 brain 用
+Buildroot 自带 glibc 工具链交叉构建并入 payload（与镜像 glibc 同源），批328/333 在
+镜像 job 里补了两道判据：动态依赖齐套（readelf 读 interpreter 与 NEEDED，逐个在
+`/tmp/br-out/target` 找到同名件）与加载自证（qemu-aarch64 以目标根为 sysroot 直接
+执行，判据=打印版本行且无 loader 错误；无总线按预期非 0 退出，不以退出码冒充功能）。
+处置——推送 `9caa24e4` 触发全量构建。判据——image job `140934886114`（run
+`46130592655`）全部步骤 success：全量 make、步骤 15「brain 动态依赖在目标根齐套」、
+步骤 16「brain 加载自证」、镜像产物断言（GPT 六分区 + 双 dtb）、镜像内容只读断言
+（e2fsck/标签/rrd/S99rrd/fstab/双 dtb/atf-bl31）与摘要上传。边界——这是**构建与
+加载器面**的证据，不是板上运行证据；串口出 shell、maskrom 实烧与系统级启动仍待硬件。
+**下轮任务拟定**：① 批337 出厂镜像去 Python3（目标侧零 python 消费者，脑已 Rust），
+以 `[buildroot-full]` 全量构建回执收口；② 批338 11-30 03:00 UTC `release-anon` 首跑
+归因（runs>0；按注解记 tag/类别/签名）；③ 批339 下次 `v*` 发布后把 OTA/buildroot/
+distro 纳入匿名回读；④ 批340 出厂镜像网络与时间面的选型裁定（NetworkManager 或换
+链路后端、时间同步机制），并给目标运行证据的判据；⑤ 批341 三线收口与再拟下轮。
