@@ -3,8 +3,9 @@
 # Buildroot 出厂镜像内容只读断言（0.0.8 buildroot 轨）。genimage 成功不等于分区
 # 内容对，本脚本把它变成可判的四组事实：
 #   ① e2fsck 抓坏文件系统；② dumpe2fs 抓槽位标签漂移；③ debugfs 抓 rootfs 内容
-#      （/usr/bin/rrd、S99rrd、/etc/fstab 四键）；④ fdtdump 抓 u-boot.itb 缺 BL31
-#      （binman 成功但 FIT 里没有 bl31 = "能烧不能启"）＋ idbloader 体量下限。
+#      （/usr/bin/rrd、S99rrd、/etc/fstab 四键、brain 的 manifest 与二进制——装配单
+#      enabled_slots 含 rr3-brain，镜像缺它即开机拒启）；④ fdtdump 抓 u-boot.itb 缺
+#      BL31（binman 成功但 FIT 里没有 bl31 = "能烧不能启"）＋ idbloader 体量下限。
 #
 # 用法：bash tools/ci/platform/buildroot-image-check.sh [镜像目录] [宿主工具目录]
 #   缺省 /tmp/br-out/images 与 /tmp/br-out/host（buildroot job 的固定产出位）。
@@ -48,7 +49,11 @@ rr3_br_rootfs() {
     echo "::error title=br-tool::host debugfs 缺席（host-e2fsprogs 未装 debugfs）"
     exit 1
   fi
-  for p in /usr/bin/rrd /etc/init.d/S99rrd; do
+  # brain 的两件同断言（批320）：distro 装配单声明了 cognition 四格，镜像必须带
+  # manifest 与二进制；只装五模块时开机有"manifest 读取失败"拒绝启动，镜像却绿。
+  for p in /usr/bin/rrd /etc/init.d/S99rrd \
+    /usr/lib/rockrobot3/modules/rr3-brain/module.toml \
+    /usr/lib/rockrobot3/modules/rr3-brain/rr3-brain; do
     if ! "${host}/sbin/debugfs" -R "stat ${p}" "${d}/rr_a.ext4" 2>&1 | grep -q 'Inode:'; then
       echo "::error title=br-rootfs::rr_a.ext4 缺 ${p}（rootfs 未装入）"
       exit 1

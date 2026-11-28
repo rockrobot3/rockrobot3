@@ -1,9 +1,9 @@
 # RockRobot3 装配单：distro 机型（发行版快路轨，0.0.2 T5 / ADR-0013 裁定 3）
 # 纯数据、零逻辑，门禁与 profiles/default.toml 完全同一套（ADR-0012 裁定 5② 查册门）。
-# 快路 payload 含五个 Rust 模块 + Python brain（0.0.6 批F1 起：brain stdlib-only，
-# 打包器按 lang=python 生成 shim 装机，判据"brain 随 deb 装机"）。0.0.2 时代四格
-# 不绑定、brain 不进 boot 队列（缺格点名冒烟）——批F1 兑现后 cognition.* 绑定
-# rr3-brain，随装配单进 boot 队列（CI distro-smoke 同步改断"六模块 spawn"）。
+# 快路 payload 含五个 Rust 模块（aarch64-musl 交叉面不含 brain：ureq+rustls(ring)
+# 需目标 C 工具链）；brain 自 0.0.8 批N32 起为 Rust（Python 承载已退役）——Pi 档由
+# build-onboard.sh 板上原生构建后并包，Buildroot 轨由镜像构建用同源工具链交叉构建。
+# cognition.* 绑定 rr3-brain，随装配单进 boot 队列（CI distro-smoke 断"六模块 spawn"）。
 # schema_version = 2（0.0.5 批J，ADR-0018 修订 1 ④ 描述符七段定形）：三新段与
 # default 同板同供给（[platform]/[supplies]/[slots] 逐值一致）。
 # schema_version = 3（0.0.5 增补轮六批N1，§4.2 [pins] 定形）：[[pin]] 物理绑定段进场、

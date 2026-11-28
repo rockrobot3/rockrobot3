@@ -139,7 +139,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.100.0"
-          targets: aarch64-unknown-linux-musl
+          # musl：五件静态产物；gnu：brain 用 Buildroot 自带 glibc 工具链交叉构建
+          # （批320——宿主 apt gcc 的 glibc 比镜像新，产出的 brain 会 GLIBC_2.x 拒启）。
+          targets: aarch64-unknown-linux-musl, aarch64-unknown-linux-gnu
 
       - name: 取 Buildroot 2024.02.11 并叠 configs/board
         run: |
@@ -185,7 +187,7 @@ jobs:
             exit 1
           fi
 
-      - name: 注入 BINARIES_DIR（rrd / rr3-ctl / rr3-ota-ctl / 五模块 / 宿主 rr3-pack）
+      - name: 注入 BINARIES_DIR（rrd / rr3-ctl / rr3-ota-ctl / 五模块 / 宿主 rr3-pack；brain 另步随镜像同源工具链）
         run: |
           set -euo pipefail
           rel=/tmp/rr3-build/aarch64-unknown-linux-musl/release
@@ -234,6 +236,47 @@ jobs:
             exit 1
           fi
           tail -3 /tmp/br-uboot.log
+
+      # brain 与镜像同源工具链（批320）：distro 装配单 enabled_slots 含 rr3-brain，
+      # 而 aarch64-musl 交叉面因 ring 需目标 C 工具链不含它——镜像此前只装五模块，
+      # 开机必有一条 "manifest 读取失败" 拒绝启动。这里用 Buildroot 自带的 glibc
+      # 交叉 gcc 构建 brain（与镜像 glibc 同一份，避免宿主 apt gcc 的 GLIBC_2.x
+      # 过新）；`make toolchain` 是幂等的（U-Boot 预构建已把工具链拉起来），随后
+      # 全量 make 从该状态续建，不重复构建。
+      - name: 预构建 Buildroot 工具链（brain 交叉前件）
+        run: |
+          set -o pipefail
+          if ! make -C /tmp/buildroot O=/tmp/br-out BR2_DL_DIR=/tmp/buildroot/dl \
+              -j"$(nproc)" toolchain > /tmp/br-toolchain.log 2>&1; then
+            bash tools/ci/lib/log-digest.sh --title br-toolchain --log /tmp/br-toolchain.log --tail 30
+            exit 1
+          fi
+          tail -3 /tmp/br-toolchain.log
+
+      - name: 交叉构建 brain（Buildroot 工具链，与镜像 glibc 同源）并入 payload
+        run: |
+          set -o pipefail
+          host=/tmp/br-out/host
+          cc="$host/bin/aarch64-buildroot-linux-gnu-gcc"
+          ar="$host/bin/aarch64-buildroot-linux-gnu-ar"
+          for t in "$cc" "$ar"; do
+            [ -x "$t" ] || { echo "::error title=br-brain::缺 $t（工具链未就绪）"; exit 1; }
+          done
+          if ! CC_aarch64_unknown_linux_gnu="$cc" AR_aarch64_unknown_linux_gnu="$ar" \
+               CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="$cc" \
+               cargo build --locked --release --target aarch64-unknown-linux-gnu \
+                 --manifest-path modules/rr3-brain/Cargo.toml > /tmp/br-brain.log 2>&1; then
+            bash tools/ci/lib/log-digest.sh --title br-brain --log /tmp/br-brain.log --tail 20
+            exit 1
+          fi
+          bin=/tmp/rr3-build/aarch64-unknown-linux-gnu/release/rr3-brain
+          [ -x "$bin" ] || { echo "::error title=br-brain::产物不在树 $bin"; exit 1; }
+          file "$bin"
+          d=/tmp/br-out/images/rr3-modules/rr3-brain
+          mkdir -p "$d"
+          install -m 0755 "$bin" "$d/bin"
+          install -m 0644 modules/rr3-brain/module.toml "$d/manifest.toml"
+          echo "PASS  brain 交叉构建（Buildroot 工具链）并入 payload"
 
       - name: 全量构建（make）
         env:
