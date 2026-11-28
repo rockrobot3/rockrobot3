@@ -3294,3 +3294,22 @@ cross-artifacts / arm64-deb / riscv-image）。窗口仍未到（runs=0）。判
 `v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
 ③ 批311 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批312 三线收口与
 再拟下轮。
+
+**2026-11-28 批309 坏包停树前预检（避免无谓停机）**：事实——原流程对坏包先停 rrd、
+换树、起探针、再回滚：一次坏包换来整机停机约 4.5s 与一次回滚，而"包内模块结构是否
+完整"在停树前就能判定。处置——`install-bundle.sh` 在停树前校验包内每个模块的
+`module.toml` 与同名 bin，缺件即拒并点名"未停 rrd"；install-smoke 增坏包预检例
+（删 `rr3-sense` bin 重打包，断言 rc≠0、点名缺件、BUNDLE_VERSION 未变、rrd 仍 active）。
+判据——commit `2400b6bd`：install-smoke job `140848322649` success，公开注解含
+`install-smoke-malformed::缺模块二进制的包在停 rrd 前被拒（rc=1），树与 unit 未变`；
+正常换树 2439ms / 回滚 4552ms 无回归；distro-smoke 同拍 success。
+
+**2026-11-28 批310 本轮收口**：本轮交付把"坏包"的第一道闸前移到停树之前——结构
+不合格的包不再换来停机与回滚。窗口仍未到（runs=0，11-30 03:00 UTC）。判据——
+`2400b6bd` 的 gate / integration 见上；三远端同指 `2400b6bd`。
+
+**2026-11-28 批310 下轮任务拟定**：① 批311 11-30 03:00 UTC `release-anon` 首跑归因
+（确认 runs>0 并按注解记录 tag/类别；红按镜像/固件/签名三类定位）；② 批312 下次
+`v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑；
+③ 批313 distro 首发后 `--deep` / B.2 实测与 distro 类裁定；④ 批314 三线收口与
+再拟下轮。
