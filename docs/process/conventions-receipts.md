@@ -3495,3 +3495,42 @@ SO_RCVTIMEO 的 5 s 读超时当成"读结束"直接终态；CI 负载下 state 
 buildroot 的 `release-verify` 实跑，distro 首发后纳入 distro 类；③ 批330 镜像内
 brain 的运行证据（真板或 QEMU 启动；硬件未到则如实记边界）；④ 批331 三线收口与
 再拟下轮。
+
+**2026-11-28 批328 brain 动态依赖齐套判据**：事实——镜像内容断言只证明 brain 文件
+在位，不证明动态链接可满足；brain 由 post-build 注入、不在 Buildroot 包图里，缺
+`libgcc_s`/ELF interpreter 只有真板启动才暴露。处置——镜像构建后新增一步：readelf
+读 brain 的 interpreter 与 NEEDED，逐个在 `/tmp/br-out/target` 找同名件，缺即红并
+点名。判据——`3f83de64` buildroot run `46125760742` success，image job
+`140920059315` 的该步 success（interpreter + NEEDED 全齐）；gate / integration /
+platforms success。边界——只证明依赖件在镜像根里，不证明 rrd 真起 brain（运行证据
+仍归真板/QEMU）。
+
+**2026-11-28 批329-330 夹具并发/缓存红因修复**：事实——`3f83de64` 之后 platforms
+`host-macos` 红在 `audio_sense_end_end`：cargo 报 fresh 但
+`/tmp/rr3-build/debug/rr3-sense` 不存在（canonicalize 失败）。根因——同一测试二进制
+两个用例并发编译同一模块、共享 target-dir；rust-cache 恢复的指纹可能"报 fresh 而
+产物不在"。处置——夹具编译进程内串行（`OnceLock<Mutex>`），产物缺失时 `clean -p`
++ 重编一次并保留首次证据；首批改动触发 clippy `map_unwrap_or` 红（`4847b0d2`），
+改为 `unwrap_or_else` + `assert`；gate 归因签名补 `error(\[|:)`，clippy/rustc 的
+lint 行今后进公开注解（`b86c0462`）。判据——`b86c0462` gate 仍红在另一条：
+`killed_eof_skipped` 20s 等不到 unregistered。
+
+**2026-11-28 批331 abort 夹具显式 shutdown（红因根治）**：事实——`622e46b4` 与
+`b86c0462` 两次 gate 都红在 `killed_eof_skipped`；加 20s 重试后第二次在 21.79s 仍红，
+说明不是"晚到"而是"根本没来"。根因——abort 支只 drain 不 close：drain 与进程死亡
+之间再过一帧广播，内核把关闭改成 RST → rrd 读 ECONNRESET → 广播 `failed` 而非
+`unregistered`；测试要排掉的混淆项从未被确定性排除。处置——sim_peer 的 abort 支在
+abort 前显式 `shutdown(Both)`，把连接状态定格为 FIN；仍不 unregister、不跑析构，
+保留"被暴力终止"语义。判据——`b9eae3ae` gate / integration / platforms（含 macOS
+夹具编译）三线 success；`killed_eof_skipped` 在 gate 两个测试入口与 macOS 腿均过。
+
+**2026-11-28 批332 本轮收口**：本轮把 rock3 镜像的 brain 从"文件在位"推进到
+"动态依赖齐套"，并连续处理两条测试面红（clippy、abort 混淆项），gate 归因面同时
+补强。窗口仍未到（`release-anon` runs=0，首跑 11-30 03:00 UTC）。判据——
+`b9eae3ae` 三线 success；三远端同指 `b9eae3ae`。
+
+**2026-11-28 批332 下轮任务拟定**：① 批333 11-30 03:00 UTC `release-anon` 首跑
+归因（runs>0；按注解记 tag/类别/签名，红按镜像/固件/签名三类定位）；② 批334 下次
+`v*` 发布后把 OTA/buildroot 纳入匿名回读并核 buildroot 的 `release-verify` 实跑，
+distro 首发后把 distro 类纳入；③ 批335 镜像内 brain 的运行证据（真板或 QEMU 启动；
+硬件未到则如实记边界）；④ 批336 三线收口与再拟下轮。
