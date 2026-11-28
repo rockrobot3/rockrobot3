@@ -371,9 +371,6 @@ fn install_tree_lands_modules() {
     assert!(root.join("modules/rr3-act/module.toml").is_file());
     assert!(root.join("modules/rr3-act/rr3-act").is_file());
     assert!(root.join("modules/rr3-act/config.toml").is_file());
-    assert!(root
-        .join("modules/rr3-brain/pkg/rr3_brain/__init__.py")
-        .is_file());
     assert!(root.join("modules/rr3-brain/rr3-brain").is_file());
     assert!(root.join("profiles/distro.toml").is_file());
     assert!(root.join("contracts/topics.toml").is_file());

@@ -26,17 +26,17 @@ pub(super) fn fixture() -> (PathBuf, PathBuf) {
     let _ = fs::remove_dir_all(&base);
     let payload = base.join("payload");
     let repo = base.join("repo");
-    fs::create_dir_all(payload.join("rr3-modules/rr3-act")).unwrap();
-    fs::create_dir_all(payload.join("rr3-modules/rr3-connect")).unwrap();
     fs::create_dir_all(repo.join("profiles")).unwrap();
     fs::create_dir_all(repo.join("contracts")).unwrap();
-    fs::create_dir_all(repo.join("modules/rr3-act")).unwrap();
-    fs::create_dir_all(repo.join("modules/rr3-connect")).unwrap();
     fs::write(payload.join("rrd"), "rrd-bin-bytes").unwrap();
     fs::write(payload.join("rr3-ctl"), "ctl-bin-bytes").unwrap();
     fs::write(payload.join("rr3-ota-ctl"), "ota-ctl-bin-bytes").unwrap();
     let manifest = "[manifest]\nschema_version = 1\nname = \"rr3-act\"\nversion = \"0.0.1\"\ntype = \"module\"\nlang = \"rust\"\nentry = \"rr3-act\" # 在仓相对\n\n[provides]\ncapabilities = [\"act.servo\"]\n\n[depends]\nrequired = [\"bus.publish\"]\n\n[events]\npublishes = []\nsubscribes = []\n\n[health]\nheartbeat_ms = 1000\nwatchdog_timeout_ms = 5000\n\n[resources]\nrestart_policy = \"always\"\nmem_limit_mb = 16\nstart_priority = 40\n";
     for m in ["rr3-act", "rr3-connect", "rr3-brain"] {
+        // 目录随循环建：模块名单是唯一真值，加模块不必记得另补两处 create_dir_all
+        // （2026-11-28 批338 红因——python 面退役时漏建 rr3-brain 目录，写 manifest 即 NotFound）。
+        fs::create_dir_all(payload.join(format!("rr3-modules/{m}"))).unwrap();
+        fs::create_dir_all(repo.join(format!("modules/{m}"))).unwrap();
         fs::write(
             payload.join(format!("rr3-modules/{m}/manifest.toml")),
             manifest.replace("rr3-act", m),
